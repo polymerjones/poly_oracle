@@ -239,6 +239,7 @@ function addListeners() {
   });
 
   openVault.addEventListener("click", () => {
+    setSettingsOpen(false);
     vault.hidden = false;
     renderVault();
   });
@@ -319,6 +320,9 @@ function hideFirstRunHint() {
 
 function setSettingsOpen(open) {
   state.settingsOpen = open;
+  if (open) {
+    vault.hidden = true;
+  }
   settingsBackdrop.hidden = !open;
   settingsPanel.hidden = !open;
   settingsPanel.classList.toggle("open", open);

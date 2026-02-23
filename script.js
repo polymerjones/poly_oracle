@@ -98,6 +98,7 @@ const state = {
 };
 
 let audioContext;
+let nativeTtsWarned = false;
 
 init();
 
@@ -563,8 +564,46 @@ function spawnSparkles(count) {
   }
 }
 
-function speakText(text, { rate = 1, pitch = 1.2, preview = false } = {}) {
-  if (!("speechSynthesis" in window) || !text) return;
+async function speakText(text, { rate = 1, pitch = 1.2, preview = false } = {}) {
+  if (!text) return;
+
+  const nativeSpoken = await speakNativeText(text, { rate, pitch });
+  if (nativeSpoken) return;
+
+  speakWebText(text, { rate, pitch, preview });
+}
+
+async function speakNativeText(text, { rate = 1, pitch = 1.2 } = {}) {
+  const plugin = getNativeTtsPlugin();
+  if (!plugin) return false;
+
+  try {
+    if (typeof plugin.stop === "function") {
+      await plugin.stop();
+    }
+
+    // The Capacitor community plugin uses a 0..2 rate range on iOS.
+    const nativeRate = Math.max(0.2, Math.min(2, rate));
+    await plugin.speak({
+      text,
+      lang: "en-GB",
+      rate: nativeRate,
+      pitch: Math.max(0.5, Math.min(2, pitch)),
+      volume: state.whisper ? 0.35 : 1,
+      category: "ambient",
+    });
+    return true;
+  } catch (error) {
+    if (!nativeTtsWarned) {
+      nativeTtsWarned = true;
+      console.warn("Native TTS unavailable, falling back to web speech.", error);
+    }
+    return false;
+  }
+}
+
+function speakWebText(text, { rate = 1, pitch = 1.2, preview = false } = {}) {
+  if (!("speechSynthesis" in window)) return;
   const synth = window.speechSynthesis;
   if (!preview) synth.cancel();
 
@@ -576,6 +615,19 @@ function speakText(text, { rate = 1, pitch = 1.2, preview = false } = {}) {
   const selected = voices.find((voice) => voice.name === state.selectedVoice);
   if (selected) utter.voice = selected;
   synth.speak(utter);
+}
+
+function getNativeTtsPlugin() {
+  const cap = window.Capacitor;
+  if (!cap || typeof cap.isNativePlatform !== "function") return null;
+  if (!cap.isNativePlatform()) return null;
+
+  // Prefer community plugin path. Capacitor exposes plugins on this object in native contexts.
+  const plugin = cap?.Plugins?.TextToSpeech;
+  if (plugin && typeof plugin.speak === "function") {
+    return plugin;
+  }
+  return null;
 }
 
 async function shareCurrentCard() {

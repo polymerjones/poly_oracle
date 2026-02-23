@@ -21,6 +21,17 @@ npm run cap:sync
 npm run cap:open:ios
 ```
 
+## Native iOS Voice (Recommended)
+Poly Oracle now supports a hybrid speech layer:
+- iOS native TTS first (if Capacitor TextToSpeech plugin is installed)
+- browser speech fallback otherwise
+
+Install native iOS speech plugin:
+```bash
+npm install @capacitor-community/text-to-speech
+npx cap sync ios
+```
+
 ## Backup
 A baseline snapshot is stored in `backups/`.
 

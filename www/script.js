@@ -12,6 +12,22 @@ const revealModes = [
   { id: "glitch", label: "Glitch Oracle", duration: 2500 },
 ];
 
+const canonicalAnswers = [
+  "Yes - you know it",
+  "Yeppurs",
+  "Yeah, buddy",
+  "Heck Yes",
+  "Nope",
+  "I don't think so",
+  "That is for God to decide",
+  "Ask another day",
+  "You're asking the wrong question, think about it and ask another day",
+  "Yes",
+  "Not today",
+  "Heck No",
+  "No",
+];
+
 const packs = {
   classic: {
     label: "Classic",
@@ -159,7 +175,7 @@ function addListeners() {
   askButton.addEventListener("click", revealAnswer);
 
   orb.addEventListener("click", () => {
-    const intensity = registerOrbTap();
+    const intensity = { sizeMultiplier: 1, brightnessMultiplier: 1, burstCount: 8 };
     playPixySound(intensity);
     spawnSparkles(intensity.burstCount, intensity.sizeMultiplier, intensity.brightnessMultiplier);
   });
@@ -284,9 +300,11 @@ function addListeners() {
     renderVault();
   });
 
-  resetThemeButton.addEventListener("click", () => {
-    resetChaosTheme();
-  });
+  if (resetThemeButton) {
+    resetThemeButton.addEventListener("click", () => {
+      resetChaosTheme();
+    });
+  }
 
   closeVault.addEventListener("click", () => {
     vault.hidden = true;
@@ -435,15 +453,15 @@ function revealAnswer() {
 
   questionInput.value = normalizedQuestion;
 
-  const polarity = Math.random() > 0.5 ? "yes" : "no";
-  const packLines = packs[state.selectedPack][polarity];
-  const answerLine = pick(packLines);
-  const microLine = pick(packLines.filter((line) => line !== answerLine).length ? packLines.filter((line) => line !== answerLine) : packLines);
+  const answerLine = pick(canonicalAnswers);
+  const polarity = inferPolarity(answerLine);
+  const microLine = pick(packs[state.selectedPack][polarity]);
   const modeId = effectiveModeId();
   const mode = revealModes.find((item) => item.id === modeId) || revealModes[0];
   const revealVoice = state.randomVoiceEachReveal ? pickRandomVoiceName() || state.selectedVoice : state.selectedVoice;
 
   hapticReveal();
+  primeSpeechFromGesture();
   setRevealing(true);
 
   // v1.2.2 ritual reveal
@@ -562,9 +580,10 @@ function renderAnswerCard() {
       : "yes"
     : state.currentAnswer.polarity;
 
-  const answerValue = sourcePolarity === state.currentAnswer.polarity
-    ? state.currentAnswer.answer
-    : pick(packs[state.currentAnswer.pack][sourcePolarity]);
+  const answerValue =
+    sourcePolarity === state.currentAnswer.polarity
+      ? state.currentAnswer.answer
+      : pick(canonicalAnswersByPolarity(sourcePolarity));
 
   const microValue = sourcePolarity === state.currentAnswer.polarity
     ? state.currentAnswer.micro
@@ -698,11 +717,6 @@ function registerOrbTap() {
   const sizeMultiplier = clamp(1 + spamTapCount * 0.05, 1, 2.5);
   const brightnessMultiplier = clamp(1 + spamTapCount * 0.07, 1, 3);
   const burstCount = Math.round(clamp(6 + spamTapCount, 6, 34));
-
-  // v1.2.2 chaos theme
-  if (state.sessionTapCount >= 20 && !state.chaosThemeEnabled) {
-    triggerChaosTheme();
-  }
 
   return { spamTapCount, sizeMultiplier, brightnessMultiplier, burstCount };
 }
@@ -911,6 +925,22 @@ async function speakText(text, { rate = 1, pitch = 1.2, preview = false, voiceNa
   speakWebText(text, { rate, pitch, preview, voiceName });
 }
 
+function primeSpeechFromGesture() {
+  if (!("speechSynthesis" in window)) return;
+  try {
+    const synth = window.speechSynthesis;
+    synth.resume();
+    const unlock = new SpeechSynthesisUtterance(" ");
+    unlock.volume = 0;
+    unlock.rate = 1;
+    unlock.pitch = 1;
+    synth.speak(unlock);
+    setTimeout(() => synth.cancel(), 40);
+  } catch {
+    // ignore priming errors
+  }
+}
+
 async function speakNativeText(text, { rate = 1, pitch = 1.2 } = {}) {
   const plugin = getNativeTtsPlugin();
   if (!plugin) return false;
@@ -939,6 +969,7 @@ async function speakNativeText(text, { rate = 1, pitch = 1.2 } = {}) {
 function speakWebText(text, { rate = 1, pitch = 1.2, preview = false, voiceName = "" } = {}) {
   if (!("speechSynthesis" in window)) return;
   const synth = window.speechSynthesis;
+  synth.resume();
   if (!preview) synth.cancel();
 
   const utter = new SpeechSynthesisUtterance(text);
@@ -1077,14 +1108,10 @@ function loadState() {
     state.verboseDetails = false;
   }
 
-  try {
-    state.chaosThemeEnabled = localStorage.getItem(chaosEnabledKey) === "1";
-    const paletteRaw = localStorage.getItem(chaosPaletteKey);
-    if (paletteRaw) state.themePalette = JSON.parse(paletteRaw);
-  } catch {
-    state.chaosThemeEnabled = false;
-    state.themePalette = null;
-  }
+  state.chaosThemeEnabled = false;
+  state.themePalette = null;
+  state.randomVoiceEachReveal = false;
+  state.verboseDetails = false;
 }
 
 function saveState() {
@@ -1127,6 +1154,26 @@ function saveThemeSettings() {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function inferPolarity(answer) {
+  const text = String(answer || "").toLowerCase();
+  if (
+    text === "no" ||
+    text.includes("nope") ||
+    text.includes("no ") ||
+    text.includes("not ") ||
+    text.includes("heck no") ||
+    text.includes("don't")
+  ) {
+    return "no";
+  }
+  return "yes";
+}
+
+function canonicalAnswersByPolarity(polarity) {
+  const filtered = canonicalAnswers.filter((answer) => inferPolarity(answer) === polarity);
+  return filtered.length ? filtered : canonicalAnswers;
 }
 
 function pick(list) {

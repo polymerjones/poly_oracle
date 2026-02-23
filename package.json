@@ -1,0 +1,24 @@
+{
+  "name": "poly_oracle",
+  "version": "1.0.0",
+  "description": "Poly Oracle iOS app",
+  "main": "script.js",
+  "scripts": {
+    "doctor:ios": "xcodebuild -version",
+    "prepare:web": "mkdir -p www && cp -f index.html style.css script.js Kaleidoscope_Magic.mp3 www/",
+    "install:cap": "npm install @capacitor/core @capacitor/cli @capacitor/ios",
+    "cap:init": "npx cap init \"Poly Oracle\" com.polyoracle.app --web-dir www",
+    "cap:add:ios": "npx cap add ios",
+    "cap:sync": "npm run prepare:web && npx cap sync ios",
+    "cap:open:ios": "npx cap open ios",
+    "bootstrap:ios": "npm run install:cap && npm run cap:add:ios && npm run cap:sync"
+  },
+  "keywords": [
+    "ios",
+    "capacitor",
+    "oracle"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {}
+}

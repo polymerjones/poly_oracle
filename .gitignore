@@ -1,0 +1,13 @@
+node_modules/
+.DS_Store
+*.log
+backups/
+ios/build/
+ios/DerivedData/
+ios/**/xcuserdata/
+logo mockup.psd
+logo mockup.jpg
+polyoraclelogo1.jpg
+polyoraclelogo2.png
+grok-image-*.png
+*-*-*-*-*.jpg

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f1324" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Poly Oracle" />
+    <title>Poly Oracle</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="stage" id="stage" aria-live="polite">
+      <div id="flash" aria-hidden="true"></div>
+      <div id="mist" aria-hidden="true"></div>
+      <div id="sparkles" aria-hidden="true"></div>
+      <audio id="revealAudio" preload="auto" src="Kaleidoscope_Magic.mp3"></audio>
+
+      <header class="hero">
+        <div class="title-wrap">
+          <h1>Poly Oracle</h1>
+          <p class="tagline">Ask. Reveal. Reflect.</p>
+        </div>
+        <div class="toggles">
+          <button id="whisperMode" class="ghost small" type="button" aria-pressed="false">Whisper</button>
+          <button id="minimalMode" class="ghost small" type="button" aria-pressed="false">Minimal</button>
+          <button id="openVault" class="ghost small" type="button">Vault</button>
+        </div>
+      </header>
+
+      <section class="orb-shell" id="orbShell">
+        <div class="orb" id="orb" aria-hidden="true"></div>
+        <div class="mode-rail" id="modeRail" aria-label="Reveal style picker"></div>
+      </section>
+
+      <section class="controls">
+        <label class="prompt" for="question">Your question</label>
+        <input
+          id="question"
+          type="text"
+          maxlength="220"
+          autocomplete="off"
+          placeholder="Will this launch be amazing?"
+        />
+
+        <div class="row">
+          <div class="field">
+            <label class="prompt" for="packSelect">Oracle Pack</label>
+            <select id="packSelect" aria-label="Answer pack selection"></select>
+          </div>
+          <div class="field">
+            <label class="prompt" for="voiceSelect">Voice</label>
+            <div class="voice-row">
+              <select id="voiceSelect" aria-label="Voice selection"></select>
+              <button id="previewVoice" class="ghost small" type="button">Preview</button>
+            </div>
+            <div id="voicePersona" class="persona">Persona: Calm</div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="ask" class="primary" type="button" disabled>Reveal</button>
+          <button id="randomVoice" class="ghost" type="button">Random Voice</button>
+        </div>
+      </section>
+
+      <section class="answer" id="answer" hidden>
+        <div class="answer-card" id="answerCard">
+          <div class="answer-label">Oracle says</div>
+          <div class="answer-polarity" id="answerPolarity">YES</div>
+          <div class="answer-text" id="answerText"></div>
+          <div class="answer-micro" id="answerMicro"></div>
+          <div class="answer-meta" id="answerMeta"></div>
+          <div class="answer-actions">
+            <button id="flipAnswer" class="ghost small" type="button">Flip</button>
+            <button id="favoriteAnswer" class="ghost small" type="button">Favorite</button>
+            <button id="shareAnswer" class="ghost small" type="button">Share</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside id="vault" class="vault" hidden aria-label="Oracle history vault">
+      <div class="vault-card">
+        <div class="vault-head">
+          <h2>Oracle Vault</h2>
+          <button id="closeVault" class="ghost small" type="button">Close</button>
+        </div>
+        <div class="vault-filters">
+          <input id="vaultSearch" type="text" placeholder="Search questions" />
+          <button id="vaultFilterAll" class="ghost small active" type="button">All</button>
+          <button id="vaultFilterFav" class="ghost small" type="button">Favorites</button>
+        </div>
+        <div id="vaultStats" class="vault-stats"></div>
+        <div id="vaultList" class="vault-list"></div>
+      </div>
+    </aside>
+
+    <script src="script.js"></script>
+  </body>
+</html>

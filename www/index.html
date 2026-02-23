@@ -208,7 +208,14 @@
       ></video>
       <div id="galaxyModeSelect" class="galaxyModeSelect" aria-hidden="true">
         <div class="galaxyModeCard">
-          <div class="galaxyModeTitle">Select Mode</div>
+          <div id="galaxyModeTitle" class="galaxyModeTitle">Select Mode</div>
+          <div id="debugLevelPanel" class="debugLevelPanel" hidden aria-hidden="true">
+            <label class="debugLevelLabel" for="debugLevelSelect">Debug Level Select</label>
+            <div class="debugLevelRow">
+              <select id="debugLevelSelect" class="debugLevelSelect" aria-label="Debug level select"></select>
+              <button id="btnDebugStartLevel" class="debugLevelBtn" type="button">Start</button>
+            </div>
+          </div>
           <button id="btnArcade" class="modeBtn" type="button">Arcade</button>
           <button id="btnFreestyle" class="modeBtn" type="button">Freestyle</button>
           <button id="btnGalaxyBack" class="modeBackBtn" type="button">← Oracle</button>

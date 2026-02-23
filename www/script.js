@@ -1848,6 +1848,14 @@ function initGalaxyCanvas() {
   let pausedLevelRemainingMs = 0;
   let pausedLandmineRemainingMs = 0;
   let landmineFlashUntil = 0;
+  let debugLevelUnlocked = false;
+  let debugModeTapCount = 0;
+  let debugModeTapLastAt = 0;
+
+  const galaxyModeTitleEl = document.getElementById("galaxyModeTitle");
+  const debugLevelPanel = document.getElementById("debugLevelPanel");
+  const debugLevelSelect = document.getElementById("debugLevelSelect");
+  const btnDebugStartLevel = document.getElementById("btnDebugStartLevel");
 
   const playfield = { x: 0, y: 0, w: 0, h: 0, pad: 12, topPad: 0, bottomPad: 0 };
 
@@ -1897,6 +1905,40 @@ function initGalaxyCanvas() {
   function syncArcadeEntryLabel() {
     if (!btnArcade) return;
     btnArcade.textContent = arcadeResumeAvailable ? "Resume" : "Arcade";
+  }
+
+  function syncDebugLevelPanel() {
+    if (!debugLevelPanel) return;
+    const visible = debugLevelUnlocked && engineMode === "menu";
+    debugLevelPanel.hidden = !visible;
+    debugLevelPanel.classList.toggle("unlocked", visible);
+    debugLevelPanel.setAttribute("aria-hidden", visible ? "false" : "true");
+  }
+
+  function buildDebugLevelSelect() {
+    if (!debugLevelSelect) return;
+    if (debugLevelSelect.options.length > 0) return;
+    for (let i = 0; i < ARCADE_LEVELS.length; i += 1) {
+      const level = ARCADE_LEVELS[i].level;
+      const option = document.createElement("option");
+      option.value = String(level);
+      option.textContent = `Level ${level}`;
+      debugLevelSelect.appendChild(option);
+    }
+    debugLevelSelect.value = "1";
+  }
+
+  function registerDebugLevelUnlockTap() {
+    if (engineMode !== "menu") return;
+    const now = performance.now();
+    if (now - debugModeTapLastAt > 1600) debugModeTapCount = 0;
+    debugModeTapLastAt = now;
+    debugModeTapCount += 1;
+    if (debugModeTapCount >= 7) {
+      debugModeTapCount = 0;
+      debugLevelUnlocked = true;
+      syncDebugLevelPanel();
+    }
   }
 
   function showArcadeOverlay(text, sub = "", durationMs = 0, opts = null) {
@@ -2536,6 +2578,23 @@ function initGalaxyCanvas() {
     startGalaxyLoop();
   }
 
+  function startArcadeAtLevel(levelNum) {
+    hideArcadeOverlay();
+    engineMode = "arcade";
+    arcadeActive = true;
+    arcadeResumeAvailable = false;
+    syncArcadeEntryLabel();
+    setGalaxyViewMode("arcade");
+    setGalaxyTool("draw");
+    resizeGalaxyCanvas();
+    computePlayfield();
+    setTimeout(computePlayfield, 50);
+    const numericLevel = Math.floor(Number(levelNum));
+    const idx = clamp((Number.isFinite(numericLevel) ? numericLevel : 1) - 1, 0, ARCADE_LEVELS.length - 1);
+    startLevel(idx);
+    startGalaxyLoop();
+  }
+
   function startFreestyleMode() {
     hideArcadeOverlay();
     engineMode = "freestyle";
@@ -2583,6 +2642,11 @@ function initGalaxyCanvas() {
     resizeGalaxyCanvas();
     computePlayfield();
     updateArcadeHud(performance.now());
+    if (debugLevelSelect) {
+      const fallbackLevel = ARCADE_LEVELS[currentLevelIndex]?.level || getSavedArcadeLevel();
+      debugLevelSelect.value = String(fallbackLevel);
+    }
+    syncDebugLevelPanel();
     startGalaxyLoop();
     draw(performance.now());
   }
@@ -2957,6 +3021,17 @@ function initGalaxyCanvas() {
 
   resizeGalaxyCanvas();
   computePlayfield();
+  buildDebugLevelSelect();
+  syncDebugLevelPanel();
+  if (galaxyModeTitleEl) {
+    galaxyModeTitleEl.addEventListener("pointerdown", registerDebugLevelUnlockTap);
+  }
+  if (btnDebugStartLevel) {
+    btnDebugStartLevel.addEventListener("click", () => {
+      const selected = parseInt(debugLevelSelect?.value || "1", 10);
+      startArcadeAtLevel(selected);
+    });
+  }
   draw(performance.now());
 
   galaxyCanvasController = {
@@ -2972,6 +3047,9 @@ function initGalaxyCanvas() {
     },
     startArcadeFromSave() {
       startArcadeFromSave();
+    },
+    startArcadeAtLevel(levelNum) {
+      startArcadeAtLevel(levelNum);
     },
     triggerBoom() {
       // no-op in current arcade interaction model

@@ -1251,6 +1251,54 @@ select:focus-visible {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #d7e5ff;
+  user-select: none;
+}
+
+.debugLevelPanel {
+  display: none;
+  border: 1px solid rgba(148, 221, 255, 0.28);
+  border-radius: 14px;
+  background: rgba(10, 20, 42, 0.7);
+  padding: 10px;
+  gap: 8px;
+}
+
+.debugLevelPanel.unlocked {
+  display: grid;
+}
+
+.debugLevelLabel {
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #b9cdf5;
+}
+
+.debugLevelRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.debugLevelSelect,
+.debugLevelBtn {
+  min-height: 40px;
+  border-radius: 10px;
+}
+
+.debugLevelSelect {
+  border: 1px solid rgba(183, 212, 255, 0.26);
+  background: rgba(255, 255, 255, 0.1);
+  color: #edf4ff;
+  padding: 0 10px;
+}
+
+.debugLevelBtn {
+  border: 1px solid rgba(145, 244, 181, 0.4);
+  background: rgba(120, 255, 170, 0.16);
+  color: #d9ffe8;
+  font-weight: 700;
+  padding: 0 12px;
 }
 
 .modeBtn,

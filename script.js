@@ -71,6 +71,7 @@ const defaultPalette = {
 
 const prefersReducedMotion =
   typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const isIOSWebKit = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
 const state = {
   selectedMode: "classic",
@@ -229,11 +230,19 @@ function addListeners() {
     if (now - lastOrbTapAt < 40) return;
     lastOrbTapAt = now;
     const intensity = registerOrbTap();
+    const safeIntensity = isIOSWebKit
+      ? {
+          ...intensity,
+          burstCount: Math.min(intensity.burstCount, 8),
+          sizeMultiplier: Math.min(intensity.sizeMultiplier, 1.5),
+          brightnessMultiplier: Math.min(intensity.brightnessMultiplier, 1.5),
+        }
+      : intensity;
     if (intensity.shouldShiftTheme) {
       triggerChaosTheme();
     }
-    playPixySound(intensity);
-    spawnSparkles(intensity.burstCount, intensity.sizeMultiplier, intensity.brightnessMultiplier);
+    playPixySound(safeIntensity);
+    spawnSparkles(safeIntensity.burstCount, safeIntensity.sizeMultiplier, safeIntensity.brightnessMultiplier);
   };
   if ("PointerEvent" in window) {
     orb.addEventListener("pointerdown", onOrbTap);
@@ -1032,6 +1041,7 @@ function showChaosToast() {
 
 function spawnSparkles(count, sizeMultiplier = 1, brightnessMultiplier = 1) {
   if (!sparkles) return;
+  if (sparkles.childElementCount > 120) return;
   const stageRect = stage.getBoundingClientRect();
   const orbRect = orb.getBoundingClientRect();
   const centerX = orbRect.left - stageRect.left + orbRect.width / 2;
@@ -1632,6 +1642,7 @@ function primeOrbTapBuffer() {
 
 function createLoopVideoController(video) {
   if (!video) return null;
+  let watchdog = null;
 
   video.muted = true;
   video.loop = true;
@@ -1655,9 +1666,19 @@ function createLoopVideoController(video) {
     start() {
       video.loop = true;
       video.play().catch(() => {});
+      if (watchdog) clearInterval(watchdog);
+      watchdog = setInterval(() => {
+        if (video.paused) {
+          video.play().catch(() => {});
+        }
+      }, 1800);
     },
     stop() {
       video.pause();
+      if (watchdog) {
+        clearInterval(watchdog);
+        watchdog = null;
+      }
     },
   };
 }

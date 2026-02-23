@@ -1118,6 +1118,12 @@ select:focus-visible {
     opacity: 0.74;
     filter: saturate(1.06) contrast(1.2) brightness(0.42);
   }
+
+  /* iOS fog clamp: disable milky reveal overlays on main screen */
+  #flash,
+  #mist {
+    display: none !important;
+  }
 }
 
 @supports (-webkit-touch-callout: none) and (max-width: 600px) {

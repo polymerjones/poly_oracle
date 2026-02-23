@@ -1,12 +1,15 @@
-const APP_VERSION = "v1.2.1";
+const APP_VERSION = "v1.2.2";
 const storageKey = "poly-oracle-v11-state";
 const firstRunHintKey = "poly_oracle_seen_hint_v1_2_1";
+const verboseKey = "poly_oracle_verbose_details";
+const chaosEnabledKey = "poly_oracle_chaos_theme";
+const chaosPaletteKey = "poly_oracle_theme_palette";
 
 const revealModes = [
-  { id: "classic", label: "Classic Fade", duration: 1050 },
-  { id: "dramatic", label: "Dramatic Flash", duration: 1750 },
-  { id: "mist", label: "Mist Unveil", duration: 1400 },
-  { id: "glitch", label: "Glitch Oracle", duration: 1450 },
+  { id: "classic", label: "Classic Fade", duration: 2500 },
+  { id: "dramatic", label: "Dramatic Flash", duration: 2500 },
+  { id: "mist", label: "Mist Unveil", duration: 2500 },
+  { id: "glitch", label: "Glitch Oracle", duration: 2500 },
 ];
 
 const packs = {
@@ -37,8 +40,14 @@ const packs = {
   },
 };
 
-const yesAnswers = ["Yes", "Yes - you know it", "Heck Yes", "Yeppurs", "Yeah, buddy"];
-const noAnswers = ["No", "Nope", "Heck No", "Not today", "I don't think so"];
+const defaultPalette = {
+  accentA: "#7be2ff",
+  accentB: "#f6a7ff",
+  accentC: "#8effd0",
+  bgNebula1: "rgba(124, 153, 255, 0.14)",
+  bgNebula2: "rgba(164, 111, 255, 0.16)",
+  orbGlow: "0 0 36px rgba(124, 223, 255, 0.52), 0 0 92px rgba(196, 127, 255, 0.28)",
+};
 
 const prefersReducedMotion =
   typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -51,12 +60,18 @@ const state = {
   whisper: false,
   minimal: false,
   randomVoiceEachReveal: false,
+  verboseDetails: false,
+  chaosThemeEnabled: false,
+  themePalette: null,
   vaultFilter: "all",
   vaultSearch: "",
   vault: [],
   currentAnswer: null,
   flip: false,
   settingsOpen: false,
+  isRevealing: false,
+  sessionTapCount: 0,
+  tapTimestamps: [],
 };
 
 const stage = document.getElementById("stage");
@@ -70,9 +85,11 @@ const askButton = document.getElementById("ask");
 
 const answerBox = document.getElementById("answer");
 const answerCard = document.getElementById("answerCard");
+const answerSimple = document.getElementById("answerSimple");
 const answerPolarity = document.getElementById("answerPolarity");
 const answerText = document.getElementById("answerText");
 const answerMicro = document.getElementById("answerMicro");
+const answerMeta = document.getElementById("answerMeta");
 const flipAnswer = document.getElementById("flipAnswer");
 const favoriteAnswer = document.getElementById("favoriteAnswer");
 const shareAnswer = document.getElementById("shareAnswer");
@@ -86,13 +103,16 @@ const packSelect = document.getElementById("packSelect");
 const whisperModeToggle = document.getElementById("whisperMode");
 const minimalModeToggle = document.getElementById("minimalMode");
 const randomVoiceEachRevealToggle = document.getElementById("randomVoiceEachReveal");
+const verboseDetailsToggle = document.getElementById("verboseDetails");
 const randomVoiceNow = document.getElementById("randomVoiceNow");
 const voiceSelect = document.getElementById("voiceSelect");
 const previewVoice = document.getElementById("previewVoice");
 const voicePersona = document.getElementById("voicePersona");
 const openVault = document.getElementById("openVault");
 const clearHistory = document.getElementById("clearHistory");
+const resetThemeButton = document.getElementById("resetTheme");
 const firstRunHint = document.getElementById("firstRunHint");
+const chaosToast = document.getElementById("chaosToast");
 
 const vault = document.getElementById("vault");
 const closeVault = document.getElementById("closeVault");
@@ -105,6 +125,7 @@ const vaultStats = document.getElementById("vaultStats");
 let audioContext;
 let nativeTtsWarned = false;
 let hintTimeout;
+let chaosToastTimeout;
 let galaxyController;
 
 init();
@@ -112,7 +133,9 @@ init();
 function init() {
   loadState();
   initGalaxyBackground();
+  applyTheme();
   buildPackSelect();
+  warmVoices();
   populateVoices();
   applySettingsToUi();
   renderVault();
@@ -128,7 +151,7 @@ function addListeners() {
   });
 
   questionInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !askButton.disabled) {
+    if (event.key === "Enter" && !askButton.disabled && !state.isRevealing) {
       revealAnswer();
     }
   });
@@ -136,8 +159,9 @@ function addListeners() {
   askButton.addEventListener("click", revealAnswer);
 
   orb.addEventListener("click", () => {
-    spawnSparkles(state.minimal ? 5 : 12);
-    playPixySound();
+    const intensity = registerOrbTap();
+    playPixySound(intensity);
+    spawnSparkles(intensity.burstCount, intensity.sizeMultiplier, intensity.brightnessMultiplier);
   });
 
   flipAnswer.addEventListener("click", () => {
@@ -212,6 +236,12 @@ function addListeners() {
     saveState();
   });
 
+  verboseDetailsToggle.addEventListener("change", (event) => {
+    state.verboseDetails = !!event.target.checked;
+    applySettingsToUi();
+    saveState();
+  });
+
   randomVoiceNow.addEventListener("click", () => {
     const voice = pickRandomVoiceName();
     if (!voice) return;
@@ -230,9 +260,9 @@ function addListeners() {
   });
 
   previewVoice.addEventListener("click", () => {
-    speakText("The Oracle is listening.", {
-      rate: 1.02,
-      pitch: 1.24,
+    speakText("Question: The Oracle is listening. Answer: Proceed.", {
+      rate: state.whisper ? 0.95 : 1.02,
+      pitch: 1.2,
       preview: true,
       voiceName: state.selectedVoice,
     });
@@ -252,6 +282,10 @@ function addListeners() {
     answerBox.hidden = true;
     saveState();
     renderVault();
+  });
+
+  resetThemeButton.addEventListener("click", () => {
+    resetChaosTheme();
   });
 
   closeVault.addEventListener("click", () => {
@@ -300,7 +334,7 @@ function setupFirstRunHint() {
   try {
     localStorage.setItem(firstRunHintKey, "1");
   } catch {
-    // ignore storage errors
+    // ignore
   }
 
   firstRunHint.classList.remove("hidden");
@@ -322,12 +356,30 @@ function setSettingsOpen(open) {
   state.settingsOpen = open;
   if (open) {
     vault.hidden = true;
+    hideFirstRunHint();
   }
   settingsBackdrop.hidden = !open;
   settingsPanel.hidden = !open;
   settingsPanel.classList.toggle("open", open);
   document.body.style.overflow = open ? "hidden" : "";
-  if (open) hideFirstRunHint();
+}
+
+function setIntentState() {
+  const value = questionInput.value.trim();
+  askButton.disabled = value.length < 2 || state.isRevealing;
+  stage.classList.toggle("intent", value.length >= 2);
+}
+
+function normalizeQuestion(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  return trimmed.endsWith("?") ? trimmed : `${trimmed}?`;
+}
+
+function effectiveModeId() {
+  if (prefersReducedMotion) return "classic";
+  if (state.minimal && state.selectedMode === "glitch") return "classic";
+  return state.selectedMode;
 }
 
 function buildPackSelect() {
@@ -351,105 +403,154 @@ function applySettingsToUi() {
   whisperModeToggle.checked = state.whisper;
   minimalModeToggle.checked = state.minimal;
   randomVoiceEachRevealToggle.checked = state.randomVoiceEachReveal;
+  verboseDetailsToggle.checked = state.verboseDetails;
 
   document.body.classList.toggle("whisper", state.whisper);
   document.body.classList.toggle("minimal", state.minimal);
+  document.body.classList.toggle("verbose-details", state.verboseDetails);
+
   revealAudio.volume = state.whisper ? 0.32 : 0.82;
-
-  if (galaxyController) {
-    galaxyController.setMinimal(state.minimal);
-  }
+  if (galaxyController) galaxyController.setMinimal(state.minimal);
 }
 
-function setIntentState() {
-  const value = questionInput.value.trim();
-  const hasText = value.length >= 2;
-  askButton.disabled = !hasText;
-  stage.classList.toggle("intent", hasText);
-}
-
-function normalizeQuestion(text) {
-  const trimmed = text.trim();
-  if (!trimmed) return "";
-  return trimmed.endsWith("?") ? trimmed : `${trimmed}?`;
-}
-
-function effectiveModeId() {
-  if (prefersReducedMotion) return "classic";
-  if (state.minimal && state.selectedMode === "glitch") return "classic";
-  return state.selectedMode;
-}
-
-function pickRevealVoice() {
-  if (state.randomVoiceEachReveal) {
-    return pickRandomVoiceName() || state.selectedVoice;
-  }
-  return state.selectedVoice;
+function setRevealing(revealing) {
+  state.isRevealing = revealing;
+  document.body.classList.toggle("is-revealing", revealing);
+  questionInput.disabled = revealing;
+  askButton.disabled = revealing || questionInput.value.trim().length < 2;
+  askButton.classList.toggle("loading", revealing);
 }
 
 function revealAnswer() {
+  if (state.isRevealing) return;
+
   const normalizedQuestion = normalizeQuestion(questionInput.value);
-  if (!normalizedQuestion) return;
+  if (!normalizedQuestion) {
+    questionInput.classList.remove("shake");
+    void questionInput.offsetWidth;
+    questionInput.classList.add("shake");
+    setTimeout(() => questionInput.classList.remove("shake"), 320);
+    return;
+  }
+
   questionInput.value = normalizedQuestion;
 
-  hapticReveal();
-
   const polarity = Math.random() > 0.5 ? "yes" : "no";
-  const answer = polarity === "yes" ? pick(yesAnswers) : pick(noAnswers);
-  const micro = pick(packs[state.selectedPack][polarity]);
+  const packLines = packs[state.selectedPack][polarity];
+  const answerLine = pick(packLines);
+  const microLine = pick(packLines.filter((line) => line !== answerLine).length ? packLines.filter((line) => line !== answerLine) : packLines);
   const modeId = effectiveModeId();
   const mode = revealModes.find((item) => item.id === modeId) || revealModes[0];
-  const revealVoice = pickRevealVoice();
+  const revealVoice = state.randomVoiceEachReveal ? pickRandomVoiceName() || state.selectedVoice : state.selectedVoice;
 
+  hapticReveal();
+  setRevealing(true);
+
+  // v1.2.2 ritual reveal
+  if (prefersReducedMotion) {
+    runReducedRitualSequence(mode, () => finishReveal({
+      normalizedQuestion,
+      polarity,
+      answerLine,
+      microLine,
+      revealVoice,
+    }));
+    return;
+  }
+
+  runRitualSequence(mode, () => finishReveal({
+    normalizedQuestion,
+    polarity,
+    answerLine,
+    microLine,
+    revealVoice,
+  }));
+}
+
+function runRitualSequence(mode, onDone) {
   orb.classList.remove("reveal");
   void orb.offsetWidth;
   orb.classList.add("reveal");
 
+  performRitualPulse(0.8);
+
+  setTimeout(() => performRitualPulse(1.05), 400);
+  setTimeout(() => performRitualPulse(1.25), 900);
+  setTimeout(() => performRitualPulse(1.45), 1600);
+  setTimeout(() => onDone(), mode.duration);
+}
+
+function runReducedRitualSequence(mode, onDone) {
+  orb.classList.remove("reveal");
+  void orb.offsetWidth;
+  orb.classList.add("reveal");
+
+  mist.classList.remove("active");
+  void mist.offsetWidth;
+  mist.classList.add("active");
+  spawnSparkles(4, 1, 1);
+
+  setTimeout(onDone, mode.duration);
+}
+
+function performRitualPulse(level = 1) {
   flash.classList.remove("active");
   mist.classList.remove("active");
   void flash.offsetWidth;
 
-  if (mode.id === "dramatic" || mode.id === "classic") flash.classList.add("active");
-  if (mode.id === "mist") mist.classList.add("active");
-  if (mode.id === "glitch" && !prefersReducedMotion) {
-    stage.style.filter = "hue-rotate(24deg)";
-    setTimeout(() => {
-      stage.style.filter = "none";
-    }, 170);
+  if (!state.minimal) {
+    flash.style.opacity = `${Math.min(0.5, 0.18 * level)}`;
+    flash.classList.add("active");
   }
 
-  spawnSparkles(state.minimal || prefersReducedMotion ? 5 : 20);
+  mist.style.opacity = `${Math.min(0.5, 0.16 * level)}`;
+  mist.classList.add("active");
+
+  spawnSparkles(Math.round(6 + level * 5), 1 + level * 0.15, 1 + level * 0.2);
+  if (level > 1.2) {
+    hapticTap();
+  }
+}
+
+function finishReveal({ normalizedQuestion, polarity, answerLine, microLine, revealVoice }) {
+  spawnSparkles(prefersReducedMotion ? 5 : 18, 1.2, 1.35);
   playRevealSound();
+  flash.classList.remove("active");
+  mist.classList.remove("active");
+  flash.style.opacity = "";
+  mist.style.opacity = "";
 
-  setTimeout(() => {
-    const entry = {
-      id: makeId(),
-      question: normalizedQuestion,
-      polarity,
-      answer,
-      micro,
-      mode: state.selectedMode,
-      pack: state.selectedPack,
-      voice: revealVoice || "Default",
-      favorite: false,
-      timestamp: Date.now(),
-    };
+  const entry = {
+    id: makeId(),
+    question: normalizedQuestion,
+    polarity,
+    answer: answerLine,
+    micro: microLine,
+    mode: state.selectedMode,
+    pack: state.selectedPack,
+    voice: revealVoice || "Default",
+    favorite: false,
+    timestamp: Date.now(),
+  };
 
-    state.currentAnswer = entry;
-    state.flip = false;
-    state.vault.unshift(entry);
-    state.vault = state.vault.slice(0, 200);
+  state.currentAnswer = entry;
+  state.flip = false;
+  state.vault.unshift(entry);
+  state.vault = state.vault.slice(0, 200);
 
-    renderAnswerCard();
-    renderVault();
-    saveState();
+  renderAnswerCard();
+  renderVault();
+  saveState();
 
-    speakText(`${normalizedQuestion} ${answer}`, {
-      rate: 1.05,
-      pitch: 1.26,
-      voiceName: revealVoice,
-    });
-  }, state.minimal || prefersReducedMotion ? 320 : mode.duration);
+  const spokenAnswer = answerSimple.textContent.trim() || entry.answer;
+  speakText(`Question: ${normalizedQuestion}. Answer: ${spokenAnswer}.`, {
+    rate: state.whisper ? 0.95 : 1.05,
+    pitch: 1.18,
+    voiceName: revealVoice,
+  });
+
+  setRevealing(false);
+  setIntentState();
 }
 
 function renderAnswerCard() {
@@ -461,26 +562,26 @@ function renderAnswerCard() {
       : "yes"
     : state.currentAnswer.polarity;
 
+  const answerValue = sourcePolarity === state.currentAnswer.polarity
+    ? state.currentAnswer.answer
+    : pick(packs[state.currentAnswer.pack][sourcePolarity]);
+
+  const microValue = sourcePolarity === state.currentAnswer.polarity
+    ? state.currentAnswer.micro
+    : pick(packs[state.currentAnswer.pack][sourcePolarity]);
+
+  answerSimple.textContent = answerValue;
   answerPolarity.textContent = sourcePolarity.toUpperCase();
   answerPolarity.classList.toggle("yes", sourcePolarity === "yes");
   answerPolarity.classList.toggle("no", sourcePolarity === "no");
+  answerText.textContent = answerValue;
+  answerMicro.textContent = microValue;
 
-  const nextAnswer =
-    sourcePolarity === state.currentAnswer.polarity
-      ? state.currentAnswer.answer
-      : sourcePolarity === "yes"
-        ? pick(yesAnswers)
-        : pick(noAnswers);
-  const nextMicro =
-    sourcePolarity === state.currentAnswer.polarity
-      ? state.currentAnswer.micro
-      : pick(packs[state.currentAnswer.pack][sourcePolarity]);
+  const when = new Date(state.currentAnswer.timestamp).toLocaleString();
+  answerMeta.textContent = `${packs[state.currentAnswer.pack]?.label || state.currentAnswer.pack} • ${state.currentAnswer.mode} • ${when}`;
 
-  answerText.textContent = nextAnswer;
-  answerMicro.textContent = nextMicro;
-
-  const fav = state.vault.find((item) => item.id === state.currentAnswer.id)?.favorite;
-  favoriteAnswer.textContent = fav ? "Unfavorite" : "Favorite";
+  const favorite = state.vault.find((item) => item.id === state.currentAnswer.id)?.favorite;
+  favoriteAnswer.textContent = favorite ? "Unfavorite" : "Favorite";
 
   answerBox.hidden = false;
   answerCard.classList.remove("reveal");
@@ -566,6 +667,7 @@ function toggleFavorite(id) {
 function loadFromVault(id) {
   const entry = state.vault.find((item) => item.id === id);
   if (!entry) return;
+
   state.currentAnswer = { ...entry };
   state.selectedMode = revealModes.some((mode) => mode.id === entry.mode) ? entry.mode : state.selectedMode;
   state.selectedPack = packs[entry.pack] ? entry.pack : state.selectedPack;
@@ -584,6 +686,150 @@ function removeFromVault(id) {
   }
   saveState();
   renderVault();
+}
+
+function registerOrbTap() {
+  const now = Date.now();
+  state.sessionTapCount += 1;
+  state.tapTimestamps.push(now);
+  state.tapTimestamps = state.tapTimestamps.filter((stamp) => now - stamp <= 2000);
+
+  const spamTapCount = state.tapTimestamps.length;
+  const sizeMultiplier = clamp(1 + spamTapCount * 0.05, 1, 2.5);
+  const brightnessMultiplier = clamp(1 + spamTapCount * 0.07, 1, 3);
+  const burstCount = Math.round(clamp(6 + spamTapCount, 6, 34));
+
+  // v1.2.2 chaos theme
+  if (state.sessionTapCount >= 20 && !state.chaosThemeEnabled) {
+    triggerChaosTheme();
+  }
+
+  return { spamTapCount, sizeMultiplier, brightnessMultiplier, burstCount };
+}
+
+function triggerChaosTheme() {
+  state.chaosThemeEnabled = true;
+  state.themePalette = createRandomPalette();
+  applyTheme();
+  saveThemeSettings();
+  showChaosToast();
+}
+
+function resetChaosTheme() {
+  state.chaosThemeEnabled = false;
+  state.themePalette = null;
+  applyTheme();
+  saveThemeSettings();
+}
+
+function createRandomPalette() {
+  const hueA = Math.floor(Math.random() * 360);
+  const hueB = (hueA + 70 + Math.floor(Math.random() * 70)) % 360;
+  const hueC = (hueA + 150 + Math.floor(Math.random() * 90)) % 360;
+
+  return {
+    accentA: `hsl(${hueA} 92% 74%)`,
+    accentB: `hsl(${hueB} 88% 74%)`,
+    accentC: `hsl(${hueC} 85% 74%)`,
+    bgNebula1: `hsla(${hueA} 90% 70% / 0.17)`,
+    bgNebula2: `hsla(${hueB} 86% 66% / 0.17)`,
+    orbGlow: `0 0 34px hsla(${hueA} 94% 72% / 0.56), 0 0 96px hsla(${hueB} 86% 70% / 0.32)`,
+  };
+}
+
+function applyTheme() {
+  const palette = state.chaosThemeEnabled && state.themePalette ? state.themePalette : defaultPalette;
+  const root = document.documentElement;
+
+  root.style.setProperty("--accentA", palette.accentA);
+  root.style.setProperty("--accentB", palette.accentB);
+  root.style.setProperty("--accentC", palette.accentC);
+  root.style.setProperty("--bgNebula1", palette.bgNebula1);
+  root.style.setProperty("--bgNebula2", palette.bgNebula2);
+  root.style.setProperty("--orbGlow", palette.orbGlow);
+}
+
+function showChaosToast() {
+  if (!chaosToast) return;
+  chaosToast.hidden = false;
+  chaosToast.classList.remove("show");
+  void chaosToast.offsetWidth;
+  chaosToast.classList.add("show");
+  clearTimeout(chaosToastTimeout);
+  chaosToastTimeout = setTimeout(() => {
+    chaosToast.classList.remove("show");
+    chaosToast.hidden = true;
+  }, 1900);
+}
+
+function spawnSparkles(count, sizeMultiplier = 1, brightnessMultiplier = 1) {
+  if (!sparkles) return;
+  const stageRect = stage.getBoundingClientRect();
+  const orbRect = orb.getBoundingClientRect();
+  const centerX = orbRect.left - stageRect.left + orbRect.width / 2;
+  const centerY = orbRect.top - stageRect.top + orbRect.height / 2;
+  const radius = orbRect.width / 2;
+
+  for (let i = 0; i < count; i += 1) {
+    const angle = Math.random() * Math.PI * 2;
+    const distance = Math.random() * radius * 0.95;
+    const x = centerX + Math.cos(angle) * distance;
+    const y = centerY + Math.sin(angle) * distance;
+    const sparkle = document.createElement("span");
+    const size = (4 + Math.random() * 7) * sizeMultiplier;
+    const alpha = clamp(0.25 * brightnessMultiplier, 0.25, 1);
+
+    sparkle.className = "sparkle";
+    sparkle.style.left = `${x}px`;
+    sparkle.style.top = `${y}px`;
+    sparkle.style.width = `${size}px`;
+    sparkle.style.height = `${size}px`;
+    sparkle.style.opacity = `${alpha}`;
+    sparkle.style.animationDelay = `${Math.random() * 0.12}s`;
+    sparkles.appendChild(sparkle);
+    sparkle.addEventListener("animationend", () => sparkle.remove());
+  }
+}
+
+function playRevealSound() {
+  if (!revealAudio) return;
+  revealAudio.currentTime = 0;
+  revealAudio.play().catch(() => {});
+}
+
+function playPixySound(intensity) {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx || state.minimal) return;
+  if (!audioContext) audioContext = new AudioCtx();
+
+  const now = audioContext.currentTime;
+  const master = audioContext.createGain();
+  master.connect(audioContext.destination);
+
+  const gainTop = state.whisper ? 0.06 : clamp(0.12 * intensity.brightnessMultiplier, 0.08, 0.3);
+  master.gain.setValueAtTime(0.0001, now);
+  master.gain.exponentialRampToValueAtTime(gainTop, now + 0.02);
+  master.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+
+  [720, 980, 1240].forEach((frequency, index) => {
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    const start = now + index * 0.05;
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(frequency * clamp(0.95 + intensity.sizeMultiplier * 0.08, 0.95, 1.18), start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.12, start + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
+    osc.connect(gain);
+    gain.connect(master);
+    osc.start(start);
+    osc.stop(start + 0.24);
+  });
+}
+
+function warmVoices() {
+  if (!("speechSynthesis" in window)) return;
+  window.speechSynthesis.getVoices();
 }
 
 function getWebVoices() {
@@ -656,63 +902,6 @@ function updatePersonaChip() {
   voicePersona.textContent = `Persona: ${persona}`;
 }
 
-function playRevealSound() {
-  if (!revealAudio) return;
-  revealAudio.currentTime = 0;
-  revealAudio.play().catch(() => {});
-}
-
-function playPixySound() {
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  if (!AudioCtx || state.minimal) return;
-  if (!audioContext) audioContext = new AudioCtx();
-
-  const now = audioContext.currentTime;
-  const master = audioContext.createGain();
-  master.connect(audioContext.destination);
-  master.gain.setValueAtTime(0.0001, now);
-  master.gain.exponentialRampToValueAtTime(state.whisper ? 0.05 : 0.16, now + 0.02);
-  master.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
-
-  [720, 980, 1240].forEach((frequency, index) => {
-    const osc = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    const start = now + index * 0.05;
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(frequency, start);
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(0.12, start + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
-    osc.connect(gain);
-    gain.connect(master);
-    osc.start(start);
-    osc.stop(start + 0.24);
-  });
-}
-
-function spawnSparkles(count) {
-  if (!sparkles) return;
-  const stageRect = stage.getBoundingClientRect();
-  const orbRect = orb.getBoundingClientRect();
-  const centerX = orbRect.left - stageRect.left + orbRect.width / 2;
-  const centerY = orbRect.top - stageRect.top + orbRect.height / 2;
-  const radius = orbRect.width / 2;
-
-  for (let i = 0; i < count; i += 1) {
-    const angle = Math.random() * Math.PI * 2;
-    const distance = Math.random() * radius * 0.95;
-    const x = centerX + Math.cos(angle) * distance;
-    const y = centerY + Math.sin(angle) * distance;
-    const sparkle = document.createElement("span");
-    sparkle.className = "sparkle";
-    sparkle.style.left = `${x}px`;
-    sparkle.style.top = `${y}px`;
-    sparkle.style.animationDelay = `${Math.random() * 0.12}s`;
-    sparkles.appendChild(sparkle);
-    sparkle.addEventListener("animationend", () => sparkle.remove());
-  }
-}
-
 async function speakText(text, { rate = 1, pitch = 1.2, preview = false, voiceName = "" } = {}) {
   if (!text) return;
 
@@ -727,16 +916,14 @@ async function speakNativeText(text, { rate = 1, pitch = 1.2 } = {}) {
   if (!plugin) return false;
 
   try {
-    if (typeof plugin.stop === "function") {
-      await plugin.stop();
-    }
+    if (typeof plugin.stop === "function") await plugin.stop();
 
     await plugin.speak({
       text,
       lang: "en-GB",
       rate: Math.max(0.2, Math.min(2, rate)),
       pitch: Math.max(0.5, Math.min(2, pitch)),
-      volume: state.whisper ? 0.35 : 1,
+      volume: state.whisper ? 0.5 : 1,
       category: "ambient",
     });
     return true;
@@ -757,7 +944,8 @@ function speakWebText(text, { rate = 1, pitch = 1.2, preview = false, voiceName 
   const utter = new SpeechSynthesisUtterance(text);
   utter.rate = rate;
   utter.pitch = pitch;
-  utter.volume = state.whisper ? 0.35 : 1;
+  utter.volume = state.whisper ? 0.5 : 1;
+
   const voices = getWebVoices();
   const selected = voices.find((voice) => voice.name === (voiceName || state.selectedVoice));
   if (selected) utter.voice = selected;
@@ -768,9 +956,9 @@ function getNativeTtsPlugin() {
   const cap = window.Capacitor;
   if (!cap || typeof cap.isNativePlatform !== "function") return null;
   if (!cap.isNativePlatform()) return null;
+
   const plugin = cap?.Plugins?.TextToSpeech;
-  if (plugin && typeof plugin.speak === "function") return plugin;
-  return null;
+  return plugin && typeof plugin.speak === "function" ? plugin : null;
 }
 
 async function shareCurrentCard() {
@@ -810,17 +998,13 @@ async function shareCurrentCard() {
   ctx.fillStyle = "#ffffff";
   drawWrappedText(ctx, entry.answer, 600, 1120, 860, 62);
 
-  ctx.font = "400 36px Inter";
-  ctx.fillStyle = "#c6d8ff";
-  drawWrappedText(ctx, entry.micro, 600, 1270, 860, 46);
-
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) return;
 
   const file = new File([blob], "oracle-card.png", { type: "image/png" });
   const shareData = {
     title: "Poly Oracle",
-    text: `${entry.question} -> ${entry.polarity.toUpperCase()}`,
+    text: `${entry.question} -> ${entry.answer}`,
     files: [file],
   };
 
@@ -829,7 +1013,7 @@ async function shareCurrentCard() {
       await navigator.share(shareData);
       return;
     } catch {
-      // ignore
+      // ignore cancel
     }
   }
 
@@ -864,29 +1048,42 @@ function hapticTap() {
 
 function hapticReveal() {
   if (state.minimal) return;
-  if (navigator.vibrate) navigator.vibrate(state.whisper ? [12, 14, 18] : [18, 24, 32]);
+  if (navigator.vibrate) navigator.vibrate(state.whisper ? [10, 12, 14] : [18, 24, 30]);
 }
 
 function loadState() {
   try {
     const raw = localStorage.getItem(storageKey);
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-
-    state.selectedMode = revealModes.some((mode) => mode.id === saved.selectedMode)
-      ? saved.selectedMode
-      : state.selectedMode;
-    state.selectedPack = packs[saved.selectedPack] ? saved.selectedPack : state.selectedPack;
-    state.selectedVoice = saved.selectedVoice || "";
-    state.userVoiceOverride = !!saved.userVoiceOverride;
-    state.whisper = !!saved.whisper;
-    state.minimal = !!saved.minimal;
-    state.randomVoiceEachReveal = !!saved.randomVoiceEachReveal;
-    state.vault = Array.isArray(saved.vault) ? saved.vault.slice(0, 200) : [];
-    state.vaultFilter = saved.vaultFilter === "fav" ? "fav" : "all";
-    state.vaultSearch = typeof saved.vaultSearch === "string" ? saved.vaultSearch : "";
+    if (raw) {
+      const saved = JSON.parse(raw);
+      state.selectedMode = revealModes.some((mode) => mode.id === saved.selectedMode) ? saved.selectedMode : state.selectedMode;
+      state.selectedPack = packs[saved.selectedPack] ? saved.selectedPack : state.selectedPack;
+      state.selectedVoice = saved.selectedVoice || "";
+      state.userVoiceOverride = !!saved.userVoiceOverride;
+      state.whisper = !!saved.whisper;
+      state.minimal = !!saved.minimal;
+      state.randomVoiceEachReveal = !!saved.randomVoiceEachReveal;
+      state.vault = Array.isArray(saved.vault) ? saved.vault.slice(0, 200) : [];
+      state.vaultFilter = saved.vaultFilter === "fav" ? "fav" : "all";
+      state.vaultSearch = typeof saved.vaultSearch === "string" ? saved.vaultSearch : "";
+    }
   } catch {
-    // ignore corrupt state
+    // ignore
+  }
+
+  try {
+    state.verboseDetails = localStorage.getItem(verboseKey) === "1";
+  } catch {
+    state.verboseDetails = false;
+  }
+
+  try {
+    state.chaosThemeEnabled = localStorage.getItem(chaosEnabledKey) === "1";
+    const paletteRaw = localStorage.getItem(chaosPaletteKey);
+    if (paletteRaw) state.themePalette = JSON.parse(paletteRaw);
+  } catch {
+    state.chaosThemeEnabled = false;
+    state.themePalette = null;
   }
 }
 
@@ -907,9 +1104,29 @@ function saveState() {
 
   try {
     localStorage.setItem(storageKey, JSON.stringify(payload));
+    localStorage.setItem(verboseKey, state.verboseDetails ? "1" : "0");
   } catch {
-    // ignore storage errors
+    // ignore
   }
+
+  saveThemeSettings();
+}
+
+function saveThemeSettings() {
+  try {
+    localStorage.setItem(chaosEnabledKey, state.chaosThemeEnabled ? "1" : "0");
+    if (state.themePalette) {
+      localStorage.setItem(chaosPaletteKey, JSON.stringify(state.themePalette));
+    } else {
+      localStorage.removeItem(chaosPaletteKey);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function pick(list) {
@@ -930,7 +1147,7 @@ function makeId() {
   return `id-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// v1.2.1 galaxy bg
+// v1.2.2 galaxy bg
 function initGalaxyBackground() {
   const canvas = document.getElementById("galaxyCanvas");
   if (!canvas) return;
@@ -1068,12 +1285,7 @@ function initGalaxyBackground() {
       const fade = progress < 0.2 ? progress / 0.2 : 1 - (progress - 0.2) / 0.8;
       const alpha = Math.max(0, fade * shoot.alpha * (galaxy.minimal ? 0.5 : 1));
 
-      const grad = ctx.createLinearGradient(
-        shoot.x,
-        shoot.y,
-        shoot.x - shoot.length,
-        shoot.y - shoot.length * 0.55,
-      );
+      const grad = ctx.createLinearGradient(shoot.x, shoot.y, shoot.x - shoot.length, shoot.y - shoot.length * 0.55);
       grad.addColorStop(0, `rgba(255,255,255,${alpha.toFixed(3)})`);
       grad.addColorStop(1, "rgba(255,255,255,0)");
 
@@ -1114,11 +1326,8 @@ function initGalaxyBackground() {
   }
 
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      pause();
-    } else {
-      resume();
-    }
+    if (document.hidden) pause();
+    else resume();
   });
 
   window.addEventListener("resize", resize);

@@ -12,6 +12,15 @@
   </head>
   <body>
     <canvas id="galaxyCanvas" aria-hidden="true"></canvas>
+    <video
+      id="oracleBgVideo"
+      class="bg-video oracle-bg-video"
+      src="bggalaxy%20grok.mp4"
+      preload="metadata"
+      playsinline
+      muted
+      aria-hidden="true"
+    ></video>
 
     <section id="oracleView" class="view">
       <main class="stage" id="stage" aria-live="polite">
@@ -19,10 +28,20 @@
         <div id="mist" aria-hidden="true"></div>
         <div id="sparkles" aria-hidden="true"></div>
         <audio id="revealAudio" preload="auto" src="Kaleidoscope_Magic.mp3"></audio>
+        <video
+          id="revealFxVideo"
+          class="reveal-fx-video"
+          src="crystalballfx.mp4"
+          preload="auto"
+          playsinline
+          aria-hidden="true"
+        ></video>
 
         <header class="hero">
           <div class="title-wrap">
             <h1>Poly Oracle</h1>
+            <span class="title-sweep" aria-hidden="true"></span>
+            <div id="titleSparkles" class="title-sparkles" aria-hidden="true"></div>
             <p class="tagline">Ask a yes or no question.</p>
           </div>
           <div class="header-icons">
@@ -172,6 +191,15 @@
     </section>
 
     <section id="galaxyView" class="view galaxy-view" hidden aria-hidden="true">
+      <video
+        id="galaxyBgVideo"
+        class="bg-video galaxy-bg-video"
+        src="bggalaxy%20grok.mp4"
+        preload="metadata"
+        playsinline
+        muted
+        aria-hidden="true"
+      ></video>
       <header class="galaxy-topbar">
         <button id="closeGalaxy" class="ghost small galaxy-back" type="button" aria-label="Back to Oracle">← Oracle</button>
         <div class="galaxy-title">Galaxy Canvas</div>

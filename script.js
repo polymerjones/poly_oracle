@@ -98,6 +98,9 @@ const flash = document.getElementById("flash");
 const mist = document.getElementById("mist");
 const sparkles = document.getElementById("sparkles");
 const revealAudio = document.getElementById("revealAudio");
+const revealFxVideo = document.getElementById("revealFxVideo");
+const oracleBgVideo = document.getElementById("oracleBgVideo");
+const galaxyBgVideo = document.getElementById("galaxyBgVideo");
 const questionInput = document.getElementById("question");
 const askButton = document.getElementById("ask");
 
@@ -131,6 +134,7 @@ const clearHistory = document.getElementById("clearHistory");
 const resetThemeButton = document.getElementById("resetTheme");
 const firstRunHint = document.getElementById("firstRunHint");
 const chaosToast = document.getElementById("chaosToast");
+const titleSparkles = document.getElementById("titleSparkles");
 const oracleView = document.getElementById("oracleView");
 const galaxyView = document.getElementById("galaxyView");
 const openGalaxy = document.getElementById("openGalaxy");
@@ -153,6 +157,9 @@ let hintTimeout;
 let chaosToastTimeout;
 let galaxyController;
 let galaxyCanvasController;
+let oracleBgController;
+let galaxyBgController;
+let titleSparkleTimer = null;
 
 init();
 
@@ -160,6 +167,7 @@ function init() {
   loadState();
   initGalaxyBackground();
   initGalaxyCanvas();
+  initBackgroundVideos();
   applyTheme();
   buildPackSelect();
   warmVoices();
@@ -168,6 +176,7 @@ function init() {
   renderVault();
   setIntentState();
   setupFirstRunHint();
+  initTitleSparkles();
   addListeners();
   setGalaxyTool(state.galaxyTool);
 }
@@ -424,6 +433,10 @@ function openGalaxyView() {
   galaxyView.hidden = false;
   galaxyView.setAttribute("aria-hidden", "false");
   document.body.style.overflow = "hidden";
+  if (!prefersReducedMotion) {
+    if (oracleBgController) oracleBgController.stop();
+    if (galaxyBgController) galaxyBgController.start();
+  }
   if (galaxyCanvasController) galaxyCanvasController.start();
 }
 
@@ -432,7 +445,41 @@ function closeGalaxyView() {
   galaxyView.setAttribute("aria-hidden", "true");
   oracleView.hidden = false;
   document.body.style.overflow = "";
+  if (!prefersReducedMotion) {
+    if (galaxyBgController) galaxyBgController.stop();
+    if (oracleBgController) oracleBgController.start();
+  }
   if (galaxyCanvasController) galaxyCanvasController.stop();
+}
+
+function initTitleSparkles() {
+  if (!titleSparkles || prefersReducedMotion) return;
+  clearInterval(titleSparkleTimer);
+  titleSparkleTimer = setInterval(() => {
+    if (oracleView.hidden) return;
+    spawnTitleSparkles(1 + Math.floor(Math.random() * 2));
+  }, 1150);
+}
+
+function spawnTitleSparkles(count = 2) {
+  if (!titleSparkles) return;
+  const width = titleSparkles.clientWidth || 240;
+  const height = titleSparkles.clientHeight || 66;
+
+  for (let i = 0; i < count; i += 1) {
+    const sparkle = document.createElement("span");
+    sparkle.className = "title-sparkle";
+    const x = Math.random() * width;
+    const y = Math.random() * height * 0.72;
+    const size = 4 + Math.random() * 4;
+    sparkle.style.left = `${x}px`;
+    sparkle.style.top = `${y}px`;
+    sparkle.style.width = `${size}px`;
+    sparkle.style.height = `${size}px`;
+    sparkle.style.animationDelay = `${Math.random() * 0.18}s`;
+    titleSparkles.appendChild(sparkle);
+    sparkle.addEventListener("animationend", () => sparkle.remove());
+  }
 }
 
 function setGalaxyTool(tool) {
@@ -558,6 +605,7 @@ function revealAnswer() {
 }
 
 function runRitualSequence(mode, onDone) {
+  triggerRevealFx();
   orb.classList.remove("reveal");
   void orb.offsetWidth;
   orb.classList.add("reveal");
@@ -571,6 +619,7 @@ function runRitualSequence(mode, onDone) {
 }
 
 function runReducedRitualSequence(mode, onDone) {
+  triggerRevealFx({ reduced: true });
   orb.classList.remove("reveal");
   void orb.offsetWidth;
   orb.classList.add("reveal");
@@ -882,6 +931,25 @@ function playRevealSound() {
   if (!revealAudio) return;
   revealAudio.currentTime = 0;
   revealAudio.play().catch(() => {});
+}
+
+function triggerRevealFx({ reduced = false } = {}) {
+  if (!revealFxVideo) return;
+  revealFxVideo.classList.add("active");
+  revealFxVideo.volume = state.whisper ? 0.4 : 0.85;
+
+  try {
+    revealFxVideo.currentTime = 0;
+  } catch {
+    // ignore seek errors
+  }
+
+  revealFxVideo.play().catch(() => {});
+
+  const hold = reduced || prefersReducedMotion ? 600 : 1200;
+  setTimeout(() => {
+    revealFxVideo.classList.remove("active");
+  }, hold);
 }
 
 function playPixySound(intensity) {
@@ -1278,6 +1346,104 @@ function makeId() {
   return `id-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function initBackgroundVideos() {
+  oracleBgController = createPingPongVideoController(oracleBgVideo, { speed: 0.22 });
+  galaxyBgController = createPingPongVideoController(galaxyBgVideo, { speed: 0.22 });
+
+  if (prefersReducedMotion) {
+    if (oracleBgVideo) oracleBgVideo.currentTime = 0;
+    if (galaxyBgVideo) galaxyBgVideo.currentTime = 0;
+  } else {
+    if (oracleBgController) oracleBgController.start();
+    if (galaxyBgController) galaxyBgController.stop();
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (oracleBgController) oracleBgController.stop();
+      if (galaxyBgController) galaxyBgController.stop();
+      return;
+    }
+
+    if (prefersReducedMotion) return;
+
+    if (!galaxyView.hidden) {
+      if (galaxyBgController) galaxyBgController.start();
+    } else {
+      if (oracleBgController) oracleBgController.start();
+    }
+  });
+}
+
+function createPingPongVideoController(video, { speed = 0.22 } = {}) {
+  if (!video) return null;
+  let raf = null;
+  let running = false;
+  let direction = 1;
+  let last = 0;
+  let ready = false;
+
+  function ensureReady() {
+    if (ready) return true;
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+      ready = true;
+      return true;
+    }
+    return false;
+  }
+
+  function step(now) {
+    if (!running) return;
+    if (!ensureReady()) {
+      raf = requestAnimationFrame(step);
+      return;
+    }
+
+    const dt = last ? (now - last) / 1000 : 0;
+    last = now;
+
+    const duration = video.duration;
+    let next = video.currentTime + dt * speed * direction;
+    if (next >= duration) {
+      next = duration - (next - duration);
+      direction = -1;
+    } else if (next <= 0) {
+      next = -next;
+      direction = 1;
+    }
+
+    try {
+      video.currentTime = clamp(next, 0, duration);
+    } catch {
+      // ignore seek errors
+    }
+
+    raf = requestAnimationFrame(step);
+  }
+
+  video.muted = true;
+  video.loop = false;
+  video.playsInline = true;
+  video.playbackRate = 1;
+  video.pause();
+  video.addEventListener("loadedmetadata", () => {
+    ready = true;
+  });
+
+  return {
+    start() {
+      running = true;
+      last = 0;
+      if (!raf) raf = requestAnimationFrame(step);
+    },
+    stop() {
+      running = false;
+      if (raf) cancelAnimationFrame(raf);
+      raf = null;
+    },
+  };
+}
+
 // Galaxy Canvas v1
 function initGalaxyCanvas() {
   if (!galaxyPlayCanvas) return;
@@ -1344,6 +1510,46 @@ function initGalaxyCanvas() {
       rot: Math.random() * Math.PI * 2,
       alpha: 0.7 + Math.random() * 0.28,
     });
+  }
+
+  function playBoomSound(intensity = 1) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx || state.minimal) return;
+    if (!audioContext) audioContext = new AudioCtx();
+
+    const now = audioContext.currentTime;
+    const master = audioContext.createGain();
+    const osc = audioContext.createOscillator();
+    const noise = audioContext.createOscillator();
+    const toneGain = audioContext.createGain();
+    const noiseGain = audioContext.createGain();
+
+    master.connect(audioContext.destination);
+    osc.connect(toneGain);
+    noise.connect(noiseGain);
+    toneGain.connect(master);
+    noiseGain.connect(master);
+
+    const peak = clamp((state.whisper ? 0.05 : 0.14) * intensity, 0.04, 0.22);
+    master.gain.setValueAtTime(0.0001, now);
+    master.gain.exponentialRampToValueAtTime(peak, now + 0.02);
+    master.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
+
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(160, now);
+    osc.frequency.exponentialRampToValueAtTime(65, now + 0.24);
+    toneGain.gain.setValueAtTime(0.5, now);
+    toneGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+
+    noise.type = "square";
+    noise.frequency.setValueAtTime(38, now);
+    noiseGain.gain.setValueAtTime(0.26, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+
+    osc.start(now);
+    noise.start(now);
+    osc.stop(now + 0.26);
+    noise.stop(now + 0.22);
   }
 
   function spawnExplosion(x, y, count = 14) {
@@ -1536,9 +1742,10 @@ function initGalaxyCanvas() {
 
   function explodeAsteroid(parent) {
     sim.asteroids = sim.asteroids.filter((a) => a.id !== parent.id);
-    // One split only: split children become explode-only targets.
-    if (parent.splitDepth >= 1) {
+    // Two split levels: large -> medium -> small -> destroy.
+    if (parent.splitDepth >= 2) {
       spawnExplosion(parent.x, parent.y, 12);
+      playBoomSound(0.9);
       return;
     }
     const chunks = 3 + Math.floor(Math.random() * 3);
@@ -1554,13 +1761,14 @@ function initGalaxyCanvas() {
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         r: childRadius,
-        splitDepth: 1,
+        splitDepth: parent.splitDepth + 1,
         spin: (Math.random() - 0.5) * 0.14,
         rot: Math.random() * Math.PI * 2,
         alpha: 0.62 + Math.random() * 0.28,
       });
     }
     spawnExplosion(parent.x, parent.y, 16);
+    playBoomSound(1.15);
   }
 
   function onTap(event) {

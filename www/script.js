@@ -1,4 +1,4 @@
-const APP_VERSION = "v1.4.1";
+const APP_VERSION = "v1.4.3";
 const storageKey = "poly-oracle-v11-state";
 const firstRunHintKey = "poly_oracle_seen_hint_v1_2_1";
 const verboseKey = "poly_oracle_verbose_details";
@@ -169,6 +169,8 @@ let mediaPrimed = false;
 const orbTapPool = [];
 let orbTapPoolIndex = 0;
 let lastOrbTapAt = 0;
+let orbTapBuffer = null;
+let orbTapBufferPromise = null;
 
 init();
 
@@ -1141,6 +1143,22 @@ function triggerRevealFx({ reduced = false } = {}) {
 }
 
 function playPixySound(intensity) {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (AudioCtx && orbTapBuffer && !state.minimal) {
+    if (!audioContext) audioContext = new AudioCtx();
+    if (audioContext.state === "suspended") {
+      audioContext.resume().catch(() => {});
+    }
+    const source = audioContext.createBufferSource();
+    const gain = audioContext.createGain();
+    source.buffer = orbTapBuffer;
+    gain.gain.value = state.whisper ? 0.52 : 0.92;
+    source.connect(gain);
+    gain.connect(audioContext.destination);
+    source.start(0);
+    return;
+  }
+
   if (orbTapPool.length) {
     const node = orbTapPool[orbTapPoolIndex % orbTapPool.length];
     orbTapPoolIndex += 1;
@@ -1150,7 +1168,6 @@ function playPixySound(intensity) {
     return;
   }
 
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
   if (!AudioCtx || state.minimal) return;
   if (!audioContext) audioContext = new AudioCtx();
 
@@ -1590,6 +1607,27 @@ function initOrbTapPool() {
     node.load();
     orbTapPool.push(node);
   }
+  primeOrbTapBuffer();
+}
+
+function primeOrbTapBuffer() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx || orbTapBuffer || orbTapBufferPromise) return;
+  if (!audioContext) audioContext = new AudioCtx();
+
+  const src = orbTapAudio?.getAttribute("src") || "taporb.mp3";
+  orbTapBufferPromise = fetch(src)
+    .then((response) => response.arrayBuffer())
+    .then((arr) => audioContext.decodeAudioData(arr.slice(0)))
+    .then((decoded) => {
+      orbTapBuffer = decoded;
+    })
+    .catch(() => {
+      orbTapBuffer = null;
+    })
+    .finally(() => {
+      orbTapBufferPromise = null;
+    });
 }
 
 function createLoopVideoController(video) {
@@ -1604,9 +1642,18 @@ function createLoopVideoController(video) {
   } catch {
     // ignore load errors
   }
+  video.addEventListener("ended", () => {
+    try {
+      video.currentTime = 0;
+    } catch {
+      // ignore
+    }
+    video.play().catch(() => {});
+  });
 
   return {
     start() {
+      video.loop = true;
       video.play().catch(() => {});
     },
     stop() {
@@ -1643,6 +1690,7 @@ function initGalaxyCanvas() {
     nextAsteroidId: 1,
     maxAsteroids: 120,
     lastTapAt: 0,
+    nextDrawAt: 0,
   };
   let galaxyRaf = 0;
   let galaxyRunning = false;
@@ -1953,10 +2001,13 @@ function playBoomSound(intensity = 1) {
     // Keep fewer tiny fragments: larger pieces, fewer chunks on later splits.
     const chunks = parent.splitDepth === 0 ? 3 + Math.floor(Math.random() * 2) : 2 + Math.floor(Math.random() * 2);
     const parentSpeed = Math.sqrt(parent.vx * parent.vx + parent.vy * parent.vy);
+    const allowTinySet = parent.splitDepth >= 1 && Math.random() < 0.25; // 1 out of 4 times
     for (let i = 0; i < chunks; i += 1) {
       const angle = Math.random() * Math.PI * 2;
       const speed = parentSpeed * (1.4 + Math.random() * 0.8) + 16 + Math.random() * 28;
-      const childRadius = clamp(parent.r * (0.38 + Math.random() * 0.22), 9, 26);
+      const childRadius = allowTinySet
+        ? clamp(parent.r * (0.26 + Math.random() * 0.16), 6, 14)
+        : clamp(parent.r * (0.40 + Math.random() * 0.22), 9, 26);
       sim.asteroids.push({
         id: sim.nextAsteroidId++,
         x: parent.x + Math.cos(angle) * 4,
@@ -1995,6 +2046,10 @@ function playBoomSound(intensity = 1) {
     if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
     if (point.x < 0 || point.x > sim.width || point.y < 0 || point.y > sim.height) return;
     if (state.galaxyTool === "draw") {
+      // Desktop browsers can fire multiple related events from one click;
+      // enforce a hard spawn cooldown so one tap doesn't create duplicates.
+      if (now < sim.nextDrawAt) return;
+      sim.nextDrawAt = now + 500;
       spawnAsteroid(point.x, point.y);
       draw(performance.now());
       return;

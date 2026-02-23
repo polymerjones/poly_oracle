@@ -660,6 +660,7 @@ function runRitualSequence(mode, onDone) {
   setTimeout(() => performRitualPulse(1.05), 400);
   setTimeout(() => performRitualPulse(1.25), 900);
   setTimeout(() => performRitualPulse(1.45), 1600);
+  setTimeout(() => triggerPreRevealAccent(), Math.max(0, mode.duration - 280));
   setTimeout(() => onDone(), mode.duration);
 }
 
@@ -673,8 +674,29 @@ function runReducedRitualSequence(mode, onDone) {
   void mist.offsetWidth;
   mist.classList.add("active");
   spawnSparkles(4, 1, 1);
+  setTimeout(() => triggerPreRevealAccent({ reduced: true }), Math.max(0, mode.duration - 260));
 
   setTimeout(onDone, mode.duration);
+}
+
+function triggerPreRevealAccent({ reduced = false } = {}) {
+  stage.classList.remove("pre-reveal-shake");
+  void stage.offsetWidth;
+  stage.classList.add("pre-reveal-shake");
+
+  if (reduced) {
+    mist.classList.remove("active");
+    void mist.offsetWidth;
+    mist.style.opacity = "0.22";
+    mist.classList.add("active");
+    spawnSparkles(4, 0.95, 0.9);
+  } else {
+    performRitualPulse(1.7);
+  }
+
+  setTimeout(() => {
+    stage.classList.remove("pre-reveal-shake");
+  }, 240);
 }
 
 function performRitualPulse(level = 1) {
@@ -697,6 +719,7 @@ function performRitualPulse(level = 1) {
 }
 
 async function finishReveal({ normalizedQuestion, polarity, answerLine, microLine, revealVoice }) {
+  stage.classList.remove("pre-reveal-shake");
   spawnSparkles(prefersReducedMotion ? 5 : 18, 1.2, 1.35);
   await playRevealSoundAndWait();
   flash.classList.remove("active");

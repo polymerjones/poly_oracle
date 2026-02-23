@@ -139,6 +139,10 @@ body.is-revealing .primary {
   opacity: 0.8;
 }
 
+.stage.pre-reveal-shake {
+  animation: preRevealShake 0.22s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
 .hero {
   display: flex;
   align-items: flex-start;
@@ -935,6 +939,27 @@ select:focus-visible {
   }
 }
 
+@keyframes preRevealShake {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  20% {
+    transform: translate3d(-3px, 0, 0);
+  }
+  40% {
+    transform: translate3d(3px, 0, 0);
+  }
+  60% {
+    transform: translate3d(-2px, 0, 0);
+  }
+  80% {
+    transform: translate3d(2px, 0, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
 @media (max-width: 780px) {
   .settings-panel {
     top: auto;
@@ -1032,7 +1057,8 @@ select:focus-visible {
   .title-sparkle,
   .hint.show,
   .chaos-toast.show,
-  body.is-revealing .orb {
+  body.is-revealing .orb,
+  .stage.pre-reveal-shake {
     animation: none !important;
   }
 

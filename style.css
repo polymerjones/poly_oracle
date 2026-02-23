@@ -266,6 +266,10 @@ h1 {
   overflow: hidden;
   position: relative;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   background:
     radial-gradient(circle at 30% 26%, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0) 44%),
     radial-gradient(circle at 63% 66%, rgba(158, 231, 255, 0.9), rgba(194, 131, 255, 0.4) 58%, rgba(64, 40, 114, 0.9) 100%);

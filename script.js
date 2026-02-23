@@ -1677,8 +1677,9 @@ function initGalaxyCanvas() {
   function spawnAsteroid(x, y, radius = 18 + Math.random() * 16, speedMin = 18, speedMax = 55) {
     if (sim.asteroids.length >= sim.maxAsteroids) return;
     const v = randomVelocity(speedMin, speedMax);
-    const points = Array.from({ length: 10 + Math.floor(Math.random() * 4) }, (_, i, arr) => {
-      const angle = (Math.PI * 2 * i) / arr.length;
+    const pointCount = 10 + Math.floor(Math.random() * 4);
+    const points = Array.from({ length: pointCount }, (_, i) => {
+      const angle = (Math.PI * 2 * i) / pointCount;
       const offset = 0.76 + Math.random() * 0.42;
       return { angle, offset };
     });
@@ -1955,10 +1956,13 @@ function playBoomSound(intensity = 1) {
         vy: Math.sin(angle) * speed,
         r: childRadius,
         splitDepth: parent.splitDepth + 1,
-        shape: Array.from({ length: 9 + Math.floor(Math.random() * 4) }, (_, i, arr) => ({
-          angle: (Math.PI * 2 * i) / arr.length,
-          offset: 0.72 + Math.random() * 0.44,
-        })),
+        shape: (() => {
+          const childPointCount = 9 + Math.floor(Math.random() * 4);
+          return Array.from({ length: childPointCount }, (_, i) => ({
+            angle: (Math.PI * 2 * i) / childPointCount,
+            offset: 0.72 + Math.random() * 0.44,
+          }));
+        })(),
         spin: (Math.random() - 0.5) * 0.14,
         rot: Math.random() * Math.PI * 2,
         alpha: 0.62 + Math.random() * 0.28,

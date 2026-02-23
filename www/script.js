@@ -466,7 +466,13 @@ function populateVoices() {
     }
 
     if (!voices.some((voice) => voice.name === state.selectedVoice)) {
-      state.selectedVoice = voices.find((voice) => /en/i.test(voice.lang))?.name || voices[0].name;
+      const preferred =
+        voices.find((voice) => voice.name === "Daniel" && voice.lang === "en-GB") ||
+        voices.find((voice) => voice.name === "Daniel") ||
+        voices.find((voice) => /en-GB/i.test(voice.lang)) ||
+        voices.find((voice) => /en/i.test(voice.lang)) ||
+        voices[0];
+      state.selectedVoice = preferred.name;
     }
     voiceSelect.value = state.selectedVoice;
     updatePersonaChip();

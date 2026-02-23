@@ -1209,10 +1209,21 @@ select:focus-visible {
   opacity: 0.45;
 }
 
+.galaxyBgVideo {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+  pointer-events: none;
+  filter: saturate(110%) contrast(105%);
+}
+
 .galaxyModeSelect {
   position: absolute;
   inset: 0;
-  z-index: 6;
+  z-index: 5;
   display: none;
   align-items: center;
   justify-content: center;
@@ -1322,7 +1333,8 @@ select:focus-visible {
 }
 
 #galaxyPlayCanvas {
-  position: relative;
+  position: fixed;
+  inset: 0;
   z-index: 1;
   width: 100%;
   height: 100%;
@@ -1358,7 +1370,7 @@ select:focus-visible {
   top: 0;
   left: 0;
   right: 0;
-  z-index: 5;
+  z-index: 3;
   display: none;
   align-items: center;
   justify-content: center;
@@ -1447,7 +1459,7 @@ select:focus-visible {
 .arcadeOverlay {
   position: absolute;
   inset: 0;
-  z-index: 7;
+  z-index: 4;
   display: none;
   place-items: center;
   text-align: center;
@@ -1465,6 +1477,19 @@ select:focus-visible {
   font-weight: 700;
   color: #9af8c4;
   text-shadow: 0 0 14px rgba(100, 255, 171, 0.45);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 1000ms ease, transform 1000ms ease;
+}
+
+.arcadeOverlayText.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.arcadeOverlayText.fadeOut {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .arcadeOverlaySub {

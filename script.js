@@ -14,16 +14,16 @@ const STORAGE = {
 
 // === Level Config ===
 const ARCADE_LEVELS = [
-  { level: 1, time: 18, totalToClear: 2, startSpawn: 2, spawnEveryMs: 0, maxOnScreen: 12 },
-  { level: 2, time: 20, totalToClear: 3, startSpawn: 3, spawnEveryMs: 0, maxOnScreen: 12 },
-  { level: 3, time: 22, totalToClear: 7, startSpawn: 3, spawnEveryMs: 2200, maxOnScreen: 12 },
-  { level: 4, time: 24, totalToClear: 9, startSpawn: 4, spawnEveryMs: 2200, maxOnScreen: 12 },
-  { level: 5, time: 26, totalToClear: 11, startSpawn: 4, spawnEveryMs: 2000, maxOnScreen: 12 },
-  { level: 6, time: 28, totalToClear: 13, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
-  { level: 7, time: 30, totalToClear: 15, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
-  { level: 8, time: 34, totalToClear: 17, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14 },
-  { level: 9, time: 38, totalToClear: 20, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14 },
-  { level: 10, time: 45, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14 },
+  { level: 1, time: 48, totalToClear: 2, startSpawn: 2, spawnEveryMs: 0, maxOnScreen: 12 },
+  { level: 2, time: 50, totalToClear: 3, startSpawn: 3, spawnEveryMs: 0, maxOnScreen: 12 },
+  { level: 3, time: 52, totalToClear: 7, startSpawn: 3, spawnEveryMs: 2200, maxOnScreen: 12 },
+  { level: 4, time: 54, totalToClear: 9, startSpawn: 4, spawnEveryMs: 2200, maxOnScreen: 12 },
+  { level: 5, time: 56, totalToClear: 11, startSpawn: 4, spawnEveryMs: 2000, maxOnScreen: 12 },
+  { level: 6, time: 58, totalToClear: 13, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
+  { level: 7, time: 60, totalToClear: 15, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
+  { level: 8, time: 64, totalToClear: 17, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14 },
+  { level: 9, time: 68, totalToClear: 20, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14 },
+  { level: 10, time: 75, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14 },
 ];
 
 function getSavedArcadeLevel() {
@@ -2179,7 +2179,7 @@ function initGalaxyCanvas() {
   function triggerGameOver() {
     arcadeActive = false;
     clearArcadeProgress();
-    showArcadeOverlay("GAME OVER", "Progress lost. Try again.", 0, {
+    showArcadeOverlay("GAME OVER", "You died. Progress lost. Try again.", 0, {
       buttonText: "Back to Modes",
       buttonAction: () => showModeSelect(),
     });

@@ -87,6 +87,7 @@ const state = {
   selectedMode: "classic",
   selectedPack: "classic",
   selectedVoice: "",
+  userVoiceOverride: false,
   whisper: false,
   minimal: false,
   vaultFilter: "all",
@@ -127,6 +128,7 @@ function init() {
     if (!voices.length) return;
     const pick = voices[Math.floor(Math.random() * voices.length)];
     state.selectedVoice = pick.name;
+    state.userVoiceOverride = true;
     voiceSelect.value = pick.name;
     updatePersonaChip();
     saveState();
@@ -138,6 +140,7 @@ function init() {
 
   voiceSelect.addEventListener("change", (e) => {
     state.selectedVoice = e.target.value;
+    state.userVoiceOverride = true;
     updatePersonaChip();
     saveState();
   });
@@ -465,14 +468,17 @@ function populateVoices() {
       return;
     }
 
-    if (!voices.some((voice) => voice.name === state.selectedVoice)) {
-      const preferred =
-        voices.find((voice) => voice.name === "Daniel" && voice.lang === "en-GB") ||
-        voices.find((voice) => voice.name === "Daniel") ||
-        voices.find((voice) => /en-GB/i.test(voice.lang)) ||
-        voices.find((voice) => /en/i.test(voice.lang)) ||
-        voices[0];
+    const preferred =
+      voices.find((voice) => voice.name === "Daniel" && voice.lang === "en-GB") ||
+      voices.find((voice) => voice.name === "Daniel") ||
+      voices.find((voice) => /en-GB/i.test(voice.lang)) ||
+      voices.find((voice) => /en/i.test(voice.lang)) ||
+      voices[0];
+
+    const currentExists = voices.some((voice) => voice.name === state.selectedVoice);
+    if (!state.userVoiceOverride || !currentExists) {
       state.selectedVoice = preferred.name;
+      state.userVoiceOverride = false;
     }
     voiceSelect.value = state.selectedVoice;
     updatePersonaChip();
@@ -681,6 +687,7 @@ function loadState() {
     state.selectedMode = revealModes.some((mode) => mode.id === saved.selectedMode) ? saved.selectedMode : state.selectedMode;
     state.selectedPack = packs[saved.selectedPack] ? saved.selectedPack : state.selectedPack;
     state.selectedVoice = saved.selectedVoice || "";
+    state.userVoiceOverride = !!saved.userVoiceOverride;
     state.whisper = !!saved.whisper;
     state.minimal = !!saved.minimal;
     state.vault = Array.isArray(saved.vault) ? saved.vault.slice(0, 200) : [];
@@ -695,6 +702,7 @@ function saveState() {
     selectedMode: state.selectedMode,
     selectedPack: state.selectedPack,
     selectedVoice: state.selectedVoice,
+    userVoiceOverride: state.userVoiceOverride,
     whisper: state.whisper,
     minimal: state.minimal,
     vault: state.vault,

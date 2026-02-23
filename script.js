@@ -1,10 +1,11 @@
-const APP_VERSION = "v1.4.0";
+const APP_VERSION = "v1.4.1";
 const storageKey = "poly-oracle-v11-state";
 const firstRunHintKey = "poly_oracle_seen_hint_v1_2_1";
 const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
+const debugTapsKey = "poly_oracle_debug_taps";
 
 const revealModes = [
   { id: "classic", label: "Classic Fade", duration: 2500 },
@@ -164,11 +165,15 @@ let oracleBgController;
 let galaxyBgController;
 let titleSparkleTimer = null;
 let mediaPrimed = false;
+const orbTapPool = [];
+let orbTapPoolIndex = 0;
+let lastOrbTapAt = 0;
 
 init();
 
 function init() {
   setVh();
+  resetUiOverlayState();
   loadState();
   initGalaxyBackground();
   initGalaxyCanvas();
@@ -182,6 +187,7 @@ function init() {
   setIntentState();
   setupFirstRunHint();
   initTitleSparkles();
+  initOrbTapPool();
   addListeners();
   setGalaxyTool(state.galaxyTool);
 }
@@ -214,14 +220,24 @@ function addListeners() {
 
   askButton.addEventListener("click", revealAnswer);
 
-  orb.addEventListener("click", () => {
+  const onOrbTap = (event) => {
+    if (event.cancelable) event.preventDefault();
+    const now = performance.now();
+    if (now - lastOrbTapAt < 40) return;
+    lastOrbTapAt = now;
     const intensity = registerOrbTap();
     if (intensity.shouldShiftTheme) {
       triggerChaosTheme();
     }
     playPixySound(intensity);
     spawnSparkles(intensity.burstCount, intensity.sizeMultiplier, intensity.brightnessMultiplier);
-  });
+  };
+  if ("PointerEvent" in window) {
+    orb.addEventListener("pointerdown", onOrbTap);
+  } else {
+    orb.addEventListener("touchstart", onOrbTap, { passive: false });
+    orb.addEventListener("mousedown", onOrbTap);
+  }
 
   flipAnswer.addEventListener("click", () => {
     if (!state.currentAnswer) return;
@@ -423,6 +439,38 @@ function setupFirstRunHint() {
   hintTimeout = setTimeout(hideFirstRunHint, 2200);
 }
 
+// HARDEN overlays
+function showBackdrop(el) {
+  if (!el) return;
+  if (el.__hideTimer) {
+    clearTimeout(el.__hideTimer);
+    el.__hideTimer = null;
+  }
+  el.hidden = false;
+  el.style.display = "block";
+  el.style.pointerEvents = "auto";
+  requestAnimationFrame(() => {
+    el.style.opacity = "1";
+  });
+}
+
+function hideBackdrop(el) {
+  if (!el) return;
+  el.style.opacity = "0";
+  el.style.pointerEvents = "none";
+  if (el.__hideTimer) clearTimeout(el.__hideTimer);
+  el.__hideTimer = setTimeout(() => {
+    el.style.display = "none";
+    el.hidden = true;
+    el.__hideTimer = null;
+  }, 180);
+}
+
+function resetUiOverlayState() {
+  document.body.classList.remove("settings-open", "overlay-open", "is-revealing", "galaxy-open");
+  hideBackdrop(settingsBackdrop);
+}
+
 function hideFirstRunHint() {
   if (!firstRunHint || firstRunHint.classList.contains("hidden")) return;
   firstRunHint.classList.remove("show");
@@ -440,26 +488,16 @@ function setSettingsOpen(open) {
     hideFirstRunHint();
   }
   if (open) {
-    settingsBackdrop.hidden = false;
+    showBackdrop(settingsBackdrop);
     settingsPanel.hidden = false;
-    settingsBackdrop.style.display = "block";
     settingsPanel.style.display = "block";
-    settingsBackdrop.style.pointerEvents = "auto";
     settingsPanel.style.pointerEvents = "auto";
-    requestAnimationFrame(() => {
-      settingsBackdrop.classList.add("open");
-      settingsPanel.classList.add("open");
-      settingsBackdrop.style.opacity = "1";
-    });
+    settingsPanel.classList.add("open");
   } else {
-    settingsBackdrop.classList.remove("open");
+    hideBackdrop(settingsBackdrop);
     settingsPanel.classList.remove("open");
-    settingsBackdrop.style.opacity = "0";
-    settingsBackdrop.style.pointerEvents = "none";
     settingsPanel.style.pointerEvents = "none";
-    settingsBackdrop.style.display = "none";
     settingsPanel.style.display = "none";
-    settingsBackdrop.hidden = true;
     settingsPanel.hidden = true;
   }
   document.body.style.overflow = open ? "hidden" : "";
@@ -482,7 +520,9 @@ function openGalaxyView() {
     if (oracleBgController) oracleBgController.stop();
     if (galaxyBgController) galaxyBgController.start();
   }
-  if (galaxyCanvasController) galaxyCanvasController.start();
+  if (galaxyCanvasController) {
+    requestAnimationFrame(() => galaxyCanvasController.start());
+  }
 }
 
 function closeGalaxyView() {
@@ -1093,10 +1133,12 @@ function triggerRevealFx({ reduced = false } = {}) {
 }
 
 function playPixySound(intensity) {
-  if (orbTapAudio) {
-    orbTapAudio.currentTime = 0;
-    orbTapAudio.volume = state.whisper ? 0.55 : 1;
-    orbTapAudio.play().catch(() => {});
+  if (orbTapPool.length) {
+    const node = orbTapPool[orbTapPoolIndex % orbTapPool.length];
+    orbTapPoolIndex += 1;
+    node.currentTime = 0;
+    node.volume = state.whisper ? 0.55 : 1;
+    node.play().catch(() => {});
     return;
   }
 
@@ -1531,6 +1573,17 @@ function primeBackgroundMedia() {
   });
 }
 
+function initOrbTapPool() {
+  orbTapPool.length = 0;
+  if (!orbTapAudio) return;
+  for (let i = 0; i < 8; i += 1) {
+    const node = i === 0 ? orbTapAudio : orbTapAudio.cloneNode(true);
+    node.preload = "auto";
+    node.load();
+    orbTapPool.push(node);
+  }
+}
+
 function createLoopVideoController(video) {
   if (!video) return null;
 
@@ -1560,12 +1613,19 @@ function initGalaxyCanvas() {
   const ctx = galaxyPlayCanvas.getContext("2d");
   if (!ctx) return;
 
+  const debugTaps = (() => {
+    try {
+      return localStorage.getItem(debugTapsKey) === "1";
+    } catch {
+      return false;
+    }
+  })();
+  if (debugTaps) document.body.classList.add("debug");
+
   const sim = {
     dpr: 1,
     width: 0,
     height: 0,
-    running: false,
-    raf: null,
     last: 0,
     stars: [],
     asteroids: [],
@@ -1576,13 +1636,19 @@ function initGalaxyCanvas() {
     maxAsteroids: 120,
     lastTapAt: 0,
   };
+  let galaxyRaf = 0;
+  let galaxyRunning = false;
 
-  function resize() {
+  // HARDEN canvas loop
+  function resizeGalaxyCanvas() {
     sim.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-    sim.width = Math.floor(galaxyPlayCanvas.clientWidth || window.innerWidth);
-    sim.height = Math.floor(galaxyPlayCanvas.clientHeight || (window.innerHeight - 80));
-    galaxyPlayCanvas.width = Math.floor(sim.width * sim.dpr);
-    galaxyPlayCanvas.height = Math.floor(sim.height * sim.dpr);
+    const rect = galaxyPlayCanvas.getBoundingClientRect();
+    const width = Math.max(1, Math.floor(rect.width || window.innerWidth));
+    const height = Math.max(1, Math.floor(rect.height || (window.innerHeight - 80)));
+    sim.width = width;
+    sim.height = height;
+    galaxyPlayCanvas.width = Math.floor(width * sim.dpr);
+    galaxyPlayCanvas.height = Math.floor(height * sim.dpr);
     ctx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
     sim.maxAsteroids = sim.width < 700 ? 80 : 120;
     seedStars();
@@ -1690,7 +1756,7 @@ function playBoomSound(intensity = 1) {
   }
 
   function spawnShootingStar() {
-    if (prefersReducedMotion || !sim.running) return;
+    if (prefersReducedMotion || !galaxyRunning) return;
     const startX = Math.random() * sim.width * 0.8;
     const startY = Math.random() * sim.height * 0.5;
     const speed = 0.9 + Math.random() * 0.7;
@@ -1833,15 +1899,15 @@ function playBoomSound(intensity = 1) {
   }
 
   function frame(now) {
-    if (!sim.running) return;
+    if (!galaxyRunning) return;
     if (now - sim.last < 33) {
-      sim.raf = requestAnimationFrame(frame);
+      galaxyRaf = requestAnimationFrame(frame);
       return;
     }
     const dt = sim.last ? now - sim.last : 16;
     sim.last = now;
     update(dt, now);
-    sim.raf = requestAnimationFrame(frame);
+    galaxyRaf = requestAnimationFrame(frame);
   }
 
   function pointFromEvent(event) {
@@ -1904,56 +1970,83 @@ function playBoomSound(intensity = 1) {
 
   function onTap(event) {
     if (event.cancelable) event.preventDefault();
+    const now = performance.now();
+    if (now - sim.lastTapAt < 55) return;
+    sim.lastTapAt = now;
+
     const point = pointFromEvent(event);
+    if (debugTaps && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)) {
+      // eslint-disable-next-line no-console
+      console.log("elementFromPoint", document.elementFromPoint(event.clientX, event.clientY));
+    }
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+    if (point.x < 0 || point.x > sim.width || point.y < 0 || point.y > sim.height) return;
     if (state.galaxyTool === "draw") {
+      spawnAsteroid(point.x, point.y);
+      draw(performance.now());
+      return;
+    }
+    if (sim.asteroids.length === 0) {
+      setGalaxyTool("draw");
       spawnAsteroid(point.x, point.y);
       return;
     }
     const hit = findHitAsteroid(point.x, point.y);
-    if (hit) explodeAsteroid(hit);
+    if (hit) {
+      explodeAsteroid(hit);
+      draw(performance.now());
+    }
   }
 
-  // iOS/WebView compatibility: use PointerEvent when available,
-  // otherwise fall back to touch + mouse handlers.
-  if ("PointerEvent" in window) {
-    galaxyPlayCanvas.addEventListener("pointerdown", onTap);
-  } else {
-    galaxyPlayCanvas.addEventListener("touchstart", onTap, { passive: false });
-    galaxyPlayCanvas.addEventListener("mousedown", onTap);
-  }
+  // HARDEN canvas input
+  galaxyPlayCanvas.addEventListener("pointerdown", onTap);
+  galaxyPlayCanvas.addEventListener("touchstart", onTap, { passive: false });
+  galaxyPlayCanvas.addEventListener("mousedown", onTap);
+  galaxyPlayCanvas.addEventListener("click", onTap);
 
-  window.addEventListener("resize", resize);
+  window.addEventListener("resize", resizeGalaxyCanvas);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
-      stop();
+      stopGalaxyLoop();
     } else if (!galaxyView.hidden) {
-      start();
+      resizeGalaxyCanvas();
+      startGalaxyLoop();
     }
   });
 
-  function start() {
-    resize();
-    sim.running = true;
+  function tick(now) {
+    frame(now);
+  }
+
+  function startGalaxyLoop() {
+    if (galaxyRunning) return;
+    galaxyRunning = true;
     sim.last = 0;
     if (!prefersReducedMotion) scheduleShootingStar();
     if (sim.asteroids.length === 0) setGalaxyTool("draw");
-    sim.raf = requestAnimationFrame(frame);
+    galaxyRaf = requestAnimationFrame(tick);
   }
 
-  function stop() {
-    sim.running = false;
-    if (sim.raf) cancelAnimationFrame(sim.raf);
-    sim.raf = null;
+  function stopGalaxyLoop() {
+    galaxyRunning = false;
+    if (galaxyRaf) cancelAnimationFrame(galaxyRaf);
+    galaxyRaf = 0;
     clearTimeout(sim.shootingTimer);
     sim.shootingTimer = null;
   }
 
-  resize();
+  // RESTORE galaxy + HARDEN resize
+  resizeGalaxyCanvas();
   draw(performance.now());
 
   galaxyCanvasController = {
-    start,
-    stop,
+    start() {
+      resizeGalaxyCanvas();
+      setTimeout(resizeGalaxyCanvas, 50);
+      setTimeout(resizeGalaxyCanvas, 250);
+      startGalaxyLoop();
+    },
+    stop: stopGalaxyLoop,
   };
 }
 

@@ -13,154 +13,176 @@
   <body>
     <canvas id="galaxyCanvas" aria-hidden="true"></canvas>
 
-    <main class="stage" id="stage" aria-live="polite">
-      <div id="flash" aria-hidden="true"></div>
-      <div id="mist" aria-hidden="true"></div>
-      <div id="sparkles" aria-hidden="true"></div>
-      <audio id="revealAudio" preload="auto" src="Kaleidoscope_Magic.mp3"></audio>
+    <section id="oracleView" class="view">
+      <main class="stage" id="stage" aria-live="polite">
+        <div id="flash" aria-hidden="true"></div>
+        <div id="mist" aria-hidden="true"></div>
+        <div id="sparkles" aria-hidden="true"></div>
+        <audio id="revealAudio" preload="auto" src="Kaleidoscope_Magic.mp3"></audio>
 
-      <header class="hero">
-        <div class="title-wrap">
-          <h1>Poly Oracle</h1>
-          <p class="tagline">Ask a yes or no question.</p>
-        </div>
-        <button id="openSettings" class="gear-btn" type="button" aria-label="Settings" title="Settings">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 8.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4Zm8.3 3.2c0-.5-.1-.9-.2-1.3l2-1.5-2-3.4-2.4 1a8.2 8.2 0 0 0-2.2-1.2l-.4-2.6h-4l-.4 2.6a8.2 8.2 0 0 0-2.2 1.2l-2.4-1-2 3.4 2 1.5c-.1.4-.2.8-.2 1.3s.1.9.2 1.3l-2 1.5 2 3.4 2.4-1c.7.5 1.4.9 2.2 1.2l.4 2.6h4l.4-2.6c.8-.3 1.5-.7 2.2-1.2l2.4 1 2-3.4-2-1.5c.1-.4.2-.8.2-1.3Z" />
-          </svg>
-        </button>
-      </header>
+        <header class="hero">
+          <div class="title-wrap">
+            <h1>Poly Oracle</h1>
+            <p class="tagline">Ask a yes or no question.</p>
+          </div>
+          <div class="header-icons">
+            <button id="openGalaxy" class="gear-btn" type="button" aria-label="Galaxy Canvas" title="Galaxy Canvas">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3.2 16.8c-.9 2.3-.8 4 .2 5s2.7 1 5-.1l8.8-4.3a2.2 2.2 0 0 0 1-3l-3.6-6.9a2.2 2.2 0 0 0-3-1L3.2 16.8Zm8.7-8.3 3.3 6.4-1.8.9-3.3-6.4 1.8-.9ZM6.7 20.3c-1 .5-1.9.7-2.4.3-.5-.5-.2-1.4.3-2.4l2.4 1.8-.3.3Z" />
+              </svg>
+            </button>
+            <button id="openSettings" class="gear-btn" type="button" aria-label="Settings" title="Settings">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 8.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4Zm8.3 3.2c0-.5-.1-.9-.2-1.3l2-1.5-2-3.4-2.4 1a8.2 8.2 0 0 0-2.2-1.2l-.4-2.6h-4l-.4 2.6a8.2 8.2 0 0 0-2.2 1.2l-2.4-1-2 3.4 2 1.5c-.1.4-.2.8-.2 1.3s.1.9.2 1.3l-2 1.5 2 3.4 2.4-1c.7.5 1.4.9 2.2 1.2l.4 2.6h4l.4-2.6c.8-.3 1.5-.7 2.2-1.2l2.4 1 2-3.4-2-1.5c.1-.4.2-.8.2-1.3Z" />
+              </svg>
+            </button>
+          </div>
+        </header>
 
-      <div id="firstRunHint" class="hint hidden" role="status">Tap ⚙︎ for Settings</div>
+        <div id="firstRunHint" class="hint hidden" role="status">Tap ⚙︎ for Settings</div>
 
-      <section class="orb-shell">
-        <div class="orb" id="orb" aria-hidden="true"></div>
-      </section>
+        <section class="orb-shell">
+          <div class="orb" id="orb" aria-hidden="true"></div>
+        </section>
 
-      <section class="controls ritual-controls">
-        <label class="prompt" for="question">Your question</label>
-        <input id="question" type="text" maxlength="220" autocomplete="off" />
+        <section class="controls ritual-controls">
+          <label class="prompt" for="question">Your question</label>
+          <input id="question" type="text" maxlength="220" autocomplete="off" />
 
-        <div class="actions">
-          <button id="ask" class="primary" type="button" disabled>Reveal</button>
-        </div>
-      </section>
+          <div class="actions">
+            <button id="ask" class="primary" type="button" disabled>Reveal</button>
+          </div>
+        </section>
 
-      <section class="answer" id="answer" hidden>
-        <div class="answer-card" id="answerCard">
-          <div class="answer-simple" id="answerSimple"></div>
-          <div class="answer-verbose" id="answerVerbose">
-            <div class="answer-label">Oracle says</div>
-            <div class="answer-polarity" id="answerPolarity">YES</div>
-            <div class="answer-text" id="answerText"></div>
-            <div class="answer-micro" id="answerMicro"></div>
-            <div class="answer-meta" id="answerMeta"></div>
-            <div class="answer-actions">
-              <button id="flipAnswer" class="ghost small" type="button">Flip</button>
-              <button id="favoriteAnswer" class="ghost small" type="button">Favorite</button>
-              <button id="shareAnswer" class="ghost small" type="button">Share</button>
+        <section class="answer" id="answer" hidden>
+          <div class="answer-card" id="answerCard">
+            <div class="answer-simple" id="answerSimple"></div>
+            <div class="answer-verbose" id="answerVerbose">
+              <div class="answer-label">Oracle says</div>
+              <div class="answer-polarity" id="answerPolarity">YES</div>
+              <div class="answer-text" id="answerText"></div>
+              <div class="answer-micro" id="answerMicro"></div>
+              <div class="answer-meta" id="answerMeta"></div>
+              <div class="answer-actions">
+                <button id="flipAnswer" class="ghost small" type="button">Flip</button>
+                <button id="favoriteAnswer" class="ghost small" type="button">Favorite</button>
+                <button id="shareAnswer" class="ghost small" type="button">Share</button>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
-    </main>
+        </section>
+      </main>
 
-    <div id="settingsBackdrop" class="panel-backdrop" hidden></div>
-    <aside id="settingsPanel" class="settings-panel" hidden aria-label="Settings panel">
-      <div class="settings-head">
-        <h2>Settings</h2>
-        <button id="closeSettings" class="ghost small" type="button" aria-label="Close settings">✕</button>
-      </div>
-
-      <section class="settings-section advanced-settings" hidden>
-        <h3>Experience</h3>
-        <div class="segment" id="settingsModeSegment">
-          <button type="button" class="segment-btn" data-mode="classic">Classic Fade</button>
-          <button type="button" class="segment-btn" data-mode="dramatic">Dramatic Flash</button>
-          <button type="button" class="segment-btn" data-mode="mist">Mist Unveil</button>
-          <button type="button" class="segment-btn" data-mode="glitch">Glitch Oracle</button>
+      <div id="settingsBackdrop" class="panel-backdrop" hidden></div>
+      <aside id="settingsPanel" class="settings-panel" hidden aria-label="Settings panel">
+        <div class="settings-head">
+          <h2>Settings</h2>
+          <button id="closeSettings" class="ghost small" type="button" aria-label="Close settings">✕</button>
         </div>
 
-        <label class="prompt" for="packSelect">Oracle Pack</label>
-        <select id="packSelect" aria-label="Oracle pack"></select>
+        <section class="settings-section advanced-settings" hidden>
+          <h3>Experience</h3>
+          <div class="segment" id="settingsModeSegment">
+            <button type="button" class="segment-btn" data-mode="classic">Classic Fade</button>
+            <button type="button" class="segment-btn" data-mode="dramatic">Dramatic Flash</button>
+            <button type="button" class="segment-btn" data-mode="mist">Mist Unveil</button>
+            <button type="button" class="segment-btn" data-mode="glitch">Glitch Oracle</button>
+          </div>
 
-        <label class="toggle-row" for="whisperMode">
-          <span>
-            <strong>Whisper Mode</strong>
-            <small>Lower volume + softer effects</small>
-          </span>
-          <input id="whisperMode" type="checkbox" />
-        </label>
+          <label class="prompt" for="packSelect">Oracle Pack</label>
+          <select id="packSelect" aria-label="Oracle pack"></select>
 
-        <label class="toggle-row" for="minimalMode">
-          <span>
-            <strong>Minimal Mode</strong>
-            <small>Reduce UI + effects</small>
-          </span>
-          <input id="minimalMode" type="checkbox" />
-        </label>
+          <label class="toggle-row" for="whisperMode">
+            <span>
+              <strong>Whisper Mode</strong>
+              <small>Lower volume + softer effects</small>
+            </span>
+            <input id="whisperMode" type="checkbox" />
+          </label>
 
-        <label class="toggle-row" for="randomVoiceEachReveal">
-          <span>
-            <strong>Random Voice Each Reveal</strong>
-            <small>Pick a fresh voice for each answer</small>
-          </span>
-          <input id="randomVoiceEachReveal" type="checkbox" />
-        </label>
+          <label class="toggle-row" for="minimalMode">
+            <span>
+              <strong>Minimal Mode</strong>
+              <small>Reduce UI + effects</small>
+            </span>
+            <input id="minimalMode" type="checkbox" />
+          </label>
 
-        <label class="toggle-row" for="verboseDetails">
-          <span>
-            <strong>Verbose details</strong>
-            <small>Show labels, extra lines, and controls</small>
-          </span>
-          <input id="verboseDetails" type="checkbox" />
-        </label>
+          <label class="toggle-row" for="randomVoiceEachReveal">
+            <span>
+              <strong>Random Voice Each Reveal</strong>
+              <small>Pick a fresh voice for each answer</small>
+            </span>
+            <input id="randomVoiceEachReveal" type="checkbox" />
+          </label>
 
-        <button id="randomVoiceNow" class="ghost small" type="button">Pick Random Voice Now</button>
-      </section>
+          <label class="toggle-row" for="verboseDetails">
+            <span>
+              <strong>Verbose details</strong>
+              <small>Show labels, extra lines, and controls</small>
+            </span>
+            <input id="verboseDetails" type="checkbox" />
+          </label>
 
-      <section class="settings-section">
-        <h3>Voice</h3>
-        <label class="prompt" for="voiceSelect">Voice</label>
-        <div class="voice-row">
-          <select id="voiceSelect" aria-label="Voice selection"></select>
-          <button id="previewVoice" class="ghost small" type="button">Preview</button>
+          <button id="randomVoiceNow" class="ghost small" type="button">Pick Random Voice Now</button>
+        </section>
+
+        <section class="settings-section">
+          <h3>Voice</h3>
+          <label class="prompt" for="voiceSelect">Voice</label>
+          <div class="voice-row">
+            <select id="voiceSelect" aria-label="Voice selection"></select>
+            <button id="previewVoice" class="ghost small" type="button">Preview</button>
+          </div>
+          <div id="voicePersona" class="persona">Persona: Calm</div>
+        </section>
+
+        <section class="settings-section">
+          <h3>Data</h3>
+          <div class="actions">
+            <button id="openVault" class="ghost small" type="button">Open Vault</button>
+            <button id="clearHistory" class="ghost small danger" type="button">Clear History</button>
+            <button id="resetTheme" class="ghost small" type="button" hidden>Reset Theme</button>
+          </div>
+        </section>
+
+        <section class="settings-section about">
+          <h3>About</h3>
+          <div class="version">Version v1.3.0</div>
+        </section>
+      </aside>
+
+      <aside id="vault" class="vault" hidden aria-label="Oracle history vault">
+        <div class="vault-card">
+          <div class="vault-head">
+            <h2>Oracle Vault</h2>
+            <button id="closeVault" class="ghost small" type="button">Close</button>
+          </div>
+          <div class="vault-filters">
+            <input id="vaultSearch" type="text" placeholder="Search questions" />
+            <button id="vaultFilterAll" class="ghost small active" type="button">All</button>
+            <button id="vaultFilterFav" class="ghost small" type="button">Favorites</button>
+          </div>
+          <div id="vaultStats" class="vault-stats"></div>
+          <div id="vaultList" class="vault-list"></div>
         </div>
-        <div id="voicePersona" class="persona">Persona: Calm</div>
-      </section>
+      </aside>
 
-      <section class="settings-section">
-        <h3>Data</h3>
-        <div class="actions">
-          <button id="openVault" class="ghost small" type="button">Open Vault</button>
-          <button id="clearHistory" class="ghost small danger" type="button">Clear History</button>
-          <button id="resetTheme" class="ghost small" type="button" hidden>Reset Theme</button>
+      <div id="chaosToast" class="chaos-toast" hidden role="status">✨ Oracle shifted realities.</div>
+    </section>
+
+    <section id="galaxyView" class="view galaxy-view" hidden aria-hidden="true">
+      <header class="galaxy-topbar">
+        <button id="closeGalaxy" class="ghost small galaxy-back" type="button" aria-label="Back to Oracle">← Oracle</button>
+        <div class="galaxy-title">Galaxy Canvas</div>
+        <div class="galaxy-tools" role="tablist" aria-label="Galaxy tools">
+          <button id="toolDraw" class="ghost small active" type="button" data-tool="draw" aria-label="Draw asteroids">Draw</button>
+          <button id="toolBoom" class="ghost small" type="button" data-tool="boom" aria-label="Boom asteroids">Boom</button>
         </div>
-      </section>
-
-      <section class="settings-section about">
-        <h3>About</h3>
-        <div class="version">Version v1.2.2</div>
-      </section>
-    </aside>
-
-    <aside id="vault" class="vault" hidden aria-label="Oracle history vault">
-      <div class="vault-card">
-        <div class="vault-head">
-          <h2>Oracle Vault</h2>
-          <button id="closeVault" class="ghost small" type="button">Close</button>
-        </div>
-        <div class="vault-filters">
-          <input id="vaultSearch" type="text" placeholder="Search questions" />
-          <button id="vaultFilterAll" class="ghost small active" type="button">All</button>
-          <button id="vaultFilterFav" class="ghost small" type="button">Favorites</button>
-        </div>
-        <div id="vaultStats" class="vault-stats"></div>
-        <div id="vaultList" class="vault-list"></div>
-      </div>
-    </aside>
-
-    <div id="chaosToast" class="chaos-toast" hidden role="status">✨ Oracle shifted realities.</div>
+      </header>
+      <canvas id="galaxyPlayCanvas" aria-hidden="true"></canvas>
+      <div class="galaxy-hint">Draw: tap to spawn asteroid • Boom: tap asteroid to split</div>
+    </section>
 
     <script src="script.js"></script>
   </body>

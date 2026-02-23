@@ -930,12 +930,7 @@ function primeSpeechFromGesture() {
   try {
     const synth = window.speechSynthesis;
     synth.resume();
-    const unlock = new SpeechSynthesisUtterance(" ");
-    unlock.volume = 0;
-    unlock.rate = 1;
-    unlock.pitch = 1;
-    synth.speak(unlock);
-    setTimeout(() => synth.cancel(), 40);
+    synth.getVoices();
   } catch {
     // ignore priming errors
   }
@@ -981,6 +976,16 @@ function speakWebText(text, { rate = 1, pitch = 1.2, preview = false, voiceName 
   const selected = voices.find((voice) => voice.name === (voiceName || state.selectedVoice));
   if (selected) utter.voice = selected;
   synth.speak(utter);
+
+  // Safari/iOS reliability fallback: if queued speech does not begin, retry with default voice.
+  setTimeout(() => {
+    if (synth.speaking || synth.pending) return;
+    const retry = new SpeechSynthesisUtterance(text);
+    retry.rate = rate;
+    retry.pitch = pitch;
+    retry.volume = state.whisper ? 0.5 : 1;
+    synth.speak(retry);
+  }, 220);
 }
 
 function getNativeTtsPlugin() {

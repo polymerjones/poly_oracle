@@ -169,6 +169,7 @@ h1 {
   width: min(242px, 58vw);
   aspect-ratio: 1;
   border-radius: 999px;
+  clip-path: circle(50%);
   overflow: hidden;
   position: relative;
   cursor: pointer;
@@ -182,13 +183,15 @@ h1 {
 .orb::before {
   content: "";
   position: absolute;
-  inset: -14%;
+  inset: 0;
   border-radius: 999px;
-  background: linear-gradient(120deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.34) 35%, rgba(255, 255, 255, 0) 70%);
-  mix-blend-mode: screen;
-  filter: blur(6px);
-  transform: translateX(-60%) rotate(10deg);
+  background: linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.35) 38%, transparent 72%);
+  filter: blur(2px);
+  opacity: 0.7;
+  transform: translateX(-120%) rotate(14deg);
   animation: orbSpecSweep 8.8s ease-in-out infinite;
+  -webkit-mask-image: radial-gradient(circle at center, #000 66%, transparent 76%);
+  mask-image: radial-gradient(circle at center, #000 66%, transparent 76%);
 }
 
 .orb::after {
@@ -660,16 +663,16 @@ select:focus-visible {
 
 @keyframes orbSpecSweep {
   0% {
-    transform: translateX(-60%) rotate(10deg);
-    opacity: 0.2;
+    transform: translateX(-120%) rotate(14deg);
+    opacity: 0.35;
   }
   50% {
-    transform: translateX(10%) rotate(10deg);
-    opacity: 0.42;
+    transform: translateX(-12%) rotate(14deg);
+    opacity: 0.76;
   }
   100% {
-    transform: translateX(60%) rotate(10deg);
-    opacity: 0.16;
+    transform: translateX(120%) rotate(14deg);
+    opacity: 0.25;
   }
 }
 

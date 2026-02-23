@@ -13,6 +13,8 @@ const revealModes = [
   { id: "glitch", label: "Glitch Oracle", duration: 2500 },
 ];
 
+const revealSoundPool = ["reveal1.mp3", "reveal2.mp3", "reveal3.mp3", "reveal4.mp3"];
+
 const canonicalAnswers = [
   "Yes - you know it",
   "Yeppurs",
@@ -930,6 +932,11 @@ function spawnSparkles(count, sizeMultiplier = 1, brightnessMultiplier = 1) {
 
 function playRevealSound() {
   if (!revealAudio) return;
+  const nextRevealSound = pick(revealSoundPool);
+  if (nextRevealSound && revealAudio.getAttribute("src") !== nextRevealSound) {
+    revealAudio.setAttribute("src", nextRevealSound);
+    revealAudio.load();
+  }
   revealAudio.currentTime = 0;
   revealAudio.play().catch(() => {});
 }
@@ -1433,8 +1440,17 @@ function createPingPongVideoController(video, { speed = 0.22 } = {}) {
   video.loop = false;
   video.playsInline = true;
   video.playbackRate = 1;
+  video.preload = "auto";
+  try {
+    video.load();
+  } catch {
+    // ignore load errors
+  }
   video.pause();
   video.addEventListener("loadedmetadata", () => {
+    ready = true;
+  });
+  video.addEventListener("loadeddata", () => {
     ready = true;
   });
 
@@ -1442,6 +1458,8 @@ function createPingPongVideoController(video, { speed = 0.22 } = {}) {
     start() {
       running = true;
       last = 0;
+      // Prime decode on Safari/WebView so currentTime stepping doesn't appear frozen.
+      video.play().then(() => video.pause()).catch(() => {});
       if (!raf) raf = requestAnimationFrame(step);
     },
     stop() {
@@ -1472,6 +1490,7 @@ function initGalaxyCanvas() {
     shootingTimer: null,
     nextAsteroidId: 1,
     maxAsteroids: 120,
+    lastTapAt: 0,
   };
 
   function resize() {
@@ -1801,7 +1820,14 @@ function playBoomSound(intensity = 1) {
 
   function onTap(event) {
     if (event.cancelable) event.preventDefault();
+    const now = performance.now();
+    if (now - sim.lastTapAt < 40) return; // dedupe stacked touch/click events
+    sim.lastTapAt = now;
+
     const point = pointFromEvent(event);
+    if (sim.asteroids.length === 0 && state.galaxyTool !== "draw") {
+      setGalaxyTool("draw");
+    }
     if (state.galaxyTool === "draw") {
       spawnAsteroid(point.x, point.y);
       return;
@@ -1810,14 +1836,10 @@ function playBoomSound(intensity = 1) {
     if (hit) explodeAsteroid(hit);
   }
 
-  // iOS/WebView compatibility: use PointerEvent when available,
-  // otherwise fall back to touch + mouse handlers.
-  if ("PointerEvent" in window) {
-    galaxyPlayCanvas.addEventListener("pointerdown", onTap);
-  } else {
-    galaxyPlayCanvas.addEventListener("touchstart", onTap, { passive: false });
-    galaxyPlayCanvas.addEventListener("mousedown", onTap);
-  }
+  // iOS/WebView compatibility: bind all common input paths.
+  galaxyPlayCanvas.addEventListener("pointerdown", onTap);
+  galaxyPlayCanvas.addEventListener("touchstart", onTap, { passive: false });
+  galaxyPlayCanvas.addEventListener("mousedown", onTap);
 
   window.addEventListener("resize", resize);
   document.addEventListener("visibilitychange", () => {

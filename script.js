@@ -961,7 +961,7 @@ function playPixySound(intensity) {
   const master = audioContext.createGain();
   master.connect(audioContext.destination);
 
-  const gainTop = state.whisper ? 0.06 : clamp(0.12 * intensity.brightnessMultiplier, 0.08, 0.3);
+  const gainTop = state.whisper ? 0.1 : clamp(0.24 * intensity.brightnessMultiplier, 0.12, 0.5);
   master.gain.setValueAtTime(0.0001, now);
   master.gain.exponentialRampToValueAtTime(gainTop, now + 0.02);
   master.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
@@ -1463,6 +1463,7 @@ function initGalaxyCanvas() {
     shooting: null,
     shootingTimer: null,
     nextAsteroidId: 1,
+    maxAsteroids: 120,
   };
 
   function resize() {
@@ -1472,6 +1473,7 @@ function initGalaxyCanvas() {
     galaxyPlayCanvas.width = Math.floor(sim.width * sim.dpr);
     galaxyPlayCanvas.height = Math.floor(sim.height * sim.dpr);
     ctx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
+    sim.maxAsteroids = sim.width < 700 ? 80 : 120;
     seedStars();
   }
 
@@ -1496,8 +1498,13 @@ function initGalaxyCanvas() {
   }
 
   function spawnAsteroid(x, y, radius = 18 + Math.random() * 16, speedMin = 18, speedMax = 55) {
-    if (sim.asteroids.length > 120) return;
+    if (sim.asteroids.length >= sim.maxAsteroids) return;
     const v = randomVelocity(speedMin, speedMax);
+    const points = Array.from({ length: 10 + Math.floor(Math.random() * 4) }, (_, i, arr) => {
+      const angle = (Math.PI * 2 * i) / arr.length;
+      const offset = 0.76 + Math.random() * 0.42;
+      return { angle, offset };
+    });
     sim.asteroids.push({
       id: sim.nextAsteroidId++,
       x,
@@ -1506,13 +1513,14 @@ function initGalaxyCanvas() {
       vy: v.vy,
       r: radius,
       splitDepth: 0,
+      shape: points,
       spin: (Math.random() - 0.5) * 0.08,
       rot: Math.random() * Math.PI * 2,
       alpha: 0.7 + Math.random() * 0.28,
     });
   }
 
-  function playBoomSound(intensity = 1) {
+function playBoomSound(intensity = 1) {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx || state.minimal) return;
     if (!audioContext) audioContext = new AudioCtx();
@@ -1530,7 +1538,7 @@ function initGalaxyCanvas() {
     toneGain.connect(master);
     noiseGain.connect(master);
 
-    const peak = clamp((state.whisper ? 0.05 : 0.14) * intensity, 0.04, 0.22);
+    const peak = clamp((state.whisper ? 0.09 : 0.28) * intensity, 0.07, 0.42);
     master.gain.setValueAtTime(0.0001, now);
     master.gain.exponentialRampToValueAtTime(peak, now + 0.02);
     master.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
@@ -1565,6 +1573,7 @@ function initGalaxyCanvas() {
         life: 0,
         ttl: 380 + Math.random() * 180,
         size: 2 + Math.random() * 2.8,
+        glow: 0.65 + Math.random() * 0.35,
       });
     }
   }
@@ -1650,15 +1659,21 @@ function initGalaxyCanvas() {
     });
 
     sim.asteroids.forEach((a) => {
-      const grad = ctx.createRadialGradient(a.x - a.r * 0.3, a.y - a.r * 0.35, a.r * 0.2, a.x, a.y, a.r);
-      grad.addColorStop(0, `rgba(196,166,122,${(a.alpha + 0.22).toFixed(3)})`);
-      grad.addColorStop(0.55, `rgba(142,104,63,${(a.alpha + 0.1).toFixed(3)})`);
-      grad.addColorStop(1, `rgba(90,62,36,${a.alpha.toFixed(3)})`);
+      const grad = ctx.createRadialGradient(a.x - a.r * 0.34, a.y - a.r * 0.38, a.r * 0.18, a.x, a.y, a.r);
+      grad.addColorStop(0, `rgba(176,136,88,${(a.alpha + 0.2).toFixed(3)})`);
+      grad.addColorStop(0.55, `rgba(112,78,44,${(a.alpha + 0.12).toFixed(3)})`);
+      grad.addColorStop(1, `rgba(54,37,22,${a.alpha.toFixed(3)})`);
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(a.x, a.y, a.r, 0, Math.PI * 2);
+      a.shape.forEach((point, index) => {
+        const px = a.x + Math.cos(point.angle + a.rot) * a.r * point.offset;
+        const py = a.y + Math.sin(point.angle + a.rot) * a.r * point.offset;
+        if (index === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,235,206,0.18)";
+      ctx.strokeStyle = "rgba(250,224,180,0.16)";
       ctx.lineWidth = 1;
       ctx.stroke();
 
@@ -1681,7 +1696,7 @@ function initGalaxyCanvas() {
     sim.particles.forEach((p) => {
       const alpha = 1 - p.life / p.ttl;
       ctx.beginPath();
-      ctx.fillStyle = `rgba(174,226,255,${Math.max(0, alpha).toFixed(3)})`;
+      ctx.fillStyle = `rgba(111,255,128,${Math.max(0, alpha * p.glow).toFixed(3)})`;
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
     });
@@ -1746,6 +1761,7 @@ function initGalaxyCanvas() {
     if (parent.splitDepth >= 2) {
       spawnExplosion(parent.x, parent.y, 12);
       playBoomSound(0.9);
+      if (sim.asteroids.length === 0) setGalaxyTool("draw");
       return;
     }
     const chunks = 3 + Math.floor(Math.random() * 3);
@@ -1762,6 +1778,10 @@ function initGalaxyCanvas() {
         vy: Math.sin(angle) * speed,
         r: childRadius,
         splitDepth: parent.splitDepth + 1,
+        shape: Array.from({ length: 9 + Math.floor(Math.random() * 4) }, (_, i, arr) => ({
+          angle: (Math.PI * 2 * i) / arr.length,
+          offset: 0.72 + Math.random() * 0.44,
+        })),
         spin: (Math.random() - 0.5) * 0.14,
         rot: Math.random() * Math.PI * 2,
         alpha: 0.62 + Math.random() * 0.28,
@@ -1798,6 +1818,7 @@ function initGalaxyCanvas() {
     sim.running = true;
     sim.last = 0;
     if (!prefersReducedMotion) scheduleShootingStar();
+    if (sim.asteroids.length === 0) setGalaxyTool("draw");
     sim.raf = requestAnimationFrame(frame);
   }
 

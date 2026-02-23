@@ -163,6 +163,7 @@ let galaxyCanvasController;
 let oracleBgController;
 let galaxyBgController;
 let titleSparkleTimer = null;
+let mediaPrimed = false;
 
 init();
 
@@ -185,6 +186,15 @@ function init() {
 }
 
 function addListeners() {
+  const primeMediaOnGesture = () => {
+    if (mediaPrimed) return;
+    mediaPrimed = true;
+    primeBackgroundMedia();
+  };
+  document.addEventListener("pointerdown", primeMediaOnGesture, { once: true });
+  document.addEventListener("touchstart", primeMediaOnGesture, { once: true, passive: true });
+  document.addEventListener("keydown", primeMediaOnGesture, { once: true });
+
   questionInput.addEventListener("input", () => {
     setIntentState();
     hapticTap();
@@ -1411,6 +1421,15 @@ function initBackgroundVideos() {
     } else {
       if (oracleBgController) oracleBgController.start();
     }
+  });
+}
+
+function primeBackgroundMedia() {
+  [oracleBgVideo, galaxyBgVideo].forEach((video) => {
+    if (!video) return;
+    video.play().then(() => {
+      if (video !== oracleBgVideo || galaxyView.hidden) video.pause();
+    }).catch(() => {});
   });
 }
 

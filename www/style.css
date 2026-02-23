@@ -271,6 +271,10 @@ button[aria-pressed="true"] {
   padding: 18px;
 }
 
+.vault[hidden] {
+  display: none !important;
+}
+
 .vault-card {
   width: min(780px, 95vw);
   max-height: 86vh;

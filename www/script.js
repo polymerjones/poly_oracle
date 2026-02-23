@@ -1903,17 +1903,8 @@ function playBoomSound(intensity = 1) {
   }
 
   function onTap(event) {
-    const target = event.target;
-    if (target && typeof target.closest === "function" && target.closest(".galaxy-topbar")) return;
     if (event.cancelable) event.preventDefault();
-    const now = performance.now();
-    if (now - sim.lastTapAt < 40) return; // dedupe stacked touch/click events
-    sim.lastTapAt = now;
-
     const point = pointFromEvent(event);
-    if (sim.asteroids.length === 0 && state.galaxyTool !== "draw") {
-      setGalaxyTool("draw");
-    }
     if (state.galaxyTool === "draw") {
       spawnAsteroid(point.x, point.y);
       return;
@@ -1922,13 +1913,14 @@ function playBoomSound(intensity = 1) {
     if (hit) explodeAsteroid(hit);
   }
 
-  // iOS/WebView compatibility: bind all common input paths.
-  galaxyPlayCanvas.addEventListener("pointerdown", onTap);
-  galaxyPlayCanvas.addEventListener("touchstart", onTap, { passive: false });
-  galaxyPlayCanvas.addEventListener("mousedown", onTap);
-  galaxyView.addEventListener("pointerdown", onTap);
-  galaxyView.addEventListener("touchstart", onTap, { passive: false });
-  galaxyView.addEventListener("mousedown", onTap);
+  // iOS/WebView compatibility: use PointerEvent when available,
+  // otherwise fall back to touch + mouse handlers.
+  if ("PointerEvent" in window) {
+    galaxyPlayCanvas.addEventListener("pointerdown", onTap);
+  } else {
+    galaxyPlayCanvas.addEventListener("touchstart", onTap, { passive: false });
+    galaxyPlayCanvas.addEventListener("mousedown", onTap);
+  }
 
   window.addEventListener("resize", resize);
   document.addEventListener("visibilitychange", () => {

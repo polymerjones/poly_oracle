@@ -361,7 +361,7 @@ function addListeners() {
   });
 
   closeGalaxy.addEventListener("click", () => {
-    closeGalaxyView();
+    galaxyCanvasController?.showModeSelect?.();
   });
 
   toolDraw.addEventListener("click", () => {

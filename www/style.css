@@ -1209,6 +1209,58 @@ select:focus-visible {
   opacity: 0.45;
 }
 
+.galaxyModeSelect {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  background: rgba(4, 8, 20, 0.58);
+}
+
+.galaxy-view.mode-menu .galaxyModeSelect {
+  display: flex;
+}
+
+.galaxyModeCard {
+  width: min(420px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 22px;
+  background: linear-gradient(170deg, rgba(12, 22, 46, 0.92), rgba(10, 17, 34, 0.9));
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.38);
+  padding: 20px;
+  display: grid;
+  gap: 12px;
+}
+
+.galaxyModeTitle {
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #d7e5ff;
+}
+
+.modeBtn,
+.modeBackBtn {
+  min-height: 44px;
+  border-radius: 999px;
+}
+
+.modeBtn {
+  border: 1px solid rgba(168, 236, 255, 0.38);
+  background: linear-gradient(125deg, rgba(123, 226, 255, 0.9), rgba(246, 167, 255, 0.88));
+  color: #0a1734;
+  font-weight: 700;
+}
+
+.modeBackBtn {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--textPrimary);
+}
+
 .galaxy-topbar {
   position: relative;
   z-index: 2;
@@ -1224,6 +1276,15 @@ select:focus-visible {
   border-bottom: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(8, 16, 35, 0.68);
   backdrop-filter: blur(10px);
+}
+
+.galaxy-view.mode-menu .galaxy-topbar,
+.galaxy-view.mode-menu .galaxy-hint {
+  visibility: hidden;
+}
+
+.galaxy-view.mode-arcade .galaxy-topbar {
+  display: none;
 }
 
 .galaxy-title {
@@ -1288,6 +1349,137 @@ select:focus-visible {
   background: rgba(8, 16, 35, 0.56);
 }
 
+.galaxy-view.mode-arcade .galaxy-hint {
+  display: none;
+}
+
+.arcadeHud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding:
+    calc(8px + env(safe-area-inset-top, 0px))
+    max(12px, env(safe-area-inset-right, 0px))
+    8px
+    max(12px, env(safe-area-inset-left, 0px));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(7, 14, 30, 0.74);
+}
+
+.galaxy-view.mode-arcade .arcadeHud {
+  display: flex;
+}
+
+.hudBtn,
+.arcadeOverlayBtn {
+  min-height: 44px;
+  border-radius: 999px;
+  padding: 10px 14px;
+}
+
+.hudBtn {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.hudCenter {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 120px;
+}
+
+.hudLevel {
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  color: #b7c9ff;
+}
+
+.hudTimer {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #dff8ff;
+}
+
+.hudTimer.danger {
+  color: rgba(255, 103, 103, 0.96);
+  text-shadow: 0 0 8px rgba(255, 57, 57, 0.7), 0 0 18px rgba(255, 34, 34, 0.5);
+}
+
+.arcadeTimerBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 180ms linear;
+}
+
+.galaxy-view.mode-arcade .arcadeTimerBackdrop {
+  display: flex;
+}
+
+.arcadeTimerGhost {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: clamp(3rem, 19vw, 9rem);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: rgba(193, 228, 255, 0.58);
+  text-shadow: 0 0 14px rgba(118, 206, 255, 0.2);
+  transition: color 160ms linear, text-shadow 160ms linear;
+}
+
+.arcadeTimerBackdrop.danger .arcadeTimerGhost {
+  color: rgba(255, 88, 88, 0.78);
+  text-shadow: 0 0 10px rgba(255, 66, 66, 0.62), 0 0 24px rgba(255, 34, 34, 0.52);
+}
+
+.arcadeOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: none;
+  place-items: center;
+  text-align: center;
+  background: rgba(6, 10, 24, 0.52);
+  padding: 22px;
+}
+
+.arcadeOverlay.show {
+  display: grid;
+}
+
+.arcadeOverlayText {
+  font-size: clamp(1.6rem, 5.8vw, 2.4rem);
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  color: #9af8c4;
+  text-shadow: 0 0 14px rgba(100, 255, 171, 0.45);
+}
+
+.arcadeOverlaySub {
+  margin-top: 8px;
+  color: #d4e2ff;
+}
+
+.arcadeOverlayBtn {
+  margin-top: 16px;
+  min-height: 44px;
+  border-radius: 999px;
+  border: 1px solid rgba(165, 238, 255, 0.4);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .galaxy-topbar {
     backdrop-filter: none;
@@ -1295,5 +1487,17 @@ select:focus-visible {
 
   .bg-video {
     opacity: 0.28;
+  }
+
+  .arcadeOverlayText {
+    text-shadow: none;
+  }
+
+  .arcadeTimerBackdrop {
+    transition: none;
+  }
+
+  .arcadeTimerGhost {
+    text-shadow: none;
   }
 }

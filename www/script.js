@@ -145,6 +145,7 @@ const openGalaxy = document.getElementById("openGalaxy");
 const closeGalaxy = document.getElementById("closeGalaxy");
 const toolDraw = document.getElementById("toolDraw");
 const toolBoom = document.getElementById("toolBoom");
+const clearGalaxy = document.getElementById("clearGalaxy");
 const galaxyPlayCanvas = document.getElementById("galaxyPlayCanvas");
 
 const vault = document.getElementById("vault");
@@ -298,6 +299,13 @@ function addListeners() {
   toolBoom.addEventListener("click", () => {
     setGalaxyTool("boom");
   });
+
+  if (clearGalaxy) {
+    clearGalaxy.addEventListener("click", () => {
+      if (!galaxyCanvasController?.clear) return;
+      galaxyCanvasController.clear();
+    });
+  }
 
   modeButtons.forEach((button) => {
     button.addEventListener("click", () => {
@@ -1942,12 +1950,13 @@ function playBoomSound(intensity = 1) {
       if (sim.asteroids.length === 0) setGalaxyTool("draw");
       return;
     }
-    const chunks = 3 + Math.floor(Math.random() * 3);
+    // Keep fewer tiny fragments: larger pieces, fewer chunks on later splits.
+    const chunks = parent.splitDepth === 0 ? 3 + Math.floor(Math.random() * 2) : 2 + Math.floor(Math.random() * 2);
     const parentSpeed = Math.sqrt(parent.vx * parent.vx + parent.vy * parent.vy);
     for (let i = 0; i < chunks; i += 1) {
       const angle = Math.random() * Math.PI * 2;
       const speed = parentSpeed * (1.4 + Math.random() * 0.8) + 16 + Math.random() * 28;
-      const childRadius = clamp(parent.r * (0.3 + Math.random() * 0.25), 6, 24);
+      const childRadius = clamp(parent.r * (0.38 + Math.random() * 0.22), 9, 26);
       sim.asteroids.push({
         id: sim.nextAsteroidId++,
         x: parent.x + Math.cos(angle) * 4,
@@ -2051,6 +2060,13 @@ function playBoomSound(intensity = 1) {
       startGalaxyLoop();
     },
     stop: stopGalaxyLoop,
+    clear() {
+      sim.asteroids = [];
+      sim.particles = [];
+      sim.shooting = null;
+      setGalaxyTool("draw");
+      draw(performance.now());
+    },
   };
 }
 

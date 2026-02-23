@@ -464,6 +464,14 @@ function revealAnswer() {
   primeSpeechFromGesture();
   setRevealing(true);
 
+  // Speak the question during the ritual lead-in.
+  speakText(normalizedQuestion, {
+    rate: state.whisper ? 0.92 : 1.0,
+    pitch: 1.12,
+    preview: true,
+    voiceName: revealVoice,
+  });
+
   // v1.2.2 ritual reveal
   if (prefersReducedMotion) {
     runReducedRitualSequence(mode, () => finishReveal({
@@ -561,7 +569,7 @@ function finishReveal({ normalizedQuestion, polarity, answerLine, microLine, rev
   saveState();
 
   const spokenAnswer = answerSimple.textContent.trim() || entry.answer;
-  speakText(`Question: ${normalizedQuestion}. Answer: ${spokenAnswer}.`, {
+  speakText(spokenAnswer, {
     rate: state.whisper ? 0.95 : 1.05,
     pitch: 1.18,
     voiceName: revealVoice,

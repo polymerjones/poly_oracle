@@ -187,7 +187,10 @@ function addListeners() {
   askButton.addEventListener("click", revealAnswer);
 
   orb.addEventListener("click", () => {
-    const intensity = { sizeMultiplier: 1, brightnessMultiplier: 1, burstCount: 8 };
+    const intensity = registerOrbTap();
+    if (intensity.shouldShiftTheme) {
+      triggerChaosTheme();
+    }
     playPixySound(intensity);
     spawnSparkles(intensity.burstCount, intensity.sizeMultiplier, intensity.brightnessMultiplier);
   });
@@ -786,8 +789,9 @@ function registerOrbTap() {
   const sizeMultiplier = clamp(1 + spamTapCount * 0.05, 1, 2.5);
   const brightnessMultiplier = clamp(1 + spamTapCount * 0.07, 1, 3);
   const burstCount = Math.round(clamp(6 + spamTapCount, 6, 34));
+  const shouldShiftTheme = state.sessionTapCount % 20 === 0;
 
-  return { spamTapCount, sizeMultiplier, brightnessMultiplier, burstCount };
+  return { spamTapCount, sizeMultiplier, brightnessMultiplier, burstCount, shouldShiftTheme };
 }
 
 function triggerChaosTheme() {
@@ -1335,6 +1339,7 @@ function initGalaxyCanvas() {
       vx: v.vx,
       vy: v.vy,
       r: radius,
+      splitDepth: 0,
       spin: (Math.random() - 0.5) * 0.08,
       rot: Math.random() * Math.PI * 2,
       alpha: 0.7 + Math.random() * 0.28,
@@ -1439,16 +1444,32 @@ function initGalaxyCanvas() {
     });
 
     sim.asteroids.forEach((a) => {
-      const grad = ctx.createRadialGradient(a.x - a.r * 0.3, a.y - a.r * 0.35, a.r * 0.25, a.x, a.y, a.r);
-      grad.addColorStop(0, `rgba(215,228,255,${(a.alpha + 0.2).toFixed(3)})`);
-      grad.addColorStop(1, `rgba(95,125,178,${a.alpha.toFixed(3)})`);
+      const grad = ctx.createRadialGradient(a.x - a.r * 0.3, a.y - a.r * 0.35, a.r * 0.2, a.x, a.y, a.r);
+      grad.addColorStop(0, `rgba(196,166,122,${(a.alpha + 0.22).toFixed(3)})`);
+      grad.addColorStop(0.55, `rgba(142,104,63,${(a.alpha + 0.1).toFixed(3)})`);
+      grad.addColorStop(1, `rgba(90,62,36,${a.alpha.toFixed(3)})`);
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(a.x, a.y, a.r, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = "rgba(235,245,255,0.16)";
+      ctx.strokeStyle = "rgba(255,235,206,0.18)";
       ctx.lineWidth = 1;
       ctx.stroke();
+
+      // subtle crater specks for rocky look
+      ctx.fillStyle = "rgba(62,42,22,0.22)";
+      ctx.beginPath();
+      ctx.arc(a.x + Math.cos(a.rot) * a.r * 0.25, a.y + Math.sin(a.rot) * a.r * 0.22, Math.max(1.2, a.r * 0.12), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(
+        a.x + Math.cos(a.rot + 1.9) * a.r * 0.18,
+        a.y + Math.sin(a.rot + 1.9) * a.r * 0.16,
+        Math.max(1, a.r * 0.09),
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
     });
 
     sim.particles.forEach((p) => {
@@ -1515,6 +1536,11 @@ function initGalaxyCanvas() {
 
   function explodeAsteroid(parent) {
     sim.asteroids = sim.asteroids.filter((a) => a.id !== parent.id);
+    // One split only: split children become explode-only targets.
+    if (parent.splitDepth >= 1) {
+      spawnExplosion(parent.x, parent.y, 12);
+      return;
+    }
     const chunks = 3 + Math.floor(Math.random() * 3);
     const parentSpeed = Math.sqrt(parent.vx * parent.vx + parent.vy * parent.vy);
     for (let i = 0; i < chunks; i += 1) {
@@ -1528,6 +1554,7 @@ function initGalaxyCanvas() {
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         r: childRadius,
+        splitDepth: 1,
         spin: (Math.random() - 0.5) * 0.14,
         rot: Math.random() * Math.PI * 2,
         alpha: 0.62 + Math.random() * 0.28,

@@ -6,6 +6,52 @@ const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
 const debugTapsKey = "poly_oracle_debug_taps";
+const STORAGE = {
+  arcadeLevel: "poly_oracle_arcade_level",
+  arcadeSaved: "poly_oracle_arcade_saved",
+  rewardCelestial: "poly_oracle_reward_celestial",
+};
+
+// === Level Config ===
+const ARCADE_LEVELS = [
+  { level: 1, time: 18, totalToClear: 2, startSpawn: 2, spawnEveryMs: 0, maxOnScreen: 12 },
+  { level: 2, time: 20, totalToClear: 3, startSpawn: 3, spawnEveryMs: 0, maxOnScreen: 12 },
+  { level: 3, time: 22, totalToClear: 7, startSpawn: 3, spawnEveryMs: 2200, maxOnScreen: 12 },
+  { level: 4, time: 24, totalToClear: 9, startSpawn: 4, spawnEveryMs: 2200, maxOnScreen: 12 },
+  { level: 5, time: 26, totalToClear: 11, startSpawn: 4, spawnEveryMs: 2000, maxOnScreen: 12 },
+  { level: 6, time: 28, totalToClear: 13, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
+  { level: 7, time: 30, totalToClear: 15, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
+  { level: 8, time: 34, totalToClear: 17, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14 },
+  { level: 9, time: 38, totalToClear: 20, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14 },
+  { level: 10, time: 45, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14 },
+];
+
+function getSavedArcadeLevel() {
+  try {
+    const n = parseInt(localStorage.getItem(STORAGE.arcadeLevel) || "1", 10);
+    return Number.isFinite(n) && n >= 1 ? n : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function setSavedArcadeLevel(level) {
+  try {
+    localStorage.setItem(STORAGE.arcadeLevel, String(level));
+    localStorage.setItem(STORAGE.arcadeSaved, "1");
+  } catch {
+    // ignore
+  }
+}
+
+function clearArcadeProgress() {
+  try {
+    localStorage.removeItem(STORAGE.arcadeLevel);
+    localStorage.removeItem(STORAGE.arcadeSaved);
+  } catch {
+    // ignore
+  }
+}
 
 const revealModes = [
   { id: "classic", label: "Classic Fade", duration: 2500 },
@@ -148,6 +194,19 @@ const toolDraw = document.getElementById("toolDraw");
 const toolBoom = document.getElementById("toolBoom");
 const clearGalaxy = document.getElementById("clearGalaxy");
 const galaxyPlayCanvas = document.getElementById("galaxyPlayCanvas");
+const galaxyModeSelect = document.getElementById("galaxyModeSelect");
+const btnArcade = document.getElementById("btnArcade");
+const btnFreestyle = document.getElementById("btnFreestyle");
+const btnGalaxyBack = document.getElementById("btnGalaxyBack");
+const arcadeHud = document.getElementById("arcadeHud");
+const arcadeBack = document.getElementById("arcadeBack");
+const hudLevel = document.getElementById("hudLevel");
+const hudTimer = document.getElementById("hudTimer");
+const btnBoom = document.getElementById("btnBoom");
+const arcadeOverlay = document.getElementById("arcadeOverlay");
+const arcadeOverlayText = document.getElementById("arcadeOverlayText");
+const arcadeOverlaySub = document.getElementById("arcadeOverlaySub");
+const arcadeOverlayBtn = document.getElementById("arcadeOverlayBtn");
 
 const vault = document.getElementById("vault");
 const closeVault = document.getElementById("closeVault");
@@ -304,6 +363,7 @@ function addListeners() {
   });
 
   toolDraw.addEventListener("click", () => {
+    if (galaxyCanvasController?.isArcade?.()) return;
     setGalaxyTool("draw");
   });
 
@@ -315,6 +375,28 @@ function addListeners() {
     clearGalaxy.addEventListener("click", () => {
       if (!galaxyCanvasController?.clear) return;
       galaxyCanvasController.clear();
+    });
+  }
+
+  if (btnArcade) {
+    btnArcade.addEventListener("click", () => {
+      galaxyCanvasController?.startArcadeFromSave?.();
+    });
+  }
+  if (btnFreestyle) {
+    btnFreestyle.addEventListener("click", () => {
+      galaxyCanvasController?.startFreestyle?.();
+    });
+  }
+  if (btnGalaxyBack) {
+    btnGalaxyBack.addEventListener("click", () => closeGalaxyView());
+  }
+  if (arcadeBack) {
+    arcadeBack.addEventListener("click", () => closeGalaxyView());
+  }
+  if (btnBoom) {
+    btnBoom.addEventListener("click", () => {
+      galaxyCanvasController?.triggerBoom?.();
     });
   }
 
@@ -540,7 +622,7 @@ function openGalaxyView() {
     if (galaxyBgController) galaxyBgController.start();
   }
   if (galaxyCanvasController) {
-    requestAnimationFrame(() => galaxyCanvasController.start());
+    requestAnimationFrame(() => galaxyCanvasController.showModeSelect?.());
   }
 }
 
@@ -553,7 +635,7 @@ function closeGalaxyView() {
     if (galaxyBgController) galaxyBgController.stop();
     if (oracleBgController) oracleBgController.start();
   }
-  if (galaxyCanvasController) galaxyCanvasController.stop();
+  if (galaxyCanvasController) galaxyCanvasController.stopAndMenu?.();
 }
 
 function initTitleSparkles() {
@@ -587,6 +669,7 @@ function spawnTitleSparkles(count = 2) {
 }
 
 function setGalaxyTool(tool) {
+  if (galaxyCanvasController?.isArcade?.()) return;
   state.galaxyTool = tool === "boom" ? "boom" : "draw";
   toolDraw.classList.toggle("active", state.galaxyTool === "draw");
   toolBoom.classList.toggle("active", state.galaxyTool === "boom");
@@ -1683,7 +1766,7 @@ function createLoopVideoController(video) {
   };
 }
 
-// Galaxy Canvas v1
+// === Arcade Mode ===
 function initGalaxyCanvas() {
   if (!galaxyPlayCanvas) return;
   const ctx = galaxyPlayCanvas.getContext("2d");
@@ -1706,17 +1789,483 @@ function initGalaxyCanvas() {
     stars: [],
     asteroids: [],
     particles: [],
+    warpRings: [],
     shooting: null,
     shootingTimer: null,
-    nextAsteroidId: 1,
     maxAsteroids: 120,
     lastTapAt: 0,
     nextDrawAt: 0,
+    asteroidPool: [],
+    particlePool: [],
+    ringPool: [],
   };
+
   let galaxyRaf = 0;
   let galaxyRunning = false;
+  let engineMode = "menu"; // menu | freestyle | arcade
+  let lastTapX = 0;
+  let lastTapY = 0;
+  let overlayTimer = null;
 
-  // HARDEN canvas loop
+  let arcadeActive = false;
+  let currentLevelIndex = 0;
+  let levelEndsAt = 0;
+  let nextSpawnAt = Infinity;
+  let spawnQueue = 0;
+  let totalToSpawn = 0;
+  let spawnedTotal = 0;
+  let maxOnScreen = 12;
+
+  let boomEnergy = 3;
+  const boomMax = 3;
+  const boomRegenMs = 1200;
+  let lastEnergyTick = 0;
+
+  function setGalaxyViewMode(mode) {
+    galaxyView.classList.toggle("mode-menu", mode === "menu");
+    galaxyView.classList.toggle("mode-freestyle", mode === "freestyle");
+    galaxyView.classList.toggle("mode-arcade", mode === "arcade");
+    if (galaxyModeSelect) galaxyModeSelect.setAttribute("aria-hidden", mode === "menu" ? "false" : "true");
+    if (arcadeHud) arcadeHud.setAttribute("aria-hidden", mode === "arcade" ? "false" : "true");
+  }
+
+  function showArcadeOverlay(text, sub = "", durationMs = 0, opts = null) {
+    if (!arcadeOverlay || !arcadeOverlayText || !arcadeOverlaySub || !arcadeOverlayBtn) return;
+    if (overlayTimer) {
+      clearTimeout(overlayTimer);
+      overlayTimer = null;
+    }
+    arcadeOverlayText.textContent = text || "";
+    arcadeOverlaySub.textContent = sub || "";
+    arcadeOverlayBtn.style.display = opts?.buttonText ? "inline-block" : "none";
+    arcadeOverlayBtn.textContent = opts?.buttonText || "";
+    arcadeOverlayBtn.onclick = opts?.buttonAction || null;
+    arcadeOverlay.classList.add("show");
+    if (durationMs > 0) {
+      overlayTimer = setTimeout(() => {
+        arcadeOverlay.classList.remove("show");
+        overlayTimer = null;
+      }, durationMs);
+    }
+  }
+
+  function hideArcadeOverlay() {
+    if (!arcadeOverlay) return;
+    if (overlayTimer) {
+      clearTimeout(overlayTimer);
+      overlayTimer = null;
+    }
+    arcadeOverlay.classList.remove("show");
+  }
+
+  function formatMs(ms) {
+    const safe = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(safe / 60);
+    const s = safe % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  function updateArcadeHud(now) {
+    if (hudLevel) hudLevel.textContent = `LEVEL ${ARCADE_LEVELS[currentLevelIndex]?.level || 1}`;
+    if (hudTimer) hudTimer.textContent = formatMs(levelEndsAt - now);
+    if (btnBoom) {
+      btnBoom.textContent = `BOOM ${boomEnergy}`;
+      btnBoom.disabled = !arcadeActive || boomEnergy <= 0;
+    }
+  }
+
+  function getAsteroid() {
+    return sim.asteroidPool.pop() || {};
+  }
+
+  function releaseAsteroid(a) {
+    a.shape = null;
+    sim.asteroidPool.push(a);
+  }
+
+  function getParticle() {
+    return sim.particlePool.pop() || {};
+  }
+
+  function releaseParticle(p) {
+    sim.particlePool.push(p);
+  }
+
+  function getRing() {
+    return sim.ringPool.pop() || {};
+  }
+
+  function releaseRing(ring) {
+    sim.ringPool.push(ring);
+  }
+
+  function randomVelocity(min, max) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = min + Math.random() * (max - min);
+    return { vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed };
+  }
+
+  function makeShape(pointCount) {
+    const points = [];
+    for (let i = 0; i < pointCount; i += 1) {
+      points.push({
+        angle: (Math.PI * 2 * i) / pointCount,
+        offset: 0.74 + Math.random() * 0.4,
+      });
+    }
+    return points;
+  }
+
+  function randomPerimeterPoint() {
+    const edge = Math.floor(Math.random() * 4);
+    const pad = 20;
+    if (edge === 0) return { x: Math.random() * sim.width, y: -pad };
+    if (edge === 1) return { x: sim.width + pad, y: Math.random() * sim.height };
+    if (edge === 2) return { x: Math.random() * sim.width, y: sim.height + pad };
+    return { x: -pad, y: Math.random() * sim.height };
+  }
+
+  // === Warp Spawns ===
+  function playWarpSound() {
+    if (prefersReducedMotion || state.minimal) return;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    if (!audioContext) audioContext = new AudioCtx();
+    const now = audioContext.currentTime;
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.exponentialRampToValueAtTime(560, now + 0.18);
+    gain.gain.setValueAtTime(state.whisper ? 0.015 : 0.03, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+    osc.connect(gain);
+    gain.connect(audioContext.destination);
+    osc.start(now);
+    osc.stop(now + 0.23);
+  }
+
+  function addWarpRing(x, y) {
+    const now = performance.now();
+    const ring = getRing();
+    ring.x = x;
+    ring.y = y;
+    ring.life = 0;
+    ring.ttl = prefersReducedMotion ? 300 : 450;
+    ring.baseR = prefersReducedMotion ? 8 : 10;
+    ring.maxR = prefersReducedMotion ? 36 : 54;
+    ring.alpha = prefersReducedMotion ? 0.24 : 0.42;
+    sim.warpRings.push(ring);
+  }
+
+  function spawnAsteroid(x, y, kind = 3, warp = true) {
+    if (sim.asteroids.length >= sim.maxAsteroids) return null;
+    const a = getAsteroid();
+    const r = kind === 3 ? 26 + Math.random() * 12 : kind === 2 ? 18 + Math.random() * 8 : 10 + Math.random() * 6;
+    const speed = kind === 3 ? 18 + Math.random() * 20 : kind === 2 ? 28 + Math.random() * 27 : 45 + Math.random() * 35;
+    const v = randomVelocity(speed * 0.8, speed);
+    a.x = x;
+    a.y = y;
+    a.vx = v.vx;
+    a.vy = v.vy;
+    a.r = r;
+    a.mass = r * r;
+    a.kind = kind;
+    a.alive = true;
+    a.rot = Math.random() * Math.PI * 2;
+    a.spin = (Math.random() - 0.5) * 0.06;
+    a.shape = makeShape(8 + Math.floor(Math.random() * 4));
+    sim.asteroids.push(a);
+    if (warp) {
+      playWarpSound();
+      addWarpRing(x, y);
+    }
+    return a;
+  }
+
+  function spawnExplosion(x, y, count = 14) {
+    const emitCount = prefersReducedMotion ? Math.min(6, count) : count;
+    for (let i = 0; i < emitCount; i += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 30 + Math.random() * 110;
+      const p = getParticle();
+      p.x = x;
+      p.y = y;
+      p.vx = Math.cos(angle) * speed;
+      p.vy = Math.sin(angle) * speed;
+      p.life = 0;
+      p.ttl = 320 + Math.random() * 180;
+      p.size = 1.7 + Math.random() * 2.4;
+      p.alpha = 0.45 + Math.random() * 0.4;
+      sim.particles.push(p);
+    }
+  }
+
+  function playBoomSound(intensity = 1) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx || state.minimal) return;
+    if (!audioContext) audioContext = new AudioCtx();
+    const now = audioContext.currentTime;
+    const master = audioContext.createGain();
+    const osc = audioContext.createOscillator();
+    const noise = audioContext.createOscillator();
+    const toneGain = audioContext.createGain();
+    const noiseGain = audioContext.createGain();
+    master.connect(audioContext.destination);
+    osc.connect(toneGain);
+    noise.connect(noiseGain);
+    toneGain.connect(master);
+    noiseGain.connect(master);
+    const peak = clamp((state.whisper ? 0.08 : 0.26) * intensity, 0.06, 0.38);
+    master.gain.setValueAtTime(0.0001, now);
+    master.gain.exponentialRampToValueAtTime(peak, now + 0.02);
+    master.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(170, now);
+    osc.frequency.exponentialRampToValueAtTime(70, now + 0.2);
+    toneGain.gain.setValueAtTime(0.4, now);
+    toneGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+    noise.type = "square";
+    noise.frequency.setValueAtTime(40, now);
+    noiseGain.gain.setValueAtTime(0.2, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+    osc.start(now);
+    noise.start(now);
+    osc.stop(now + 0.24);
+    noise.stop(now + 0.2);
+  }
+
+  function wrapAsteroid(a) {
+    if (a.x < -a.r) a.x = sim.width + a.r;
+    if (a.x > sim.width + a.r) a.x = -a.r;
+    if (a.y < -a.r) a.y = sim.height + a.r;
+    if (a.y > sim.height + a.r) a.y = -a.r;
+  }
+
+  // === Collisions ===
+  function resolveAsteroidCollisions() {
+    const count = sim.asteroids.length;
+    if (count < 2) return;
+    if (count > 30 && engineMode !== "arcade") return;
+
+    for (let i = 0; i < count - 1; i += 1) {
+      const a = sim.asteroids[i];
+      for (let j = i + 1; j < count; j += 1) {
+        const b = sim.asteroids[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const minDist = a.r + b.r;
+        const distSq = dx * dx + dy * dy;
+        if (distSq <= 0 || distSq >= minDist * minDist) continue;
+
+        const dist = Math.sqrt(distSq);
+        const nx = dx / dist;
+        const ny = dy / dist;
+        const overlap = minDist - dist;
+        const totalMass = a.mass + b.mass;
+        const pushA = overlap * (b.mass / totalMass);
+        const pushB = overlap * (a.mass / totalMass);
+        a.x -= nx * pushA;
+        a.y -= ny * pushA;
+        b.x += nx * pushB;
+        b.y += ny * pushB;
+
+        const rvx = b.vx - a.vx;
+        const rvy = b.vy - a.vy;
+        const velAlongNormal = rvx * nx + rvy * ny;
+        if (velAlongNormal > 0) continue;
+
+        const restitution = 0.92;
+        const impulse = (-(1 + restitution) * velAlongNormal) / (1 / a.mass + 1 / b.mass);
+        const ix = impulse * nx;
+        const iy = impulse * ny;
+        a.vx -= ix / a.mass;
+        a.vy -= iy / a.mass;
+        b.vx += ix / b.mass;
+        b.vy += iy / b.mass;
+      }
+    }
+  }
+
+  function findHitAsteroidIndex(x, y) {
+    let best = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const a = sim.asteroids[i];
+      const dx = a.x - x;
+      const dy = a.y - y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d <= a.r + 10 && d < bestDist) {
+        best = i;
+        bestDist = d;
+      }
+    }
+    return best;
+  }
+
+  function removeAsteroidAt(index) {
+    const a = sim.asteroids[index];
+    if (!a) return null;
+    const last = sim.asteroids.length - 1;
+    sim.asteroids[index] = sim.asteroids[last];
+    sim.asteroids.pop();
+    return a;
+  }
+
+  function explodeAsteroidByIndex(targetIndex) {
+    const a = removeAsteroidAt(targetIndex);
+    if (!a) return;
+
+    const wasKind = a.kind;
+    const baseX = a.x;
+    const baseY = a.y;
+    const parentSpeed = Math.sqrt(a.vx * a.vx + a.vy * a.vy);
+    releaseAsteroid(a);
+
+    if (wasKind > 1) {
+      const childCount = wasKind === 3 ? (3 + Math.floor(Math.random() * 3)) : (2 + Math.floor(Math.random() * 2));
+      for (let i = 0; i < childCount; i += 1) {
+        if (sim.asteroids.length >= sim.maxAsteroids) break;
+        const child = spawnAsteroid(baseX, baseY, wasKind - 1, true);
+        if (!child) break;
+        const boost = 1.5 + Math.random() * 0.7;
+        child.vx += (child.vx / Math.max(1, Math.abs(child.vx))) * parentSpeed * 0.2 * boost;
+        child.vy += (child.vy / Math.max(1, Math.abs(child.vy))) * parentSpeed * 0.2 * boost;
+      }
+    }
+
+    spawnExplosion(baseX, baseY, 14);
+    playBoomSound(wasKind === 3 ? 1.1 : 0.95);
+  }
+
+  function triggerArcadeBoom() {
+    const now = performance.now();
+    if (!arcadeActive) return;
+    if (boomEnergy <= 0) return;
+    boomEnergy -= 1;
+    lastEnergyTick = now;
+    updateArcadeHud(now);
+
+    let tx = Number.isFinite(lastTapX) ? lastTapX : sim.width / 2;
+    let ty = Number.isFinite(lastTapY) ? lastTapY : sim.height / 2;
+    if (tx < 0 || tx > sim.width || ty < 0 || ty > sim.height) {
+      tx = sim.width / 2;
+      ty = sim.height / 2;
+    }
+    const targetIndex = findHitAsteroidIndex(tx, ty);
+    if (targetIndex >= 0) explodeAsteroidByIndex(targetIndex);
+  }
+
+  function pointFromEvent(event) {
+    const rect = galaxyPlayCanvas.getBoundingClientRect();
+    const clientX = event.touches?.[0]?.clientX ?? event.changedTouches?.[0]?.clientX ?? event.clientX;
+    const clientY = event.touches?.[0]?.clientY ?? event.changedTouches?.[0]?.clientY ?? event.clientY;
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  }
+
+  function clearGameplayEntities() {
+    while (sim.asteroids.length) releaseAsteroid(sim.asteroids.pop());
+    while (sim.particles.length) releaseParticle(sim.particles.pop());
+    while (sim.warpRings.length) releaseRing(sim.warpRings.pop());
+    sim.shooting = null;
+  }
+
+  function levelComplete() {
+    arcadeActive = false;
+    const cfg = ARCADE_LEVELS[currentLevelIndex];
+    const nextLevel = cfg.level + 1;
+    if (nextLevel <= ARCADE_LEVELS.length) {
+      setSavedArcadeLevel(nextLevel);
+      showArcadeOverlay(`LEVEL ${nextLevel}`, "", 400);
+      setTimeout(() => startLevel(currentLevelIndex + 1), 420);
+      return;
+    }
+    clearArcadeProgress();
+    try {
+      localStorage.setItem(STORAGE.rewardCelestial, "1");
+    } catch {
+      // ignore
+    }
+    showArcadeOverlay("YOU WIN", "Reward unlocked: Celestial Pack", 0, {
+      buttonText: "Back to Modes",
+      buttonAction: () => showModeSelect(),
+    });
+  }
+
+  function triggerGameOver() {
+    arcadeActive = false;
+    clearArcadeProgress();
+    showArcadeOverlay("GAME OVER", "Progress lost. Try again.", 0, {
+      buttonText: "Back to Modes",
+      buttonAction: () => showModeSelect(),
+    });
+  }
+
+  function startLevel(idx) {
+    const safeIdx = clamp(idx, 0, ARCADE_LEVELS.length - 1);
+    currentLevelIndex = safeIdx;
+    const cfg = ARCADE_LEVELS[safeIdx];
+    const now = performance.now();
+
+    clearGameplayEntities();
+    totalToSpawn = cfg.totalToClear;
+    spawnedTotal = 0;
+    spawnQueue = Math.max(0, cfg.totalToClear - cfg.startSpawn);
+    maxOnScreen = cfg.maxOnScreen;
+    sim.maxAsteroids = cfg.maxOnScreen;
+
+    for (let i = 0; i < cfg.startSpawn; i += 1) {
+      const p = randomPerimeterPoint();
+      spawnAsteroid(p.x, p.y, 3, false);
+      spawnedTotal += 1;
+    }
+
+    nextSpawnAt = cfg.spawnEveryMs > 0 ? now + cfg.spawnEveryMs : Infinity;
+    levelEndsAt = now + 400 + cfg.time * 1000;
+    boomEnergy = boomMax;
+    lastEnergyTick = now;
+    arcadeActive = true;
+    if (hudLevel) hudLevel.textContent = `LEVEL ${cfg.level}`;
+    showArcadeOverlay(`LEVEL ${cfg.level}`, "", 400);
+  }
+
+  function startArcadeFromSave() {
+    hideArcadeOverlay();
+    engineMode = "arcade";
+    arcadeActive = true;
+    setGalaxyViewMode("arcade");
+    setGalaxyTool("boom");
+    const saved = getSavedArcadeLevel();
+    const idx = clamp(saved - 1, 0, ARCADE_LEVELS.length - 1);
+    startLevel(idx);
+    resizeGalaxyCanvas();
+    startGalaxyLoop();
+  }
+
+  function startFreestyleMode() {
+    hideArcadeOverlay();
+    engineMode = "freestyle";
+    arcadeActive = false;
+    setGalaxyViewMode("freestyle");
+    sim.maxAsteroids = sim.width < 700 ? 80 : 120;
+    if (state.galaxyTool !== "boom") setGalaxyTool("draw");
+    resizeGalaxyCanvas();
+    startGalaxyLoop();
+  }
+
+  function showModeSelect() {
+    hideArcadeOverlay();
+    clearGameplayEntities();
+    engineMode = "menu";
+    arcadeActive = false;
+    setGalaxyViewMode("menu");
+    sim.maxAsteroids = sim.width < 700 ? 80 : 120;
+    setGalaxyTool("draw");
+    updateArcadeHud(performance.now());
+    startGalaxyLoop();
+    draw(performance.now());
+  }
+
   function resizeGalaxyCanvas() {
     sim.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     const rect = galaxyPlayCanvas.getBoundingClientRect();
@@ -1727,114 +2276,26 @@ function initGalaxyCanvas() {
     galaxyPlayCanvas.width = Math.floor(width * sim.dpr);
     galaxyPlayCanvas.height = Math.floor(height * sim.dpr);
     ctx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
-    sim.maxAsteroids = sim.width < 700 ? 80 : 120;
+    if (engineMode !== "arcade") sim.maxAsteroids = sim.width < 700 ? 80 : 120;
     seedStars();
   }
 
   function seedStars() {
-    const target = Math.max(120, Math.min(220, Math.round((sim.width * sim.height) / 9000)));
+    const target = Math.max(90, Math.min(190, Math.round((sim.width * sim.height) / 10000)));
     sim.stars = Array.from({ length: target }, () => ({
       x: Math.random() * sim.width,
       y: Math.random() * sim.height,
-      r: 0.4 + Math.random() * 1.6,
-      baseAlpha: 0.18 + Math.random() * 0.62,
-      twinkleSpeed: 0.4 + Math.random() * 1.3,
+      r: 0.5 + Math.random() * 1.4,
+      baseAlpha: 0.18 + Math.random() * 0.5,
+      twinkleSpeed: 0.4 + Math.random(),
       phase: Math.random() * Math.PI * 2,
-      driftX: prefersReducedMotion ? 0 : (Math.random() - 0.5) * 0.004,
-      driftY: prefersReducedMotion ? 0 : (Math.random() - 0.5) * 0.004,
+      driftX: prefersReducedMotion ? 0 : (Math.random() - 0.5) * 0.003,
+      driftY: prefersReducedMotion ? 0 : (Math.random() - 0.5) * 0.003,
     }));
   }
 
-  function randomVelocity(min, max) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = min + Math.random() * (max - min);
-    return { vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed };
-  }
-
-  function spawnAsteroid(x, y, radius = 18 + Math.random() * 16, speedMin = 18, speedMax = 55) {
-    if (sim.asteroids.length >= sim.maxAsteroids) return;
-    const v = randomVelocity(speedMin, speedMax);
-    const pointCount = 10 + Math.floor(Math.random() * 4);
-    const points = Array.from({ length: pointCount }, (_, i) => {
-      const angle = (Math.PI * 2 * i) / pointCount;
-      const offset = 0.76 + Math.random() * 0.42;
-      return { angle, offset };
-    });
-    sim.asteroids.push({
-      id: sim.nextAsteroidId++,
-      x,
-      y,
-      vx: v.vx,
-      vy: v.vy,
-      r: radius,
-      splitDepth: 0,
-      shape: points,
-      spin: (Math.random() - 0.5) * 0.08,
-      rot: Math.random() * Math.PI * 2,
-      alpha: 0.7 + Math.random() * 0.28,
-    });
-  }
-
-function playBoomSound(intensity = 1) {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx || state.minimal) return;
-    if (!audioContext) audioContext = new AudioCtx();
-
-    const now = audioContext.currentTime;
-    const master = audioContext.createGain();
-    const osc = audioContext.createOscillator();
-    const noise = audioContext.createOscillator();
-    const toneGain = audioContext.createGain();
-    const noiseGain = audioContext.createGain();
-
-    master.connect(audioContext.destination);
-    osc.connect(toneGain);
-    noise.connect(noiseGain);
-    toneGain.connect(master);
-    noiseGain.connect(master);
-
-    const peak = clamp((state.whisper ? 0.09 : 0.28) * intensity, 0.07, 0.42);
-    master.gain.setValueAtTime(0.0001, now);
-    master.gain.exponentialRampToValueAtTime(peak, now + 0.02);
-    master.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
-
-    osc.type = "triangle";
-    osc.frequency.setValueAtTime(160, now);
-    osc.frequency.exponentialRampToValueAtTime(65, now + 0.24);
-    toneGain.gain.setValueAtTime(0.5, now);
-    toneGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
-
-    noise.type = "square";
-    noise.frequency.setValueAtTime(38, now);
-    noiseGain.gain.setValueAtTime(0.26, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
-
-    osc.start(now);
-    noise.start(now);
-    osc.stop(now + 0.26);
-    noise.stop(now + 0.22);
-  }
-
-  function spawnExplosion(x, y, count = 14) {
-    if (prefersReducedMotion) return;
-    for (let i = 0; i < count; i += 1) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 40 + Math.random() * 120;
-      sim.particles.push({
-        x,
-        y,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        life: 0,
-        ttl: 380 + Math.random() * 180,
-        size: 2 + Math.random() * 2.8,
-        glow: 0.65 + Math.random() * 0.35,
-      });
-    }
-  }
-
   function spawnShootingStar() {
-    if (prefersReducedMotion || !galaxyRunning) return;
+    if (prefersReducedMotion || !galaxyRunning || state.minimal) return;
     const startX = Math.random() * sim.width * 0.8;
     const startY = Math.random() * sim.height * 0.5;
     const speed = 0.9 + Math.random() * 0.7;
@@ -1843,14 +2304,14 @@ function playBoomSound(intensity = 1) {
       y: startY,
       vx: 0.95 * speed,
       vy: 0.55 * speed,
-      length: 80 + Math.random() * 70,
+      length: 70 + Math.random() * 50,
       life: 0,
-      ttl: 700 + Math.random() * 500,
+      ttl: 650 + Math.random() * 450,
     };
   }
 
   function scheduleShootingStar() {
-    if (prefersReducedMotion) return;
+    if (prefersReducedMotion || state.minimal) return;
     clearTimeout(sim.shootingTimer);
     const delay = 10000 + Math.random() * 15000;
     sim.shootingTimer = setTimeout(() => {
@@ -1859,37 +2320,79 @@ function playBoomSound(intensity = 1) {
     }, delay);
   }
 
-  function wrapAsteroid(a) {
-    if (a.x < -a.r) a.x = sim.width + a.r;
-    if (a.x > sim.width + a.r) a.x = -a.r;
-    if (a.y < -a.r) a.y = sim.height + a.r;
-    if (a.y > sim.height + a.r) a.y = -a.r;
-  }
-
   function update(dt, now) {
     const driftScale = prefersReducedMotion ? 0 : 1;
-    sim.stars.forEach((s) => {
+    for (let i = 0; i < sim.stars.length; i += 1) {
+      const s = sim.stars[i];
       s.x += s.driftX * dt * driftScale;
       s.y += s.driftY * dt * driftScale;
       if (s.x < 0) s.x += sim.width;
       if (s.y < 0) s.y += sim.height;
       if (s.x > sim.width) s.x -= sim.width;
       if (s.y > sim.height) s.y -= sim.height;
-    });
+    }
 
-    sim.asteroids.forEach((a) => {
+    if (engineMode === "arcade" && arcadeActive) {
+      const cfg = ARCADE_LEVELS[currentLevelIndex];
+      while (now - lastEnergyTick >= boomRegenMs && boomEnergy < boomMax) {
+        boomEnergy += 1;
+        lastEnergyTick += boomRegenMs;
+      }
+
+      if (cfg.spawnEveryMs > 0 && spawnQueue > 0 && now >= nextSpawnAt) {
+        if (sim.asteroids.length < maxOnScreen) {
+          const p = randomPerimeterPoint();
+          spawnAsteroid(p.x, p.y, 3, true);
+          spawnQueue -= 1;
+          spawnedTotal += 1;
+          nextSpawnAt = now + cfg.spawnEveryMs;
+        } else {
+          nextSpawnAt = now + 180;
+        }
+      }
+
+      const remainingMs = levelEndsAt - now;
+      updateArcadeHud(now);
+      if (remainingMs <= 0) {
+        triggerGameOver();
+      }
+
+      if (spawnQueue === 0 && spawnedTotal >= totalToSpawn && sim.asteroids.length === 0) {
+        levelComplete();
+      }
+    }
+
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const a = sim.asteroids[i];
       a.x += a.vx * (dt / 1000);
       a.y += a.vy * (dt / 1000);
       a.rot += a.spin * (dt / 16);
       wrapAsteroid(a);
-    });
+    }
 
-    sim.particles = sim.particles.filter((p) => {
+    resolveAsteroidCollisions();
+
+    for (let i = sim.particles.length - 1; i >= 0; i -= 1) {
+      const p = sim.particles[i];
       p.life += dt;
       p.x += p.vx * (dt / 1000);
       p.y += p.vy * (dt / 1000);
-      return p.life < p.ttl;
-    });
+      if (p.life >= p.ttl) {
+        sim.particles[i] = sim.particles[sim.particles.length - 1];
+        sim.particles.pop();
+        releaseParticle(p);
+      }
+    }
+
+    for (let i = sim.warpRings.length - 1; i >= 0; i -= 1) {
+      const ring = sim.warpRings[i];
+      ring.life += dt;
+      if (ring.life >= ring.ttl) {
+        sim.warpRings[i] = sim.warpRings[sim.warpRings.length - 1];
+        sim.warpRings.pop();
+        releaseRing(ring);
+      }
+    }
 
     if (sim.shooting) {
       sim.shooting.life += dt;
@@ -1904,71 +2407,61 @@ function playBoomSound(intensity = 1) {
   function draw(now) {
     ctx.clearRect(0, 0, sim.width, sim.height);
 
-    sim.stars.forEach((s) => {
-      const twinkle = prefersReducedMotion ? 0 : Math.sin(now * 0.001 * s.twinkleSpeed + s.phase) * 0.25;
-      const alpha = Math.max(0.06, Math.min(0.95, s.baseAlpha + twinkle));
+    for (let i = 0; i < sim.stars.length; i += 1) {
+      const s = sim.stars[i];
+      const twinkle = prefersReducedMotion ? 0 : Math.sin(now * 0.001 * s.twinkleSpeed + s.phase) * 0.2;
+      const alpha = Math.max(0.08, Math.min(0.9, s.baseAlpha + twinkle));
       ctx.beginPath();
       ctx.fillStyle = `rgba(214,227,255,${alpha.toFixed(3)})`;
       ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
       ctx.fill();
-    });
+    }
 
-    sim.asteroids.forEach((a) => {
-      const grad = ctx.createRadialGradient(a.x - a.r * 0.34, a.y - a.r * 0.38, a.r * 0.18, a.x, a.y, a.r);
-      grad.addColorStop(0, `rgba(176,136,88,${(a.alpha + 0.2).toFixed(3)})`);
-      grad.addColorStop(0.55, `rgba(112,78,44,${(a.alpha + 0.12).toFixed(3)})`);
-      grad.addColorStop(1, `rgba(54,37,22,${a.alpha.toFixed(3)})`);
-      ctx.fillStyle = grad;
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const a = sim.asteroids[i];
       ctx.beginPath();
-      a.shape.forEach((point, index) => {
+      for (let j = 0; j < a.shape.length; j += 1) {
+        const point = a.shape[j];
         const px = a.x + Math.cos(point.angle + a.rot) * a.r * point.offset;
         const py = a.y + Math.sin(point.angle + a.rot) * a.r * point.offset;
-        if (index === 0) ctx.moveTo(px, py);
+        if (j === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
-      });
+      }
       ctx.closePath();
+      const fill = a.kind === 3 ? "rgba(145,106,68,0.82)" : a.kind === 2 ? "rgba(126,92,61,0.82)" : "rgba(112,84,58,0.82)";
+      ctx.fillStyle = fill;
       ctx.fill();
-      ctx.strokeStyle = "rgba(250,224,180,0.16)";
+      ctx.strokeStyle = "rgba(246,220,184,0.2)";
       ctx.lineWidth = 1;
       ctx.stroke();
+    }
 
-      // subtle crater specks for rocky look
-      ctx.fillStyle = "rgba(62,42,22,0.22)";
+    for (let i = 0; i < sim.warpRings.length; i += 1) {
+      const ring = sim.warpRings[i];
+      const t = ring.life / ring.ttl;
+      const radius = ring.baseR + (ring.maxR - ring.baseR) * t;
+      const alpha = ring.alpha * (1 - t);
       ctx.beginPath();
-      ctx.arc(a.x + Math.cos(a.rot) * a.r * 0.25, a.y + Math.sin(a.rot) * a.r * 0.22, Math.max(1.2, a.r * 0.12), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(
-        a.x + Math.cos(a.rot + 1.9) * a.r * 0.18,
-        a.y + Math.sin(a.rot + 1.9) * a.r * 0.16,
-        Math.max(1, a.r * 0.09),
-        0,
-        Math.PI * 2,
-      );
-      ctx.fill();
-    });
+      ctx.strokeStyle = `rgba(112,255,178,${Math.max(0, alpha).toFixed(3)})`;
+      ctx.lineWidth = prefersReducedMotion ? 1.2 : 1.8;
+      ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
-    sim.particles.forEach((p) => {
-      const alpha = 1 - p.life / p.ttl;
+    for (let i = 0; i < sim.particles.length; i += 1) {
+      const p = sim.particles[i];
+      const alpha = (1 - p.life / p.ttl) * p.alpha;
       ctx.beginPath();
-      ctx.fillStyle = `rgba(111,255,128,${Math.max(0, alpha * p.glow).toFixed(3)})`;
+      ctx.fillStyle = `rgba(111,255,128,${Math.max(0, alpha).toFixed(3)})`;
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
-    });
+    }
 
-    if (sim.shooting && !prefersReducedMotion) {
+    if (sim.shooting && !prefersReducedMotion && !state.minimal) {
       const progress = sim.shooting.life / sim.shooting.ttl;
       const fade = progress < 0.2 ? progress / 0.2 : 1 - (progress - 0.2) / 0.8;
-      const grad = ctx.createLinearGradient(
-        sim.shooting.x,
-        sim.shooting.y,
-        sim.shooting.x - sim.shooting.length,
-        sim.shooting.y - sim.shooting.length * 0.55,
-      );
-      grad.addColorStop(0, `rgba(255,255,255,${Math.max(0, fade).toFixed(3)})`);
-      grad.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.strokeStyle = grad;
-      ctx.lineWidth = 1.8;
+      ctx.strokeStyle = `rgba(255,255,255,${Math.max(0, fade).toFixed(3)})`;
+      ctx.lineWidth = 1.6;
       ctx.beginPath();
       ctx.moveTo(sim.shooting.x, sim.shooting.y);
       ctx.lineTo(sim.shooting.x - sim.shooting.length, sim.shooting.y - sim.shooting.length * 0.55);
@@ -1978,79 +2471,15 @@ function playBoomSound(intensity = 1) {
 
   function frame(now) {
     if (!galaxyRunning) return;
-    if (now - sim.last < 33) {
+    if (now - sim.last < 16) {
       galaxyRaf = requestAnimationFrame(frame);
       return;
     }
-    const dt = sim.last ? now - sim.last : 16;
+    const rawDt = sim.last ? now - sim.last : 16;
+    const dt = Math.min(rawDt, 33);
     sim.last = now;
     update(dt, now);
     galaxyRaf = requestAnimationFrame(frame);
-  }
-
-  function pointFromEvent(event) {
-    const rect = galaxyPlayCanvas.getBoundingClientRect();
-    const clientX = event.touches?.[0]?.clientX ?? event.changedTouches?.[0]?.clientX ?? event.clientX;
-    const clientY = event.touches?.[0]?.clientY ?? event.changedTouches?.[0]?.clientY ?? event.clientY;
-    return { x: clientX - rect.left, y: clientY - rect.top };
-  }
-
-  function findHitAsteroid(x, y) {
-    let best = null;
-    let bestDist = Infinity;
-    sim.asteroids.forEach((a) => {
-      const dx = a.x - x;
-      const dy = a.y - y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d <= a.r + 10 && d < bestDist) {
-        best = a;
-        bestDist = d;
-      }
-    });
-    return best;
-  }
-
-  function explodeAsteroid(parent) {
-    sim.asteroids = sim.asteroids.filter((a) => a.id !== parent.id);
-    // Two split levels: large -> medium -> small -> destroy.
-    if (parent.splitDepth >= 2) {
-      spawnExplosion(parent.x, parent.y, 12);
-      playBoomSound(0.9);
-      if (sim.asteroids.length === 0) setGalaxyTool("draw");
-      return;
-    }
-    // Keep fewer tiny fragments: larger pieces, fewer chunks on later splits.
-    const chunks = parent.splitDepth === 0 ? 3 + Math.floor(Math.random() * 2) : 2 + Math.floor(Math.random() * 2);
-    const parentSpeed = Math.sqrt(parent.vx * parent.vx + parent.vy * parent.vy);
-    const allowTinySet = parent.splitDepth >= 1 && Math.random() < 0.25; // 1 out of 4 times
-    for (let i = 0; i < chunks; i += 1) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = parentSpeed * (1.4 + Math.random() * 0.8) + 16 + Math.random() * 28;
-      const childRadius = allowTinySet
-        ? clamp(parent.r * (0.26 + Math.random() * 0.16), 6, 14)
-        : clamp(parent.r * (0.40 + Math.random() * 0.22), 9, 26);
-      sim.asteroids.push({
-        id: sim.nextAsteroidId++,
-        x: parent.x + Math.cos(angle) * 4,
-        y: parent.y + Math.sin(angle) * 4,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        r: childRadius,
-        splitDepth: parent.splitDepth + 1,
-        shape: (() => {
-          const childPointCount = 9 + Math.floor(Math.random() * 4);
-          return Array.from({ length: childPointCount }, (_, i) => ({
-            angle: (Math.PI * 2 * i) / childPointCount,
-            offset: 0.72 + Math.random() * 0.44,
-          }));
-        })(),
-        spin: (Math.random() - 0.5) * 0.14,
-        rot: Math.random() * Math.PI * 2,
-        alpha: 0.62 + Math.random() * 0.28,
-      });
-    }
-    spawnExplosion(parent.x, parent.y, 16);
-    playBoomSound(1.15);
   }
 
   function onTap(event) {
@@ -2060,34 +2489,64 @@ function playBoomSound(intensity = 1) {
     sim.lastTapAt = now;
 
     const point = pointFromEvent(event);
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+    if (point.x < 0 || point.x > sim.width || point.y < 0 || point.y > sim.height) return;
+    lastTapX = point.x;
+    lastTapY = point.y;
+
     if (debugTaps && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)) {
       // eslint-disable-next-line no-console
       console.log("elementFromPoint", document.elementFromPoint(event.clientX, event.clientY));
     }
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-    if (point.x < 0 || point.x > sim.width || point.y < 0 || point.y > sim.height) return;
+
+    if (engineMode === "arcade") {
+      return;
+    }
+    if (engineMode !== "freestyle") return;
+
     if (state.galaxyTool === "draw") {
-      // Desktop browsers can fire multiple related events from one click;
-      // enforce a hard spawn cooldown so one tap doesn't create duplicates.
       if (now < sim.nextDrawAt) return;
       sim.nextDrawAt = now + 500;
-      spawnAsteroid(point.x, point.y);
-      draw(performance.now());
+      spawnAsteroid(point.x, point.y, 3, false);
+      draw(now);
       return;
     }
+
     if (sim.asteroids.length === 0) {
       setGalaxyTool("draw");
-      spawnAsteroid(point.x, point.y);
+      spawnAsteroid(point.x, point.y, 3, false);
       return;
     }
-    const hit = findHitAsteroid(point.x, point.y);
-    if (hit) {
-      explodeAsteroid(hit);
-      draw(performance.now());
+
+    const hitIndex = findHitAsteroidIndex(point.x, point.y);
+    if (hitIndex >= 0) {
+      explodeAsteroidByIndex(hitIndex);
+      draw(now);
     }
   }
 
-  // HARDEN canvas input
+  function startGalaxyLoop() {
+    if (galaxyRunning) return;
+    galaxyRunning = true;
+    sim.last = 0;
+    if (!prefersReducedMotion) scheduleShootingStar();
+    galaxyRaf = requestAnimationFrame(frame);
+  }
+
+  function stopGalaxyLoop() {
+    galaxyRunning = false;
+    if (galaxyRaf) cancelAnimationFrame(galaxyRaf);
+    galaxyRaf = 0;
+    clearTimeout(sim.shootingTimer);
+    sim.shootingTimer = null;
+  }
+
+  function stopAndMenu() {
+    stopGalaxyLoop();
+    showModeSelect();
+    stopGalaxyLoop();
+  }
+
   galaxyPlayCanvas.addEventListener("pointerdown", onTap);
   galaxyPlayCanvas.addEventListener("touchstart", onTap, { passive: false });
   galaxyPlayCanvas.addEventListener("mousedown", onTap);
@@ -2103,43 +2562,33 @@ function playBoomSound(intensity = 1) {
     }
   });
 
-  function tick(now) {
-    frame(now);
-  }
-
-  function startGalaxyLoop() {
-    if (galaxyRunning) return;
-    galaxyRunning = true;
-    sim.last = 0;
-    if (!prefersReducedMotion) scheduleShootingStar();
-    if (sim.asteroids.length === 0) setGalaxyTool("draw");
-    galaxyRaf = requestAnimationFrame(tick);
-  }
-
-  function stopGalaxyLoop() {
-    galaxyRunning = false;
-    if (galaxyRaf) cancelAnimationFrame(galaxyRaf);
-    galaxyRaf = 0;
-    clearTimeout(sim.shootingTimer);
-    sim.shootingTimer = null;
-  }
-
-  // RESTORE galaxy + HARDEN resize
   resizeGalaxyCanvas();
   draw(performance.now());
 
   galaxyCanvasController = {
-    start() {
+    showModeSelect() {
       resizeGalaxyCanvas();
       setTimeout(resizeGalaxyCanvas, 50);
       setTimeout(resizeGalaxyCanvas, 250);
-      startGalaxyLoop();
+      showModeSelect();
     },
+    startFreestyle() {
+      startFreestyleMode();
+    },
+    startArcadeFromSave() {
+      startArcadeFromSave();
+    },
+    triggerBoom() {
+      if (engineMode === "arcade") triggerArcadeBoom();
+    },
+    isArcade() {
+      return engineMode === "arcade";
+    },
+    stopAndMenu,
     stop: stopGalaxyLoop,
     clear() {
-      sim.asteroids = [];
-      sim.particles = [];
-      sim.shooting = null;
+      if (engineMode === "arcade") return;
+      clearGameplayEntities();
       setGalaxyTool("draw");
       draw(performance.now());
     },

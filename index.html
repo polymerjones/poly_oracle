@@ -48,7 +48,7 @@
             <h1>Poly Oracle</h1>
             <span class="title-sweep" aria-hidden="true"></span>
             <div id="titleSparkles" class="title-sparkles" aria-hidden="true"></div>
-            <p class="tagline">Ask a yes or no question.</p>
+            <p class="tagline">Allow the Polyverse Oracle to guide you.</p>
           </div>
           <div class="header-icons">
             <button id="openGalaxy" class="gear-btn" type="button" aria-label="Galaxy Canvas" title="Galaxy Canvas">
@@ -71,7 +71,7 @@
         </section>
 
         <section class="controls ritual-controls">
-          <label class="prompt" for="question">Your question</label>
+          <label class="prompt" for="question">Ask your yes or no question:</label>
           <input id="question" type="text" maxlength="220" autocomplete="off" />
 
           <div class="actions">
@@ -206,6 +206,14 @@
         muted
         aria-hidden="true"
       ></video>
+      <div id="galaxyModeSelect" class="galaxyModeSelect" aria-hidden="true">
+        <div class="galaxyModeCard">
+          <div class="galaxyModeTitle">Select Mode</div>
+          <button id="btnArcade" class="modeBtn" type="button">Arcade</button>
+          <button id="btnFreestyle" class="modeBtn" type="button">Freestyle</button>
+          <button id="btnGalaxyBack" class="modeBackBtn" type="button">← Oracle</button>
+        </div>
+      </div>
       <header class="galaxy-topbar">
         <button id="closeGalaxy" class="ghost small galaxy-back" type="button" aria-label="Back to Oracle">← Oracle</button>
         <div class="galaxy-title">Galaxy Canvas</div>
@@ -215,8 +223,21 @@
           <button id="clearGalaxy" class="ghost small" type="button" aria-label="Clear asteroids">Clear</button>
         </div>
       </header>
+      <div id="arcadeHud" class="arcadeHud" aria-hidden="true">
+        <button id="arcadeBack" class="hudBtn" type="button">← Oracle</button>
+        <div class="hudCenter">
+          <div id="hudLevel" class="hudLevel">LEVEL 1</div>
+          <div id="hudTimer" class="hudTimer">00:20</div>
+        </div>
+        <button id="btnBoom" class="hudBoom" type="button">BOOM</button>
+      </div>
       <canvas id="galaxyPlayCanvas" aria-hidden="true"></canvas>
       <div class="galaxy-hint">Draw: tap to spawn asteroid • Boom: tap asteroid to split</div>
+      <div id="arcadeOverlay" class="arcadeOverlay" aria-hidden="true">
+        <div id="arcadeOverlayText" class="arcadeOverlayText">LEVEL 1</div>
+        <div id="arcadeOverlaySub" class="arcadeOverlaySub"></div>
+        <button id="arcadeOverlayBtn" class="arcadeOverlayBtn" style="display:none;"></button>
+      </div>
     </section>
 
     <script src="script.js?v=1.4.3"></script>

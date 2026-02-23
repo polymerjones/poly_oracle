@@ -98,6 +98,7 @@ const flash = document.getElementById("flash");
 const mist = document.getElementById("mist");
 const sparkles = document.getElementById("sparkles");
 const revealAudio = document.getElementById("revealAudio");
+const orbTapAudio = document.getElementById("orbTapAudio");
 const revealFxVideo = document.getElementById("revealFxVideo");
 const oracleBgVideo = document.getElementById("oracleBgVideo");
 const galaxyBgVideo = document.getElementById("galaxyBgVideo");
@@ -953,6 +954,13 @@ function triggerRevealFx({ reduced = false } = {}) {
 }
 
 function playPixySound(intensity) {
+  if (orbTapAudio) {
+    orbTapAudio.currentTime = 0;
+    orbTapAudio.volume = state.whisper ? 0.55 : 1;
+    orbTapAudio.play().catch(() => {});
+    return;
+  }
+
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   if (!AudioCtx || state.minimal) return;
   if (!audioContext) audioContext = new AudioCtx();
@@ -1735,8 +1743,8 @@ function playBoomSound(intensity = 1) {
 
   function pointFromEvent(event) {
     const rect = galaxyPlayCanvas.getBoundingClientRect();
-    const clientX = event.touches?.[0]?.clientX ?? event.clientX;
-    const clientY = event.touches?.[0]?.clientY ?? event.clientY;
+    const clientX = event.touches?.[0]?.clientX ?? event.changedTouches?.[0]?.clientX ?? event.clientX;
+    const clientY = event.touches?.[0]?.clientY ?? event.changedTouches?.[0]?.clientY ?? event.clientY;
     return { x: clientX - rect.left, y: clientY - rect.top };
   }
 
@@ -1792,7 +1800,7 @@ function playBoomSound(intensity = 1) {
   }
 
   function onTap(event) {
-    event.preventDefault();
+    if (event.cancelable) event.preventDefault();
     const point = pointFromEvent(event);
     if (state.galaxyTool === "draw") {
       spawnAsteroid(point.x, point.y);
@@ -1802,7 +1810,14 @@ function playBoomSound(intensity = 1) {
     if (hit) explodeAsteroid(hit);
   }
 
-  galaxyPlayCanvas.addEventListener("pointerdown", onTap);
+  // iOS/WebView compatibility: use PointerEvent when available,
+  // otherwise fall back to touch + mouse handlers.
+  if ("PointerEvent" in window) {
+    galaxyPlayCanvas.addEventListener("pointerdown", onTap);
+  } else {
+    galaxyPlayCanvas.addEventListener("touchstart", onTap, { passive: false });
+    galaxyPlayCanvas.addEventListener("mousedown", onTap);
+  }
 
   window.addEventListener("resize", resize);
   document.addEventListener("visibilitychange", () => {

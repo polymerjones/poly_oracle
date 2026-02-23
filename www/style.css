@@ -1056,7 +1056,7 @@ select:focus-visible {
   width: 100%;
   height: 100%;
   display: block;
-  touch-action: manipulation;
+  touch-action: none;
 }
 
 .galaxy-hint {

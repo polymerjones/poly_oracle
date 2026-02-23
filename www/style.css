@@ -1177,6 +1177,13 @@ select:focus-visible {
   display: none !important;
 }
 
+#oracleView {
+  min-height: calc(var(--vh, 1vh) * 100 - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  display: grid;
+  align-items: center;
+  justify-items: center;
+}
+
 .header-icons {
   display: flex;
   gap: 10px;

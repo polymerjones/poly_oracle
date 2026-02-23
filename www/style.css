@@ -25,9 +25,8 @@
 
 body {
   margin: 0;
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
+  min-height: calc(var(--vh, 1vh) * 100);
+  display: block;
   padding:
     max(10px, env(safe-area-inset-top, 0px))
     max(10px, env(safe-area-inset-right, 0px))
@@ -41,6 +40,8 @@ body {
   color: var(--textPrimary);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, Arial, sans-serif;
   position: relative;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 #galaxyCanvas {
@@ -68,14 +69,15 @@ body {
 }
 
 .stage {
-  width: min(820px, 94vw);
+  width: 92vw;
+  max-width: min(92vw, 520px);
+  margin: 0 auto;
   padding: 26px;
-  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 20px);
   border-radius: 30px;
-  background: linear-gradient(165deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  background: rgba(18, 24, 36, 0.55);
   border: 1px solid var(--line);
   box-shadow: 0 28px 80px rgba(2, 5, 15, 0.68), inset 0 0 72px rgba(163, 196, 255, 0.1);
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(14px) saturate(120%);
   position: relative;
   overflow: hidden;
   z-index: 1;
@@ -246,7 +248,7 @@ h1 {
 }
 
 .orb {
-  width: min(242px, 58vw);
+  width: clamp(180px, 52vw, 320px);
   aspect-ratio: 1;
   border-radius: 999px;
   clip-path: circle(50%);
@@ -456,30 +458,40 @@ body.verbose-details .answer-verbose {
   position: fixed;
   inset: 0;
   background: rgba(4, 8, 18, 0.64);
-  z-index: 5;
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
 }
 
 .panel-backdrop[hidden] {
   display: none !important;
 }
 
+.panel-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .settings-panel {
   position: fixed;
   right: 0;
   top: 0;
-  height: 100vh;
+  height: calc(var(--vh, 1vh) * 100);
   width: min(440px, 94vw);
   padding: 16px;
   border-left: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(8, 15, 33, 0.98), rgba(10, 20, 40, 0.97));
-  z-index: 6;
+  z-index: 51;
   overflow: auto;
   transform: translateX(100%);
   transition: transform 0.28s ease;
+  pointer-events: none;
 }
 
 .settings-panel.open {
   transform: translateX(0);
+  pointer-events: auto;
 }
 
 .settings-head {
@@ -956,6 +968,56 @@ select:focus-visible {
   .stage {
     padding: 20px;
     border-radius: 24px;
+  }
+}
+
+/* v1.2.4 iOS mobile patch */
+@media (max-width: 480px) {
+  .stage {
+    width: 92vw;
+    max-width: min(92vw, 520px);
+    padding: 18px;
+    border-radius: 28px;
+  }
+
+  .hero {
+    gap: 8px;
+  }
+
+  h1 {
+    font-size: clamp(1.8rem, 8.3vw, 2.2rem);
+  }
+
+  .tagline {
+    margin-top: 2px;
+    font-size: 0.95rem;
+  }
+
+  .orb-shell {
+    margin-top: 10px;
+  }
+
+  .controls {
+    margin-top: 8px;
+  }
+
+  .actions {
+    margin-top: 10px;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+@supports (-webkit-touch-callout: none) {
+  .stage {
+    background: rgba(18, 24, 36, 0.68);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(16px) saturate(115%);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
 }
 

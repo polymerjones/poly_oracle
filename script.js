@@ -168,6 +168,7 @@ let mediaPrimed = false;
 init();
 
 function init() {
+  setVh();
   loadState();
   initGalaxyBackground();
   initGalaxyCanvas();
@@ -186,6 +187,11 @@ function init() {
 }
 
 function addListeners() {
+  window.addEventListener("resize", setVh);
+  window.addEventListener("orientationchange", setVh);
+  questionInput.addEventListener("focus", setVh);
+  questionInput.addEventListener("blur", setVh);
+
   const primeMediaOnGesture = () => {
     if (mediaPrimed) return;
     mediaPrimed = true;
@@ -433,10 +439,36 @@ function setSettingsOpen(open) {
     vault.hidden = true;
     hideFirstRunHint();
   }
-  settingsBackdrop.hidden = !open;
-  settingsPanel.hidden = !open;
-  settingsPanel.classList.toggle("open", open);
+  if (open) {
+    settingsBackdrop.hidden = false;
+    settingsPanel.hidden = false;
+    settingsBackdrop.style.display = "block";
+    settingsPanel.style.display = "block";
+    settingsBackdrop.style.pointerEvents = "auto";
+    settingsPanel.style.pointerEvents = "auto";
+    requestAnimationFrame(() => {
+      settingsBackdrop.classList.add("open");
+      settingsPanel.classList.add("open");
+      settingsBackdrop.style.opacity = "1";
+    });
+  } else {
+    settingsBackdrop.classList.remove("open");
+    settingsPanel.classList.remove("open");
+    settingsBackdrop.style.opacity = "0";
+    settingsBackdrop.style.pointerEvents = "none";
+    settingsPanel.style.pointerEvents = "none";
+    settingsBackdrop.style.display = "none";
+    settingsPanel.style.display = "none";
+    settingsBackdrop.hidden = true;
+    settingsPanel.hidden = true;
+  }
   document.body.style.overflow = open ? "hidden" : "";
+}
+
+/* v1.2.4 iOS mobile patch */
+function setVh() {
+  const vh = window.innerHeight * 0.01;
+  document.documentElement.style.setProperty("--vh", `${vh}px`);
 }
 
 function openGalaxyView() {

@@ -1,4 +1,4 @@
-const APP_VERSION = "v1.2.2";
+const APP_VERSION = "v1.4.0";
 const storageKey = "poly-oracle-v11-state";
 const firstRunHintKey = "poly_oracle_seen_hint_v1_2_1";
 const verboseKey = "poly_oracle_verbose_details";
@@ -746,6 +746,7 @@ async function finishReveal({ normalizedQuestion, polarity, answerLine, microLin
   state.vault = state.vault.slice(0, 200);
 
   renderAnswerCard();
+  triggerAnswerRevealImpact();
   renderVault();
   saveState();
 
@@ -758,6 +759,19 @@ async function finishReveal({ normalizedQuestion, polarity, answerLine, microLin
 
   setRevealing(false);
   setIntentState();
+}
+
+function triggerAnswerRevealImpact() {
+  // Bright purple flash at answer reveal.
+  flash.classList.remove("answer-hit");
+  void flash.offsetWidth;
+  flash.classList.add("answer-hit");
+  setTimeout(() => {
+    flash.classList.remove("answer-hit");
+  }, prefersReducedMotion ? 180 : 320);
+
+  // Sparkle burst around the revealed answer card.
+  spawnAnswerSparkles(prefersReducedMotion ? 8 : 20, prefersReducedMotion ? 1 : 1.25);
 }
 
 function renderAnswerCard() {
@@ -990,6 +1004,35 @@ function spawnSparkles(count, sizeMultiplier = 1, brightnessMultiplier = 1) {
     sparkle.style.height = `${size}px`;
     sparkle.style.opacity = `${alpha}`;
     sparkle.style.animationDelay = `${Math.random() * 0.12}s`;
+    sparkles.appendChild(sparkle);
+    sparkle.addEventListener("animationend", () => sparkle.remove());
+  }
+}
+
+function spawnAnswerSparkles(count = 14, scale = 1) {
+  if (!sparkles || !answerCard || answerBox.hidden) return;
+  const stageRect = stage.getBoundingClientRect();
+  const cardRect = answerCard.getBoundingClientRect();
+  const centerX = cardRect.left - stageRect.left + cardRect.width / 2;
+  const centerY = cardRect.top - stageRect.top + cardRect.height / 2;
+  const radiusX = cardRect.width * 0.52;
+  const radiusY = cardRect.height * 0.55;
+
+  for (let i = 0; i < count; i += 1) {
+    const angle = Math.random() * Math.PI * 2;
+    const jitter = 0.55 + Math.random() * 0.5;
+    const x = centerX + Math.cos(angle) * radiusX * jitter;
+    const y = centerY + Math.sin(angle) * radiusY * jitter;
+    const sparkle = document.createElement("span");
+    const size = (4 + Math.random() * 6) * scale;
+
+    sparkle.className = "sparkle answer-sparkle";
+    sparkle.style.left = `${x}px`;
+    sparkle.style.top = `${y}px`;
+    sparkle.style.width = `${size}px`;
+    sparkle.style.height = `${size}px`;
+    sparkle.style.opacity = prefersReducedMotion ? "0.5" : "0.82";
+    sparkle.style.animationDelay = `${Math.random() * 0.09}s`;
     sparkles.appendChild(sparkle);
     sparkle.addEventListener("animationend", () => sparkle.remove());
   }

@@ -123,6 +123,12 @@ body {
   animation: flashPop 0.46s ease-out;
 }
 
+#flash.answer-hit {
+  opacity: 0;
+  background: radial-gradient(circle at 50% 52%, rgba(205, 126, 255, 0.95), rgba(145, 88, 255, 0.65) 32%, transparent 68%);
+  animation: answerHitFlash 0.3s ease-out;
+}
+
 #mist.active {
   animation: mistRise 1.05s ease-out;
 }
@@ -726,6 +732,11 @@ body.verbose-details .answer-verbose {
   animation: sparklePop 0.8s ease-out forwards;
 }
 
+.sparkle.answer-sparkle {
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95) 0%, rgba(232, 156, 255, 0.86) 45%, rgba(255, 255, 255, 0) 78%);
+  box-shadow: 0 0 14px rgba(214, 132, 255, 0.85);
+}
+
 body.whisper .stage {
   box-shadow: 0 16px 42px rgba(2, 5, 15, 0.56), inset 0 0 26px rgba(173, 202, 255, 0.06);
 }
@@ -839,6 +850,18 @@ select:focus-visible {
   }
   25% {
     opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes answerHitFlash {
+  0% {
+    opacity: 0;
+  }
+  34% {
+    opacity: 0.95;
   }
   100% {
     opacity: 0;
@@ -998,11 +1021,21 @@ select:focus-visible {
 
 /* v1.2.4 iOS mobile patch */
 @media (max-width: 480px) {
+  body {
+    background:
+      radial-gradient(760px 520px at 18% 10%, rgba(88, 112, 210, 0.16), transparent 62%),
+      radial-gradient(680px 540px at 84% 12%, rgba(82, 156, 214, 0.12), transparent 66%),
+      linear-gradient(165deg, #070c1d, #0d1838 52%, #132654);
+  }
+
   .stage {
     width: 92vw;
     max-width: min(92vw, 520px);
     padding: 18px;
     border-radius: 28px;
+    background: rgba(16, 22, 36, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
 
   .hero {
@@ -1035,6 +1068,11 @@ select:focus-visible {
   select {
     font-size: 16px;
   }
+
+  .oracle-bg-video {
+    opacity: 0.62;
+    filter: saturate(1.14) contrast(1.12) brightness(0.54);
+  }
 }
 
 @supports (-webkit-touch-callout: none) {
@@ -1046,12 +1084,28 @@ select:focus-visible {
   }
 }
 
+@supports (-webkit-touch-callout: none) and (max-width: 600px) {
+  /* v1.2.6 mobile Safari anti-fog pass */
+  .stage {
+    background: rgba(14, 20, 34, 0.84);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: 0 18px 56px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+
+  .oracle-bg-video {
+    opacity: 0.66;
+    filter: saturate(1.18) contrast(1.14) brightness(0.5);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .orb,
   .orb::before,
   .title-sweep,
   .answer-card.reveal,
   #flash.active,
+  #flash.answer-hit,
   #mist.active,
   .sparkle,
   .title-sparkle,

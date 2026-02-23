@@ -427,6 +427,11 @@ body.verbose-details .answer-verbose {
   color: var(--textSecondary);
 }
 
+.advanced-settings,
+.advanced-settings[hidden] {
+  display: none !important;
+}
+
 .segment {
   display: grid;
   grid-template-columns: 1fr 1fr;

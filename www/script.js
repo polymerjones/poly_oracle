@@ -654,9 +654,9 @@ function performRitualPulse(level = 1) {
   }
 }
 
-function finishReveal({ normalizedQuestion, polarity, answerLine, microLine, revealVoice }) {
+async function finishReveal({ normalizedQuestion, polarity, answerLine, microLine, revealVoice }) {
   spawnSparkles(prefersReducedMotion ? 5 : 18, 1.2, 1.35);
-  playRevealSound();
+  await playRevealSoundAndWait();
   flash.classList.remove("active");
   mist.classList.remove("active");
   flash.style.opacity = "";
@@ -930,15 +930,39 @@ function spawnSparkles(count, sizeMultiplier = 1, brightnessMultiplier = 1) {
   }
 }
 
-function playRevealSound() {
-  if (!revealAudio) return;
+function playRevealSoundAndWait() {
+  if (!revealAudio) return Promise.resolve();
   const nextRevealSound = pick(revealSoundPool);
   if (nextRevealSound && revealAudio.getAttribute("src") !== nextRevealSound) {
     revealAudio.setAttribute("src", nextRevealSound);
     revealAudio.load();
   }
   revealAudio.currentTime = 0;
-  revealAudio.play().catch(() => {});
+  const fallbackMs = Math.min(
+    2400,
+    Math.max(
+      750,
+      Number.isFinite(revealAudio.duration) && revealAudio.duration > 0 ? Math.round(revealAudio.duration * 1000) : 1250,
+    ),
+  );
+  return new Promise((resolve) => {
+    let done = false;
+    let timeoutId = null;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      revealAudio.removeEventListener("ended", finish);
+      revealAudio.removeEventListener("error", finish);
+      resolve();
+    };
+    revealAudio.addEventListener("ended", finish, { once: true });
+    revealAudio.addEventListener("error", finish, { once: true });
+    timeoutId = setTimeout(finish, fallbackMs);
+    revealAudio.play().catch(() => {
+      setTimeout(finish, 220);
+    });
+  });
 }
 
 function triggerRevealFx({ reduced = false } = {}) {
@@ -1362,8 +1386,8 @@ function makeId() {
 }
 
 function initBackgroundVideos() {
-  oracleBgController = createPingPongVideoController(oracleBgVideo, { speed: 0.22 });
-  galaxyBgController = createPingPongVideoController(galaxyBgVideo, { speed: 0.22 });
+  oracleBgController = createLoopVideoController(oracleBgVideo);
+  galaxyBgController = createLoopVideoController(galaxyBgVideo);
 
   if (prefersReducedMotion) {
     if (oracleBgVideo) oracleBgVideo.currentTime = 0;
@@ -1390,82 +1414,25 @@ function initBackgroundVideos() {
   });
 }
 
-function createPingPongVideoController(video, { speed = 0.22 } = {}) {
+function createLoopVideoController(video) {
   if (!video) return null;
-  let raf = null;
-  let running = false;
-  let direction = 1;
-  let last = 0;
-  let ready = false;
-
-  function ensureReady() {
-    if (ready) return true;
-    if (Number.isFinite(video.duration) && video.duration > 0) {
-      ready = true;
-      return true;
-    }
-    return false;
-  }
-
-  function step(now) {
-    if (!running) return;
-    if (!ensureReady()) {
-      raf = requestAnimationFrame(step);
-      return;
-    }
-
-    const dt = last ? (now - last) / 1000 : 0;
-    last = now;
-
-    const duration = video.duration;
-    let next = video.currentTime + dt * speed * direction;
-    if (next >= duration) {
-      next = duration - (next - duration);
-      direction = -1;
-    } else if (next <= 0) {
-      next = -next;
-      direction = 1;
-    }
-
-    try {
-      video.currentTime = clamp(next, 0, duration);
-    } catch {
-      // ignore seek errors
-    }
-
-    raf = requestAnimationFrame(step);
-  }
 
   video.muted = true;
-  video.loop = false;
+  video.loop = true;
   video.playsInline = true;
-  video.playbackRate = 1;
   video.preload = "auto";
   try {
     video.load();
   } catch {
     // ignore load errors
   }
-  video.pause();
-  video.addEventListener("loadedmetadata", () => {
-    ready = true;
-  });
-  video.addEventListener("loadeddata", () => {
-    ready = true;
-  });
 
   return {
     start() {
-      running = true;
-      last = 0;
-      // Prime decode on Safari/WebView so currentTime stepping doesn't appear frozen.
-      video.play().then(() => video.pause()).catch(() => {});
-      if (!raf) raf = requestAnimationFrame(step);
+      video.play().catch(() => {});
     },
     stop() {
-      running = false;
-      if (raf) cancelAnimationFrame(raf);
-      raf = null;
+      video.pause();
     },
   };
 }
@@ -1819,6 +1786,8 @@ function playBoomSound(intensity = 1) {
   }
 
   function onTap(event) {
+    const target = event.target;
+    if (target && typeof target.closest === "function" && target.closest(".galaxy-topbar")) return;
     if (event.cancelable) event.preventDefault();
     const now = performance.now();
     if (now - sim.lastTapAt < 40) return; // dedupe stacked touch/click events
@@ -1840,6 +1809,9 @@ function playBoomSound(intensity = 1) {
   galaxyPlayCanvas.addEventListener("pointerdown", onTap);
   galaxyPlayCanvas.addEventListener("touchstart", onTap, { passive: false });
   galaxyPlayCanvas.addEventListener("mousedown", onTap);
+  galaxyView.addEventListener("pointerdown", onTap);
+  galaxyView.addEventListener("touchstart", onTap, { passive: false });
+  galaxyView.addEventListener("mousedown", onTap);
 
   window.addEventListener("resize", resize);
   document.addEventListener("visibilitychange", () => {

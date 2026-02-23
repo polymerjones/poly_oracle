@@ -202,7 +202,8 @@ const arcadeHud = document.getElementById("arcadeHud");
 const arcadeBack = document.getElementById("arcadeBack");
 const hudLevel = document.getElementById("hudLevel");
 const hudTimer = document.getElementById("hudTimer");
-const btnBoom = document.getElementById("btnBoom");
+const arcadeTimerBackdrop = document.getElementById("arcadeTimerBackdrop");
+const arcadeTimerGhost = document.getElementById("arcadeTimerGhost");
 const arcadeOverlay = document.getElementById("arcadeOverlay");
 const arcadeOverlayText = document.getElementById("arcadeOverlayText");
 const arcadeOverlaySub = document.getElementById("arcadeOverlaySub");
@@ -392,11 +393,8 @@ function addListeners() {
     btnGalaxyBack.addEventListener("click", () => closeGalaxyView());
   }
   if (arcadeBack) {
-    arcadeBack.addEventListener("click", () => closeGalaxyView());
-  }
-  if (btnBoom) {
-    btnBoom.addEventListener("click", () => {
-      galaxyCanvasController?.triggerBoom?.();
+    arcadeBack.addEventListener("click", () => {
+      galaxyCanvasController?.showModeSelect?.();
     });
   }
 
@@ -1815,11 +1813,7 @@ function initGalaxyCanvas() {
   let totalToSpawn = 0;
   let spawnedTotal = 0;
   let maxOnScreen = 12;
-
-  let boomEnergy = 3;
-  const boomMax = 3;
-  const boomRegenMs = 1200;
-  let lastEnergyTick = 0;
+  let levelDurationMs = 0;
 
   function setGalaxyViewMode(mode) {
     galaxyView.classList.toggle("mode-menu", mode === "menu");
@@ -1866,11 +1860,19 @@ function initGalaxyCanvas() {
   }
 
   function updateArcadeHud(now) {
+    const remainingMs = levelEndsAt - now;
+    const safeRemaining = Math.max(0, remainingMs);
     if (hudLevel) hudLevel.textContent = `LEVEL ${ARCADE_LEVELS[currentLevelIndex]?.level || 1}`;
-    if (hudTimer) hudTimer.textContent = formatMs(levelEndsAt - now);
-    if (btnBoom) {
-      btnBoom.textContent = `BOOM ${boomEnergy}`;
-      btnBoom.disabled = !arcadeActive || boomEnergy <= 0;
+    if (hudTimer) {
+      hudTimer.textContent = formatMs(safeRemaining);
+      hudTimer.classList.toggle("danger", safeRemaining <= 10000 && safeRemaining > 0);
+    }
+    if (arcadeTimerGhost) arcadeTimerGhost.textContent = formatMs(safeRemaining);
+    if (arcadeTimerBackdrop) {
+      const ratio = levelDurationMs > 0 ? 1 - safeRemaining / levelDurationMs : 0;
+      const opacity = clamp(0.08 + ratio * 0.64, 0.08, 0.72);
+      arcadeTimerBackdrop.style.opacity = String(opacity);
+      arcadeTimerBackdrop.classList.toggle("danger", safeRemaining <= 10000 && safeRemaining > 0);
     }
   }
 
@@ -2138,24 +2140,6 @@ function initGalaxyCanvas() {
     playBoomSound(wasKind === 3 ? 1.1 : 0.95);
   }
 
-  function triggerArcadeBoom() {
-    const now = performance.now();
-    if (!arcadeActive) return;
-    if (boomEnergy <= 0) return;
-    boomEnergy -= 1;
-    lastEnergyTick = now;
-    updateArcadeHud(now);
-
-    let tx = Number.isFinite(lastTapX) ? lastTapX : sim.width / 2;
-    let ty = Number.isFinite(lastTapY) ? lastTapY : sim.height / 2;
-    if (tx < 0 || tx > sim.width || ty < 0 || ty > sim.height) {
-      tx = sim.width / 2;
-      ty = sim.height / 2;
-    }
-    const targetIndex = findHitAsteroidIndex(tx, ty);
-    if (targetIndex >= 0) explodeAsteroidByIndex(targetIndex);
-  }
-
   function pointFromEvent(event) {
     const rect = galaxyPlayCanvas.getBoundingClientRect();
     const clientX = event.touches?.[0]?.clientX ?? event.changedTouches?.[0]?.clientX ?? event.clientX;
@@ -2221,9 +2205,8 @@ function initGalaxyCanvas() {
     }
 
     nextSpawnAt = cfg.spawnEveryMs > 0 ? now + cfg.spawnEveryMs : Infinity;
-    levelEndsAt = now + 400 + cfg.time * 1000;
-    boomEnergy = boomMax;
-    lastEnergyTick = now;
+    levelDurationMs = cfg.time * 1000;
+    levelEndsAt = now + 400 + levelDurationMs;
     arcadeActive = true;
     if (hudLevel) hudLevel.textContent = `LEVEL ${cfg.level}`;
     showArcadeOverlay(`LEVEL ${cfg.level}`, "", 400);
@@ -2234,7 +2217,7 @@ function initGalaxyCanvas() {
     engineMode = "arcade";
     arcadeActive = true;
     setGalaxyViewMode("arcade");
-    setGalaxyTool("boom");
+    setGalaxyTool("draw");
     const saved = getSavedArcadeLevel();
     const idx = clamp(saved - 1, 0, ARCADE_LEVELS.length - 1);
     startLevel(idx);
@@ -2261,6 +2244,10 @@ function initGalaxyCanvas() {
     setGalaxyViewMode("menu");
     sim.maxAsteroids = sim.width < 700 ? 80 : 120;
     setGalaxyTool("draw");
+    if (arcadeTimerBackdrop) {
+      arcadeTimerBackdrop.style.opacity = "0";
+      arcadeTimerBackdrop.classList.remove("danger");
+    }
     updateArcadeHud(performance.now());
     startGalaxyLoop();
     draw(performance.now());
@@ -2334,10 +2321,6 @@ function initGalaxyCanvas() {
 
     if (engineMode === "arcade" && arcadeActive) {
       const cfg = ARCADE_LEVELS[currentLevelIndex];
-      while (now - lastEnergyTick >= boomRegenMs && boomEnergy < boomMax) {
-        boomEnergy += 1;
-        lastEnergyTick += boomRegenMs;
-      }
 
       if (cfg.spawnEveryMs > 0 && spawnQueue > 0 && now >= nextSpawnAt) {
         if (sim.asteroids.length < maxOnScreen) {
@@ -2500,6 +2483,11 @@ function initGalaxyCanvas() {
     }
 
     if (engineMode === "arcade") {
+      const hitIndex = findHitAsteroidIndex(point.x, point.y);
+      if (hitIndex >= 0) {
+        explodeAsteroidByIndex(hitIndex);
+        draw(now);
+      }
       return;
     }
     if (engineMode !== "freestyle") return;
@@ -2579,7 +2567,7 @@ function initGalaxyCanvas() {
       startArcadeFromSave();
     },
     triggerBoom() {
-      if (engineMode === "arcade") triggerArcadeBoom();
+      // no-op in current arcade interaction model
     },
     isArcade() {
       return engineMode === "arcade";

@@ -1361,7 +1361,7 @@ select:focus-visible {
   z-index: 5;
   display: none;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 10px;
   padding:
     calc(8px + env(safe-area-inset-top, 0px))
@@ -1377,7 +1377,7 @@ select:focus-visible {
 }
 
 .hudBtn,
-.hudBoom {
+.arcadeOverlayBtn {
   min-height: 44px;
   border-radius: 999px;
   padding: 10px 14px;
@@ -1386,18 +1386,6 @@ select:focus-visible {
 .hudBtn {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.06);
-}
-
-.hudBoom {
-  min-width: 96px;
-  border: 1px solid rgba(135, 255, 193, 0.48);
-  background: linear-gradient(120deg, rgba(104, 255, 182, 0.9), rgba(116, 225, 255, 0.86));
-  color: #08212f;
-  font-weight: 700;
-}
-
-.hudBoom:disabled {
-  opacity: 0.45;
 }
 
 .hudCenter {
@@ -1418,6 +1406,42 @@ select:focus-visible {
   font-size: 1rem;
   font-weight: 700;
   color: #dff8ff;
+}
+
+.hudTimer.danger {
+  color: rgba(255, 103, 103, 0.96);
+  text-shadow: 0 0 8px rgba(255, 57, 57, 0.7), 0 0 18px rgba(255, 34, 34, 0.5);
+}
+
+.arcadeTimerBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 180ms linear;
+}
+
+.galaxy-view.mode-arcade .arcadeTimerBackdrop {
+  display: flex;
+}
+
+.arcadeTimerGhost {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: clamp(3rem, 19vw, 9rem);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: rgba(193, 228, 255, 0.58);
+  text-shadow: 0 0 14px rgba(118, 206, 255, 0.2);
+  transition: color 160ms linear, text-shadow 160ms linear;
+}
+
+.arcadeTimerBackdrop.danger .arcadeTimerGhost {
+  color: rgba(255, 88, 88, 0.78);
+  text-shadow: 0 0 10px rgba(255, 66, 66, 0.62), 0 0 24px rgba(255, 34, 34, 0.52);
 }
 
 .arcadeOverlay {
@@ -1466,6 +1490,14 @@ select:focus-visible {
   }
 
   .arcadeOverlayText {
+    text-shadow: none;
+  }
+
+  .arcadeTimerBackdrop {
+    transition: none;
+  }
+
+  .arcadeTimerGhost {
     text-shadow: none;
   }
 }

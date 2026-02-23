@@ -232,6 +232,7 @@ let orbTapPoolIndex = 0;
 let lastOrbTapAt = 0;
 let orbTapBuffer = null;
 let orbTapBufferPromise = null;
+let chaosShiftAudio = null;
 
 init();
 
@@ -1109,6 +1110,8 @@ function applyTheme() {
 
 function showChaosToast() {
   if (!chaosToast) return;
+  chaosToast.textContent = "✨ Oracle changed realities.";
+  playChaosShiftSound();
   chaosToast.hidden = false;
   chaosToast.classList.remove("show");
   void chaosToast.offsetWidth;
@@ -1118,6 +1121,20 @@ function showChaosToast() {
     chaosToast.classList.remove("show");
     chaosToast.hidden = true;
   }, 1900);
+}
+
+function playChaosShiftSound() {
+  try {
+    if (!chaosShiftAudio) {
+      chaosShiftAudio = new Audio("reveal3.mp3");
+      chaosShiftAudio.preload = "auto";
+    }
+    chaosShiftAudio.currentTime = 0;
+    chaosShiftAudio.volume = state.whisper ? 0.3 : 0.75;
+    chaosShiftAudio.play().catch(() => {});
+  } catch {
+    // ignore audio errors
+  }
 }
 
 function spawnSparkles(count, sizeMultiplier = 1, brightnessMultiplier = 1) {

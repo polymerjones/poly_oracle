@@ -1027,10 +1027,27 @@ select:focus-visible {
   gap: 8px;
 }
 
+.galaxy-tools .ghost {
+  border-color: rgba(214, 235, 255, 0.3);
+  background:
+    radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0) 44%),
+    radial-gradient(circle at 64% 66%, rgba(155, 230, 255, 0.86), rgba(194, 131, 255, 0.42) 58%, rgba(58, 38, 106, 0.9) 100%);
+  color: #eef6ff;
+  box-shadow:
+    0 0 16px rgba(123, 226, 255, 0.28),
+    inset 0 0 16px rgba(255, 255, 255, 0.2);
+}
+
 .galaxy-tools .active {
-  background: linear-gradient(125deg, var(--accentA), var(--accentB));
-  color: #10162f;
+  background:
+    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0) 42%),
+    radial-gradient(circle at 64% 66%, rgba(166, 238, 255, 0.96), rgba(211, 151, 255, 0.58) 58%, rgba(66, 42, 116, 0.94) 100%);
+  color: #08142e;
   border-color: transparent;
+  box-shadow:
+    0 0 24px rgba(124, 223, 255, 0.46),
+    0 0 42px rgba(196, 127, 255, 0.24),
+    inset 0 0 18px rgba(255, 255, 255, 0.3);
 }
 
 #galaxyPlayCanvas {

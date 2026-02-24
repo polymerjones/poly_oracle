@@ -2529,6 +2529,7 @@ function initGalaxyCanvas() {
   let asteroidImpactFlashUntil = 0;
   let asteroidImpactFlashIntensity = 1;
   let lastAsteroidCollisionSfxAt = 0;
+  let suppressAstCollisionSfxUntil = 0;
   let warningActive = false;
   let warningLoopHandle = null;
   let arcadeLives = 0;
@@ -3204,6 +3205,7 @@ function initGalaxyCanvas() {
 
     if (playCollisionSfx) {
       const now = performance.now();
+      if (now < suppressAstCollisionSfxUntil) return;
       const impact = Math.abs(velAlongNormal);
       if (impact > 8 && now - lastAsteroidCollisionSfxAt > 95) {
         const isBigCollision = (a.kind || 1) >= 3 || (b.kind || 1) >= 3;
@@ -3283,7 +3285,7 @@ function initGalaxyCanvas() {
       const childCount = wasKind === 3 ? (3 + Math.floor(Math.random() * 3)) : (2 + Math.floor(Math.random() * 2));
       for (let i = 0; i < childCount; i += 1) {
         if (sim.asteroids.length >= sim.maxAsteroids) break;
-        const child = spawnAsteroid(baseX, baseY, wasKind - 1, true);
+        const child = spawnAsteroid(baseX, baseY, wasKind - 1, false);
         if (!child) break;
         const boost = 1.5 + Math.random() * 0.7;
         child.vx += (child.vx / Math.max(1, Math.abs(child.vx))) * parentSpeed * 0.2 * boost;
@@ -3299,6 +3301,7 @@ function initGalaxyCanvas() {
     playGameSfx(explodeKey, boomStackVolume(wasKind === 3 ? 0.9 : wasKind === 2 ? 0.72 : 0.56), {
       rate: 0.92 + Math.random() * 0.16,
     });
+    suppressAstCollisionSfxUntil = performance.now() + 180;
     if (bigBlast) {
       triggerAsteroidImpactFlash(1);
     } else if (mediumBlast) {

@@ -4388,21 +4388,10 @@ function initGalaxyCanvas() {
     galaxyPlayCanvas.addEventListener("pointerdown", onGalaxyPointerDown, { passive: false });
     galaxyPlayCanvas.addEventListener("pointermove", onGalaxyPointerMove, { passive: false });
     galaxyPlayCanvas.addEventListener("pointerup", onGalaxyPointerUp, { passive: false });
-    if (!window.PointerEvent) {
-      galaxyPlayCanvas.addEventListener("touchstart", onGalaxyPointerDown, { passive: false });
-      galaxyPlayCanvas.addEventListener("mousedown", onGalaxyPointerDown, { passive: false });
-    }
-  }
-  if (galaxyView && !galaxyView.__polyPracticeFallbackBound && !window.PointerEvent) {
-    galaxyView.__polyPracticeFallbackBound = true;
-    galaxyView.addEventListener("touchstart", (event) => {
-      if (engineMode !== "practice") return;
-      onGalaxyPointerDown(event);
-    }, { passive: false, capture: true });
-    galaxyView.addEventListener("mousedown", (event) => {
-      if (engineMode !== "practice") return;
-      onGalaxyPointerDown(event);
-    }, { passive: false, capture: true });
+    // Keep explicit fallbacks even when PointerEvent exists; some iOS webviews report
+    // support but still route taps inconsistently.
+    galaxyPlayCanvas.addEventListener("touchstart", onGalaxyPointerDown, { passive: false });
+    galaxyPlayCanvas.addEventListener("mousedown", onGalaxyPointerDown, { passive: false });
   }
   galaxyPlayCanvas.addEventListener("pointerenter", (event) => {
     setCrosshairVisible(true);

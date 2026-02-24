@@ -1329,9 +1329,8 @@ async function revealAnswer() {
     setAnswerTextVisible(true);
     setRevealBgStrobe(false);
     triggerAnswerTextRevealFx();
-    const textRevealHandle = audioEngine.play(SFX.POST, { volume: 0.95, rate: 1.0 });
-    await Promise.race([textRevealHandle?.ended || Promise.resolve(), delay(2200)]);
-    await delay(120);
+    audioEngine.play(SFX.POST, { volume: 0.95, rate: 1.0 });
+    await delay(620);
 
     if (state.voiceReadsAnswer !== false) {
       await speakAnswer(answerLine, revealVoice);

@@ -61,7 +61,7 @@ body::before {
   content: "";
   position: fixed;
   inset: -2px;
-  z-index: -3;
+  z-index: 0;
   pointer-events: none;
   background:
     radial-gradient(1000px 760px at 12% 10%, var(--bgNebula1), transparent 60%),
@@ -75,7 +75,7 @@ body::before {
   inset: 0;
   width: 100%;
   height: 100%;
-  z-index: -1;
+  z-index: 1;
   pointer-events: none;
 }
 
@@ -92,7 +92,7 @@ body::before {
 }
 
 .oracle-bg-video {
-  z-index: -2;
+  z-index: 2;
   opacity: 0.1;
 }
 
@@ -107,7 +107,7 @@ body::before {
   box-shadow: none;
   position: relative;
   overflow: hidden;
-  z-index: 1;
+  z-index: 3;
   isolation: isolate;
 }
 

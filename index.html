@@ -175,11 +175,11 @@
         <section class="settings-section about">
           <h3>About</h3>
           <div class="version">Version v1.4.3</div>
-          <button id="openContact" class="ghost small" type="button">Contact</button>
+          <button id="openContact" class="ghost small" type="button" hidden>Contact</button>
         </section>
       </aside>
 
-      <div id="contactModal" class="contactModal" hidden aria-hidden="true">
+      <div id="contactModal" class="contactModal" hidden aria-hidden="true" style="display:none;">
         <form id="contactForm" class="contactCard">
           <div class="contactHead">
             <h3>Contact</h3>
@@ -285,6 +285,9 @@
       </div>
     </section>
 
+    <script>
+      window.POLY_CONTACT_FORM_ENDPOINT = "";
+    </script>
     <script src="script.js?v=1.4.3"></script>
   </body>
 </html>

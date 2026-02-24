@@ -27,7 +27,7 @@ const GAME_SFX = {
   explosion_big: "gamesfx/explo1.mp3",
   explosion_med: "gamesfx/explo1.mp3",
   explosion_small: "gamesfx/smallboom1.mp3",
-  reveal_magic: "reveal3.mp3",
+  reveal_magic: "newprereveal.mp3",
   reveal_flash: "reveal4.mp3",
   landmine_arm: "gamesfx/minepreexplode.mp3",
   landmine_boom: "gamesfx/minefinalexplo.mp3",
@@ -36,9 +36,25 @@ const GAME_SFX = {
   lastlevelstart: "gamesfx/lastlevelstart.mp3",
   astcollide1: "gamesfx/astcollide1.mp3",
   astcollide2: "gamesfx/astcollide2.mp3",
+  newreveal001: "gamesfx/newreveal001.mp3",
+  newreveal002: "gamesfx/newreveal002.mp3",
+  newreveal003: "gamesfx/newreveal003.mp3",
+  newreveal004: "gamesfx/newreveal004.mp3",
+  newreveal005: "gamesfx/newreveal005.mp3",
+  newreveal007: "gamesfx/newreveal007.mp3",
+  newreveal008: "gamesfx/newreveal008.mp3",
 };
 
 const DEBUG_FORCE_LEVEL_SELECT = true;
+const REVEAL_VARIANT_SFX = [
+  "newreveal001",
+  "newreveal002",
+  "newreveal003",
+  "newreveal004",
+  "newreveal005",
+  "newreveal007",
+  "newreveal008",
+];
 
 // === Level Config ===
 const ARCADE_LEVELS = [
@@ -369,6 +385,11 @@ const audioEngine = {
     gain.connect(this.masterGain);
     source.start(0);
   },
+  getDuration(name, rate = 1) {
+    const buffer = this.buffers.get(name);
+    if (!buffer) return 0;
+    return buffer.duration / Math.max(0.01, rate || 1);
+  },
 };
 
 function preloadSfx() {
@@ -377,6 +398,13 @@ function preloadSfx() {
     const [name, src] = entries[i];
     audioEngine.loadSound(name, src);
   }
+}
+
+async function playSfxAndWait(name, { volume = 1, rate = 1, detune = 0, maxWaitMs = 8000 } = {}) {
+  audioEngine.play(name, { volume, rate, detune });
+  const durationMs = audioEngine.getDuration(name, rate) * 1000;
+  const waitMs = clamp(durationMs || 300, 180, maxWaitMs);
+  await delay(waitMs);
 }
 
 init();
@@ -1055,26 +1083,25 @@ async function revealAnswer() {
   await audioEngine.unlock();
   setRevealing(true);
   try {
-    audioEngine.play("reveal_magic", { volume: 0.9 });
-    await delay(250);
+    await playSfxAndWait("reveal_magic", { volume: 0.9, maxWaitMs: 5000 });
+    await delay(120);
     await speakLine(normalizedQuestion, {
       rate: state.whisper ? 0.92 : 1,
       pitch: 1.1,
       voiceName: revealVoice,
       timeoutMs: 6500,
     });
+    const revealDuring = pick(REVEAL_VARIANT_SFX);
+    const revealAfter = pick(REVEAL_VARIANT_SFX);
     audioEngine.play("reveal_flash", { volume: 0.75 });
     flashBackground(1, 180);
     darkenStage(true);
     await delay(220);
-    if (state.voiceReadsAnswer !== false) {
-      await speakLine(answerLine, {
-        rate: state.whisper ? 0.96 : 1.04,
-        pitch: 1.14,
-        voiceName: revealVoice,
-        timeoutMs: 6500,
-      });
-    }
+    await playSfxAndWait(revealDuring, {
+      volume: state.whisper ? 0.44 : 0.72,
+      rate: 0.98 + Math.random() * 0.06,
+      maxWaitMs: 6500,
+    });
     darkenStage(false);
     flashBackground(0.7, 160);
     finishReveal({
@@ -1084,6 +1111,19 @@ async function revealAnswer() {
       microLine,
       revealVoice,
     });
+    await playSfxAndWait(revealAfter, {
+      volume: state.whisper ? 0.4 : 0.66,
+      rate: 0.98 + Math.random() * 0.06,
+      maxWaitMs: 6500,
+    });
+    if (state.voiceReadsAnswer !== false) {
+      await speakLine(answerLine, {
+        rate: state.whisper ? 0.96 : 1.04,
+        pitch: 1.14,
+        voiceName: revealVoice,
+        timeoutMs: 6500,
+      });
+    }
   } finally {
     darkenStage(false);
     setRevealing(false);
@@ -3387,11 +3427,13 @@ function initGalaxyCanvas() {
 
     if (engineMode === "arcade") {
       if (landmine && isPointOnLandmine(point.x, point.y)) {
+        triggerCrosshairFire();
         armLandmine();
         return;
       }
       const hitIndex = findHitAsteroidIndex(point.x, point.y);
       if (hitIndex >= 0) {
+        triggerCrosshairFire();
         splitAsteroidByIndex(hitIndex);
         draw(now);
       }
@@ -3403,6 +3445,7 @@ function initGalaxyCanvas() {
     if (!freestyleBoom) {
       if (now < sim.nextDrawAt) return;
       sim.nextDrawAt = now + 120;
+      triggerCrosshairFire();
       spawnAsteroid(point.x, point.y, 3, false);
       draw(now);
       return;
@@ -3411,6 +3454,7 @@ function initGalaxyCanvas() {
     if (sim.asteroids.length === 0) {
       setGalaxyTool("draw");
       sim.nextDrawAt = 0;
+      triggerCrosshairFire();
       spawnAsteroid(point.x, point.y, 3, false);
       draw(now);
       return;
@@ -3418,9 +3462,17 @@ function initGalaxyCanvas() {
 
     const hitIndex = findHitAsteroidIndex(point.x, point.y);
     if (hitIndex >= 0) {
+      triggerCrosshairFire();
       splitAsteroidByIndex(hitIndex);
       draw(now);
+      return;
     }
+
+    if (now < sim.nextDrawAt) return;
+    sim.nextDrawAt = now + 120;
+    triggerCrosshairFire();
+    spawnAsteroid(point.x, point.y, 3, false);
+    draw(now);
   }
 
   function setCrosshairVisible(visible) {
@@ -3435,6 +3487,14 @@ function initGalaxyCanvas() {
     if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
     canvasCrosshair.style.left = `${clientX}px`;
     canvasCrosshair.style.top = `${clientY}px`;
+  }
+
+  function triggerCrosshairFire() {
+    if (!canvasCrosshair || !canShowCrosshair) return;
+    canvasCrosshair.classList.remove("fire");
+    void canvasCrosshair.offsetWidth;
+    canvasCrosshair.classList.add("fire");
+    setTimeout(() => canvasCrosshair.classList.remove("fire"), 110);
   }
 
   function startGalaxyLoop() {

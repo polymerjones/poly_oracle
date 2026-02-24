@@ -2662,11 +2662,11 @@ function initGalaxyCanvas() {
   const galaxyHint = galaxyView.querySelector(".galaxy-hint");
   const galaxyTools = galaxyView.querySelector(".galaxy-tools");
   let practiceDebugEl = document.getElementById("practiceDebug");
-  if (!practiceDebugEl && galaxyTools) {
+  if (!practiceDebugEl) {
     practiceDebugEl = document.createElement("div");
     practiceDebugEl.id = "practiceDebug";
     practiceDebugEl.className = "practiceDebug";
-    galaxyTools.appendChild(practiceDebugEl);
+    galaxyView.appendChild(practiceDebugEl);
   }
 
   const playfield = { x: 0, y: 0, w: 0, h: 0, pad: 12, topPad: 0, bottomPad: 0 };
@@ -3451,6 +3451,7 @@ function initGalaxyCanvas() {
   function updatePracticeDebug() {
     if (!practiceDebugEl) return;
     practiceDebugEl.textContent = `${engineMode} • ${state.practiceTool} • asteroids ${sim.asteroids.length}/${PRACTICE_MAX_ASTEROIDS}`;
+    practiceDebugEl.classList.toggle("hidden", engineMode !== "practice");
   }
 
   function debugPing(x, y) {
@@ -3463,6 +3464,7 @@ function initGalaxyCanvas() {
     const pencilActive = state.practiceTool === "pencil";
     toolDraw.classList.toggle("active", pencilActive);
     toolBoom.classList.toggle("active", !pencilActive);
+    updatePracticeDebug();
   }
 
   function isPointOnLandmine(x, y) {
@@ -3789,7 +3791,7 @@ function initGalaxyCanvas() {
     clearGameplayEntities();
     updatePracticeDebug();
     audioEngine.stopMusic();
-    audioEngine.playMusic("PRACTICE", MUSIC.PRACTICE, { crossfadeMs: 200 });
+    audioEngine.playMusic("PRACTICE", MUSIC.PRACTICE || MUSIC.L1_3, { crossfadeMs: 200 });
     resizeGalaxyCanvas();
     computePlayfield();
     setTimeout(computePlayfield, 50);
@@ -4295,6 +4297,9 @@ function initGalaxyCanvas() {
     const now = performance.now();
     if (now - sim.lastTapAt < 55) return;
     sim.lastTapAt = now;
+    const target = event.target;
+    const uiBlocker = target?.closest?.(".galaxyModeSelect:not(.hidden), .arcadeHud:not(.hidden), .arcadeOverlay.show:not(.hidden), .galaxy-topbar:not(.hidden)");
+    if (uiBlocker) return;
     const overlayVisible = arcadeOverlay && arcadeOverlay.classList.contains("show") && !arcadeOverlay.classList.contains("hidden");
     if (overlayVisible) return;
     const point = getPointerWorld(event);

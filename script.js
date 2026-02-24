@@ -2673,6 +2673,7 @@ function initGalaxyCanvas() {
   const canShowCrosshair = typeof window.matchMedia === "function"
     && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
   let debugDots = [];
+  let practiceLastInput = "idle";
 
   function showEl(el) {
     if (!el) return;
@@ -3450,7 +3451,7 @@ function initGalaxyCanvas() {
 
   function updatePracticeDebug() {
     if (!practiceDebugEl) return;
-    practiceDebugEl.textContent = `${engineMode} • ${state.practiceTool} • asteroids ${sim.asteroids.length}/${PRACTICE_MAX_ASTEROIDS}`;
+    practiceDebugEl.textContent = `${engineMode} • ${state.practiceTool} • asteroids ${sim.asteroids.length}/${PRACTICE_MAX_ASTEROIDS} • ${practiceLastInput}`;
     practiceDebugEl.classList.toggle("hidden", engineMode !== "practice");
   }
 
@@ -4272,6 +4273,7 @@ function initGalaxyCanvas() {
   }
 
   function handlePracticeTap(x, y, now) {
+    practiceLastInput = `tap ${Math.round(x)},${Math.round(y)}`;
     debugPing(x, y);
     if (state.practiceTool === "pencil") {
       if (now < sim.nextDrawAt) return;
@@ -4299,12 +4301,28 @@ function initGalaxyCanvas() {
     sim.lastTapAt = now;
     const target = event.target;
     const uiBlocker = target?.closest?.(".galaxyModeSelect:not(.hidden), .arcadeHud:not(.hidden), .arcadeOverlay.show:not(.hidden), .galaxy-topbar:not(.hidden)");
-    if (uiBlocker) return;
+    if (uiBlocker) {
+      practiceLastInput = "blocked by ui";
+      updatePracticeDebug();
+      return;
+    }
     const overlayVisible = arcadeOverlay && arcadeOverlay.classList.contains("show") && !arcadeOverlay.classList.contains("hidden");
-    if (overlayVisible) return;
+    if (overlayVisible) {
+      practiceLastInput = "blocked by overlay";
+      updatePracticeDebug();
+      return;
+    }
     const point = getPointerWorld(event);
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-    if (point.x < 0 || point.x > sim.width || point.y < 0 || point.y > sim.height) return;
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+      practiceLastInput = "invalid point";
+      updatePracticeDebug();
+      return;
+    }
+    if (point.x < 0 || point.x > sim.width || point.y < 0 || point.y > sim.height) {
+      practiceLastInput = `out ${Math.round(point.x)},${Math.round(point.y)}`;
+      updatePracticeDebug();
+      return;
+    }
     if (engineMode === "practice") {
       handlePracticeTap(point.x, point.y, now);
       return;
@@ -4374,6 +4392,17 @@ function initGalaxyCanvas() {
     galaxyPlayCanvas.addEventListener("touchstart", onGalaxyPointerDown, { passive: false });
     galaxyPlayCanvas.addEventListener("mousedown", onGalaxyPointerDown, { passive: false });
     galaxyPlayCanvas.addEventListener("click", onGalaxyPointerDown, { passive: false });
+  }
+  if (galaxyView && !galaxyView.__polyPracticeFallbackBound) {
+    galaxyView.__polyPracticeFallbackBound = true;
+    galaxyView.addEventListener("touchstart", (event) => {
+      if (engineMode !== "practice") return;
+      onGalaxyPointerDown(event);
+    }, { passive: false, capture: true });
+    galaxyView.addEventListener("mousedown", (event) => {
+      if (engineMode !== "practice") return;
+      onGalaxyPointerDown(event);
+    }, { passive: false, capture: true });
   }
   galaxyPlayCanvas.addEventListener("pointerenter", (event) => {
     setCrosshairVisible(true);

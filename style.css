@@ -1349,6 +1349,29 @@ select:focus-visible {
   grid-template-rows: auto 1fr auto;
 }
 
+.galaxy-view::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0;
+  mix-blend-mode: screen;
+  background: rgba(255, 60, 60, 0);
+  transition: opacity 120ms ease;
+}
+
+.galaxy-view.warning::after {
+  opacity: 1;
+  animation: warningStrobe 220ms infinite ease-in-out;
+}
+
+@keyframes warningStrobe {
+  0% { background: rgba(255, 60, 60, 0.1); }
+  50% { background: rgba(255, 60, 60, 0.28); }
+  100% { background: rgba(255, 60, 60, 0.12); }
+}
+
 .galaxy-bg-video {
   position: absolute;
   inset: 0;
@@ -1507,7 +1530,7 @@ select:focus-visible {
 
 .galaxy-topbar {
   position: relative;
-  z-index: 2;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1563,6 +1586,16 @@ select:focus-visible {
 
 .galaxy-tools .active svg {
   fill: #ffffff;
+}
+
+.practiceToolBtn {
+  opacity: 0.9;
+}
+
+.practiceToolBtn.active {
+  box-shadow: 0 0 0 1px rgba(190, 120, 255, 0.55), 0 12px 30px rgba(120, 70, 255, 0.22);
+  background: rgba(120, 70, 255, 0.22);
+  opacity: 1;
 }
 
 #galaxyPlayCanvas {
@@ -1781,6 +1814,12 @@ select:focus-visible {
   text-shadow: 0 0 8px rgba(255, 57, 57, 0.7), 0 0 18px rgba(255, 34, 34, 0.5);
 }
 
+.hudLives {
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: rgba(220, 234, 255, 0.9);
+}
+
 .arcadeTimerBackdrop {
   position: absolute;
   inset: 0;
@@ -1861,7 +1900,17 @@ select:focus-visible {
   background: rgba(255, 255, 255, 0.08);
 }
 
+#arcadeOverlayBtnSecondary {
+  margin-top: 8px;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .galaxy-view.warning::after {
+    animation: none;
+    opacity: 1;
+    background: rgba(255, 60, 60, 0.16);
+  }
+
   .galaxy-topbar {
     backdrop-filter: none;
   }

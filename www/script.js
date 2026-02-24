@@ -2227,7 +2227,7 @@ function initGalaxyCanvas() {
   }
 
   function triggerAsteroidImpactFlash() {
-    asteroidImpactFlashUntil = performance.now() + (prefersReducedMotion ? 80 : 140);
+    asteroidImpactFlashUntil = performance.now() + (prefersReducedMotion ? 100 : 220);
   }
 
   function addWarpRing(x, y, color = "rgba(112,255,178,1)") {
@@ -2295,7 +2295,7 @@ function initGalaxyCanvas() {
     return levelNum === 3 || levelNum === 5 || levelNum === 8;
   }
 
-  function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1) {
+  function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1) {
     const emitCount = prefersReducedMotion ? Math.min(6, count) : count;
     for (let i = 0; i < emitCount; i += 1) {
       const angle = Math.random() * Math.PI * 2;
@@ -2306,7 +2306,7 @@ function initGalaxyCanvas() {
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
       p.life = 0;
-      p.ttl = 320 + Math.random() * 180;
+      p.ttl = (320 + Math.random() * 180) * ttlScale;
       p.size = (1.7 + Math.random() * 2.4) * blastScale;
       p.alpha = 0.45 + Math.random() * 0.4;
       if (fire) {
@@ -2493,14 +2493,21 @@ function initGalaxyCanvas() {
     }
 
     const bigBlast = wasKind === 3;
-    spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15);
-    if (wasKind === 3) {
+    const mediumBlast = wasKind === 2;
+    const ttlScale = bigBlast ? 1.4 : mediumBlast ? 1.18 : 1;
+    spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale);
+    if (wasKind >= 2) {
       playGameSfx("explo1", 0.92);
     } else {
       playGameSfx(Math.random() < 0.5 ? "smallboom1" : "smallboom2", 0.82);
     }
-    if (wasKind === 3) {
+    if (bigBlast) {
       triggerAsteroidImpactFlash();
+    } else if (mediumBlast) {
+      triggerAsteroidImpactFlash();
+      setTimeout(() => {
+        triggerAsteroidImpactFlash();
+      }, 90);
     }
   }
 

@@ -4388,12 +4388,12 @@ function initGalaxyCanvas() {
     galaxyPlayCanvas.addEventListener("pointerdown", onGalaxyPointerDown, { passive: false });
     galaxyPlayCanvas.addEventListener("pointermove", onGalaxyPointerMove, { passive: false });
     galaxyPlayCanvas.addEventListener("pointerup", onGalaxyPointerUp, { passive: false });
-    // iOS fallback paths where pointer events can be unreliable.
-    galaxyPlayCanvas.addEventListener("touchstart", onGalaxyPointerDown, { passive: false });
-    galaxyPlayCanvas.addEventListener("mousedown", onGalaxyPointerDown, { passive: false });
-    galaxyPlayCanvas.addEventListener("click", onGalaxyPointerDown, { passive: false });
+    if (!window.PointerEvent) {
+      galaxyPlayCanvas.addEventListener("touchstart", onGalaxyPointerDown, { passive: false });
+      galaxyPlayCanvas.addEventListener("mousedown", onGalaxyPointerDown, { passive: false });
+    }
   }
-  if (galaxyView && !galaxyView.__polyPracticeFallbackBound) {
+  if (galaxyView && !galaxyView.__polyPracticeFallbackBound && !window.PointerEvent) {
     galaxyView.__polyPracticeFallbackBound = true;
     galaxyView.addEventListener("touchstart", (event) => {
       if (engineMode !== "practice") return;

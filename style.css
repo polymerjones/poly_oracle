@@ -488,11 +488,30 @@ button:disabled {
 
 .answerText {
   opacity: 0;
-  transition: opacity 220ms ease;
+  transform: translateY(6px);
+  transition: opacity 420ms ease, transform 420ms ease, text-shadow 420ms ease;
 }
 
 .answerText.on {
   opacity: 1;
+  transform: translateY(0);
+  text-shadow: 0 0 8px rgba(185, 226, 255, 0.45), 0 0 18px rgba(208, 154, 255, 0.28);
+}
+
+.answerText.shimmer {
+  animation: answerTextShimmer 680ms ease-out;
+}
+
+@keyframes answerTextShimmer {
+  0% {
+    filter: brightness(1);
+  }
+  35% {
+    filter: brightness(1.35);
+  }
+  100% {
+    filter: brightness(1);
+  }
 }
 
 .answer-verbose {

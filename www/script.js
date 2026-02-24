@@ -1155,6 +1155,20 @@ function setAnswerTextVisible(on) {
   answerText?.classList.toggle("on", !!on);
 }
 
+function triggerAnswerTextRevealFx() {
+  [answerSimple, answerText].forEach((el) => {
+    if (!el) return;
+    el.classList.remove("shimmer");
+    void el.offsetWidth;
+    el.classList.add("shimmer");
+  });
+  spawnAnswerSparkles(prefersReducedMotion ? 8 : 18, prefersReducedMotion ? 1 : 1.18);
+  if (!prefersReducedMotion) {
+    setTimeout(() => spawnAnswerSparkles(10, 1.08), 120);
+    setTimeout(() => spawnAnswerSparkles(8, 1), 240);
+  }
+}
+
 async function speakAnswer(text, voiceName = "") {
   if (!text) return;
   await speakLine(text, {
@@ -1276,12 +1290,13 @@ async function revealAnswer() {
       microLine,
       revealVoice,
     });
+    setTimeout(() => stopCrystalOverlay(), 180);
     await delay(900);
     setAnswerTextVisible(true);
+    triggerAnswerTextRevealFx();
     const textRevealHandle = audioEngine.play(SFX.POST, { volume: 0.95, rate: 1.0 });
     await Promise.race([textRevealHandle?.ended || Promise.resolve(), delay(2200)]);
-    await delay(250);
-    stopCrystalOverlay();
+    await delay(120);
 
     if (state.voiceReadsAnswer !== false) {
       await speakAnswer(answerLine, revealVoice);

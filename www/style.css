@@ -72,6 +72,51 @@ body::before {
     linear-gradient(160deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2));
 }
 
+body.reveal-bg-strobe::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.22;
+  background: radial-gradient(circle at 50% 46%, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0) 68%);
+  animation: revealBgStrobe 140ms steps(2, end) infinite;
+}
+
+@keyframes revealBgStrobe {
+  0% {
+    background: radial-gradient(circle at 46% 42%, rgba(213, 132, 255, 0.9), rgba(255, 255, 255, 0) 68%);
+    opacity: 0.18;
+  }
+  50% {
+    background: radial-gradient(circle at 54% 48%, rgba(255, 132, 214, 0.92), rgba(255, 255, 255, 0) 70%);
+    opacity: 0.24;
+  }
+  100% {
+    background: radial-gradient(circle at 50% 46%, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0) 66%);
+    opacity: 0.3;
+  }
+}
+
+body.reveal-screen-shake #oracleView {
+  animation: revealScreenShake 1000ms cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+@keyframes revealScreenShake {
+  0% { transform: translate3d(0, 0, 0); }
+  10% { transform: translate3d(-10px, 5px, 0); }
+  20% { transform: translate3d(9px, -6px, 0); }
+  30% { transform: translate3d(-8px, 7px, 0); }
+  40% { transform: translate3d(8px, -7px, 0); }
+  50% { transform: translate3d(-6px, 5px, 0); }
+  60% { transform: translate3d(6px, -5px, 0); }
+  70% { transform: translate3d(-4px, 3px, 0); }
+  80% { transform: translate3d(3px, -2px, 0); }
+  90% { transform: translate3d(-2px, 1px, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
 #galaxyCanvas {
   position: fixed;
   inset: 0;

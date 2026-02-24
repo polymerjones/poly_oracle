@@ -1138,6 +1138,17 @@ function setRevealBusy(on) {
   setRevealing(!!on);
 }
 
+function setRevealBgStrobe(on) {
+  document.body.classList.toggle("reveal-bg-strobe", !!on);
+}
+
+function triggerLargeScreenShake() {
+  document.body.classList.remove("reveal-screen-shake");
+  void document.body.offsetWidth;
+  document.body.classList.add("reveal-screen-shake");
+  setTimeout(() => document.body.classList.remove("reveal-screen-shake"), 1000);
+}
+
 function hideAnswerBar() {
   if (!answerBox) return;
   answerBox.hidden = false;
@@ -1236,6 +1247,8 @@ async function revealAnswer() {
   primeSpeechFromGesture();
   await audioEngine.unlock();
   setRevealBusy(true);
+  setRevealBgStrobe(true);
+  triggerLargeScreenShake();
   try {
     setAnswerTextVisible(false);
     hideAnswerBar();
@@ -1305,6 +1318,7 @@ async function revealAnswer() {
     darkenStage(false);
     setOrbScale(1);
     stopCrystalOverlay();
+    setRevealBgStrobe(false);
     setRevealBusy(false);
     setIntentState();
   }

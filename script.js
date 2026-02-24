@@ -29,6 +29,7 @@ const GAME_SFX = {
   explosion_small: "gamesfx/smallboom1.mp3",
   reveal_magic: "newprereveal.mp3",
   reveal_flash: "reveal4.mp3",
+  reveal2: "reveal2.mp3",
   landmine_arm: "gamesfx/minepreexplode.mp3",
   landmine_boom: "gamesfx/minefinalexplo.mp3",
   blip1: "gamesfx/blip1.mp3",
@@ -55,6 +56,23 @@ const REVEAL_VARIANT_SFX = [
   "newreveal007",
   "newreveal008",
 ];
+const REVEAL = {
+  TAP_BURST_MS: 1500,
+  TAP_INTERVAL_MS_START: 60,
+  TAP_INTERVAL_MS_END: 180,
+  PULSE_MIN: 1.0,
+  PULSE_MAX: 1.1,
+  GROW_MAX: 1.18,
+  FLASH_RATE_MS: 120,
+  TOTAL_BASELINE_MS: 8000,
+};
+const SFX = {
+  TAP: "orb_tap",
+  MAIN: "newreveal005",
+  PRE_A: "reveal_magic",
+  PRE_B: "newreveal002",
+  POST: "reveal2",
+};
 
 // === Level Config ===
 const ARCADE_LEVELS = [
@@ -370,11 +388,15 @@ const audioEngine = {
       return null;
     }
   },
+  loadMany(mapNameToUrl) {
+    const entries = Object.entries(mapNameToUrl || {});
+    return Promise.all(entries.map(([name, url]) => this.loadSound(name, url)));
+  },
   play(name, { volume = 1, rate = 1, detune = 0 } = {}) {
     const ctx = this.ensureContext();
-    if (!ctx || !this.unlocked) return;
+    if (!ctx || !this.unlocked) return { source: null, ended: Promise.resolve() };
     const buffer = this.buffers.get(name);
-    if (!buffer) return;
+    if (!buffer) return { source: null, ended: Promise.resolve() };
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
     source.buffer = buffer;
@@ -383,7 +405,11 @@ const audioEngine = {
     gain.gain.value = clamp(volume, 0, 1);
     source.connect(gain);
     gain.connect(this.masterGain);
+    const ended = new Promise((resolve) => {
+      source.onended = resolve;
+    });
     source.start(0);
+    return { source, ended };
   },
   getDuration(name, rate = 1) {
     const buffer = this.buffers.get(name);
@@ -393,18 +419,14 @@ const audioEngine = {
 };
 
 function preloadSfx() {
-  const entries = Object.entries(GAME_SFX);
-  for (let i = 0; i < entries.length; i += 1) {
-    const [name, src] = entries[i];
-    audioEngine.loadSound(name, src);
-  }
+  audioEngine.loadMany(GAME_SFX);
 }
 
 async function playSfxAndWait(name, { volume = 1, rate = 1, detune = 0, maxWaitMs = 8000 } = {}) {
-  audioEngine.play(name, { volume, rate, detune });
+  const handle = audioEngine.play(name, { volume, rate, detune });
   const durationMs = audioEngine.getDuration(name, rate) * 1000;
   const waitMs = clamp(durationMs || 300, 180, maxWaitMs);
-  await delay(waitMs);
+  await Promise.race([handle?.ended || Promise.resolve(), delay(waitMs)]);
 }
 
 init();
@@ -1057,6 +1079,124 @@ async function speakLine(text, { rate = 1, pitch = 1.1, voiceName = "", timeoutM
   });
 }
 
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function getCrystalOverlay() {
+  return revealFxVideo || document.getElementById("crystalOverlayVideo");
+}
+
+async function startCrystalOverlay() {
+  const video = getCrystalOverlay();
+  if (!video) return;
+  const desiredSrc = "crystalballfx.mp4";
+  if (!video.getAttribute("src") || !video.getAttribute("src").includes("crystalballfx.mp4")) {
+    video.setAttribute("src", desiredSrc);
+  }
+  try {
+    video.currentTime = 0;
+  } catch {
+    // ignore seek errors
+  }
+  video.classList.add("active", "on");
+  try {
+    await video.play();
+  } catch {
+    // ignore autoplay errors
+  }
+}
+
+function stopCrystalOverlay() {
+  const video = getCrystalOverlay();
+  if (!video) return;
+  video.pause();
+  video.classList.remove("active", "on");
+}
+
+function triggerOrbSparkle(intensity = 1) {
+  spawnSparkles(Math.round(5 + intensity * 5), 1 + intensity * 0.12, 1 + intensity * 0.18);
+}
+
+function triggerScreenShake(intensity = 1) {
+  stage.classList.remove("pre-reveal-shake");
+  void stage.offsetWidth;
+  stage.classList.add("pre-reveal-shake");
+  setTimeout(() => stage.classList.remove("pre-reveal-shake"), Math.round(130 + intensity * 70));
+}
+
+function triggerBgFlashPinkPurple(intensity = 1) {
+  flashBackground(clamp(0.35 + intensity * 0.65, 0.15, 1), Math.round(90 + intensity * 90));
+}
+
+function setOrbScale(mult) {
+  if (!orb) return;
+  orb.style.transform = `scale(${clamp(mult, 0.86, 1.35).toFixed(3)})`;
+}
+
+function setRevealBusy(on) {
+  setRevealing(!!on);
+}
+
+function hideAnswerBar() {
+  if (!answerBox) return;
+  answerBox.hidden = false;
+  answerBox.classList.remove("on");
+}
+
+function fadeInAnswerBar() {
+  if (!answerBox) return;
+  answerBox.hidden = false;
+  requestAnimationFrame(() => answerBox.classList.add("on"));
+}
+
+function setAnswerTextVisible(on) {
+  answerSimple?.classList.toggle("on", !!on);
+  answerText?.classList.toggle("on", !!on);
+}
+
+async function speakAnswer(text, voiceName = "") {
+  if (!text) return;
+  await speakLine(text, {
+    rate: state.whisper ? 0.96 : 1.04,
+    pitch: 1.14,
+    voiceName,
+    timeoutMs: 6500,
+  });
+}
+
+window.triggerOrbSparkle = triggerOrbSparkle;
+window.triggerScreenShake = triggerScreenShake;
+window.triggerBgFlashPinkPurple = triggerBgFlashPinkPurple;
+window.setOrbScale = setOrbScale;
+window.setRevealBusy = setRevealBusy;
+window.fadeInAnswerBar = fadeInAnswerBar;
+window.hideAnswerBar = hideAnswerBar;
+window.setAnswerTextVisible = setAnswerTextVisible;
+window.speakAnswer = speakAnswer;
+
+async function runTapBurst() {
+  const t0 = performance.now();
+  const endAt = t0 + REVEAL.TAP_BURST_MS;
+  let nextAt = t0;
+  while (performance.now() < endAt) {
+    const now = performance.now();
+    const progress = Math.min(1, (now - t0) / REVEAL.TAP_BURST_MS);
+    const interval = lerp(REVEAL.TAP_INTERVAL_MS_START, REVEAL.TAP_INTERVAL_MS_END, progress);
+    if (now >= nextAt) {
+      audioEngine.play(SFX.TAP, { volume: 0.45, rate: 0.96 + Math.random() * 0.1 });
+      triggerOrbSparkle(1);
+      triggerBgFlashPinkPurple(0.35);
+      nextAt = now + interval;
+    }
+    const pulse = lerp(REVEAL.PULSE_MIN, REVEAL.PULSE_MAX, 0.5 + 0.5 * Math.sin(now / 90));
+    const grow = lerp(1, REVEAL.GROW_MAX, progress);
+    setOrbScale(pulse * grow);
+    await new Promise(requestAnimationFrame);
+  }
+  setOrbScale(REVEAL.GROW_MAX * 0.98);
+}
+
 async function revealAnswer() {
   if (state.isRevealing) return;
 
@@ -1081,29 +1221,54 @@ async function revealAnswer() {
   hapticReveal();
   primeSpeechFromGesture();
   await audioEngine.unlock();
-  setRevealing(true);
+  setRevealBusy(true);
   try {
-    await playSfxAndWait("reveal_magic", { volume: 0.9, maxWaitMs: 5000 });
-    await delay(120);
+    setAnswerTextVisible(false);
+    hideAnswerBar();
+
+    startCrystalOverlay();
+    audioEngine.play(SFX.MAIN, { volume: 0.9, rate: 1.0 });
+
+    const burstPromise = runTapBurst();
+    const burstFlashInterval = setInterval(() => {
+      triggerScreenShake(0.45);
+      triggerBgFlashPinkPurple(0.55);
+      triggerOrbSparkle(0.9);
+    }, REVEAL.FLASH_RATE_MS);
+    await burstPromise;
+    clearInterval(burstFlashInterval);
+
     await speakLine(normalizedQuestion, {
       rate: state.whisper ? 0.92 : 1,
       pitch: 1.1,
       voiceName: revealVoice,
       timeoutMs: 6500,
     });
-    const revealDuring = pick(REVEAL_VARIANT_SFX);
-    const revealAfter = pick(REVEAL_VARIANT_SFX);
-    audioEngine.play("reveal_flash", { volume: 0.75 });
-    flashBackground(1, 180);
-    darkenStage(true);
-    await delay(220);
-    await playSfxAndWait(revealDuring, {
-      volume: state.whisper ? 0.44 : 0.72,
-      rate: 0.98 + Math.random() * 0.06,
-      maxWaitMs: 6500,
-    });
-    darkenStage(false);
-    flashBackground(0.7, 160);
+
+    const pre = Math.random() < 0.5 ? SFX.PRE_A : SFX.PRE_B;
+    audioEngine.play(pre, { volume: 0.85, rate: 1.0 });
+    const tensionEnd = performance.now() + 700;
+    while (performance.now() < tensionEnd) {
+      const now = performance.now();
+      triggerBgFlashPinkPurple(0.45);
+      triggerOrbSparkle(0.6);
+      setOrbScale(REVEAL.GROW_MAX * (1.02 + 0.02 * Math.sin(now / 80)));
+      await new Promise(requestAnimationFrame);
+    }
+
+    for (let i = 0; i < 6; i += 1) {
+      triggerScreenShake(1);
+      triggerBgFlashPinkPurple(1);
+      triggerOrbSparkle(1.3);
+      await delay(60);
+    }
+
+    fadeInAnswerBar();
+    const postHandle = audioEngine.play(SFX.POST, { volume: 0.95, rate: 1.0 });
+    const postSpark = setInterval(() => triggerOrbSparkle(0.7), 140);
+    await Promise.race([postHandle?.ended || Promise.resolve(), delay(2000)]);
+    clearInterval(postSpark);
+
     finishReveal({
       normalizedQuestion,
       polarity,
@@ -1111,22 +1276,18 @@ async function revealAnswer() {
       microLine,
       revealVoice,
     });
-    await playSfxAndWait(revealAfter, {
-      volume: state.whisper ? 0.4 : 0.66,
-      rate: 0.98 + Math.random() * 0.06,
-      maxWaitMs: 6500,
-    });
+    setAnswerTextVisible(true);
+    await delay(250);
+    stopCrystalOverlay();
+
     if (state.voiceReadsAnswer !== false) {
-      await speakLine(answerLine, {
-        rate: state.whisper ? 0.96 : 1.04,
-        pitch: 1.14,
-        voiceName: revealVoice,
-        timeoutMs: 6500,
-      });
+      await speakAnswer(answerLine, revealVoice);
     }
   } finally {
     darkenStage(false);
-    setRevealing(false);
+    setOrbScale(1);
+    stopCrystalOverlay();
+    setRevealBusy(false);
     setIntentState();
   }
 }

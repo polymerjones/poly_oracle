@@ -4365,9 +4365,10 @@ function initGalaxyCanvas() {
     galaxyPlayCanvas.addEventListener("pointerdown", onGalaxyPointerDown, { passive: false });
     galaxyPlayCanvas.addEventListener("pointermove", onGalaxyPointerMove, { passive: false });
     galaxyPlayCanvas.addEventListener("pointerup", onGalaxyPointerUp, { passive: false });
-    galaxyPlayCanvas.addEventListener("touchstart", (event) => {
-      event.preventDefault();
-    }, { passive: false });
+    // iOS fallback paths where pointer events can be unreliable.
+    galaxyPlayCanvas.addEventListener("touchstart", onGalaxyPointerDown, { passive: false });
+    galaxyPlayCanvas.addEventListener("mousedown", onGalaxyPointerDown, { passive: false });
+    galaxyPlayCanvas.addEventListener("click", onGalaxyPointerDown, { passive: false });
   }
   galaxyPlayCanvas.addEventListener("pointerenter", (event) => {
     setCrosshairVisible(true);

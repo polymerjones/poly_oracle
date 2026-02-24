@@ -1606,7 +1606,19 @@ select:focus-visible {
   height: 100%;
   display: block;
   touch-action: none;
-  pointer-events: auto;
+  pointer-events: auto !important;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.pe-none {
+  pointer-events: none !important;
+}
+
+.pe-auto {
+  pointer-events: auto !important;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -1818,6 +1830,13 @@ select:focus-visible {
   font-size: 0.78rem;
   letter-spacing: 0.04em;
   color: rgba(220, 234, 255, 0.9);
+}
+
+.practiceDebug {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-left: 8px;
+  color: rgba(212, 198, 255, 0.9);
 }
 
 .arcadeTimerBackdrop {

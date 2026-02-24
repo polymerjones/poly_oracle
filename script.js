@@ -1,4 +1,4 @@
-const APP_VERSION = "v2.1.1";
+const APP_VERSION = "v2.1.2";
 const storageKey = "poly-oracle-v11-state";
 const firstRunHintKey = "poly_oracle_seen_hint_v1_2_1";
 const verboseKey = "poly_oracle_verbose_details";
@@ -59,6 +59,7 @@ const MUSIC = {
   L4_7: "assets/music/E1L4-7.mp3",
   L8_9: "assets/music/E1L8-9.mp3",
   L10: "assets/music/E1L10BOSS.mp3",
+  PRACTICE: "assets/music/PRACTICE.mp3",
 };
 
 function musicKeyForLevel(levelNum) {
@@ -2657,10 +2658,33 @@ function initGalaxyCanvas() {
   const debugLevelPanel = document.getElementById("debugLevelPanel");
   const debugLevelSelect = document.getElementById("debugLevelSelect");
   const btnDebugStartLevel = document.getElementById("btnDebugStartLevel");
+  const galaxyTopbar = galaxyView.querySelector(".galaxy-topbar");
+  const galaxyHint = galaxyView.querySelector(".galaxy-hint");
+  const galaxyTools = galaxyView.querySelector(".galaxy-tools");
+  let practiceDebugEl = document.getElementById("practiceDebug");
+  if (!practiceDebugEl && galaxyTools) {
+    practiceDebugEl = document.createElement("div");
+    practiceDebugEl.id = "practiceDebug";
+    practiceDebugEl.className = "practiceDebug";
+    galaxyTools.appendChild(practiceDebugEl);
+  }
 
   const playfield = { x: 0, y: 0, w: 0, h: 0, pad: 12, topPad: 0, bottomPad: 0 };
   const canShowCrosshair = typeof window.matchMedia === "function"
     && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+  let debugDots = [];
+
+  function showEl(el) {
+    if (!el) return;
+    el.classList.remove("hidden", "pe-none");
+    el.classList.add("pe-auto");
+  }
+
+  function hideEl(el) {
+    if (!el) return;
+    el.classList.add("hidden", "pe-none");
+    el.classList.remove("pe-auto");
+  }
 
   function getSafeInsets() {
     const cs = getComputedStyle(document.documentElement);
@@ -2673,6 +2697,25 @@ function initGalaxyCanvas() {
     galaxyView.classList.toggle("mode-menu", mode === "menu");
     galaxyView.classList.toggle("mode-practice", mode === "practice");
     galaxyView.classList.toggle("mode-arcade", mode === "arcade");
+    if (mode === "menu") {
+      showEl(galaxyModeSelect);
+      hideEl(arcadeHud);
+      hideEl(galaxyTopbar);
+      hideEl(galaxyHint);
+      setMenuOverlayOpen(true);
+    } else if (mode === "arcade") {
+      hideEl(galaxyModeSelect);
+      showEl(arcadeHud);
+      hideEl(galaxyTopbar);
+      hideEl(galaxyHint);
+      setMenuOverlayOpen(false);
+    } else {
+      hideEl(galaxyModeSelect);
+      hideEl(arcadeHud);
+      showEl(galaxyTopbar);
+      showEl(galaxyHint);
+      setMenuOverlayOpen(false);
+    }
     if (galaxyModeSelect) galaxyModeSelect.setAttribute("aria-hidden", mode === "menu" ? "false" : "true");
     if (arcadeHud) arcadeHud.setAttribute("aria-hidden", mode === "arcade" ? "false" : "true");
   }
@@ -2844,6 +2887,7 @@ function initGalaxyCanvas() {
       arcadeOverlayBtnSecondary.textContent = opts?.secondaryButtonText || "";
       arcadeOverlayBtnSecondary.onclick = opts?.secondaryButtonAction || null;
     }
+    showEl(arcadeOverlay);
     arcadeOverlay.classList.add("show");
     if (durationMs > 0) {
       overlayTimer = setTimeout(() => {
@@ -2861,6 +2905,7 @@ function initGalaxyCanvas() {
     }
     arcadeOverlay.classList.remove("show");
     arcadeOverlayText.classList.remove("show", "fadeOut");
+    hideEl(arcadeOverlay);
     if (arcadeOverlayBtn) {
       arcadeOverlayBtn.style.display = "none";
       arcadeOverlayBtn.onclick = null;
@@ -2875,6 +2920,7 @@ function initGalaxyCanvas() {
     if (!arcadeOverlay || !arcadeOverlayText || !arcadeOverlaySub || !arcadeOverlayBtn) return;
     if (overlayTimer) clearTimeout(overlayTimer);
 
+    showEl(arcadeOverlay);
     arcadeOverlay.classList.add("show");
     arcadeOverlay.setAttribute("aria-hidden", "false");
     arcadeOverlayBtn.style.display = "none";
@@ -2891,6 +2937,7 @@ function initGalaxyCanvas() {
         arcadeOverlay.classList.remove("show");
         arcadeOverlay.setAttribute("aria-hidden", "true");
         arcadeOverlayText.classList.remove("show", "fadeOut");
+        hideEl(arcadeOverlay);
         overlayTimer = null;
       }, 1000);
     }, 400);
@@ -3387,6 +3434,37 @@ function initGalaxyCanvas() {
     return best;
   }
 
+  function findAsteroidAt(x, y, hit = 26) {
+    let best = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const a = sim.asteroids[i];
+      const d = Math.hypot(a.x - x, a.y - y);
+      if (d <= (a.r + hit) && d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  function updatePracticeDebug() {
+    if (!practiceDebugEl) return;
+    practiceDebugEl.textContent = `${engineMode} • ${state.practiceTool} • asteroids ${sim.asteroids.length}/${PRACTICE_MAX_ASTEROIDS}`;
+  }
+
+  function debugPing(x, y) {
+    debugDots.push({ x, y, t: performance.now() });
+    if (debugDots.length > 12) debugDots.shift();
+    updatePracticeDebug();
+  }
+
+  function setPracticeToolUI() {
+    const pencilActive = state.practiceTool === "pencil";
+    toolDraw.classList.toggle("active", pencilActive);
+    toolBoom.classList.toggle("active", !pencilActive);
+  }
+
   function isPointOnLandmine(x, y) {
     if (!landmine) return false;
     const d = Math.hypot(landmine.x - x, landmine.y - y);
@@ -3706,9 +3784,12 @@ function initGalaxyCanvas() {
     setGalaxyBackgroundForLevel(1);
     setGalaxyTool("draw");
     state.practiceTool = "pencil";
+    setPracticeToolUI();
     sim.nextDrawAt = 0;
     clearGameplayEntities();
-    audioEngine.playMusic("L1_3", MUSIC.L1_3, { crossfadeMs: 200 });
+    updatePracticeDebug();
+    audioEngine.stopMusic();
+    audioEngine.playMusic("PRACTICE", MUSIC.PRACTICE, { crossfadeMs: 200 });
     resizeGalaxyCanvas();
     computePlayfield();
     setTimeout(computePlayfield, 50);
@@ -3742,6 +3823,7 @@ function initGalaxyCanvas() {
     setMenuOverlayOpen(true);
     sim.maxAsteroids = sim.width < 700 ? 80 : 120;
     setGalaxyTool("draw");
+    setPracticeToolUI();
     if (!canPreserve) {
       setGalaxyBackgroundForLevel(1);
     }
@@ -3968,6 +4050,17 @@ function initGalaxyCanvas() {
   function draw(now) {
     ctx.clearRect(0, 0, sim.width, sim.height);
 
+    if (debugDots.length) {
+      debugDots = debugDots.filter((d) => now - d.t < 450);
+      for (let i = 0; i < debugDots.length; i += 1) {
+        const d = debugDots[i];
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(190,120,255,0.9)";
+        ctx.fill();
+      }
+    }
+
     for (let i = 0; i < sim.stars.length; i += 1) {
       const s = sim.stars[i];
       const twinkle = prefersReducedMotion ? 0 : Math.sin(now * 0.001 * s.twinkleSpeed + s.phase) * 0.2;
@@ -4149,62 +4242,78 @@ function initGalaxyCanvas() {
     galaxyRaf = requestAnimationFrame(frame);
   }
 
-  function onTap(event) {
-    if (event.cancelable) event.preventDefault();
-    const now = performance.now();
-    if (now - sim.lastTapAt < 55) return;
-    sim.lastTapAt = now;
+  function getPointerWorld(event) {
+    const rect = galaxyPlayCanvas.getBoundingClientRect();
+    const clientX = event.touches?.[0]?.clientX ?? event.changedTouches?.[0]?.clientX ?? event.clientX;
+    const clientY = event.touches?.[0]?.clientY ?? event.changedTouches?.[0]?.clientY ?? event.clientY;
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  }
 
-    const point = pointFromEvent(event);
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-    if (point.x < 0 || point.x > sim.width || point.y < 0 || point.y > sim.height) return;
-
-    if (debugTaps && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)) {
-      // eslint-disable-next-line no-console
-      console.log("elementFromPoint", document.elementFromPoint(event.clientX, event.clientY));
-    }
-
-    if (engineMode === "arcade") {
-      if (landmine && isPointOnLandmine(point.x, point.y)) {
-        triggerCrosshairFire();
-        armLandmine();
-        return;
-      }
-      if (ufo && isPointOnUfo(point.x, point.y)) {
-        triggerCrosshairFire();
-        hitUfo();
-        draw(now);
-        return;
-      }
-      const hitIndex = findHitAsteroidIndex(point.x, point.y);
-      if (hitIndex >= 0) {
-        triggerCrosshairFire();
-        splitAsteroidByIndex(hitIndex);
-        draw(now);
-      }
+  function handleArcadeTap(x, y, now) {
+    if (landmine && isPointOnLandmine(x, y)) {
+      triggerCrosshairFire();
+      armLandmine();
       return;
     }
-    if (engineMode !== "practice") return;
-
-    const boomMode = state.practiceTool === "boom";
-    if (!boomMode) {
-      if (now < sim.nextDrawAt) return;
-      sim.nextDrawAt = now + 120;
-      if (sim.asteroids.length >= PRACTICE_MAX_ASTEROIDS) return;
+    if (ufo && isPointOnUfo(x, y)) {
       triggerCrosshairFire();
-      spawnAsteroid(point.x, point.y, 3, true);
+      hitUfo();
       draw(now);
       return;
     }
-
-    const hitIndex = findHitAsteroidIndex(point.x, point.y);
+    const hitIndex = findHitAsteroidIndex(x, y);
     if (hitIndex >= 0) {
       triggerCrosshairFire();
       splitAsteroidByIndex(hitIndex);
       draw(now);
-      return;
     }
   }
+
+  function handlePracticeTap(x, y, now) {
+    debugPing(x, y);
+    if (state.practiceTool === "pencil") {
+      if (now < sim.nextDrawAt) return;
+      sim.nextDrawAt = now + 120;
+      if (sim.asteroids.length >= PRACTICE_MAX_ASTEROIDS) return;
+      triggerCrosshairFire();
+      spawnAsteroid(x, y, 3, true);
+      updatePracticeDebug();
+      draw(now);
+      return;
+    }
+    const idx = findAsteroidAt(x, y, 28);
+    if (idx >= 0) {
+      triggerCrosshairFire();
+      splitAsteroidByIndex(idx);
+      updatePracticeDebug();
+      draw(now);
+    }
+  }
+
+  function onGalaxyPointerDown(event) {
+    if (event.cancelable) event.preventDefault();
+    const now = performance.now();
+    if (now - sim.lastTapAt < 55) return;
+    sim.lastTapAt = now;
+    const overlayVisible = arcadeOverlay && arcadeOverlay.classList.contains("show") && !arcadeOverlay.classList.contains("hidden");
+    if (overlayVisible) return;
+    const point = getPointerWorld(event);
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+    if (point.x < 0 || point.x > sim.width || point.y < 0 || point.y > sim.height) return;
+    if (engineMode === "practice") {
+      handlePracticeTap(point.x, point.y, now);
+      return;
+    }
+    if (engineMode === "arcade") {
+      handleArcadeTap(point.x, point.y, now);
+    }
+  }
+
+  function onGalaxyPointerMove(event) {
+    updateCrosshairPosition(event);
+  }
+
+  function onGalaxyPointerUp() {}
 
   function setCrosshairVisible(visible) {
     if (!canvasCrosshair || !canShowCrosshair) return;
@@ -4251,15 +4360,19 @@ function initGalaxyCanvas() {
     stopGalaxyLoop();
   }
 
-  galaxyPlayCanvas.addEventListener("pointerdown", onTap);
-  galaxyPlayCanvas.addEventListener("touchstart", onTap, { passive: false });
-  galaxyPlayCanvas.addEventListener("mousedown", onTap);
-  galaxyPlayCanvas.addEventListener("click", onTap);
+  if (!galaxyPlayCanvas.__polyPointerBound) {
+    galaxyPlayCanvas.__polyPointerBound = true;
+    galaxyPlayCanvas.addEventListener("pointerdown", onGalaxyPointerDown, { passive: false });
+    galaxyPlayCanvas.addEventListener("pointermove", onGalaxyPointerMove, { passive: false });
+    galaxyPlayCanvas.addEventListener("pointerup", onGalaxyPointerUp, { passive: false });
+    galaxyPlayCanvas.addEventListener("touchstart", (event) => {
+      event.preventDefault();
+    }, { passive: false });
+  }
   galaxyPlayCanvas.addEventListener("pointerenter", (event) => {
     setCrosshairVisible(true);
     updateCrosshairPosition(event);
   });
-  galaxyPlayCanvas.addEventListener("pointermove", updateCrosshairPosition);
   galaxyPlayCanvas.addEventListener("pointerleave", () => setCrosshairVisible(false));
 
   window.addEventListener("resize", () => {

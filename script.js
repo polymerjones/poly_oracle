@@ -1,4 +1,4 @@
-const APP_VERSION = "v1.4.3";
+const APP_VERSION = "v2.0.0";
 const storageKey = "poly-oracle-v11-state";
 const firstRunHintKey = "poly_oracle_seen_hint_v1_2_1";
 const verboseKey = "poly_oracle_verbose_details";

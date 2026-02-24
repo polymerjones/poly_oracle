@@ -1540,6 +1540,10 @@ select:focus-visible {
   padding: 18px;
 }
 
+.contactModal[hidden] {
+  display: none !important;
+}
+
 .contactCard {
   width: min(460px, 100%);
   display: grid;

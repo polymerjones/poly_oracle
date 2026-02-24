@@ -2035,6 +2035,20 @@ function initGalaxyCanvas() {
     ringPool: [],
   };
 
+  const asteroidSpritePaths = {
+    roid01: "astgfx/roid01.png",
+    roid02: "astgfx/roid02.png",
+    roid03: "astgfx/roid03.png",
+    hotroid01: "astgfx/hotroid01.png",
+  };
+  const asteroidSprites = {};
+  Object.keys(asteroidSpritePaths).forEach((key) => {
+    const img = new Image();
+    img.decoding = "async";
+    img.src = asteroidSpritePaths[key];
+    asteroidSprites[key] = img;
+  });
+
   let galaxyRaf = 0;
   let galaxyRunning = false;
   let engineMode = "menu"; // menu | freestyle | arcade
@@ -2296,6 +2310,13 @@ function initGalaxyCanvas() {
     if (levelNum >= 8) return BG.C;
     if (levelNum >= 5) return BG.B;
     return BG.A;
+  }
+
+  function getAsteroidSpriteForLevel(levelNum) {
+    if (levelNum >= 10) return asteroidSprites.hotroid01;
+    if (levelNum >= 7) return asteroidSprites.roid03;
+    if (levelNum >= 4) return asteroidSprites.roid02;
+    return asteroidSprites.roid01;
   }
 
   function setGalaxyBackgroundForLevel(levelNum) {
@@ -3159,21 +3180,32 @@ function initGalaxyCanvas() {
 
     for (let i = 0; i < sim.asteroids.length; i += 1) {
       const a = sim.asteroids[i];
-      ctx.beginPath();
-      for (let j = 0; j < a.shape.length; j += 1) {
-        const point = a.shape[j];
-        const px = a.x + Math.cos(point.angle + a.rot) * a.r * point.offset;
-        const py = a.y + Math.sin(point.angle + a.rot) * a.r * point.offset;
-        if (j === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
+      const levelNum = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
+      const sprite = getAsteroidSpriteForLevel(levelNum);
+      if (sprite && sprite.complete && sprite.naturalWidth > 0) {
+        const d = a.r * 2;
+        ctx.save();
+        ctx.translate(a.x, a.y);
+        ctx.rotate(a.rot);
+        ctx.drawImage(sprite, -a.r, -a.r, d, d);
+        ctx.restore();
+      } else {
+        ctx.beginPath();
+        for (let j = 0; j < a.shape.length; j += 1) {
+          const point = a.shape[j];
+          const px = a.x + Math.cos(point.angle + a.rot) * a.r * point.offset;
+          const py = a.y + Math.sin(point.angle + a.rot) * a.r * point.offset;
+          if (j === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        const fill = a.kind === 3 ? "rgba(145,106,68,0.82)" : a.kind === 2 ? "rgba(126,92,61,0.82)" : "rgba(112,84,58,0.82)";
+        ctx.fillStyle = fill;
+        ctx.fill();
+        ctx.strokeStyle = "rgba(246,220,184,0.2)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
       }
-      ctx.closePath();
-      const fill = a.kind === 3 ? "rgba(145,106,68,0.82)" : a.kind === 2 ? "rgba(126,92,61,0.82)" : "rgba(112,84,58,0.82)";
-      ctx.fillStyle = fill;
-      ctx.fill();
-      ctx.strokeStyle = "rgba(246,220,184,0.2)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
     }
 
     if (landmine) {

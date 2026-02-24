@@ -9,6 +9,8 @@ const debugTapsKey = "poly_oracle_debug_taps";
 const STORAGE = {
   arcadeLevel: "poly_oracle_arcade_level",
   arcadeSaved: "poly_oracle_arcade_saved",
+  arcadeHasSave: "poly_oracle_arcade_hasSave",
+  arcadeWon: "poly_oracle_arcade_won",
   rewardCelestial: "poly_oracle_reward_celestial",
 };
 
@@ -20,16 +22,20 @@ const BG = {
 };
 
 const GAME_SFX = {
-  astcollide1: "gamesfx/astcollide1.mp3",
-  astcollide2: "gamesfx/astcollide2.mp3",
+  orb_tap: "taporb.mp3",
+  warp: "gamesfx/blip1.mp3",
+  explosion_big: "gamesfx/explo1.mp3",
+  explosion_med: "gamesfx/explo1.mp3",
+  explosion_small: "gamesfx/smallboom1.mp3",
+  reveal_magic: "reveal3.mp3",
+  reveal_flash: "reveal4.mp3",
+  landmine_arm: "gamesfx/minepreexplode.mp3",
+  landmine_boom: "gamesfx/minefinalexplo.mp3",
   blip1: "gamesfx/blip1.mp3",
-  explo1: "gamesfx/explo1.mp3",
   gameover: "gamesfx/gameover.mp3",
   lastlevelstart: "gamesfx/lastlevelstart.mp3",
-  minepreexplode: "gamesfx/minepreexplode.mp3",
-  minefinalexplo: "gamesfx/minefinalexplo.mp3",
-  smallboom1: "gamesfx/smallboom1.mp3",
-  smallboom2: "gamesfx/smallboom2.mp3",
+  astcollide1: "gamesfx/astcollide1.mp3",
+  astcollide2: "gamesfx/astcollide2.mp3",
 };
 
 // === Level Config ===
@@ -59,6 +65,7 @@ function setSavedArcadeLevel(level) {
   try {
     localStorage.setItem(STORAGE.arcadeLevel, String(level));
     localStorage.setItem(STORAGE.arcadeSaved, "1");
+    localStorage.setItem(STORAGE.arcadeHasSave, "1");
   } catch {
     // ignore
   }
@@ -68,8 +75,33 @@ function clearArcadeProgress() {
   try {
     localStorage.removeItem(STORAGE.arcadeLevel);
     localStorage.removeItem(STORAGE.arcadeSaved);
+    localStorage.removeItem(STORAGE.arcadeHasSave);
   } catch {
     // ignore
+  }
+}
+
+function hasArcadeSave() {
+  try {
+    return localStorage.getItem(STORAGE.arcadeHasSave) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setArcadeWon() {
+  try {
+    localStorage.setItem(STORAGE.arcadeWon, "1");
+  } catch {
+    // ignore
+  }
+}
+
+function hasArcadeWon() {
+  try {
+    return localStorage.getItem(STORAGE.arcadeWon) === "1";
+  } catch {
+    return false;
   }
 }
 
@@ -160,6 +192,7 @@ const state = {
   sessionTapCount: 0,
   tapTimestamps: [],
   galaxyTool: "draw",
+  voiceReadsAnswer: true,
 };
 
 const stage = document.getElementById("stage");
@@ -218,6 +251,14 @@ const galaxyModeSelect = document.getElementById("galaxyModeSelect");
 const btnArcade = document.getElementById("btnArcade");
 const btnFreestyle = document.getElementById("btnFreestyle");
 const btnGalaxyBack = document.getElementById("btnGalaxyBack");
+const arcadeMenuPanel = document.getElementById("arcadeMenuPanel");
+const arcadeLevelPanel = document.getElementById("arcadeLevelPanel");
+const btnArcadeNew = document.getElementById("btnArcadeNew");
+const btnArcadeResume = document.getElementById("btnArcadeResume");
+const btnArcadeLevelSelect = document.getElementById("btnArcadeLevelSelect");
+const btnArcadeMenuBack = document.getElementById("btnArcadeMenuBack");
+const btnArcadeLevelBack = document.getElementById("btnArcadeLevelBack");
+const arcadeLevelGrid = document.getElementById("arcadeLevelGrid");
 const arcadeHud = document.getElementById("arcadeHud");
 const arcadeBack = document.getElementById("arcadeBack");
 const hudLevel = document.getElementById("hudLevel");
@@ -236,6 +277,15 @@ const vaultList = document.getElementById("vaultList");
 const vaultFilterAll = document.getElementById("vaultFilterAll");
 const vaultFilterFav = document.getElementById("vaultFilterFav");
 const vaultStats = document.getElementById("vaultStats");
+const openContact = document.getElementById("openContact");
+const contactModal = document.getElementById("contactModal");
+const closeContact = document.getElementById("closeContact");
+const contactForm = document.getElementById("contactForm");
+const contactHoney = document.getElementById("contactHoney");
+const contactEmail = document.getElementById("contactEmail");
+const contactSubject = document.getElementById("contactSubject");
+const contactPlatform = document.getElementById("contactPlatform");
+const contactMessage = document.getElementById("contactMessage");
 
 let audioContext;
 let nativeTtsWarned = false;
@@ -253,6 +303,77 @@ let lastOrbTapAt = 0;
 let orbTapBuffer = null;
 let orbTapBufferPromise = null;
 let chaosShiftAudio = null;
+const boomTimes = [];
+
+const audioEngine = {
+  ctx: null,
+  masterGain: null,
+  buffers: new Map(),
+  unlocked: false,
+  ensureContext() {
+    if (this.ctx) return this.ctx;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    this.ctx = new AudioCtx();
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 0.75;
+    this.masterGain.connect(this.ctx.destination);
+    return this.ctx;
+  },
+  async unlock() {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    if (ctx.state !== "running") {
+      try {
+        await ctx.resume();
+      } catch {
+        // ignore
+      }
+    }
+    this.unlocked = ctx.state === "running";
+  },
+  resume() {
+    return this.unlock();
+  },
+  async loadSound(name, url) {
+    if (this.buffers.has(name)) return this.buffers.get(name);
+    const ctx = this.ensureContext();
+    if (!ctx) return null;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      const arr = await response.arrayBuffer();
+      const decoded = await ctx.decodeAudioData(arr.slice(0));
+      this.buffers.set(name, decoded);
+      return decoded;
+    } catch {
+      return null;
+    }
+  },
+  play(name, { volume = 1, rate = 1, detune = 0 } = {}) {
+    const ctx = this.ensureContext();
+    if (!ctx || !this.unlocked) return;
+    const buffer = this.buffers.get(name);
+    if (!buffer) return;
+    const source = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    source.buffer = buffer;
+    source.playbackRate.value = rate;
+    source.detune.value = detune;
+    gain.gain.value = clamp(volume, 0, 1);
+    source.connect(gain);
+    gain.connect(this.masterGain);
+    source.start(0);
+  },
+};
+
+function preloadSfx() {
+  const entries = Object.entries(GAME_SFX);
+  for (let i = 0; i < entries.length; i += 1) {
+    const [name, src] = entries[i];
+    audioEngine.loadSound(name, src);
+  }
+}
 
 init();
 
@@ -260,6 +381,7 @@ function init() {
   setVh();
   resetUiOverlayState();
   loadState();
+  preloadSfx();
   initGalaxyBackground();
   initGalaxyCanvas();
   initBackgroundVideos();
@@ -286,11 +408,15 @@ function addListeners() {
   const primeMediaOnGesture = () => {
     if (mediaPrimed) return;
     mediaPrimed = true;
+    audioEngine.unlock();
     primeBackgroundMedia();
   };
   document.addEventListener("pointerdown", primeMediaOnGesture, { once: true });
   document.addEventListener("touchstart", primeMediaOnGesture, { once: true, passive: true });
   document.addEventListener("keydown", primeMediaOnGesture, { once: true });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) audioEngine.resume();
+  });
 
   questionInput.addEventListener("input", () => {
     setIntentState();
@@ -307,6 +433,7 @@ function addListeners() {
 
   const onOrbTap = (event) => {
     if (event.cancelable) event.preventDefault();
+    audioEngine.unlock();
     const now = performance.now();
     if (now - lastOrbTapAt < 40) return;
     lastOrbTapAt = now;
@@ -402,7 +529,7 @@ function addListeners() {
 
   if (btnArcade) {
     btnArcade.addEventListener("click", () => {
-      galaxyCanvasController?.startArcadeFromSave?.();
+      galaxyCanvasController?.openArcadeMenu?.();
     });
   }
   if (btnFreestyle) {
@@ -416,6 +543,73 @@ function addListeners() {
   if (arcadeBack) {
     arcadeBack.addEventListener("click", () => {
       galaxyCanvasController?.showModeSelect?.({ preserveArcade: true });
+    });
+  }
+  if (btnArcadeNew) {
+    btnArcadeNew.addEventListener("click", () => galaxyCanvasController?.startArcadeNew?.());
+  }
+  if (btnArcadeResume) {
+    btnArcadeResume.addEventListener("click", () => galaxyCanvasController?.startArcadeResume?.());
+  }
+  if (btnArcadeLevelSelect) {
+    btnArcadeLevelSelect.addEventListener("click", () => galaxyCanvasController?.openArcadeLevelSelect?.());
+  }
+  if (btnArcadeMenuBack) {
+    btnArcadeMenuBack.addEventListener("click", () => galaxyCanvasController?.showModeSelect?.());
+  }
+  if (btnArcadeLevelBack) {
+    btnArcadeLevelBack.addEventListener("click", () => galaxyCanvasController?.openArcadeMenu?.());
+  }
+  if (openContact && contactModal) {
+    openContact.addEventListener("click", () => {
+      contactModal.hidden = false;
+      contactModal.setAttribute("aria-hidden", "false");
+    });
+  }
+  if (closeContact && contactModal) {
+    closeContact.addEventListener("click", () => {
+      contactModal.hidden = true;
+      contactModal.setAttribute("aria-hidden", "true");
+    });
+  }
+  if (contactModal) {
+    contactModal.addEventListener("click", (event) => {
+      if (event.target === contactModal) {
+        contactModal.hidden = true;
+        contactModal.setAttribute("aria-hidden", "true");
+      }
+    });
+  }
+  if (contactForm) {
+    contactForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const payload = {
+        fromEmail: contactEmail?.value?.trim() || "",
+        subject: contactSubject?.value?.trim() || "",
+        platform: contactPlatform?.value || "desktop",
+        message: contactMessage?.value?.trim() || "",
+        website: contactHoney?.value || "",
+        userAgent: navigator.userAgent,
+        ts: Date.now(),
+      };
+      try {
+        const response = await fetch("/api/contact", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) throw new Error("send failed");
+        showChaosToast("Message sent.");
+        contactModal.hidden = true;
+        contactModal.setAttribute("aria-hidden", "true");
+        contactForm.reset();
+      } catch {
+        const qs = new URLSearchParams({
+          subject: `[Poly Oracle Contact] ${payload.subject} (${payload.platform})`,
+          body: `From: ${payload.fromEmail}\nPlatform: ${payload.platform}\n\n${payload.message}`,
+        });
+        window.location.href = `mailto:?${qs.toString()}`;
+      }
     });
   }
 
@@ -756,7 +950,58 @@ function setRevealing(revealing) {
   askButton.classList.toggle("loading", revealing);
 }
 
-function revealAnswer() {
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function flashBackground(intensity = 1, ms = 160) {
+  if (!stage) return;
+  stage.style.setProperty("--ritualFlashOpacity", String(clamp(intensity, 0, 1)));
+  stage.classList.remove("ritual-flash");
+  void stage.offsetWidth;
+  stage.classList.add("ritual-flash");
+  setTimeout(() => stage.classList.remove("ritual-flash"), ms);
+}
+
+function darkenStage(on) {
+  if (!stage) return;
+  stage.classList.toggle("ritual-dark", !!on);
+}
+
+async function speakLine(text, { rate = 1, pitch = 1.1, voiceName = "", timeoutMs = 6000 } = {}) {
+  if (!text) return;
+  if (!("speechSynthesis" in window)) return;
+  const synth = window.speechSynthesis;
+  synth.cancel();
+  synth.resume();
+  const voices = getWebVoices();
+  await new Promise((resolve) => {
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.rate = rate;
+    utter.pitch = pitch;
+    utter.volume = state.whisper ? 0.5 : 1;
+    const selected = voices.find((voice) => voice.name === (voiceName || state.selectedVoice));
+    if (selected) utter.voice = selected;
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      resolve();
+    };
+    const tid = setTimeout(finish, timeoutMs);
+    utter.onend = () => {
+      clearTimeout(tid);
+      finish();
+    };
+    utter.onerror = () => {
+      clearTimeout(tid);
+      finish();
+    };
+    synth.speak(utter);
+  });
+}
+
+async function revealAnswer() {
   if (state.isRevealing) return;
 
   const normalizedQuestion = normalizeQuestion(questionInput.value);
@@ -779,35 +1024,43 @@ function revealAnswer() {
 
   hapticReveal();
   primeSpeechFromGesture();
+  await audioEngine.unlock();
   setRevealing(true);
-
-  // Speak the question during the ritual lead-in.
-  speakText(normalizedQuestion, {
-    rate: state.whisper ? 0.92 : 1.0,
-    pitch: 1.12,
-    preview: true,
-    voiceName: revealVoice,
-  });
-
-  // v1.2.2 ritual reveal
-  if (prefersReducedMotion) {
-    runReducedRitualSequence(mode, () => finishReveal({
+  try {
+    audioEngine.play("reveal_magic", { volume: 0.9 });
+    await delay(250);
+    await speakLine(normalizedQuestion, {
+      rate: state.whisper ? 0.92 : 1,
+      pitch: 1.1,
+      voiceName: revealVoice,
+      timeoutMs: 6500,
+    });
+    audioEngine.play("reveal_flash", { volume: 0.75 });
+    flashBackground(1, 180);
+    darkenStage(true);
+    await delay(220);
+    if (state.voiceReadsAnswer !== false) {
+      await speakLine(answerLine, {
+        rate: state.whisper ? 0.96 : 1.04,
+        pitch: 1.14,
+        voiceName: revealVoice,
+        timeoutMs: 6500,
+      });
+    }
+    darkenStage(false);
+    flashBackground(0.7, 160);
+    finishReveal({
       normalizedQuestion,
       polarity,
       answerLine,
       microLine,
       revealVoice,
-    }));
-    return;
+    });
+  } finally {
+    darkenStage(false);
+    setRevealing(false);
+    setIntentState();
   }
-
-  runRitualSequence(mode, () => finishReveal({
-    normalizedQuestion,
-    polarity,
-    answerLine,
-    microLine,
-    revealVoice,
-  }));
 }
 
 function runRitualSequence(mode, onDone) {
@@ -882,7 +1135,6 @@ function performRitualPulse(level = 1) {
 async function finishReveal({ normalizedQuestion, polarity, answerLine, microLine, revealVoice }) {
   stage.classList.remove("pre-reveal-shake");
   spawnSparkles(prefersReducedMotion ? 5 : 18, 1.2, 1.35);
-  await playRevealSoundAndWait();
   flash.classList.remove("active");
   mist.classList.remove("active");
   flash.style.opacity = "";
@@ -910,16 +1162,6 @@ async function finishReveal({ normalizedQuestion, polarity, answerLine, microLin
   triggerAnswerRevealImpact();
   renderVault();
   saveState();
-
-  const spokenAnswer = answerSimple.textContent.trim() || entry.answer;
-  speakText(spokenAnswer, {
-    rate: state.whisper ? 0.95 : 1.05,
-    pitch: 1.18,
-    voiceName: revealVoice,
-  });
-
-  setRevealing(false);
-  setIntentState();
 }
 
 function triggerAnswerRevealImpact() {
@@ -1271,56 +1513,11 @@ function triggerRevealFx({ reduced = false } = {}) {
 }
 
 function playPixySound(intensity) {
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  if (AudioCtx && orbTapBuffer && !state.minimal) {
-    if (!audioContext) audioContext = new AudioCtx();
-    if (audioContext.state === "suspended") {
-      audioContext.resume().catch(() => {});
-    }
-    const source = audioContext.createBufferSource();
-    const gain = audioContext.createGain();
-    source.buffer = orbTapBuffer;
-    gain.gain.value = state.whisper ? 0.52 : 0.92;
-    source.connect(gain);
-    gain.connect(audioContext.destination);
-    source.start(0);
-    return;
-  }
-
-  if (orbTapPool.length) {
-    const node = orbTapPool[orbTapPoolIndex % orbTapPool.length];
-    orbTapPoolIndex += 1;
-    node.currentTime = 0;
-    node.volume = state.whisper ? 0.55 : 1;
-    node.play().catch(() => {});
-    return;
-  }
-
-  if (!AudioCtx || state.minimal) return;
-  if (!audioContext) audioContext = new AudioCtx();
-
-  const now = audioContext.currentTime;
-  const master = audioContext.createGain();
-  master.connect(audioContext.destination);
-
-  const gainTop = state.whisper ? 0.1 : clamp(0.24 * intensity.brightnessMultiplier, 0.12, 0.5);
-  master.gain.setValueAtTime(0.0001, now);
-  master.gain.exponentialRampToValueAtTime(gainTop, now + 0.02);
-  master.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
-
-  [720, 980, 1240].forEach((frequency, index) => {
-    const osc = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    const start = now + index * 0.05;
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(frequency * clamp(0.95 + intensity.sizeMultiplier * 0.08, 0.95, 1.18), start);
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(0.12, start + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
-    osc.connect(gain);
-    gain.connect(master);
-    osc.start(start);
-    osc.stop(start + 0.24);
+  if (state.minimal) return;
+  const volume = state.whisper ? 0.38 : clamp(0.58 * intensity.brightnessMultiplier, 0.32, 0.9);
+  audioEngine.play("orb_tap", {
+    volume,
+    rate: clamp(0.94 + intensity.sizeMultiplier * 0.08, 0.92, 1.08),
   });
 }
 
@@ -1862,8 +2059,8 @@ function initGalaxyCanvas() {
   let pausedLandmineRemainingMs = 0;
   let landmineFlashUntil = 0;
   let asteroidImpactFlashUntil = 0;
+  let asteroidImpactFlashIntensity = 1;
   let lastAsteroidCollisionSfxAt = 0;
-  const gameSfxPool = {};
   let debugLevelUnlocked = false;
   let debugModeTapCount = 0;
   let debugModeTapLastAt = 0;
@@ -1920,12 +2117,53 @@ function initGalaxyCanvas() {
 
   function syncArcadeEntryLabel() {
     if (!btnArcade) return;
-    btnArcade.textContent = arcadeResumeAvailable ? "Resume" : "Arcade";
+    btnArcade.textContent = "Arcade";
+  }
+
+  function setArcadeSubmenu(mode = "root") {
+    const showRoot = mode === "root";
+    const showArcade = mode === "arcade";
+    const showLevels = mode === "levels";
+    if (btnArcade) btnArcade.style.display = showRoot ? "" : "none";
+    if (btnFreestyle) btnFreestyle.style.display = showRoot ? "" : "none";
+    if (debugLevelPanel) debugLevelPanel.style.display = showRoot && debugLevelUnlocked ? "" : "none";
+    if (arcadeMenuPanel) {
+      arcadeMenuPanel.hidden = !showArcade;
+      arcadeMenuPanel.classList.toggle("show", showArcade);
+      arcadeMenuPanel.setAttribute("aria-hidden", showArcade ? "false" : "true");
+    }
+    if (arcadeLevelPanel) {
+      arcadeLevelPanel.hidden = !showLevels;
+      arcadeLevelPanel.classList.toggle("show", showLevels);
+      arcadeLevelPanel.setAttribute("aria-hidden", showLevels ? "false" : "true");
+    }
+  }
+
+  function buildArcadeLevelSelect() {
+    if (!arcadeLevelGrid) return;
+    if (arcadeLevelGrid.children.length) return;
+    for (let i = 0; i < ARCADE_LEVELS.length; i += 1) {
+      const level = ARCADE_LEVELS[i].level;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "arcadeLevelBtn";
+      button.textContent = String(level);
+      button.addEventListener("click", () => {
+        setSavedArcadeLevel(level);
+        startArcadeAtLevel(level);
+      });
+      arcadeLevelGrid.appendChild(button);
+    }
+  }
+
+  function syncArcadeMenuButtons() {
+    if (btnArcadeResume) btnArcadeResume.disabled = !(arcadeResumeAvailable || hasArcadeSave());
+    if (btnArcadeLevelSelect) btnArcadeLevelSelect.disabled = !hasArcadeWon();
   }
 
   function syncDebugLevelPanel() {
     if (!debugLevelPanel) return;
-    const visible = debugLevelUnlocked && engineMode === "menu";
+    const visible = debugLevelUnlocked && engineMode === "menu" && btnArcade?.style.display !== "none";
     debugLevelPanel.hidden = !visible;
     debugLevelPanel.classList.toggle("unlocked", visible);
     debugLevelPanel.setAttribute("aria-hidden", visible ? "false" : "true");
@@ -2160,82 +2398,46 @@ function initGalaxyCanvas() {
     }
   }
 
-  function playGameSfx(name, volume = 0.9) {
-    const src = GAME_SFX[name];
-    if (!src || state.minimal) return;
-    let pool = gameSfxPool[name];
-    if (!pool) {
-      pool = [];
-      gameSfxPool[name] = pool;
-    }
-    let node = null;
-    for (let i = 0; i < pool.length; i += 1) {
-      if (pool[i].paused || pool[i].ended) {
-        node = pool[i];
-        break;
-      }
-    }
-    if (!node) {
-      node = new Audio(src);
-      node.preload = "auto";
-      pool.push(node);
-    }
-    try {
-      node.currentTime = 0;
-      node.volume = clamp(volume * (state.whisper ? 0.45 : 1), 0, 1);
-      node.play().catch(() => {});
-    } catch {
-      // ignore
-    }
+  function boomStackVolume(baseVolume) {
+    const now = performance.now();
+    while (boomTimes.length && now - boomTimes[0] > 150) boomTimes.shift();
+    const count = boomTimes.length;
+    boomTimes.push(now);
+    return baseVolume * (1 / (1 + count * 0.35));
+  }
+
+  function playGameSfx(name, volume = 0.9, opts = {}) {
+    if (state.minimal) return;
+    audioEngine.play(name, {
+      volume: clamp(volume * (state.whisper ? 0.55 : 1), 0, 1),
+      rate: opts.rate || 1,
+      detune: opts.detune || 0,
+    });
   }
 
   // === Warp Spawns ===
   function playWarpSound() {
     if (prefersReducedMotion || state.minimal) return;
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx) return;
-    if (!audioContext) audioContext = new AudioCtx();
-    const now = audioContext.currentTime;
-    const osc = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(220, now);
-    osc.frequency.exponentialRampToValueAtTime(560, now + 0.18);
-    gain.gain.setValueAtTime(state.whisper ? 0.015 : 0.03, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
-    osc.connect(gain);
-    gain.connect(audioContext.destination);
-    osc.start(now);
-    osc.stop(now + 0.23);
+    playGameSfx("warp", 0.48, { rate: 0.98 + Math.random() * 0.08 });
   }
 
   function playArmSound() {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx || state.minimal) return;
-    if (!audioContext) audioContext = new AudioCtx();
-    const now = audioContext.currentTime;
-    const osc = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    osc.type = "square";
-    osc.frequency.setValueAtTime(580, now);
-    gain.gain.setValueAtTime(state.whisper ? 0.01 : 0.03, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
-    osc.connect(gain);
-    gain.connect(audioContext.destination);
-    osc.start(now);
-    osc.stop(now + 0.13);
+    playGameSfx("landmine_arm", 0.84);
   }
 
   function playBigBoomSound() {
-    playGameSfx("minefinalexplo", 0.92);
+    playGameSfx("landmine_boom", 0.92);
   }
 
   function triggerLandmineScreenFlash() {
     landmineFlashUntil = performance.now() + 220;
   }
 
-  function triggerAsteroidImpactFlash() {
-    asteroidImpactFlashUntil = performance.now() + (prefersReducedMotion ? 100 : 220);
+  function triggerAsteroidImpactFlash(intensity = 1) {
+    const safeIntensity = clamp(intensity, 0, 1);
+    asteroidImpactFlashIntensity = safeIntensity;
+    const duration = safeIntensity <= 0.25 ? 80 : safeIntensity <= 0.55 ? 120 : (prefersReducedMotion ? 100 : 220);
+    asteroidImpactFlashUntil = performance.now() + duration;
   }
 
   function addWarpRing(x, y, color = "rgba(112,255,178,1)") {
@@ -2295,7 +2497,7 @@ function initGalaxyCanvas() {
       lastY: y,
       lastMoveAt: performance.now(),
     };
-    playGameSfx("blip1", 0.88);
+    playGameSfx("blip1", 0.8, { rate: 1.05 });
     addWarpRing(x, y, "rgba(124,255,91,1)");
   }
 
@@ -2504,18 +2706,19 @@ function initGalaxyCanvas() {
     const mediumBlast = wasKind === 2;
     const ttlScale = bigBlast ? 1.4 : mediumBlast ? 1.18 : 1;
     spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale);
-    if (wasKind >= 2) {
-      playGameSfx("explo1", 0.92);
-    } else {
-      playGameSfx(Math.random() < 0.5 ? "smallboom1" : "smallboom2", 0.82);
-    }
+    const explodeKey = wasKind === 3 ? "explosion_big" : wasKind === 2 ? "explosion_med" : "explosion_small";
+    playGameSfx(explodeKey, boomStackVolume(wasKind === 3 ? 0.9 : wasKind === 2 ? 0.72 : 0.56), {
+      rate: 0.92 + Math.random() * 0.16,
+    });
     if (bigBlast) {
-      triggerAsteroidImpactFlash();
+      triggerAsteroidImpactFlash(1);
     } else if (mediumBlast) {
-      triggerAsteroidImpactFlash();
+      triggerAsteroidImpactFlash(0.5);
       setTimeout(() => {
-        triggerAsteroidImpactFlash();
+        triggerAsteroidImpactFlash(0.4);
       }, 90);
+    } else {
+      triggerAsteroidImpactFlash(0.2);
     }
   }
 
@@ -2524,6 +2727,8 @@ function initGalaxyCanvas() {
     if (!a) return;
     const bigBlast = a.kind === 3;
     spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1);
+    const explodeKey = bigBlast ? "explosion_big" : a.kind === 2 ? "explosion_med" : "explosion_small";
+    playGameSfx(explodeKey, boomStackVolume(bigBlast ? 0.82 : 0.56), { rate: 0.92 + Math.random() * 0.14 });
     releaseAsteroid(a);
   }
 
@@ -2532,7 +2737,7 @@ function initGalaxyCanvas() {
     const now = performance.now();
     landmine.armedAt = now;
     landmine.explodeAt = now + 1000;
-    playGameSfx("minepreexplode", 0.96);
+    playGameSfx("landmine_arm", 0.96);
   }
 
   function explodeLandmine() {
@@ -2584,7 +2789,9 @@ function initGalaxyCanvas() {
       setTimeout(() => startLevel(currentLevelIndex + 1), 420);
       return;
     }
+    setArcadeWon();
     clearArcadeProgress();
+    syncArcadeMenuButtons();
     try {
       localStorage.setItem(STORAGE.rewardCelestial, "1");
     } catch {
@@ -2601,6 +2808,7 @@ function initGalaxyCanvas() {
     arcadeResumeAvailable = false;
     syncArcadeEntryLabel();
     clearArcadeProgress();
+    syncArcadeMenuButtons();
     playGameSfx("gameover", 0.96);
     showArcadeOverlay("GAME OVER", "You died. Progress lost. Try again.", 0, {
       buttonText: "Back to Modes",
@@ -2613,6 +2821,7 @@ function initGalaxyCanvas() {
     currentLevelIndex = safeIdx;
     const cfg = ARCADE_LEVELS[safeIdx];
     const now = performance.now();
+    setSavedArcadeLevel(cfg.level);
 
     clearGameplayEntities();
     totalToSpawn = cfg.totalToClear;
@@ -2679,6 +2888,27 @@ function initGalaxyCanvas() {
     startGalaxyLoop();
   }
 
+  function startArcadeNew() {
+    clearArcadeProgress();
+    setSavedArcadeLevel(1);
+    startArcadeAtLevel(1);
+  }
+
+  function startArcadeResume() {
+    startArcadeFromSave();
+  }
+
+  function openArcadeMenu() {
+    setArcadeSubmenu("arcade");
+    syncArcadeMenuButtons();
+  }
+
+  function openArcadeLevelSelect() {
+    if (!hasArcadeWon()) return;
+    buildArcadeLevelSelect();
+    setArcadeSubmenu("levels");
+  }
+
   function startArcadeAtLevel(levelNum) {
     hideArcadeOverlay();
     engineMode = "arcade";
@@ -2731,6 +2961,8 @@ function initGalaxyCanvas() {
     }
     engineMode = "menu";
     syncArcadeEntryLabel();
+    setArcadeSubmenu("root");
+    syncArcadeMenuButtons();
     setGalaxyViewMode("menu");
     sim.maxAsteroids = sim.width < 700 ? 80 : 120;
     setGalaxyTool("draw");
@@ -3034,8 +3266,9 @@ function initGalaxyCanvas() {
       ctx.fillRect(0, 0, sim.width, sim.height);
     }
     if (asteroidImpactFlashUntil > now) {
-      const t = (asteroidImpactFlashUntil - now) / 140;
-      const alpha = Math.max(0, Math.min(1, t)) * (prefersReducedMotion ? 0.13 : 0.2);
+      const t = (asteroidImpactFlashUntil - now) / 220;
+      const base = prefersReducedMotion ? 0.13 : 0.2;
+      const alpha = Math.max(0, Math.min(1, t)) * base * asteroidImpactFlashIntensity;
       ctx.fillStyle = `rgba(255,245,220,${alpha.toFixed(3)})`;
       ctx.fillRect(0, 0, sim.width, sim.height);
     }
@@ -3158,6 +3391,7 @@ function initGalaxyCanvas() {
 
   resizeGalaxyCanvas();
   computePlayfield();
+  buildArcadeLevelSelect();
   buildDebugLevelSelect();
   syncDebugLevelPanel();
   if (galaxyModeTitleEl) {
@@ -3184,6 +3418,18 @@ function initGalaxyCanvas() {
     },
     startArcadeFromSave() {
       startArcadeFromSave();
+    },
+    startArcadeNew() {
+      startArcadeNew();
+    },
+    startArcadeResume() {
+      startArcadeResume();
+    },
+    openArcadeMenu() {
+      openArcadeMenu();
+    },
+    openArcadeLevelSelect() {
+      openArcadeLevelSelect();
     },
     startArcadeAtLevel(levelNum) {
       startArcadeAtLevel(levelNum);

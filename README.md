@@ -51,3 +51,14 @@ git push -u origin v1.1-dev
 5. Deploy.
 
 `vercel.json` is included for clean static hosting headers.
+
+## Contact API Env Vars
+For `/api/contact` email forwarding (Resend), configure:
+
+```bash
+RESEND_API_KEY=...
+CONTACT_TO=Paul.t.fisher03@gmail.com
+CONTACT_FROM=Poly Oracle <noreply@yourdomain.com>
+```
+
+If env vars are missing, the client falls back to opening the user mail app.

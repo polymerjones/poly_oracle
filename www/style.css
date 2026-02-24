@@ -1457,6 +1457,55 @@ select:focus-visible {
   pointer-events: auto;
 }
 
+@media (hover: hover) and (pointer: fine) {
+  #galaxyPlayCanvas {
+    cursor: none;
+  }
+}
+
+.canvasCrosshair {
+  position: fixed;
+  width: 26px;
+  height: 26px;
+  margin-left: -13px;
+  margin-top: -13px;
+  z-index: 2;
+  pointer-events: none;
+  display: none;
+  border: 1.6px solid rgba(255, 62, 62, 0.9);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(255, 36, 36, 0.45), inset 0 0 8px rgba(255, 104, 104, 0.4);
+  animation: crosshairPulse 980ms ease-in-out infinite;
+}
+
+.canvasCrosshair::before,
+.canvasCrosshair::after {
+  content: "";
+  position: absolute;
+  background: rgba(255, 64, 64, 0.94);
+}
+
+.canvasCrosshair::before {
+  left: 50%;
+  top: 3px;
+  width: 1px;
+  height: 20px;
+  margin-left: -0.5px;
+}
+
+.canvasCrosshair::after {
+  top: 50%;
+  left: 3px;
+  width: 20px;
+  height: 1px;
+  margin-top: -0.5px;
+}
+
+@keyframes crosshairPulse {
+  0%, 100% { transform: scale(1); opacity: 0.86; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+
 .debug * {
   outline: 1px solid rgba(255, 0, 0, 0.08);
 }

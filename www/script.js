@@ -247,6 +247,7 @@ const toolDraw = document.getElementById("toolDraw");
 const toolBoom = document.getElementById("toolBoom");
 const clearGalaxy = document.getElementById("clearGalaxy");
 const galaxyPlayCanvas = document.getElementById("galaxyPlayCanvas");
+const canvasCrosshair = document.getElementById("canvasCrosshair");
 const galaxyModeSelect = document.getElementById("galaxyModeSelect");
 const btnArcade = document.getElementById("btnArcade");
 const btnFreestyle = document.getElementById("btnFreestyle");
@@ -286,6 +287,7 @@ const contactEmail = document.getElementById("contactEmail");
 const contactSubject = document.getElementById("contactSubject");
 const contactPlatform = document.getElementById("contactPlatform");
 const contactMessage = document.getElementById("contactMessage");
+const formspreeEndpoint = String(window.POLY_CONTACT_FORM_ENDPOINT || "").trim();
 
 let audioContext;
 let nativeTtsWarned = false;
@@ -593,12 +595,36 @@ function addListeners() {
         ts: Date.now(),
       };
       try {
+        let sent = false;
         const response = await fetch("/api/contact", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        if (!response.ok) throw new Error("send failed");
+        if (response.ok) {
+          sent = true;
+        } else {
+          const body = await response.json().catch(() => ({}));
+          if (body?.fallback && formspreeEndpoint) {
+            const fsRes = await fetch(formspreeEndpoint, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+              },
+              body: JSON.stringify({
+                email: payload.fromEmail,
+                subject: payload.subject,
+                platform: payload.platform,
+                message: payload.message,
+                userAgent: payload.userAgent,
+                ts: payload.ts,
+              }),
+            });
+            sent = fsRes.ok;
+          }
+        }
+        if (!sent) throw new Error("send failed");
         showChaosToast("Message sent.");
         contactModal.hidden = true;
         contactModal.setAttribute("aria-hidden", "true");
@@ -2085,6 +2111,8 @@ function initGalaxyCanvas() {
   const btnDebugStartLevel = document.getElementById("btnDebugStartLevel");
 
   const playfield = { x: 0, y: 0, w: 0, h: 0, pad: 12, topPad: 0, bottomPad: 0 };
+  const canShowCrosshair = typeof window.matchMedia === "function"
+    && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 
   function getSafeInsets() {
     const cs = getComputedStyle(document.documentElement);
@@ -2319,6 +2347,14 @@ function initGalaxyCanvas() {
     return asteroidSprites.roid01;
   }
 
+  function getAsteroidSpriteKeyForLevel(levelNum) {
+    if (levelNum >= 10) return "hotroid01";
+    if (levelNum >= 7) return "roid03";
+    if (levelNum >= 4) return "roid02";
+    if (levelNum === 2) return Math.random() < 0.5 ? "roid01" : "roid02";
+    return "roid01";
+  }
+
   function setGalaxyBackgroundForLevel(levelNum) {
     const bgVideo = galaxyBgVideo;
     if (!bgVideo) return;
@@ -2487,6 +2523,8 @@ function initGalaxyCanvas() {
     a.r = r;
     a.mass = r * r;
     a.kind = kind;
+    const levelNum = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
+    a.spriteKey = getAsteroidSpriteKeyForLevel(levelNum);
     a.rot = Math.random() * Math.PI * 2;
     a.spin = (Math.random() - 0.5) * 0.06;
     a.shape = makeShape(8 + Math.floor(Math.random() * 4));
@@ -3181,7 +3219,7 @@ function initGalaxyCanvas() {
     for (let i = 0; i < sim.asteroids.length; i += 1) {
       const a = sim.asteroids[i];
       const levelNum = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
-      const sprite = getAsteroidSpriteForLevel(levelNum);
+      const sprite = asteroidSprites[a.spriteKey] || getAsteroidSpriteForLevel(levelNum);
       if (sprite && sprite.complete && sprite.naturalWidth > 0) {
         const d = a.r * 2;
         ctx.save();
@@ -3380,6 +3418,20 @@ function initGalaxyCanvas() {
     }
   }
 
+  function setCrosshairVisible(visible) {
+    if (!canvasCrosshair || !canShowCrosshair) return;
+    canvasCrosshair.style.display = visible ? "block" : "none";
+  }
+
+  function updateCrosshairPosition(event) {
+    if (!canvasCrosshair || !canShowCrosshair) return;
+    const clientX = event.clientX;
+    const clientY = event.clientY;
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+    canvasCrosshair.style.left = `${clientX}px`;
+    canvasCrosshair.style.top = `${clientY}px`;
+  }
+
   function startGalaxyLoop() {
     if (galaxyRunning) return;
     galaxyRunning = true;
@@ -3406,6 +3458,12 @@ function initGalaxyCanvas() {
   galaxyPlayCanvas.addEventListener("touchstart", onTap, { passive: false });
   galaxyPlayCanvas.addEventListener("mousedown", onTap);
   galaxyPlayCanvas.addEventListener("click", onTap);
+  galaxyPlayCanvas.addEventListener("pointerenter", (event) => {
+    setCrosshairVisible(true);
+    updateCrosshairPosition(event);
+  });
+  galaxyPlayCanvas.addEventListener("pointermove", updateCrosshairPosition);
+  galaxyPlayCanvas.addEventListener("pointerleave", () => setCrosshairVisible(false));
 
   window.addEventListener("resize", () => {
     resizeGalaxyCanvas();

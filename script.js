@@ -1,4 +1,4 @@
-const APP_VERSION = "v2.0.0";
+const APP_VERSION = "v2.1.0";
 const storageKey = "poly-oracle-v11-state";
 const firstRunHintKey = "poly_oracle_seen_hint_v1_2_1";
 const verboseKey = "poly_oracle_verbose_details";
@@ -53,6 +53,27 @@ const GAME_SFX = {
 
 const PRACTICE_MAX_ASTEROIDS = 40;
 const MAX_LIVES = 3;
+const MUSIC = {
+  L1_3: "assets/music/E1L1-3.mp3",
+  L4_7: "assets/music/E1L4-7.mp3",
+  L8_9: "assets/music/E1L8-9.mp3",
+  L10: "assets/music/E1L10BOSS.mp3",
+};
+
+function musicKeyForLevel(levelNum) {
+  if (levelNum >= 10) return "L10";
+  if (levelNum >= 8) return "L8_9";
+  if (levelNum >= 4) return "L4_7";
+  return "L1_3";
+}
+
+function nextMusicKeyForLevel(levelNum) {
+  const key = musicKeyForLevel(levelNum);
+  if (key === "L1_3") return "L4_7";
+  if (key === "L4_7") return "L8_9";
+  if (key === "L8_9") return "L10";
+  return null;
+}
 
 const DEBUG_FORCE_LEVEL_SELECT = true;
 const REVEAL_VARIANT_SFX = [
@@ -355,6 +376,8 @@ let oracleBgController;
 let galaxyBgController;
 let titleSparkleTimer = null;
 let mediaPrimed = false;
+let gamePageActive = false;
+let menuOverlayOpen = false;
 const orbTapPool = [];
 let orbTapPoolIndex = 0;
 let lastOrbTapAt = 0;
@@ -366,6 +389,9 @@ const boomTimes = [];
 const audioEngine = {
   ctx: null,
   masterGain: null,
+  musicGain: null,
+  musicBuffers: new Map(),
+  currentMusic: null,
   buffers: new Map(),
   loops: new Map(),
   unlocked: false,
@@ -472,6 +498,86 @@ const audioEngine = {
     this.loops.set(name, handle);
     return handle;
   },
+  ensureMusic() {
+    this.ensureContext();
+    if (!this.ctx) return;
+    if (!this.musicGain) {
+      this.musicGain = this.ctx.createGain();
+      this.musicGain.gain.value = 1.0;
+      if (this.masterGain) this.musicGain.connect(this.masterGain);
+      else this.musicGain.connect(this.ctx.destination);
+    }
+  },
+  async loadMusicBuffer(url) {
+    this.ensureMusic();
+    if (!this.ctx) return null;
+    if (this.musicBuffers.has(url)) return this.musicBuffers.get(url);
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      const arr = await response.arrayBuffer();
+      const decoded = await this.ctx.decodeAudioData(arr.slice(0));
+      this.musicBuffers.set(url, decoded);
+      return decoded;
+    } catch {
+      return null;
+    }
+  },
+  async playMusic(key, url, { crossfadeMs = 250 } = {}) {
+    this.ensureMusic();
+    if (!this.ctx || !this.unlocked) return;
+    if (this.currentMusic && this.currentMusic.key === key) return;
+    const buffer = await this.loadMusicBuffer(url);
+    if (!buffer || !this.ctx) return;
+    const source = this.ctx.createBufferSource();
+    const gain = this.ctx.createGain();
+    source.buffer = buffer;
+    source.loop = true;
+    gain.gain.value = 0;
+    source.connect(gain);
+    gain.connect(this.musicGain || this.masterGain || this.ctx.destination);
+    const now = this.ctx.currentTime;
+    source.start(now);
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(1, now + crossfadeMs / 1000);
+    if (this.currentMusic) {
+      const old = this.currentMusic;
+      try {
+        old.gain.gain.cancelScheduledValues(now);
+        old.gain.gain.setValueAtTime(old.gain.gain.value, now);
+        old.gain.gain.linearRampToValueAtTime(0, now + crossfadeMs / 1000);
+        setTimeout(() => {
+          try {
+            old.source.stop();
+          } catch {
+            // ignore
+          }
+        }, crossfadeMs + 60);
+      } catch {
+        // ignore
+      }
+    }
+    this.currentMusic = { key, source, gain, startedAt: performance.now() };
+  },
+  stopMusic() {
+    if (!this.currentMusic) return;
+    try {
+      this.currentMusic.source.stop();
+    } catch {
+      // ignore
+    }
+    this.currentMusic = null;
+  },
+  setMusicDim(dimOn) {
+    this.ensureMusic();
+    if (!this.musicGain || !this.ctx) return;
+    const target = dimOn ? 0.4 : 1;
+    const now = this.ctx.currentTime;
+    this.musicGain.gain.cancelScheduledValues(now);
+    this.musicGain.gain.setValueAtTime(this.musicGain.gain.value, now);
+    this.musicGain.gain.linearRampToValueAtTime(target, now + 0.12);
+  },
   stopLoop(name) {
     const loop = this.loops.get(name);
     if (loop) loop.stop();
@@ -540,6 +646,7 @@ function addListeners() {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       audioEngine.stopAllLoops();
+      audioEngine.stopMusic();
       return;
     }
     audioEngine.resume();
@@ -979,6 +1086,8 @@ function openGalaxyView() {
   vault.hidden = true;
   oracleView.hidden = true;
   galaxyView.hidden = false;
+  gamePageActive = true;
+  menuOverlayOpen = true;
   galaxyView.setAttribute("aria-hidden", "false");
   document.body.style.overflow = "hidden";
   if (!prefersReducedMotion) {
@@ -991,6 +1100,9 @@ function openGalaxyView() {
 }
 
 function closeGalaxyView() {
+  gamePageActive = false;
+  menuOverlayOpen = false;
+  audioEngine.stopMusic();
   galaxyView.hidden = true;
   galaxyView.setAttribute("aria-hidden", "true");
   oracleView.hidden = false;
@@ -2579,6 +2691,24 @@ function initGalaxyCanvas() {
     audioEngine.stopLoop("warning10");
   }
 
+  function setMenuOverlayOpen(open) {
+    menuOverlayOpen = !!open;
+    if (!gamePageActive) return;
+    audioEngine.setMusicDim(menuOverlayOpen);
+  }
+
+  function playArcadeMusicForLevel(levelNum) {
+    audioEngine.unlock();
+    const key = musicKeyForLevel(levelNum);
+    const url = MUSIC[key];
+    audioEngine.playMusic(key, url, { crossfadeMs: 250 });
+    const nextKey = nextMusicKeyForLevel(levelNum);
+    if (nextKey) {
+      const nextUrl = MUSIC[nextKey];
+      audioEngine.loadMusicBuffer(nextUrl).catch(() => {});
+    }
+  }
+
   function formatMs(ms) {
     const safe = Math.max(0, Math.floor(ms / 1000));
     const m = Math.floor(safe / 60);
@@ -3386,6 +3516,7 @@ function initGalaxyCanvas() {
       setTimeout(() => startLevel(currentLevelIndex + 1), 420);
       return;
     }
+    audioEngine.stopMusic();
     setArcadeWon();
     clearArcadeProgress();
     syncArcadeMenuButtons();
@@ -3402,10 +3533,12 @@ function initGalaxyCanvas() {
 
   function promptRetryOrGameOver() {
     retryPending = true;
+    setMenuOverlayOpen(true);
     showArcadeOverlay("TIME'S UP", "Use 1 life to retry this level?", 0, {
       buttonText: "Retry (1 Life)",
       buttonAction: () => {
         retryPending = false;
+        setMenuOverlayOpen(false);
         arcadeLives = clamp(arcadeLives - 1, 0, MAX_LIVES);
         renderLives();
         hideArcadeOverlay();
@@ -3422,6 +3555,7 @@ function initGalaxyCanvas() {
   function triggerGameOver() {
     arcadeActive = false;
     retryPending = false;
+    audioEngine.stopMusic();
     stopWarningState();
     arcadeResumeAvailable = false;
     syncArcadeEntryLabel();
@@ -3462,6 +3596,7 @@ function initGalaxyCanvas() {
     syncArcadeEntryLabel();
 
     setGalaxyBackgroundForLevel(cfg.level);
+    playArcadeMusicForLevel(cfg.level);
     if (cfg.level === 10) {
       playGameSfx("lastlevelstart", 0.96);
     }
@@ -3486,12 +3621,15 @@ function initGalaxyCanvas() {
         landmine.explodeAt = now + pausedLandmineRemainingMs;
       }
       engineMode = "arcade";
+      setMenuOverlayOpen(false);
       setGalaxyViewMode("arcade");
       setGalaxyTool("draw");
       resizeGalaxyCanvas();
       computePlayfield();
       setTimeout(computePlayfield, 50);
       startGalaxyLoop();
+      const resumeLevel = ARCADE_LEVELS[currentLevelIndex]?.level || 1;
+      playArcadeMusicForLevel(resumeLevel);
       arcadeResumeAvailable = false;
       syncArcadeEntryLabel();
       return;
@@ -3499,6 +3637,7 @@ function initGalaxyCanvas() {
     engineMode = "arcade";
     arcadeActive = true;
     retryPending = false;
+    setMenuOverlayOpen(false);
     setGalaxyViewMode("arcade");
     setGalaxyTool("draw");
     resizeGalaxyCanvas();
@@ -3538,6 +3677,7 @@ function initGalaxyCanvas() {
     engineMode = "arcade";
     arcadeActive = true;
     retryPending = false;
+    setMenuOverlayOpen(false);
     arcadeResumeAvailable = false;
     syncArcadeEntryLabel();
     setGalaxyViewMode("arcade");
@@ -3558,6 +3698,7 @@ function initGalaxyCanvas() {
     arcadeActive = false;
     arcadeResumeAvailable = false;
     retryPending = false;
+    setMenuOverlayOpen(false);
     syncArcadeEntryLabel();
     setGalaxyViewMode("practice");
     sim.maxAsteroids = PRACTICE_MAX_ASTEROIDS;
@@ -3566,6 +3707,7 @@ function initGalaxyCanvas() {
     state.practiceTool = "pencil";
     sim.nextDrawAt = 0;
     clearGameplayEntities();
+    audioEngine.playMusic("L1_3", MUSIC.L1_3, { crossfadeMs: 200 });
     resizeGalaxyCanvas();
     computePlayfield();
     setTimeout(computePlayfield, 50);
@@ -3586,6 +3728,7 @@ function initGalaxyCanvas() {
       clearGameplayEntities();
       arcadeActive = false;
       arcadeResumeAvailable = false;
+      audioEngine.stopMusic();
       if (galaxyBgVideo) {
         galaxyBgVideo.style.filter = "saturate(110%) contrast(105%) brightness(1)";
       }
@@ -3595,6 +3738,7 @@ function initGalaxyCanvas() {
     setArcadeSubmenu("root");
     syncArcadeMenuButtons();
     setGalaxyViewMode("menu");
+    setMenuOverlayOpen(true);
     sim.maxAsteroids = sim.width < 700 ? 80 : 120;
     setGalaxyTool("draw");
     if (!canPreserve) {
@@ -4124,6 +4268,7 @@ function initGalaxyCanvas() {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopGalaxyLoop();
+      audioEngine.stopMusic();
     } else if (!galaxyView.hidden) {
       resizeGalaxyCanvas();
       computePlayfield();

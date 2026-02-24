@@ -2065,16 +2065,24 @@ function initGalaxyCanvas() {
     if (!bgVideo) return;
     const src = getBgForLevel(levelNum);
     if (src === currentBgSrc) return;
+    const isFirstLoad = !currentBgSrc;
     currentBgSrc = src;
 
-    bgVideo.style.transition = "opacity 350ms ease";
+    if (isFirstLoad) {
+      bgVideo.src = src;
+      bgVideo.load();
+      bgVideo.play().catch(() => {});
+      return;
+    }
+
+    bgVideo.style.transition = "opacity 280ms ease";
     bgVideo.style.opacity = "0";
     setTimeout(() => {
       bgVideo.src = src;
       bgVideo.load();
       bgVideo.play().catch(() => {});
-      bgVideo.style.opacity = "1";
-    }, 220);
+      bgVideo.style.opacity = "";
+    }, 120);
   }
 
   function computePlayfield() {
@@ -2697,7 +2705,8 @@ function initGalaxyCanvas() {
     setGalaxyViewMode("freestyle");
     sim.maxAsteroids = sim.width < 700 ? 80 : 120;
     setGalaxyBackgroundForLevel(1);
-    if (state.galaxyTool !== "boom") setGalaxyTool("draw");
+    setGalaxyTool("draw");
+    sim.nextDrawAt = 0;
     resizeGalaxyCanvas();
     computePlayfield();
     setTimeout(computePlayfield, 50);

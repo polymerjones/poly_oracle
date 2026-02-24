@@ -89,11 +89,13 @@ body::before {
   filter: saturate(1.08) contrast(1.02) brightness(0.66);
   transform: translateZ(0);
   backface-visibility: hidden;
+  opacity: var(--video-visible-opacity, 0.45);
+  transition: opacity 260ms ease;
 }
 
 .oracle-bg-video {
   z-index: 2;
-  opacity: 0.1;
+  --video-visible-opacity: 0.1;
 }
 
 .stage {
@@ -1229,7 +1231,7 @@ select:focus-visible {
   position: absolute;
   inset: 0;
   z-index: 0;
-  opacity: 0.45;
+  --video-visible-opacity: 0.45;
 }
 
 .galaxyBgVideo {
@@ -1241,6 +1243,7 @@ select:focus-visible {
   z-index: 0;
   pointer-events: none;
   filter: saturate(110%) contrast(105%);
+  --video-visible-opacity: 0.45;
 }
 
 .galaxyModeSelect {

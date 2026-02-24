@@ -1,4 +1,4 @@
-const APP_VERSION = "v2.1.0";
+const APP_VERSION = "v2.1.1";
 const storageKey = "poly-oracle-v11-state";
 const firstRunHintKey = "poly_oracle_seen_hint_v1_2_1";
 const verboseKey = "poly_oracle_verbose_details";
@@ -53,6 +53,7 @@ const GAME_SFX = {
 
 const PRACTICE_MAX_ASTEROIDS = 40;
 const MAX_LIVES = 3;
+const MUSIC_MAX_GAIN = 0.85;
 const MUSIC = {
   L1_3: "assets/music/E1L1-3.mp3",
   L4_7: "assets/music/E1L4-7.mp3",
@@ -503,7 +504,7 @@ const audioEngine = {
     if (!this.ctx) return;
     if (!this.musicGain) {
       this.musicGain = this.ctx.createGain();
-      this.musicGain.gain.value = 1.0;
+      this.musicGain.gain.value = MUSIC_MAX_GAIN;
       if (this.masterGain) this.musicGain.connect(this.masterGain);
       else this.musicGain.connect(this.ctx.destination);
     }
@@ -572,7 +573,7 @@ const audioEngine = {
   setMusicDim(dimOn) {
     this.ensureMusic();
     if (!this.musicGain || !this.ctx) return;
-    const target = dimOn ? 0.4 : 1;
+    const target = dimOn ? MUSIC_MAX_GAIN * 0.4 : MUSIC_MAX_GAIN;
     const now = this.ctx.currentTime;
     this.musicGain.gain.cancelScheduledValues(now);
     this.musicGain.gain.setValueAtTime(this.musicGain.gain.value, now);

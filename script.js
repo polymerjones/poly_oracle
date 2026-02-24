@@ -4295,7 +4295,6 @@ function initGalaxyCanvas() {
   }
 
   function onGalaxyPointerDown(event) {
-    if (event.cancelable) event.preventDefault();
     const now = performance.now();
     if (now - sim.lastTapAt < 55) return;
     sim.lastTapAt = now;
@@ -4306,6 +4305,7 @@ function initGalaxyCanvas() {
       updatePracticeDebug();
       return;
     }
+    if (event.cancelable) event.preventDefault();
     const overlayVisible = arcadeOverlay && arcadeOverlay.classList.contains("show") && !arcadeOverlay.classList.contains("hidden");
     if (overlayVisible) {
       practiceLastInput = "blocked by overlay";

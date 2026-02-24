@@ -2295,7 +2295,7 @@ function initGalaxyCanvas() {
     return levelNum === 3 || levelNum === 5 || levelNum === 8;
   }
 
-  function spawnExplosion(x, y, count = 14, fire = false) {
+  function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1) {
     const emitCount = prefersReducedMotion ? Math.min(6, count) : count;
     for (let i = 0; i < emitCount; i += 1) {
       const angle = Math.random() * Math.PI * 2;
@@ -2307,11 +2307,25 @@ function initGalaxyCanvas() {
       p.vy = Math.sin(angle) * speed;
       p.life = 0;
       p.ttl = 320 + Math.random() * 180;
-      p.size = 1.7 + Math.random() * 2.4;
+      p.size = (1.7 + Math.random() * 2.4) * blastScale;
       p.alpha = 0.45 + Math.random() * 0.4;
-      p.color = fire
-        ? `rgba(${220 + Math.floor(Math.random() * 35)},${100 + Math.floor(Math.random() * 90)},${30 + Math.floor(Math.random() * 40)},`
-        : "rgba(111,255,128,";
+      if (fire) {
+        p.color = `rgba(${220 + Math.floor(Math.random() * 35)},${100 + Math.floor(Math.random() * 90)},${30 + Math.floor(Math.random() * 40)},`;
+      } else {
+        const tone = Math.random();
+        if (tone < 0.48) {
+          p.color = `rgba(${245 + Math.floor(Math.random() * 10)},${238 + Math.floor(Math.random() * 14)},${210 + Math.floor(Math.random() * 24)},`;
+        } else if (tone < 0.84) {
+          p.color = `rgba(${242 + Math.floor(Math.random() * 13)},${188 + Math.floor(Math.random() * 44)},${70 + Math.floor(Math.random() * 50)},`;
+        } else {
+          p.color = `rgba(${12 + Math.floor(Math.random() * 18)},${10 + Math.floor(Math.random() * 18)},${8 + Math.floor(Math.random() * 18)},`;
+          p.ttl += 520 + Math.random() * 260;
+          p.size *= 1.35;
+          p.vx *= 0.42;
+          p.vy *= 0.42;
+          p.alpha = Math.max(p.alpha, 0.62);
+        }
+      }
       sim.particles.push(p);
     }
   }
@@ -2478,7 +2492,8 @@ function initGalaxyCanvas() {
       }
     }
 
-    spawnExplosion(baseX, baseY, 14);
+    const bigBlast = wasKind === 3;
+    spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15);
     if (wasKind === 3) {
       playGameSfx("explo1", 0.92);
     } else {
@@ -2492,7 +2507,8 @@ function initGalaxyCanvas() {
   function vaporizeAsteroidByIndex(targetIndex) {
     const a = removeAsteroidAt(targetIndex);
     if (!a) return;
-    spawnExplosion(a.x, a.y, 12);
+    const bigBlast = a.kind === 3;
+    spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1);
     releaseAsteroid(a);
   }
 

@@ -1276,6 +1276,7 @@ async function revealAnswer() {
       microLine,
       revealVoice,
     });
+    await delay(900);
     setAnswerTextVisible(true);
     const textRevealHandle = audioEngine.play(SFX.POST, { volume: 0.95, rate: 1.0 });
     await Promise.race([textRevealHandle?.ended || Promise.resolve(), delay(2200)]);

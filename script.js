@@ -3399,9 +3399,10 @@ function initGalaxyCanvas() {
     }
     if (engineMode !== "freestyle") return;
 
-    if (state.galaxyTool === "draw") {
+    const freestyleBoom = state.galaxyTool === "boom";
+    if (!freestyleBoom) {
       if (now < sim.nextDrawAt) return;
-      sim.nextDrawAt = now + 500;
+      sim.nextDrawAt = now + 120;
       spawnAsteroid(point.x, point.y, 3, false);
       draw(now);
       return;
@@ -3409,7 +3410,9 @@ function initGalaxyCanvas() {
 
     if (sim.asteroids.length === 0) {
       setGalaxyTool("draw");
+      sim.nextDrawAt = 0;
       spawnAsteroid(point.x, point.y, 3, false);
+      draw(now);
       return;
     }
 

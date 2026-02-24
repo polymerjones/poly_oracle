@@ -38,6 +38,8 @@ const GAME_SFX = {
   astcollide2: "gamesfx/astcollide2.mp3",
 };
 
+const DEBUG_FORCE_LEVEL_SELECT = true;
+
 // === Level Config ===
 const ARCADE_LEVELS = [
   { level: 1, time: 48, totalToClear: 2, startSpawn: 2, spawnEveryMs: 0, maxOnScreen: 12 },
@@ -2200,7 +2202,7 @@ function initGalaxyCanvas() {
 
   function syncArcadeMenuButtons() {
     if (btnArcadeResume) btnArcadeResume.disabled = !(arcadeResumeAvailable || hasArcadeSave());
-    if (btnArcadeLevelSelect) btnArcadeLevelSelect.disabled = !hasArcadeWon();
+    if (btnArcadeLevelSelect) btnArcadeLevelSelect.disabled = !(DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon());
   }
 
   function syncDebugLevelPanel() {
@@ -2963,7 +2965,7 @@ function initGalaxyCanvas() {
   }
 
   function openArcadeLevelSelect() {
-    if (!hasArcadeWon()) return;
+    if (!(DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon())) return;
     buildArcadeLevelSelect();
     setArcadeSubmenu("levels");
   }
@@ -3397,9 +3399,10 @@ function initGalaxyCanvas() {
     }
     if (engineMode !== "freestyle") return;
 
-    if (state.galaxyTool === "draw") {
+    const freestyleBoom = state.galaxyTool === "boom";
+    if (!freestyleBoom) {
       if (now < sim.nextDrawAt) return;
-      sim.nextDrawAt = now + 500;
+      sim.nextDrawAt = now + 120;
       spawnAsteroid(point.x, point.y, 3, false);
       draw(now);
       return;
@@ -3407,7 +3410,9 @@ function initGalaxyCanvas() {
 
     if (sim.asteroids.length === 0) {
       setGalaxyTool("draw");
+      sim.nextDrawAt = 0;
       spawnAsteroid(point.x, point.y, 3, false);
+      draw(now);
       return;
     }
 

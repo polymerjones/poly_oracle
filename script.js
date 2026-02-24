@@ -200,6 +200,12 @@ const defaultPalette = {
   accentC: "#8effd0",
   bgNebula1: "rgba(124, 153, 255, 0.14)",
   bgNebula2: "rgba(164, 111, 255, 0.16)",
+  bgNebula3: "rgba(120, 208, 255, 0.12)",
+  bgNebula4: "rgba(158, 255, 215, 0.09)",
+  nebulaPos1: "12% 10%",
+  nebulaPos2: "82% 16%",
+  nebulaPos3: "56% 96%",
+  nebulaPos4: "22% 78%",
   orbGlow: "0 0 36px rgba(124, 223, 255, 0.52), 0 0 92px rgba(196, 127, 255, 0.28)",
 };
 
@@ -226,6 +232,7 @@ const state = {
   settingsOpen: false,
   isRevealing: false,
   sessionTapCount: 0,
+  chaosShiftCount: 0,
   tapTimestamps: [],
   galaxyTool: "draw",
   voiceReadsAnswer: true,
@@ -1110,8 +1117,10 @@ async function startCrystalOverlay() {
 function stopCrystalOverlay() {
   const video = getCrystalOverlay();
   if (!video) return;
-  video.pause();
   video.classList.remove("active", "on");
+  setTimeout(() => {
+    video.pause();
+  }, 220);
 }
 
 function triggerOrbSparkle(intensity = 1) {
@@ -1306,6 +1315,7 @@ async function revealAnswer() {
     setTimeout(() => stopCrystalOverlay(), 180);
     await delay(900);
     setAnswerTextVisible(true);
+    setRevealBgStrobe(false);
     triggerAnswerTextRevealFx();
     const textRevealHandle = audioEngine.play(SFX.POST, { volume: 0.95, rate: 1.0 });
     await Promise.race([textRevealHandle?.ended || Promise.resolve(), delay(2200)]);
@@ -1591,7 +1601,8 @@ function registerOrbTap() {
 
 function triggerChaosTheme() {
   state.chaosThemeEnabled = true;
-  state.themePalette = createRandomPalette();
+  state.chaosShiftCount += 1;
+  state.themePalette = createRandomPalette(state.chaosShiftCount);
   applyTheme();
   saveThemeSettings();
   showChaosToast();
@@ -1600,22 +1611,41 @@ function triggerChaosTheme() {
 function resetChaosTheme() {
   state.chaosThemeEnabled = false;
   state.themePalette = null;
+  state.chaosShiftCount = 0;
   applyTheme();
   saveThemeSettings();
 }
 
-function createRandomPalette() {
+function createRandomPalette(shiftCount = 1) {
+  const level = clamp(shiftCount, 1, 12);
+  const heat = clamp(level / 10, 0.1, 1.3);
+  const satBoost = Math.round(88 + heat * 8);
+  const lightness = Math.round(clamp(70 + heat * 10, 70, 84));
+  const nebulaAlpha = clamp(0.18 + heat * 0.12, 0.18, 0.36);
+
   const hueA = Math.floor(Math.random() * 360);
   const hueB = (hueA + 70 + Math.floor(Math.random() * 70)) % 360;
   const hueC = (hueA + 150 + Math.floor(Math.random() * 90)) % 360;
+  const hueD = (hueA + 210 + Math.floor(Math.random() * 80)) % 360;
+
+  const pos1 = `${Math.round(8 + Math.random() * 22)}% ${Math.round(6 + Math.random() * 24)}%`;
+  const pos2 = `${Math.round(64 + Math.random() * 28)}% ${Math.round(8 + Math.random() * 26)}%`;
+  const pos3 = `${Math.round(12 + Math.random() * 76)}% ${Math.round(60 + Math.random() * 34)}%`;
+  const pos4 = `${Math.round(12 + Math.random() * 72)}% ${Math.round(30 + Math.random() * 56)}%`;
 
   return {
-    accentA: `hsl(${hueA} 92% 74%)`,
-    accentB: `hsl(${hueB} 88% 74%)`,
-    accentC: `hsl(${hueC} 85% 74%)`,
-    bgNebula1: `hsla(${hueA} 90% 70% / 0.17)`,
-    bgNebula2: `hsla(${hueB} 86% 66% / 0.17)`,
-    orbGlow: `0 0 34px hsla(${hueA} 94% 72% / 0.56), 0 0 96px hsla(${hueB} 86% 70% / 0.32)`,
+    accentA: `hsl(${hueA} ${satBoost}% ${lightness}%)`,
+    accentB: `hsl(${hueB} ${Math.max(86, satBoost - 5)}% ${Math.max(70, lightness - 2)}%)`,
+    accentC: `hsl(${hueC} ${Math.max(84, satBoost - 8)}% ${Math.max(69, lightness - 3)}%)`,
+    bgNebula1: `hsla(${hueA} 96% 72% / ${nebulaAlpha.toFixed(2)})`,
+    bgNebula2: `hsla(${hueB} 95% 70% / ${nebulaAlpha.toFixed(2)})`,
+    bgNebula3: `hsla(${hueC} 94% 68% / ${(nebulaAlpha * 0.95).toFixed(2)})`,
+    bgNebula4: `hsla(${hueD} 92% 70% / ${(nebulaAlpha * 0.84).toFixed(2)})`,
+    nebulaPos1: pos1,
+    nebulaPos2: pos2,
+    nebulaPos3: pos3,
+    nebulaPos4: pos4,
+    orbGlow: `0 0 ${Math.round(34 + heat * 26)}px hsla(${hueA} 98% 74% / ${clamp(0.56 + heat * 0.18, 0.56, 0.88).toFixed(2)}), 0 0 ${Math.round(96 + heat * 90)}px hsla(${hueB} 94% 72% / ${clamp(0.32 + heat * 0.14, 0.32, 0.62).toFixed(2)})`,
   };
 }
 
@@ -1628,12 +1658,20 @@ function applyTheme() {
   root.style.setProperty("--accentC", palette.accentC);
   root.style.setProperty("--bgNebula1", palette.bgNebula1);
   root.style.setProperty("--bgNebula2", palette.bgNebula2);
+  root.style.setProperty("--bgNebula3", palette.bgNebula3 || defaultPalette.bgNebula3);
+  root.style.setProperty("--bgNebula4", palette.bgNebula4 || defaultPalette.bgNebula4);
+  root.style.setProperty("--nebulaPos1", palette.nebulaPos1 || defaultPalette.nebulaPos1);
+  root.style.setProperty("--nebulaPos2", palette.nebulaPos2 || defaultPalette.nebulaPos2);
+  root.style.setProperty("--nebulaPos3", palette.nebulaPos3 || defaultPalette.nebulaPos3);
+  root.style.setProperty("--nebulaPos4", palette.nebulaPos4 || defaultPalette.nebulaPos4);
   root.style.setProperty("--orbGlow", palette.orbGlow);
 }
 
 function showChaosToast() {
   if (!chaosToast) return;
   chaosToast.textContent = "✨ Oracle changed realities.";
+  const intensity = clamp(1 + state.chaosShiftCount * 0.12, 1, 2.2);
+  chaosToast.style.setProperty("--chaos-intensity", intensity.toFixed(2));
   playChaosShiftSound();
   chaosToast.hidden = false;
   chaosToast.classList.remove("show");

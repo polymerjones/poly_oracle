@@ -8,6 +8,12 @@
   --bg-2: #172a5b;
   --bgNebula1: rgba(124, 153, 255, 0.14);
   --bgNebula2: rgba(164, 111, 255, 0.16);
+  --bgNebula3: rgba(120, 208, 255, 0.12);
+  --bgNebula4: rgba(158, 255, 215, 0.09);
+  --nebulaPos1: 12% 10%;
+  --nebulaPos2: 82% 16%;
+  --nebulaPos3: 56% 96%;
+  --nebulaPos4: 22% 78%;
   --accentA: #7be2ff;
   --accentB: #f6a7ff;
   --accentC: #8effd0;
@@ -37,9 +43,10 @@ body {
     max(calc(24px + env(safe-area-inset-bottom, 0px)), 24px)
     max(16px, env(safe-area-inset-left, 0px));
   background:
-    radial-gradient(1000px 760px at 12% 10%, var(--bgNebula1), transparent 60%),
-    radial-gradient(920px 680px at 88% 12%, rgba(120, 208, 255, 0.12), transparent 62%),
-    radial-gradient(720px 520px at 56% 96%, var(--bgNebula2), transparent 65%),
+    radial-gradient(1000px 760px at var(--nebulaPos1), var(--bgNebula1), transparent 60%),
+    radial-gradient(920px 680px at var(--nebulaPos2), var(--bgNebula3), transparent 62%),
+    radial-gradient(720px 520px at var(--nebulaPos3), var(--bgNebula2), transparent 65%),
+    radial-gradient(860px 620px at var(--nebulaPos4), var(--bgNebula4), transparent 66%),
     linear-gradient(160deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2));
   color: var(--textPrimary);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, Arial, sans-serif;
@@ -66,9 +73,10 @@ body::before {
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(1000px 760px at 12% 10%, var(--bgNebula1), transparent 60%),
-    radial-gradient(920px 680px at 88% 12%, rgba(120, 208, 255, 0.12), transparent 62%),
-    radial-gradient(720px 520px at 56% 96%, var(--bgNebula2), transparent 65%),
+    radial-gradient(1000px 760px at var(--nebulaPos1), var(--bgNebula1), transparent 60%),
+    radial-gradient(920px 680px at var(--nebulaPos2), var(--bgNebula3), transparent 62%),
+    radial-gradient(720px 520px at var(--nebulaPos3), var(--bgNebula2), transparent 65%),
+    radial-gradient(860px 620px at var(--nebulaPos4), var(--bgNebula4), transparent 66%),
     linear-gradient(160deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2));
 }
 
@@ -864,7 +872,10 @@ body.verbose-details .answer-verbose {
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.24);
   background: rgba(14, 24, 48, 0.9);
-  box-shadow: 0 10px 26px rgba(2, 8, 20, 0.45);
+  box-shadow:
+    0 10px 26px rgba(2, 8, 20, calc(0.45 + (var(--chaos-intensity, 1) - 1) * 0.18)),
+    0 0 calc(16px * var(--chaos-intensity, 1)) rgba(196, 127, 255, 0.42),
+    0 0 calc(28px * var(--chaos-intensity, 1)) rgba(123, 226, 255, 0.36);
   font-size: 0.88rem;
 }
 
@@ -899,6 +910,8 @@ body.minimal {
   --line: rgba(255, 255, 255, 0.11);
   --bgNebula1: rgba(124, 153, 255, 0.08);
   --bgNebula2: rgba(164, 111, 255, 0.08);
+  --bgNebula3: rgba(120, 208, 255, 0.07);
+  --bgNebula4: rgba(158, 255, 215, 0.05);
 }
 
 body.minimal .stage {

@@ -2674,6 +2674,7 @@ function initGalaxyCanvas() {
     && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
   let debugDots = [];
   let practiceLastInput = "idle";
+  let practiceTapMarker = null;
 
   function showEl(el) {
     if (!el) return;
@@ -4053,6 +4054,22 @@ function initGalaxyCanvas() {
   function draw(now) {
     ctx.clearRect(0, 0, sim.width, sim.height);
 
+    if (engineMode === "practice" && practiceTapMarker) {
+      const age = now - practiceTapMarker.t;
+      if (age > 450) {
+        practiceTapMarker = null;
+      } else {
+        ctx.save();
+        ctx.globalAlpha = 1 - (age / 450);
+        ctx.beginPath();
+        ctx.arc(practiceTapMarker.x, practiceTapMarker.y, 10, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(190,120,255,0.9)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
     if (debugDots.length) {
       debugDots = debugDots.filter((d) => now - d.t < 450);
       for (let i = 0; i < debugDots.length; i += 1) {
@@ -4245,11 +4262,22 @@ function initGalaxyCanvas() {
     galaxyRaf = requestAnimationFrame(frame);
   }
 
-  function getPointerWorld(event) {
+  function pointerToCanvas(event) {
     const rect = galaxyPlayCanvas.getBoundingClientRect();
     const clientX = event.touches?.[0]?.clientX ?? event.changedTouches?.[0]?.clientX ?? event.clientX;
     const clientY = event.touches?.[0]?.clientY ?? event.changedTouches?.[0]?.clientY ?? event.clientY;
-    return { x: clientX - rect.left, y: clientY - rect.top };
+    const scaleX = rect.width > 0 ? galaxyPlayCanvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? galaxyPlayCanvas.height / rect.height : 1;
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+  }
+
+  function getPointerWorld(event) {
+    const p = pointerToCanvas(event);
+    return { x: p.x / (sim.dpr || 1), y: p.y / (sim.dpr || 1) };
+  }
+
+  function markTap(x, y) {
+    practiceTapMarker = { x, y, t: performance.now() };
   }
 
   function handleArcadeTap(x, y, now) {
@@ -4274,6 +4302,7 @@ function initGalaxyCanvas() {
 
   function handlePracticeTap(x, y, now) {
     practiceLastInput = `tap ${Math.round(x)},${Math.round(y)}`;
+    markTap(x, y);
     debugPing(x, y);
     if (state.practiceTool === "pencil") {
       if (now < sim.nextDrawAt) return;
@@ -4392,6 +4421,15 @@ function initGalaxyCanvas() {
     // support but still route taps inconsistently.
     galaxyPlayCanvas.addEventListener("touchstart", onGalaxyPointerDown, { passive: false });
     galaxyPlayCanvas.addEventListener("mousedown", onGalaxyPointerDown, { passive: false });
+    galaxyPlayCanvas.addEventListener("click", onGalaxyPointerDown, { passive: false });
+  }
+  if (galaxyView && !galaxyView.__polyInputCaptureBound) {
+    galaxyView.__polyInputCaptureBound = true;
+    const captureOpts = { passive: false, capture: true };
+    galaxyView.addEventListener("pointerdown", onGalaxyPointerDown, captureOpts);
+    galaxyView.addEventListener("touchstart", onGalaxyPointerDown, captureOpts);
+    galaxyView.addEventListener("mousedown", onGalaxyPointerDown, captureOpts);
+    galaxyView.addEventListener("click", onGalaxyPointerDown, captureOpts);
   }
   galaxyPlayCanvas.addEventListener("pointerenter", (event) => {
     setCrosshairVisible(true);

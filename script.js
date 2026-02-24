@@ -52,6 +52,7 @@ const GAME_SFX = {
 };
 
 const PRACTICE_MAX_ASTEROIDS = 40;
+const PRACTICE_SPAWN_COOLDOWN_MS = 1000;
 const MAX_LIVES = 3;
 const MUSIC_MAX_GAIN = 0.85;
 const MUSIC = {
@@ -4306,7 +4307,7 @@ function initGalaxyCanvas() {
     debugPing(x, y);
     if (state.practiceTool === "pencil") {
       if (now < sim.nextDrawAt) return;
-      sim.nextDrawAt = now + 120;
+      sim.nextDrawAt = now + PRACTICE_SPAWN_COOLDOWN_MS;
       if (sim.asteroids.length >= PRACTICE_MAX_ASTEROIDS) return;
       triggerCrosshairFire();
       spawnAsteroid(x, y, 3, true);

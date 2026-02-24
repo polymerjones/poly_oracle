@@ -146,15 +146,25 @@ body::before {
   z-index: 4;
   mix-blend-mode: screen;
   filter: saturate(1.25) brightness(1.05);
+  -webkit-mask-image: radial-gradient(circle at center, rgba(0,0,0,1) 58%, rgba(0,0,0,0.88) 70%, rgba(0,0,0,0.45) 84%, rgba(0,0,0,0) 100%);
+  mask-image: radial-gradient(circle at center, rgba(0,0,0,1) 58%, rgba(0,0,0,0.88) 70%, rgba(0,0,0,0.45) 84%, rgba(0,0,0,0) 100%);
   transition: opacity 180ms ease;
 }
 
 .reveal-fx-video.active {
   opacity: 0.88;
+  animation: crystalStrobe 220ms steps(2, end) infinite;
 }
 
 .reveal-fx-video.on {
   opacity: 0.88;
+  animation: crystalStrobe 220ms steps(2, end) infinite;
+}
+
+@keyframes crystalStrobe {
+  0% { opacity: 0.66; }
+  50% { opacity: 0.96; }
+  100% { opacity: 0.72; }
 }
 
 #flash,

@@ -1264,9 +1264,9 @@ async function revealAnswer() {
     }
 
     fadeInAnswerBar();
-    const postHandle = audioEngine.play(SFX.POST, { volume: 0.95, rate: 1.0 });
+    const barRevealHandle = audioEngine.play(SFX.PRE_A, { volume: 0.95, rate: 1.0 });
     const postSpark = setInterval(() => triggerOrbSparkle(0.7), 140);
-    await Promise.race([postHandle?.ended || Promise.resolve(), delay(2000)]);
+    await Promise.race([barRevealHandle?.ended || Promise.resolve(), delay(2000)]);
     clearInterval(postSpark);
 
     finishReveal({
@@ -1277,6 +1277,8 @@ async function revealAnswer() {
       revealVoice,
     });
     setAnswerTextVisible(true);
+    const textRevealHandle = audioEngine.play(SFX.POST, { volume: 0.95, rate: 1.0 });
+    await Promise.race([textRevealHandle?.ended || Promise.resolve(), delay(2200)]);
     await delay(250);
     stopCrystalOverlay();
 

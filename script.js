@@ -337,6 +337,7 @@ let nativeTtsWarned = false;
 let hintTimeout;
 let chaosToastTimeout;
 let crystalOverlayStopTimer = null;
+let orbStrobeController = null;
 let galaxyController;
 let galaxyCanvasController;
 let oracleBgController;
@@ -1155,6 +1156,82 @@ function setOrbScale(mult) {
   orb.style.transform = `scale(${clamp(mult, 0.86, 1.35).toFixed(3)})`;
 }
 
+function startOrbStrobeCadence(baseScale = REVEAL.GROW_MAX * 0.99) {
+  if (orbStrobeController) {
+    orbStrobeController.stop(true);
+    orbStrobeController = null;
+  }
+
+  const startAt = performance.now();
+  const cycleMs = 1320;
+  let raf = 0;
+  let stopping = false;
+  let stopAt = 0;
+  let stopResolve = null;
+
+  const pickPhase = (elapsed) => {
+    const t = elapsed % cycleMs;
+    if (t < 360) return { speed: 0.085, amp: 0.048 }; // fast
+    if (t < 900) return { speed: 0.042, amp: 0.032 }; // slower
+    return { speed: 0.078, amp: 0.044 }; // fast again
+  };
+
+  const finish = () => {
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+    setOrbScale(1);
+    if (stopResolve) stopResolve();
+  };
+
+  const frame = (now) => {
+    if (stopping) {
+      const t = clamp((now - stopAt) / 460, 0, 1);
+      const eased = 1 - Math.pow(1 - t, 2);
+      const amp = 0.03 * (1 - eased);
+      const scaleBase = lerp(baseScale, 1, eased);
+      const scale = scaleBase + Math.sin(now * 0.062) * amp;
+      setOrbScale(scale);
+      if (t >= 1) {
+        finish();
+        return;
+      }
+    } else {
+      const phase = pickPhase(now - startAt);
+      const scale = baseScale + Math.sin(now * phase.speed) * phase.amp;
+      setOrbScale(scale);
+    }
+    raf = requestAnimationFrame(frame);
+  };
+
+  raf = requestAnimationFrame(frame);
+  orbStrobeController = {
+    stop(immediate = false) {
+      if (!raf) return Promise.resolve();
+      if (immediate) {
+        finish();
+        return Promise.resolve();
+      }
+      if (!stopping) {
+        stopping = true;
+        stopAt = performance.now();
+      }
+      return new Promise((resolve) => {
+        stopResolve = resolve;
+      });
+    },
+  };
+}
+
+function stopOrbStrobeCadence(immediate = false) {
+  if (!orbStrobeController) {
+    if (immediate) setOrbScale(1);
+    return Promise.resolve();
+  }
+  const ctrl = orbStrobeController;
+  orbStrobeController = null;
+  return ctrl.stop(immediate);
+}
+
 function setRevealBusy(on) {
   setRevealing(!!on);
 }
@@ -1285,6 +1362,7 @@ async function revealAnswer() {
     }, REVEAL.FLASH_RATE_MS);
     await burstPromise;
     clearInterval(burstFlashInterval);
+    startOrbStrobeCadence(REVEAL.GROW_MAX * 0.99);
 
     await speakLine(normalizedQuestion, {
       rate: state.whisper ? 0.92 : 1,
@@ -1300,7 +1378,6 @@ async function revealAnswer() {
       const now = performance.now();
       triggerBgFlashPinkPurple(0.45);
       triggerOrbSparkle(0.6);
-      setOrbScale(REVEAL.GROW_MAX * (1.02 + 0.02 * Math.sin(now / 80)));
       await new Promise(requestAnimationFrame);
     }
 
@@ -1325,7 +1402,8 @@ async function revealAnswer() {
       revealVoice,
     });
     setTimeout(() => stopCrystalOverlay(), 180);
-    await delay(900);
+    await stopOrbStrobeCadence(false);
+    await delay(420);
     setAnswerTextVisible(true);
     setRevealBgStrobe(false);
     triggerAnswerTextRevealFx();
@@ -1337,6 +1415,7 @@ async function revealAnswer() {
     }
   } finally {
     darkenStage(false);
+    stopOrbStrobeCadence(true);
     setOrbScale(1);
     stopCrystalOverlay();
     setRevealBgStrobe(false);

@@ -336,6 +336,7 @@ let audioContext;
 let nativeTtsWarned = false;
 let hintTimeout;
 let chaosToastTimeout;
+let crystalOverlayStopTimer = null;
 let galaxyController;
 let galaxyCanvasController;
 let oracleBgController;
@@ -1097,6 +1098,10 @@ function getCrystalOverlay() {
 async function startCrystalOverlay() {
   const video = getCrystalOverlay();
   if (!video) return;
+  if (crystalOverlayStopTimer) {
+    clearTimeout(crystalOverlayStopTimer);
+    crystalOverlayStopTimer = null;
+  }
   const desiredSrc = "crystalballfx.mp4";
   if (!video.getAttribute("src") || !video.getAttribute("src").includes("crystalballfx.mp4")) {
     video.setAttribute("src", desiredSrc);
@@ -1106,6 +1111,7 @@ async function startCrystalOverlay() {
   } catch {
     // ignore seek errors
   }
+  video.classList.remove("fading");
   video.classList.add("active", "on");
   try {
     await video.play();
@@ -1114,13 +1120,19 @@ async function startCrystalOverlay() {
   }
 }
 
-function stopCrystalOverlay() {
+function stopCrystalOverlay(fadeMs = 620) {
   const video = getCrystalOverlay();
   if (!video) return;
-  video.classList.remove("active", "on");
-  setTimeout(() => {
+  if (crystalOverlayStopTimer) {
+    clearTimeout(crystalOverlayStopTimer);
+    crystalOverlayStopTimer = null;
+  }
+  video.classList.add("fading");
+  crystalOverlayStopTimer = setTimeout(() => {
+    video.classList.remove("active", "on", "fading");
     video.pause();
-  }, 220);
+    crystalOverlayStopTimer = null;
+  }, Math.max(220, fadeMs));
 }
 
 function triggerOrbSparkle(intensity = 1) {

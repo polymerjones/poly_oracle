@@ -53,8 +53,9 @@ const GAME_SFX = {
   newreveal008: "gamesfx/newreveal008.mp3",
   warning10: "10secwarningloop.mp3",
   ufo_spawn: "assets/sfx/ufo_spawn.mp3",
+  ufo_teleport: "newsfxdesigned/ufoteleport.mp3",
   ufo_hit1: "assets/sfx/ufo_hit1.mp3",
-  ufo_destroy: "assets/sfx/ufo_destroy.mp3",
+  ufo_destroy: "newsfxdesigned/ufodeath.mp3",
   life_gain: "assets/sfx/life_gain.mp3",
 };
 
@@ -2804,6 +2805,7 @@ function initGalaxyCanvas() {
     stars: [],
     asteroids: [],
     particles: [],
+    lightningBursts: [],
     warpRings: [],
     shooting: null,
     shootingTimer: null,
@@ -2854,6 +2856,7 @@ function initGalaxyCanvas() {
   let landmineFlashUntil = 0;
   let asteroidImpactFlashUntil = 0;
   let asteroidImpactFlashIntensity = 1;
+  let ufoKillFlashUntil = 0;
   let lastAsteroidCollisionSfxAt = 0;
   let suppressAstCollisionSfxUntil = 0;
   let warningActive = false;
@@ -3432,10 +3435,8 @@ function initGalaxyCanvas() {
     arcadeUfoSpawnAt = 0;
     ufo = null;
     if (engineMode !== "arcade") return;
-    const chance = cfg.level >= 2 ? 0.6 : 0;
-    if (Math.random() > chance) return;
-    const totalMs = cfg.time * 1000;
-    arcadeUfoSpawnAt = performance.now() + totalMs * (0.25 + Math.random() * 0.45);
+    // Testing mode: spawn one UFO 5s into every level.
+    arcadeUfoSpawnAt = performance.now() + 5000;
   }
 
   function spawnUfo() {
@@ -3478,11 +3479,29 @@ function initGalaxyCanvas() {
     }
     playGameSfx("ufo_destroy", 0.84);
     playGameSfx("life_gain", 0.84);
+    triggerUfoDestroyFx(x, y);
     spawnExplosion(x, y, 28, false, 1.25, 1.2);
     addWarpRing(x, y, "rgba(172,255,214,1)");
     ufo = null;
     arcadeLives = clamp(arcadeLives + 1, 0, MAX_LIVES);
     renderLives();
+  }
+
+  function triggerUfoDestroyFx(x, y) {
+    const now = performance.now();
+    ufoKillFlashUntil = now + 170;
+    sim.lightningBursts.push({
+      x,
+      y,
+      bornAt: now,
+      ttl: 340,
+      startR: 22,
+      endR: 230,
+      spikes: 22,
+      jitter: 0.36,
+      rot: Math.random() * Math.PI * 2,
+    });
+    if (sim.lightningBursts.length > 8) sim.lightningBursts.shift();
   }
 
   function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1) {
@@ -3787,11 +3806,13 @@ function initGalaxyCanvas() {
     while (sim.asteroids.length) releaseAsteroid(sim.asteroids.pop());
     while (sim.particles.length) releaseParticle(sim.particles.pop());
     while (sim.warpRings.length) releaseRing(sim.warpRings.pop());
+    sim.lightningBursts.length = 0;
     sim.shooting = null;
     landmine = null;
     landmineSpawnedThisLevel = false;
     ufo = null;
     arcadeUfoSpawnAt = 0;
+    ufoKillFlashUntil = 0;
     stopWarningState();
   }
 
@@ -4218,6 +4239,7 @@ function initGalaxyCanvas() {
             ufo.x = playfield.x + playfield.w * (0.1 + Math.random() * 0.8);
             ufo.y = playfield.y + playfield.h * (0.1 + Math.random() * 0.8);
             ufo.teleportAt = now + (900 + Math.random() * 500);
+            playGameSfx("ufo_teleport", 0.62);
             addWarpRing(ufo.x, ufo.y, "rgba(160,255,255,0.9)");
           }
           for (let i = 0; i < sim.asteroids.length; i += 1) {
@@ -4259,6 +4281,14 @@ function initGalaxyCanvas() {
         sim.warpRings[i] = sim.warpRings[sim.warpRings.length - 1];
         sim.warpRings.pop();
         releaseRing(ring);
+      }
+    }
+
+    for (let i = sim.lightningBursts.length - 1; i >= 0; i -= 1) {
+      const fx = sim.lightningBursts[i];
+      if (now - fx.bornAt >= fx.ttl) {
+        sim.lightningBursts[i] = sim.lightningBursts[sim.lightningBursts.length - 1];
+        sim.lightningBursts.pop();
       }
     }
 
@@ -4435,6 +4465,34 @@ function initGalaxyCanvas() {
       ctx.stroke();
     }
 
+    for (let i = 0; i < sim.lightningBursts.length; i += 1) {
+      const fx = sim.lightningBursts[i];
+      const t = clamp((now - fx.bornAt) / fx.ttl, 0, 1);
+      const radius = fx.startR + (fx.endR - fx.startR) * t;
+      const alpha = (1 - t) * 0.95;
+      const points = fx.spikes;
+      const step = (Math.PI * 2) / points;
+      ctx.save();
+      ctx.translate(fx.x, fx.y);
+      ctx.rotate(fx.rot + t * 0.9);
+      ctx.beginPath();
+      for (let p = 0; p <= points; p += 1) {
+        const a = p * step;
+        const jag = 1 + (Math.sin(p * 2.31 + t * 16) * fx.jitter);
+        const rr = radius * jag;
+        const px = Math.cos(a) * rr;
+        const py = Math.sin(a) * rr;
+        if (p === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.strokeStyle = `rgba(196,230,255,${alpha.toFixed(3)})`;
+      ctx.lineWidth = 2.2;
+      ctx.shadowBlur = prefersReducedMotion ? 0 : 12;
+      ctx.shadowColor = "rgba(170,220,255,0.8)";
+      ctx.stroke();
+      ctx.restore();
+    }
+
     for (let i = 0; i < sim.particles.length; i += 1) {
       const p = sim.particles[i];
       const alpha = (1 - p.life / p.ttl) * p.alpha;
@@ -4455,6 +4513,12 @@ function initGalaxyCanvas() {
       const base = prefersReducedMotion ? 0.13 : 0.2;
       const alpha = Math.max(0, Math.min(1, t)) * base * asteroidImpactFlashIntensity;
       ctx.fillStyle = `rgba(255,245,220,${alpha.toFixed(3)})`;
+      ctx.fillRect(0, 0, sim.width, sim.height);
+    }
+    if (ufoKillFlashUntil > now) {
+      const t = (ufoKillFlashUntil - now) / 170;
+      const alpha = clamp(t, 0, 1) * 0.42;
+      ctx.fillStyle = `rgba(230,246,255,${alpha.toFixed(3)})`;
       ctx.fillRect(0, 0, sim.width, sim.height);
     }
 

@@ -51,7 +51,7 @@ const GAME_SFX = {
   newreveal005: "gamesfx/newreveal005.mp3",
   newreveal007: "gamesfx/newreveal007.mp3",
   newreveal008: "gamesfx/newreveal008.mp3",
-  warning10: "assets/sfx/10secwarningloop.mp3",
+  warning10: "10secwarningloop.mp3",
   ufo_spawn: "assets/sfx/ufo_spawn.mp3",
   ufo_hit1: "assets/sfx/ufo_hit1.mp3",
   ufo_destroy: "assets/sfx/ufo_destroy.mp3",
@@ -3203,14 +3203,18 @@ function initGalaxyCanvas() {
   }
 
   function computePlayfield() {
-    const hudHeight = arcadeHud && arcadeHud.offsetParent !== null ? Math.ceil(arcadeHud.getBoundingClientRect().height) : 0;
+    const viewRect = galaxyView.getBoundingClientRect();
+    const hudRect = arcadeHud && arcadeHud.offsetParent !== null ? arcadeHud.getBoundingClientRect() : null;
+    const hudBottom = hudRect ? Math.max(0, Math.ceil(hudRect.bottom - viewRect.top)) : 0;
     const topBar = galaxyView.querySelector(".galaxy-topbar");
-    const topBarHeight = topBar && topBar.offsetParent !== null ? Math.ceil(topBar.getBoundingClientRect().height) : 0;
+    const topBarRect = topBar && topBar.offsetParent !== null ? topBar.getBoundingClientRect() : null;
+    const topBarBottom = topBarRect ? Math.max(0, Math.ceil(topBarRect.bottom - viewRect.top)) : 0;
     const hint = galaxyView.querySelector(".galaxy-hint");
-    const hintHeight = hint && hint.offsetParent !== null ? Math.ceil(hint.getBoundingClientRect().height) : 0;
+    const hintRect = hint && hint.offsetParent !== null ? hint.getBoundingClientRect() : null;
+    const hintHeight = hintRect ? Math.ceil(hintRect.height) : 0;
     const safe = getSafeInsets();
     const pad = 12;
-    const topPad = Math.max(hudHeight, topBarHeight) + safe.top + pad;
+    const topPad = Math.max(hudBottom, topBarBottom) + safe.top + pad;
     const bottomPad = hintHeight + safe.bottom + 44 + pad;
 
     playfield.x = pad;
@@ -3228,11 +3232,11 @@ function initGalaxyCanvas() {
     const top = playfield.y;
     const right = playfield.x + playfield.w;
     const bottom = playfield.y + playfield.h;
-    const pad = 20;
-    if (edge === 0) return { x: left + Math.random() * playfield.w, y: top - pad };
-    if (edge === 1) return { x: right + pad, y: top + Math.random() * playfield.h };
-    if (edge === 2) return { x: left + Math.random() * playfield.w, y: bottom + pad };
-    return { x: left - pad, y: top + Math.random() * playfield.h };
+    const inset = 4;
+    if (edge === 0) return { x: left + Math.random() * playfield.w, y: top + inset };
+    if (edge === 1) return { x: right - inset, y: top + Math.random() * playfield.h };
+    if (edge === 2) return { x: left + Math.random() * playfield.w, y: bottom - inset };
+    return { x: left + inset, y: top + Math.random() * playfield.h };
   }
 
   function clampSpeed(entity) {

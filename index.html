@@ -221,15 +221,11 @@
     </section>
 
     <section id="galaxyView" class="view galaxy-view" hidden aria-hidden="true">
-      <video
-        id="galaxyBgVideo"
-        class="bg-video galaxy-bg-video galaxyBgVideo"
-        src="galaxybg1b-h264.mp4"
-        preload="metadata"
-        playsinline
-        muted
-        aria-hidden="true"
-      ></video>
+      <div id="bgStack" class="bgStack" aria-hidden="true">
+        <video id="bgA" class="bgVideo" muted playsinline webkit-playsinline loop preload="auto"></video>
+        <video id="bgB" class="bgVideo" muted playsinline webkit-playsinline loop preload="auto"></video>
+        <div id="bgTint" class="bgTint"></div>
+      </div>
       <div id="galaxyModeSelect" class="galaxyModeSelect" aria-hidden="true">
         <div class="galaxyModeCard">
           <div id="galaxyModeTitle" class="galaxyModeTitle">Select Mode</div>

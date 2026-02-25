@@ -15,11 +15,18 @@ const STORAGE = {
 };
 
 const BG = {
-  A: "galaxybg1b-h264.mp4",
-  B: "level5-h264.mp4",
-  C: "level8-h264.mp4",
-  D: "level10-h264.mp4",
+  L1_3: "galaxybg1b-h264.mp4",
+  L4_7: "level5-h264.mp4",
+  L8_9: "level8-h264.mp4",
+  L10: "newbossbg.mp4",
 };
+
+function bgKeyForLevel(levelNum) {
+  if (levelNum >= 10) return "L10";
+  if (levelNum >= 8) return "L8_9";
+  if (levelNum >= 4) return "L4_7";
+  return "L1_3";
+}
 
 const GAME_SFX = {
   orb_tap: "taporb.mp3",
@@ -280,7 +287,10 @@ const revealAudio = document.getElementById("revealAudio");
 const orbTapAudio = document.getElementById("orbTapAudio");
 const revealFxVideo = document.getElementById("revealFxVideo");
 const oracleBgVideo = document.getElementById("oracleBgVideo");
-const galaxyBgVideo = document.getElementById("galaxyBgVideo");
+const bgStack = document.getElementById("bgStack");
+const bgVideoA = document.getElementById("bgA");
+const bgVideoB = document.getElementById("bgB");
+const bgTint = document.getElementById("bgTint");
 const questionInput = document.getElementById("question");
 const askButton = document.getElementById("ask");
 
@@ -376,11 +386,19 @@ let orbStrobeController = null;
 let galaxyController;
 let galaxyCanvasController;
 let oracleBgController;
-let galaxyBgController;
 let titleSparkleTimer = null;
 let mediaPrimed = false;
 let gamePageActive = false;
 let menuOverlayOpen = false;
+const bgCtl = {
+  a: null,
+  b: null,
+  front: null,
+  back: null,
+  currentKey: null,
+  ready: false,
+  token: 0,
+};
 const orbTapPool = [];
 let orbTapPoolIndex = 0;
 let lastOrbTapAt = 0;
@@ -1095,7 +1113,7 @@ function openGalaxyView() {
   document.body.style.overflow = "hidden";
   if (!prefersReducedMotion) {
     if (oracleBgController) oracleBgController.stop();
-    if (galaxyBgController) galaxyBgController.start();
+    initGalaxyBackgroundStack();
   }
   if (galaxyCanvasController) {
     requestAnimationFrame(() => galaxyCanvasController.showModeSelect?.());
@@ -1106,15 +1124,15 @@ function closeGalaxyView() {
   gamePageActive = false;
   menuOverlayOpen = false;
   audioEngine.stopMusic();
+  stopGalaxyBackground();
   galaxyView.hidden = true;
   galaxyView.setAttribute("aria-hidden", "true");
   oracleView.hidden = false;
   document.body.style.overflow = "";
   if (!prefersReducedMotion) {
-    if (galaxyBgController) galaxyBgController.stop();
     if (oracleBgController) oracleBgController.start();
   }
-  if (galaxyCanvasController) galaxyCanvasController.stopAndMenu?.();
+  if (galaxyCanvasController) galaxyCanvasController.stop?.();
 }
 
 function initTitleSparkles() {
@@ -2456,27 +2474,27 @@ function makeId() {
 
 function initBackgroundVideos() {
   oracleBgController = createLoopVideoController(oracleBgVideo);
-  galaxyBgController = createLoopVideoController(galaxyBgVideo);
+  initGalaxyBackgroundStack();
 
   if (prefersReducedMotion) {
     if (oracleBgVideo) oracleBgVideo.currentTime = 0;
-    if (galaxyBgVideo) galaxyBgVideo.currentTime = 0;
   } else {
     if (oracleBgController) oracleBgController.start();
-    if (galaxyBgController) galaxyBgController.stop();
+    stopGalaxyBackground();
   }
 
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       if (oracleBgController) oracleBgController.stop();
-      if (galaxyBgController) galaxyBgController.stop();
+      stopGalaxyBackground();
       return;
     }
 
     if (prefersReducedMotion) return;
 
     if (!galaxyView.hidden) {
-      if (galaxyBgController) galaxyBgController.start();
+      // foreground gameplay start handles key selection and playback
+      initGalaxyBackgroundStack();
     } else {
       if (oracleBgController) oracleBgController.start();
     }
@@ -2484,7 +2502,7 @@ function initBackgroundVideos() {
 }
 
 function primeBackgroundMedia() {
-  [oracleBgVideo, galaxyBgVideo].forEach((video) => {
+  [oracleBgVideo, bgVideoA, bgVideoB].forEach((video) => {
     if (!video) return;
     video.play().then(() => {
       if (video !== oracleBgVideo || galaxyView.hidden) video.pause();
@@ -2567,6 +2585,173 @@ function createLoopVideoController(video) {
   };
 }
 
+function initGalaxyBackgroundStack() {
+  if (bgCtl.ready) return;
+  if (!bgVideoA || !bgVideoB) return;
+  bgCtl.a = bgVideoA;
+  bgCtl.b = bgVideoB;
+  bgCtl.front = bgVideoA;
+  bgCtl.back = bgVideoB;
+  [bgCtl.a, bgCtl.b].forEach((video) => {
+    video.muted = true;
+    video.loop = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.setAttribute("muted", "");
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+  });
+  bgCtl.ready = true;
+}
+
+function waitVideoReady(video) {
+  return new Promise((resolve) => {
+    if (!video) {
+      resolve(false);
+      return;
+    }
+    if (video.readyState >= 2) {
+      resolve(true);
+      return;
+    }
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      video.removeEventListener("loadeddata", onReady);
+      video.removeEventListener("canplay", onReady);
+      resolve(ok);
+    };
+    const onReady = () => finish(true);
+    video.addEventListener("loadeddata", onReady, { once: true });
+    video.addEventListener("canplay", onReady, { once: true });
+    setTimeout(() => finish(false), 2500);
+  });
+}
+
+function setGalaxyBackgroundDim(ratio = 0) {
+  if (!bgTint) return;
+  const safe = clamp(ratio, 0, 1);
+  const alpha = (0.18 + safe * 0.44).toFixed(3);
+  bgTint.style.background = `radial-gradient(circle at 50% 30%, rgba(140, 90, 255, ${alpha}), rgba(0, 0, 0, 0.55))`;
+}
+
+async function setGalaxyBackgroundKey(key, opts = {}) {
+  initGalaxyBackgroundStack();
+  if (!bgCtl.ready) return;
+  if (!key || !BG[key]) return;
+
+  const fadeMs = opts.fadeMs ?? 450;
+  const fadeInSeconds = opts.fadeInSeconds ?? 20;
+  const immediate = opts.immediate ?? false;
+
+  if (bgCtl.currentKey === key && bgCtl.front) {
+    try {
+      await bgCtl.front.play();
+    } catch {
+      // ignore autoplay block
+    }
+    return;
+  }
+
+  const token = ++bgCtl.token;
+  const src = BG[key];
+  const back = bgCtl.back;
+  const front = bgCtl.front;
+
+  back.classList.remove("isOn");
+  back.style.transition = "none";
+  back.style.opacity = "0";
+
+  const currentSrc = back.getAttribute("src") || "";
+  if (currentSrc !== src) {
+    back.setAttribute("src", src);
+    try {
+      back.load();
+    } catch {
+      // ignore
+    }
+  }
+
+  await waitVideoReady(back);
+  if (token !== bgCtl.token) return;
+
+  try {
+    await back.play();
+  } catch {
+    // ignore autoplay block
+  }
+
+  if (!front || !bgCtl.currentKey) {
+    back.style.transition = immediate ? "none" : `opacity ${fadeMs}ms ease`;
+    back.classList.add("isOn");
+    back.style.opacity = "1";
+    bgCtl.front = back;
+    bgCtl.back = front || (back === bgCtl.a ? bgCtl.b : bgCtl.a);
+    bgCtl.currentKey = key;
+    if (!immediate && fadeInSeconds > 0) {
+      back.style.transition = `opacity ${fadeInSeconds}s linear`;
+    }
+    return;
+  }
+
+  back.style.transition = `opacity ${fadeMs}ms ease`;
+  front.style.transition = `opacity ${fadeMs}ms ease`;
+  back.classList.add("isOn");
+  requestAnimationFrame(() => {
+    back.style.opacity = "1";
+    front.style.opacity = "0";
+  });
+
+  setTimeout(() => {
+    if (token !== bgCtl.token) return;
+    try {
+      front.pause();
+    } catch {
+      // ignore
+    }
+    front.classList.remove("isOn");
+    front.style.opacity = "0";
+    bgCtl.front = back;
+    bgCtl.back = front;
+    bgCtl.currentKey = key;
+    if (!immediate && fadeInSeconds > 0) {
+      bgCtl.front.style.transition = `opacity ${fadeInSeconds}s linear`;
+      bgCtl.front.style.opacity = "1";
+    }
+  }, fadeMs + 40);
+}
+
+function preloadGalaxyBackgroundKey(key) {
+  initGalaxyBackgroundStack();
+  if (!bgCtl.ready || !key || !BG[key]) return;
+  const src = BG[key];
+  const back = bgCtl.back;
+  const currentSrc = back.getAttribute("src") || "";
+  if (currentSrc === src) return;
+  back.setAttribute("src", src);
+  try {
+    back.load();
+  } catch {
+    // ignore
+  }
+}
+
+function stopGalaxyBackground() {
+  if (!bgCtl.ready) return;
+  [bgCtl.a, bgCtl.b].forEach((video) => {
+    try {
+      video.pause();
+    } catch {
+      // ignore
+    }
+    video.classList.remove("isOn");
+    video.style.opacity = "0";
+  });
+  bgCtl.currentKey = null;
+  bgCtl.token += 1;
+}
+
 // === Arcade Mode ===
 function initGalaxyCanvas() {
   if (!galaxyPlayCanvas) return;
@@ -2622,7 +2807,7 @@ function initGalaxyCanvas() {
   let galaxyRunning = false;
   let engineMode = "menu"; // menu | practice | arcade
   let overlayTimer = null;
-  let currentBgSrc = "";
+  let bgPreRolledForLevel = false;
 
   let arcadeActive = false;
   let currentLevelIndex = 0;
@@ -2778,16 +2963,23 @@ function initGalaxyCanvas() {
       const opacity = clamp(0.08 + ratio * 0.64, 0.08, 0.72);
       arcadeTimerBackdrop.style.opacity = String(opacity);
       arcadeTimerBackdrop.classList.toggle("danger", safeRemaining <= 10000 && safeRemaining > 0);
-      if (galaxyBgVideo) {
-        const brightness = clamp(1 - ratio * 0.42, 0.58, 1);
-        galaxyBgVideo.style.filter = `saturate(110%) contrast(105%) brightness(${brightness.toFixed(3)})`;
-      }
+      setGalaxyBackgroundDim(ratio);
     }
     if (engineMode === "arcade" && arcadeActive && safeRemaining <= 10000 && safeRemaining > 0) {
       if (!warningActive) {
         warningActive = true;
         galaxyView.classList.add("warning");
         warningLoopHandle = audioEngine.playLoop("warning10", { volume: state.whisper ? 0.28 : 0.6, rate: 1 });
+      }
+      if (!bgPreRolledForLevel) {
+        bgPreRolledForLevel = true;
+        const currentLevelNum = ARCADE_LEVELS[currentLevelIndex]?.level || 1;
+        const nextLevelNum = currentLevelNum + 1;
+        const currentKey = bgKeyForLevel(currentLevelNum);
+        const nextKey = bgKeyForLevel(nextLevelNum);
+        if (nextKey && nextKey !== currentKey) {
+          setGalaxyBackgroundKey(nextKey, { fadeMs: 600, fadeInSeconds: 20, immediate: true });
+        }
       }
     } else if (warningActive) {
       stopWarningState();
@@ -2988,13 +3180,6 @@ function initGalaxyCanvas() {
     return points;
   }
 
-  function getBgForLevel(levelNum) {
-    if (levelNum >= 10) return BG.D;
-    if (levelNum >= 8) return BG.C;
-    if (levelNum >= 5) return BG.B;
-    return BG.A;
-  }
-
   function getAsteroidSpriteForLevel(levelNum) {
     if (levelNum >= 10) return asteroidSprites.hotroid01;
     if (levelNum >= 7) return asteroidSprites.roid03;
@@ -3011,28 +3196,10 @@ function initGalaxyCanvas() {
   }
 
   function setGalaxyBackgroundForLevel(levelNum) {
-    const bgVideo = galaxyBgVideo;
-    if (!bgVideo) return;
-    const src = getBgForLevel(levelNum);
-    if (src === currentBgSrc) return;
-    const isFirstLoad = !currentBgSrc;
-    currentBgSrc = src;
-
-    if (isFirstLoad) {
-      bgVideo.src = src;
-      bgVideo.load();
-      bgVideo.play().catch(() => {});
-      return;
-    }
-
-    bgVideo.style.transition = "opacity 280ms ease";
-    bgVideo.style.opacity = "0";
-    setTimeout(() => {
-      bgVideo.src = src;
-      bgVideo.load();
-      bgVideo.play().catch(() => {});
-      bgVideo.style.opacity = "";
-    }, 120);
+    const key = bgKeyForLevel(levelNum);
+    setGalaxyBackgroundKey(key, { fadeMs: 450, fadeInSeconds: 20 });
+    const nextKey = bgKeyForLevel(levelNum + 1);
+    if (nextKey && nextKey !== key) preloadGalaxyBackgroundKey(nextKey);
   }
 
   function computePlayfield() {
@@ -3612,6 +3779,7 @@ function initGalaxyCanvas() {
       return;
     }
     audioEngine.stopMusic();
+    stopGalaxyBackground();
     setArcadeWon();
     clearArcadeProgress();
     syncArcadeMenuButtons();
@@ -3651,6 +3819,7 @@ function initGalaxyCanvas() {
     arcadeActive = false;
     retryPending = false;
     audioEngine.stopMusic();
+    stopGalaxyBackground();
     stopWarningState();
     arcadeResumeAvailable = false;
     syncArcadeEntryLabel();
@@ -3688,6 +3857,7 @@ function initGalaxyCanvas() {
     pausedLevelRemainingMs = 0;
     pausedLandmineRemainingMs = 0;
     arcadeResumeAvailable = false;
+    bgPreRolledForLevel = false;
     syncArcadeEntryLabel();
 
     setGalaxyBackgroundForLevel(cfg.level);
@@ -3827,9 +3997,7 @@ function initGalaxyCanvas() {
       arcadeActive = false;
       arcadeResumeAvailable = false;
       audioEngine.stopMusic();
-      if (galaxyBgVideo) {
-        galaxyBgVideo.style.filter = "saturate(110%) contrast(105%) brightness(1)";
-      }
+      setGalaxyBackgroundDim(0);
     }
     engineMode = "menu";
     syncArcadeEntryLabel();

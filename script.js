@@ -2651,8 +2651,9 @@ function waitVideoReady(video) {
 function setGalaxyBackgroundDim(ratio = 0) {
   if (!bgTint) return;
   const safe = clamp(ratio, 0, 1);
-  const alpha = (0.18 + safe * 0.44).toFixed(3);
-  bgTint.style.background = `radial-gradient(circle at 50% 30%, rgba(140, 90, 255, ${alpha}), rgba(0, 0, 0, 0.55))`;
+  const alpha = (0.14 + safe * 0.34).toFixed(3);
+  const vignette = (0.22 + safe * 0.18).toFixed(3);
+  bgTint.style.background = `radial-gradient(circle at 50% 32%, rgba(140, 90, 255, ${alpha}), rgba(0, 0, 0, 0.54)), radial-gradient(circle at 50% 50%, rgba(0,0,0,0), rgba(0,0,0,${vignette}))`;
 }
 
 async function setGalaxyBackgroundKey(key, opts = {}) {
@@ -4150,6 +4151,15 @@ function initGalaxyCanvas() {
           } else {
             nextSpawnAt = now + 180;
           }
+        }
+
+        // Keep gameplay visually alive between stagger waves.
+        if (cfg.spawnEveryMs > 0 && spawnQueue > 0 && sim.asteroids.length === 0) {
+          const p = randomPerimeterPoint();
+          spawnAsteroid(p.x, p.y, 3, true);
+          spawnQueue -= 1;
+          spawnedTotal += 1;
+          nextSpawnAt = Math.max(nextSpawnAt, now + Math.max(350, cfg.spawnEveryMs));
         }
 
         const elapsedMs = Math.max(0, now - levelRunStartAt);

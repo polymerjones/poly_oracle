@@ -3094,6 +3094,17 @@ function initGalaxyCanvas() {
     else if (entity.y > bottom + entity.r) entity.y = top - entity.r + EPS;
   }
 
+  function wrapEntityToCanvas(entity) {
+    const left = 0;
+    const top = 0;
+    const right = sim.width;
+    const bottom = sim.height;
+    if (entity.x < left - entity.r) entity.x = right + entity.r - EPS;
+    else if (entity.x > right + entity.r) entity.x = left - entity.r + EPS;
+    if (entity.y < top - entity.r) entity.y = bottom + entity.r - EPS;
+    else if (entity.y > bottom + entity.r) entity.y = top - entity.r + EPS;
+  }
+
   function applyMotionHealth(entity, now) {
     const moved = Math.hypot(entity.x - entity.lastX, entity.y - entity.lastY);
     if (moved > 0.2) {
@@ -3967,7 +3978,8 @@ function initGalaxyCanvas() {
         a.x += a.vx * (dt / 1000);
         a.y += a.vy * (dt / 1000);
         a.rot += a.spin * (dt / 16);
-        wrapEntity(a);
+        if (engineMode === "practice") wrapEntityToCanvas(a);
+        else wrapEntity(a);
         clampSpeed(a);
         applyMotionHealth(a, now);
       }

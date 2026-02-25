@@ -2880,6 +2880,7 @@ function initGalaxyCanvas() {
   let debugDots = [];
   let practiceLastInput = "idle";
   let practiceTapMarker = null;
+  let lastPrimaryPointerAt = 0;
 
   function showEl(el) {
     if (!el) return;
@@ -3417,7 +3418,7 @@ function initGalaxyCanvas() {
   }
 
   function levelHasLandmine(levelNum) {
-    return levelNum === 3 || levelNum === 5 || levelNum === 8;
+    return levelNum === 1 || levelNum === 3 || levelNum === 5 || levelNum === 8;
   }
 
   function setupUfoSpawnForLevel(cfg) {
@@ -4529,6 +4530,10 @@ function initGalaxyCanvas() {
 
   function onGalaxyPointerDown(event) {
     const now = performance.now();
+    if (event.type === "click" && now - lastPrimaryPointerAt < 550) return;
+    if (event.type === "pointerdown" || event.type === "mousedown" || event.type === "touchstart") {
+      lastPrimaryPointerAt = now;
+    }
     if (now - sim.lastTapAt < 55) return;
     sim.lastTapAt = now;
     const target = event.target;
@@ -4622,6 +4627,7 @@ function initGalaxyCanvas() {
       galaxyPlayCanvas.addEventListener("pointerdown", onGalaxyPointerDown, { passive: false });
       galaxyPlayCanvas.addEventListener("pointermove", onGalaxyPointerMove, { passive: false });
       galaxyPlayCanvas.addEventListener("pointerup", onGalaxyPointerUp, { passive: false });
+      galaxyPlayCanvas.addEventListener("click", onGalaxyPointerDown, { passive: false });
     } else {
       galaxyPlayCanvas.addEventListener("touchstart", onGalaxyPointerDown, { passive: false });
       galaxyPlayCanvas.addEventListener("touchmove", onGalaxyPointerMove, { passive: false });

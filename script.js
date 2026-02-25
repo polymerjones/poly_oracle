@@ -664,6 +664,17 @@ function addListeners() {
   document.addEventListener("pointerdown", primeMediaOnGesture, { once: true });
   document.addEventListener("touchstart", primeMediaOnGesture, { once: true, passive: true });
   document.addEventListener("keydown", primeMediaOnGesture, { once: true });
+  const resumeAudioOnGesture = () => {
+    audioEngine.resume();
+    try {
+      if ("speechSynthesis" in window) window.speechSynthesis.resume();
+    } catch {
+      // ignore
+    }
+  };
+  document.addEventListener("pointerdown", resumeAudioOnGesture, { passive: true });
+  document.addEventListener("touchstart", resumeAudioOnGesture, { passive: true });
+  document.addEventListener("keydown", resumeAudioOnGesture);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       audioEngine.stopAllLoops();
@@ -671,6 +682,11 @@ function addListeners() {
       return;
     }
     audioEngine.resume();
+    try {
+      if ("speechSynthesis" in window) window.speechSynthesis.resume();
+    } catch {
+      // ignore
+    }
   });
 
   questionInput.addEventListener("input", () => {
@@ -1255,6 +1271,8 @@ function darkenStage(on) {
 
 async function speakLine(text, { rate = 1, pitch = 1.1, voiceName = "", timeoutMs = 6000 } = {}) {
   if (!text) return;
+  const nativeSpoken = await speakNativeText(text, { rate, pitch, voiceName });
+  if (nativeSpoken) return;
   if (!("speechSynthesis" in window)) return;
   const synth = window.speechSynthesis;
   synth.cancel();
@@ -2203,7 +2221,7 @@ function primeSpeechFromGesture() {
   }
 }
 
-async function speakNativeText(text, { rate = 1, pitch = 1.2 } = {}) {
+async function speakNativeText(text, { rate = 1, pitch = 1.2, voiceName = "" } = {}) {
   const plugin = getNativeTtsPlugin();
   if (!plugin) return false;
 
@@ -2213,6 +2231,7 @@ async function speakNativeText(text, { rate = 1, pitch = 1.2 } = {}) {
     await plugin.speak({
       text,
       lang: "en-GB",
+      voice: voiceName || state.selectedVoice || undefined,
       rate: Math.max(0.2, Math.min(2, rate)),
       pitch: Math.max(0.5, Math.min(2, pitch)),
       volume: state.whisper ? 0.5 : 1,
@@ -4599,22 +4618,18 @@ function initGalaxyCanvas() {
 
   if (!galaxyPlayCanvas.__polyPointerBound) {
     galaxyPlayCanvas.__polyPointerBound = true;
-    galaxyPlayCanvas.addEventListener("pointerdown", onGalaxyPointerDown, { passive: false });
-    galaxyPlayCanvas.addEventListener("pointermove", onGalaxyPointerMove, { passive: false });
-    galaxyPlayCanvas.addEventListener("pointerup", onGalaxyPointerUp, { passive: false });
-    // Keep explicit fallbacks even when PointerEvent exists; some iOS webviews report
-    // support but still route taps inconsistently.
-    galaxyPlayCanvas.addEventListener("touchstart", onGalaxyPointerDown, { passive: false });
-    galaxyPlayCanvas.addEventListener("mousedown", onGalaxyPointerDown, { passive: false });
-    galaxyPlayCanvas.addEventListener("click", onGalaxyPointerDown, { passive: false });
-  }
-  if (galaxyView && !galaxyView.__polyInputCaptureBound) {
-    galaxyView.__polyInputCaptureBound = true;
-    const captureOpts = { passive: false, capture: true };
-    galaxyView.addEventListener("pointerdown", onGalaxyPointerDown, captureOpts);
-    galaxyView.addEventListener("touchstart", onGalaxyPointerDown, captureOpts);
-    galaxyView.addEventListener("mousedown", onGalaxyPointerDown, captureOpts);
-    galaxyView.addEventListener("click", onGalaxyPointerDown, captureOpts);
+    if ("PointerEvent" in window) {
+      galaxyPlayCanvas.addEventListener("pointerdown", onGalaxyPointerDown, { passive: false });
+      galaxyPlayCanvas.addEventListener("pointermove", onGalaxyPointerMove, { passive: false });
+      galaxyPlayCanvas.addEventListener("pointerup", onGalaxyPointerUp, { passive: false });
+    } else {
+      galaxyPlayCanvas.addEventListener("touchstart", onGalaxyPointerDown, { passive: false });
+      galaxyPlayCanvas.addEventListener("touchmove", onGalaxyPointerMove, { passive: false });
+      galaxyPlayCanvas.addEventListener("touchend", onGalaxyPointerUp, { passive: false });
+      galaxyPlayCanvas.addEventListener("mousedown", onGalaxyPointerDown, { passive: false });
+      galaxyPlayCanvas.addEventListener("mousemove", onGalaxyPointerMove, { passive: false });
+      galaxyPlayCanvas.addEventListener("mouseup", onGalaxyPointerUp, { passive: false });
+    }
   }
   galaxyPlayCanvas.addEventListener("pointerenter", (event) => {
     setCrosshairVisible(true);

@@ -2663,6 +2663,7 @@ async function setGalaxyBackgroundKey(key, opts = {}) {
   const fadeMs = opts.fadeMs ?? 450;
   const fadeInSeconds = opts.fadeInSeconds ?? 20;
   const immediate = opts.immediate ?? false;
+  const entryOpacity = immediate ? 1 : 0.34;
 
   if (bgCtl.currentKey === key && bgCtl.front) {
     try {
@@ -2702,14 +2703,17 @@ async function setGalaxyBackgroundKey(key, opts = {}) {
   }
 
   if (!front || !bgCtl.currentKey) {
-    back.style.transition = immediate ? "none" : `opacity ${fadeMs}ms ease`;
+    back.style.transition = `opacity ${fadeMs}ms ease`;
     back.classList.add("isOn");
-    back.style.opacity = "1";
+    back.style.opacity = String(entryOpacity);
     bgCtl.front = back;
     bgCtl.back = front || (back === bgCtl.a ? bgCtl.b : bgCtl.a);
     bgCtl.currentKey = key;
     if (!immediate && fadeInSeconds > 0) {
-      back.style.transition = `opacity ${fadeInSeconds}s linear`;
+      requestAnimationFrame(() => {
+        back.style.transition = `opacity ${fadeInSeconds}s linear`;
+        back.style.opacity = "1";
+      });
     }
     return;
   }
@@ -2718,7 +2722,7 @@ async function setGalaxyBackgroundKey(key, opts = {}) {
   front.style.transition = `opacity ${fadeMs}ms ease`;
   back.classList.add("isOn");
   requestAnimationFrame(() => {
-    back.style.opacity = "1";
+    back.style.opacity = String(entryOpacity);
     front.style.opacity = "0";
   });
 
@@ -2735,8 +2739,10 @@ async function setGalaxyBackgroundKey(key, opts = {}) {
     bgCtl.back = front;
     bgCtl.currentKey = key;
     if (!immediate && fadeInSeconds > 0) {
-      bgCtl.front.style.transition = `opacity ${fadeInSeconds}s linear`;
-      bgCtl.front.style.opacity = "1";
+      requestAnimationFrame(() => {
+        bgCtl.front.style.transition = `opacity ${fadeInSeconds}s linear`;
+        bgCtl.front.style.opacity = "1";
+      });
     }
   }, fadeMs + 40);
 }
@@ -2998,7 +3004,7 @@ function initGalaxyCanvas() {
         const currentKey = bgKeyForLevel(currentLevelNum);
         const nextKey = bgKeyForLevel(nextLevelNum);
         if (nextKey && nextKey !== currentKey) {
-          setGalaxyBackgroundKey(nextKey, { fadeMs: 600, fadeInSeconds: 20, immediate: true });
+          setGalaxyBackgroundKey(nextKey, { fadeMs: 600, fadeInSeconds: 20, immediate: false });
         }
       }
     } else if (warningActive) {

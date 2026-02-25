@@ -2805,7 +2805,6 @@ function initGalaxyCanvas() {
     stars: [],
     asteroids: [],
     particles: [],
-    lightningBursts: [],
     warpRings: [],
     shooting: null,
     shootingTimer: null,
@@ -2856,7 +2855,6 @@ function initGalaxyCanvas() {
   let landmineFlashUntil = 0;
   let asteroidImpactFlashUntil = 0;
   let asteroidImpactFlashIntensity = 1;
-  let ufoKillFlashUntil = 0;
   let lastAsteroidCollisionSfxAt = 0;
   let suppressAstCollisionSfxUntil = 0;
   let warningActive = false;
@@ -2868,6 +2866,18 @@ function initGalaxyCanvas() {
   let debugLevelUnlocked = false;
   let debugModeTapCount = 0;
   let debugModeTapLastAt = 0;
+  const ufoDeathFx = typeof window.UfoDeathEffect === "function" ? new window.UfoDeathEffect({ maxParticles: 320 }) : null;
+  const effects = {
+    triggerUfoDeath(x, y) {
+      ufoDeathFx?.trigger(x, y);
+    },
+    update(dtMs) {
+      ufoDeathFx?.update(dtMs, sim.width, sim.height);
+    },
+    draw(drawCtx) {
+      ufoDeathFx?.draw(drawCtx, sim.width, sim.height);
+    },
+  };
 
   const galaxyModeTitleEl = document.getElementById("galaxyModeTitle");
   const debugLevelPanel = document.getElementById("debugLevelPanel");
@@ -3479,29 +3489,12 @@ function initGalaxyCanvas() {
     }
     playGameSfx("ufo_destroy", 0.84);
     playGameSfx("life_gain", 0.84);
-    triggerUfoDestroyFx(x, y);
+    effects.triggerUfoDeath(x, y);
     spawnExplosion(x, y, 28, false, 1.25, 1.2);
     addWarpRing(x, y, "rgba(172,255,214,1)");
     ufo = null;
     arcadeLives = clamp(arcadeLives + 1, 0, MAX_LIVES);
     renderLives();
-  }
-
-  function triggerUfoDestroyFx(x, y) {
-    const now = performance.now();
-    ufoKillFlashUntil = now + 170;
-    sim.lightningBursts.push({
-      x,
-      y,
-      bornAt: now,
-      ttl: 340,
-      startR: 22,
-      endR: 230,
-      spikes: 22,
-      jitter: 0.36,
-      rot: Math.random() * Math.PI * 2,
-    });
-    if (sim.lightningBursts.length > 8) sim.lightningBursts.shift();
   }
 
   function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1) {
@@ -3806,13 +3799,11 @@ function initGalaxyCanvas() {
     while (sim.asteroids.length) releaseAsteroid(sim.asteroids.pop());
     while (sim.particles.length) releaseParticle(sim.particles.pop());
     while (sim.warpRings.length) releaseRing(sim.warpRings.pop());
-    sim.lightningBursts.length = 0;
     sim.shooting = null;
     landmine = null;
     landmineSpawnedThisLevel = false;
     ufo = null;
     arcadeUfoSpawnAt = 0;
-    ufoKillFlashUntil = 0;
     stopWarningState();
   }
 
@@ -4284,14 +4275,6 @@ function initGalaxyCanvas() {
       }
     }
 
-    for (let i = sim.lightningBursts.length - 1; i >= 0; i -= 1) {
-      const fx = sim.lightningBursts[i];
-      if (now - fx.bornAt >= fx.ttl) {
-        sim.lightningBursts[i] = sim.lightningBursts[sim.lightningBursts.length - 1];
-        sim.lightningBursts.pop();
-      }
-    }
-
     if (sim.shooting) {
       sim.shooting.life += dt;
       sim.shooting.x += sim.shooting.vx * dt;
@@ -4299,6 +4282,7 @@ function initGalaxyCanvas() {
       if (sim.shooting.life >= sim.shooting.ttl) sim.shooting = null;
     }
 
+    effects.update(dt);
     draw(now);
   }
 
@@ -4464,34 +4448,7 @@ function initGalaxyCanvas() {
       ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
       ctx.stroke();
     }
-
-    for (let i = 0; i < sim.lightningBursts.length; i += 1) {
-      const fx = sim.lightningBursts[i];
-      const t = clamp((now - fx.bornAt) / fx.ttl, 0, 1);
-      const radius = fx.startR + (fx.endR - fx.startR) * t;
-      const alpha = (1 - t) * 0.95;
-      const points = fx.spikes;
-      const step = (Math.PI * 2) / points;
-      ctx.save();
-      ctx.translate(fx.x, fx.y);
-      ctx.rotate(fx.rot + t * 0.9);
-      ctx.beginPath();
-      for (let p = 0; p <= points; p += 1) {
-        const a = p * step;
-        const jag = 1 + (Math.sin(p * 2.31 + t * 16) * fx.jitter);
-        const rr = radius * jag;
-        const px = Math.cos(a) * rr;
-        const py = Math.sin(a) * rr;
-        if (p === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      }
-      ctx.strokeStyle = `rgba(196,230,255,${alpha.toFixed(3)})`;
-      ctx.lineWidth = 2.2;
-      ctx.shadowBlur = prefersReducedMotion ? 0 : 12;
-      ctx.shadowColor = "rgba(170,220,255,0.8)";
-      ctx.stroke();
-      ctx.restore();
-    }
+    effects.draw(ctx);
 
     for (let i = 0; i < sim.particles.length; i += 1) {
       const p = sim.particles[i];
@@ -4513,12 +4470,6 @@ function initGalaxyCanvas() {
       const base = prefersReducedMotion ? 0.13 : 0.2;
       const alpha = Math.max(0, Math.min(1, t)) * base * asteroidImpactFlashIntensity;
       ctx.fillStyle = `rgba(255,245,220,${alpha.toFixed(3)})`;
-      ctx.fillRect(0, 0, sim.width, sim.height);
-    }
-    if (ufoKillFlashUntil > now) {
-      const t = (ufoKillFlashUntil - now) / 170;
-      const alpha = clamp(t, 0, 1) * 0.42;
-      ctx.fillStyle = `rgba(230,246,255,${alpha.toFixed(3)})`;
       ctx.fillRect(0, 0, sim.width, sim.height);
     }
 

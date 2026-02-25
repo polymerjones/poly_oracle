@@ -593,7 +593,7 @@ const audioEngine = {
   setMusicDim(dimOn) {
     this.ensureMusic();
     if (!this.musicGain || !this.ctx) return;
-    const target = dimOn ? MUSIC_MAX_GAIN * 0.4 : MUSIC_MAX_GAIN;
+    const target = dimOn ? MUSIC_MAX_GAIN * 0.2 : MUSIC_MAX_GAIN;
     const now = this.ctx.currentTime;
     this.musicGain.gain.cancelScheduledValues(now);
     this.musicGain.gain.setValueAtTime(this.musicGain.gain.value, now);

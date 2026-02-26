@@ -1,4 +1,4 @@
-const APP_VERSION = "v2.1.3";
+const APP_VERSION = "v2.2";
 const storageKey = "poly-oracle-v11-state";
 const firstRunHintKey = "poly_oracle_seen_hint_v1_2_1";
 const verboseKey = "poly_oracle_verbose_details";
@@ -6,6 +6,7 @@ const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
 const debugTapsKey = "poly_oracle_debug_taps";
+const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE = {
   arcadeLevel: "poly_oracle_arcade_level",
   arcadeSaved: "poly_oracle_arcade_saved",
@@ -2866,10 +2867,19 @@ function initGalaxyCanvas() {
   let debugLevelUnlocked = false;
   let debugModeTapCount = 0;
   let debugModeTapLastAt = 0;
-  const ufoDeathFx = typeof window.UfoDeathEffect === "function" ? new window.UfoDeathEffect({ maxParticles: 320 }) : null;
+  const initialUfoFxPreset = (() => {
+    try {
+      return localStorage.getItem(ufoFxPresetKey) || "cyan";
+    } catch {
+      return "cyan";
+    }
+  })();
+  const ufoDeathFx = typeof window.UfoDeathEffect === "function"
+    ? new window.UfoDeathEffect({ maxParticles: 320, preset: initialUfoFxPreset })
+    : null;
   const effects = {
-    triggerUfoDeath(x, y) {
-      ufoDeathFx?.trigger(x, y);
+    triggerUfoDeath(x, y, presetName = "") {
+      ufoDeathFx?.trigger(x, y, presetName);
     },
     update(dtMs) {
       ufoDeathFx?.update(dtMs, sim.width, sim.height);
@@ -2878,6 +2888,17 @@ function initGalaxyCanvas() {
       ufoDeathFx?.draw(drawCtx, sim.width, sim.height);
     },
   };
+  window.setUfoFxPreset = (name) => {
+    const preset = ufoDeathFx?.setPreset?.(name) || "cyan";
+    try {
+      localStorage.setItem(ufoFxPresetKey, preset);
+    } catch {
+      // ignore
+    }
+    return preset;
+  };
+  window.getUfoFxPreset = () => ufoDeathFx?.getPreset?.() || initialUfoFxPreset || "cyan";
+  window.listUfoFxPresets = () => (window.UfoDeathEffect?.PRESETS ? [...window.UfoDeathEffect.PRESETS] : ["cyan", "red", "white"]);
 
   const galaxyModeTitleEl = document.getElementById("galaxyModeTitle");
   const debugLevelPanel = document.getElementById("debugLevelPanel");
@@ -3456,6 +3477,7 @@ function initGalaxyCanvas() {
       x,
       y,
       r: 16,
+      mass: 16 * 16 * 2.2,
       vx: (Math.random() < 0.5 ? -1 : 1) * (120 + Math.random() * 60),
       vy: (Math.random() < 0.5 ? -1 : 1) * (120 + Math.random() * 60),
       alive: true,
@@ -3584,9 +3606,11 @@ function initGalaxyCanvas() {
     const nx = dx / dist;
     const ny = dy / dist;
     const overlap = minDist - dist;
-    const totalMass = a.mass + b.mass;
-    const pushA = overlap * (b.mass / totalMass);
-    const pushB = overlap * (a.mass / totalMass);
+    const massA = Number.isFinite(a.mass) && a.mass > 0 ? a.mass : Math.max(1, (a.r || 1) * (a.r || 1));
+    const massB = Number.isFinite(b.mass) && b.mass > 0 ? b.mass : Math.max(1, (b.r || 1) * (b.r || 1));
+    const totalMass = massA + massB;
+    const pushA = overlap * (massB / totalMass);
+    const pushB = overlap * (massA / totalMass);
     a.x -= nx * pushA;
     a.y -= ny * pushA;
     b.x += nx * pushB;
@@ -3597,13 +3621,13 @@ function initGalaxyCanvas() {
     const velAlongNormal = rvx * nx + rvy * ny;
     if (velAlongNormal > 0) return;
 
-    const impulse = (-(1 + restitution) * velAlongNormal) / (1 / a.mass + 1 / b.mass);
+    const impulse = (-(1 + restitution) * velAlongNormal) / (1 / massA + 1 / massB);
     const ix = impulse * nx;
     const iy = impulse * ny;
-    a.vx -= ix / a.mass;
-    a.vy -= iy / a.mass;
-    b.vx += ix / b.mass;
-    b.vy += iy / b.mass;
+    a.vx -= ix / massA;
+    a.vy -= iy / massA;
+    b.vx += ix / massB;
+    b.vy += iy / massB;
 
     if (playCollisionSfx) {
       const now = performance.now();
@@ -4540,23 +4564,21 @@ function initGalaxyCanvas() {
     practiceLastInput = `tap ${Math.round(x)},${Math.round(y)}`;
     markTap(x, y);
     debugPing(x, y);
-    if (state.practiceTool === "pencil") {
-      if (now < sim.nextDrawAt) return;
-      sim.nextDrawAt = now + PRACTICE_SPAWN_COOLDOWN_MS;
-      if (sim.asteroids.length >= PRACTICE_MAX_ASTEROIDS) return;
-      triggerCrosshairFire();
-      spawnAsteroid(x, y, 3, true);
-      updatePracticeDebug();
-      draw(now);
-      return;
-    }
     const idx = findAsteroidAt(x, y, 28);
     if (idx >= 0) {
       triggerCrosshairFire();
       splitAsteroidByIndex(idx);
       updatePracticeDebug();
       draw(now);
+      return;
     }
+    if (now < sim.nextDrawAt) return;
+    sim.nextDrawAt = now + PRACTICE_SPAWN_COOLDOWN_MS;
+    if (sim.asteroids.length >= PRACTICE_MAX_ASTEROIDS) return;
+    triggerCrosshairFire();
+    spawnAsteroid(x, y, 3, true);
+    updatePracticeDebug();
+    draw(now);
   }
 
   function onGalaxyPointerDown(event) {

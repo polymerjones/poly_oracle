@@ -13,7 +13,7 @@
     <link rel="icon" type="image/png" sizes="256x256" href="favicon.png" />
     <link rel="apple-touch-icon" href="favicon.png" />
     <title>Poly Oracle</title>
-    <link rel="stylesheet" href="style.css?v=1.4.3" />
+    <link rel="stylesheet" href="style.css?v=2.2" />
   </head>
   <body>
     <canvas id="galaxyCanvas" aria-hidden="true"></canvas>
@@ -174,7 +174,7 @@
 
         <section class="settings-section about">
           <h3>About</h3>
-          <div class="version">Version v1.4.3</div>
+          <div class="version">Version v2.2</div>
           <button id="openContact" class="ghost small" type="button" hidden>Contact</button>
         </section>
       </aside>
@@ -221,15 +221,11 @@
     </section>
 
     <section id="galaxyView" class="view galaxy-view" hidden aria-hidden="true">
-      <video
-        id="galaxyBgVideo"
-        class="bg-video galaxy-bg-video galaxyBgVideo"
-        src="galaxybg1b-h264.mp4"
-        preload="metadata"
-        playsinline
-        muted
-        aria-hidden="true"
-      ></video>
+      <div id="bgStack" class="bgStack" aria-hidden="true">
+        <video id="bgA" class="bgVideo" muted playsinline webkit-playsinline loop preload="auto"></video>
+        <video id="bgB" class="bgVideo" muted playsinline webkit-playsinline loop preload="auto"></video>
+        <div id="bgTint" class="bgTint"></div>
+      </div>
       <div id="galaxyModeSelect" class="galaxyModeSelect" aria-hidden="true">
         <div class="galaxyModeCard">
           <div id="galaxyModeTitle" class="galaxyModeTitle">Select Mode</div>
@@ -253,16 +249,16 @@
             </div>
           </div>
           <button id="btnArcade" class="modeBtn" type="button">Arcade</button>
-          <button id="btnFreestyle" class="modeBtn" type="button">Freestyle</button>
+          <button id="btnPractice" class="modeBtn" type="button">Practice</button>
           <button id="btnGalaxyBack" class="modeBackBtn" type="button">← Oracle</button>
         </div>
       </div>
       <header class="galaxy-topbar">
         <button id="closeGalaxy" class="ghost small galaxy-back" type="button" aria-label="Back to Modes">← Modes</button>
-        <div class="galaxy-title">Freestyle</div>
+        <div class="galaxy-title">Practice</div>
         <div class="galaxy-tools" role="tablist" aria-label="Galaxy tools">
-          <button id="toolDraw" class="ghost small active" type="button" data-tool="draw" aria-label="Draw asteroids">Draw</button>
-          <button id="toolBoom" class="ghost small" type="button" data-tool="boom" aria-label="Boom asteroids">Boom</button>
+          <button id="toolDraw" class="ghost small practiceToolBtn active" type="button" data-tool="draw" aria-label="Pencil tool">✏️ Pencil</button>
+          <button id="toolBoom" class="ghost small practiceToolBtn" type="button" data-tool="boom" aria-label="Boom tool">💥 Boom</button>
           <button id="clearGalaxy" class="ghost small" type="button" aria-label="Clear asteroids">Clear</button>
         </div>
       </header>
@@ -271,6 +267,7 @@
         <div class="hudCenter">
           <div id="hudLevel" class="hudLevel">LEVEL 1</div>
           <div id="hudTimer" class="hudTimer">00:20</div>
+          <div id="hudLives" class="hudLives">Lives: 0</div>
         </div>
       </div>
       <div id="arcadeTimerBackdrop" class="arcadeTimerBackdrop" aria-hidden="true">
@@ -283,12 +280,13 @@
         <div id="arcadeOverlayText" class="arcadeOverlayText">LEVEL 1</div>
         <div id="arcadeOverlaySub" class="arcadeOverlaySub"></div>
         <button id="arcadeOverlayBtn" class="arcadeOverlayBtn" style="display:none;"></button>
+        <button id="arcadeOverlayBtnSecondary" class="arcadeOverlayBtn ghost small" style="display:none;"></button>
       </div>
     </section>
 
     <script>
       window.POLY_CONTACT_FORM_ENDPOINT = "";
     </script>
-    <script src="script.js?v=1.4.3"></script>
+    <script src="script.js?v=2.2"></script>
   </body>
 </html>

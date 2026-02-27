@@ -6,6 +6,7 @@ const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
 const debugTapsKey = "poly_oracle_debug_taps";
+const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE = {
   arcadeLevel: "poly_oracle_arcade_level",
   arcadeSaved: "poly_oracle_arcade_saved",
@@ -53,8 +54,9 @@ const GAME_SFX = {
   newreveal008: "gamesfx/newreveal008.mp3",
   warning10: "10secwarningloop.mp3",
   ufo_spawn: "assets/sfx/ufo_spawn.mp3",
+  ufo_teleport: "newsfxdesigned/ufoteleport.mp3",
   ufo_hit1: "assets/sfx/ufo_hit1.mp3",
-  ufo_destroy: "assets/sfx/ufo_destroy.mp3",
+  ufo_destroy: "newsfxdesigned/ufodeath.mp3",
   life_gain: "assets/sfx/life_gain.mp3",
 };
 
@@ -390,6 +392,8 @@ let titleSparkleTimer = null;
 let mediaPrimed = false;
 let gamePageActive = false;
 let menuOverlayOpen = false;
+let gameOverFuzzyInstance = null;
+let retryFuzzyInstance = null;
 const bgCtl = {
   a: null,
   b: null,
@@ -406,6 +410,322 @@ let orbTapBuffer = null;
 let orbTapBufferPromise = null;
 let chaosShiftAudio = null;
 const boomTimes = [];
+
+function createFuzzyText(canvas, opts = {}) {
+  if (!canvas) {
+    return { destroy() {} };
+  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return { destroy() {} };
+  }
+
+  const cfg = {
+    text: opts?.text || "",
+    fontFamily: opts?.fontFamily || "\"Arial Black\", Impact, sans-serif",
+    fontWeight: opts?.fontWeight || 900,
+    fontSize: opts?.fontSize || 64,
+    color: opts?.color || "#ffe9e9",
+    enableHover: opts?.enableHover ?? true,
+    baseIntensity: opts?.baseIntensity ?? 0.18,
+    hoverIntensity: opts?.hoverIntensity ?? 0.5,
+    fuzzRange: opts?.fuzzRange ?? 30,
+    fps: opts?.fps ?? 60,
+    direction: opts?.direction || "horizontal",
+    transitionDuration: opts?.transitionDuration ?? 0,
+    clickEffect: opts?.clickEffect ?? true,
+    glitchMode: opts?.glitchMode ?? false,
+    glitchInterval: opts?.glitchInterval ?? 2000,
+    glitchDuration: opts?.glitchDuration ?? 200,
+    letterSpacing: opts?.letterSpacing ?? 0,
+    pulseOnMount: opts?.pulseOnMount ?? false,
+    pulseIntensity: opts?.pulseIntensity ?? 1.0,
+    pulseMs: opts?.pulseMs ?? 350,
+  };
+
+  let raf = 0;
+  let destroyed = false;
+  let lastFrameAt = 0;
+  let isHovering = false;
+  let isClicking = false;
+  let isGlitching = false;
+  let clickUntil = 0;
+  let glitchUntil = 0;
+  let pulseUntil = 0;
+  let targetIntensity = cfg.baseIntensity;
+  let currentIntensity = cfg.baseIntensity;
+  const frameMs = 1000 / Math.max(20, cfg.fps);
+  const offscreen = document.createElement("canvas");
+  const offCtx = offscreen.getContext("2d");
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  let textW = 0;
+  let textH = 0;
+  let marginX = 0;
+
+  function setupCanvases() {
+    if (!offCtx) return;
+    const fontPx = Math.max(28, Number(cfg.fontSize) || 64);
+    offCtx.font = `${cfg.fontWeight} ${fontPx}px ${cfg.fontFamily}`;
+    offCtx.textBaseline = "alphabetic";
+
+    let totalWidth = 0;
+    if (cfg.letterSpacing !== 0) {
+      for (const ch of cfg.text) {
+        totalWidth += offCtx.measureText(ch).width + cfg.letterSpacing;
+      }
+      totalWidth -= cfg.letterSpacing;
+    } else {
+      totalWidth = offCtx.measureText(cfg.text).width;
+    }
+    const metrics = offCtx.measureText(cfg.text);
+    const actualLeft = metrics.actualBoundingBoxLeft ?? 0;
+    const actualRight = cfg.letterSpacing !== 0 ? totalWidth : (metrics.actualBoundingBoxRight ?? metrics.width);
+    const actualAscent = metrics.actualBoundingBoxAscent ?? fontPx;
+    const actualDescent = metrics.actualBoundingBoxDescent ?? fontPx * 0.2;
+    textW = Math.ceil(cfg.letterSpacing !== 0 ? totalWidth : actualLeft + actualRight);
+    textH = Math.ceil(actualAscent + actualDescent);
+
+    const extraWidthBuffer = 10;
+    const xOffset = extraWidthBuffer / 2;
+    offscreen.width = textW + extraWidthBuffer;
+    offscreen.height = textH;
+    offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
+    offCtx.font = `${cfg.fontWeight} ${fontPx}px ${cfg.fontFamily}`;
+    offCtx.textBaseline = "alphabetic";
+    offCtx.fillStyle = cfg.color;
+    if (cfg.letterSpacing !== 0) {
+      let xPos = xOffset;
+      for (const ch of cfg.text) {
+        offCtx.fillText(ch, xPos, actualAscent);
+        xPos += offCtx.measureText(ch).width + cfg.letterSpacing;
+      }
+    } else {
+      offCtx.fillText(cfg.text, xOffset - actualLeft, actualAscent);
+    }
+
+    marginX = cfg.fuzzRange + 20;
+    const cssW = offscreen.width + marginX * 2;
+    const cssH = textH;
+    canvas.width = Math.floor(cssW * dpr);
+    canvas.height = Math.floor(cssH * dpr);
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.translate(marginX, 0);
+  }
+
+  function tick(ts) {
+    if (destroyed) return;
+    if (ts - lastFrameAt < frameMs) {
+      raf = requestAnimationFrame(tick);
+      return;
+    }
+    lastFrameAt = ts;
+
+    const nowMs = performance.now();
+    if (clickUntil && nowMs >= clickUntil) {
+      isClicking = false;
+      clickUntil = 0;
+    }
+    if (glitchUntil && nowMs >= glitchUntil) {
+      isGlitching = false;
+      glitchUntil = 0;
+    }
+    if (cfg.glitchMode && !isGlitching && !glitchUntil) {
+      glitchUntil = nowMs + cfg.glitchInterval;
+    }
+    if (cfg.glitchMode && glitchUntil && nowMs >= glitchUntil && !isGlitching) {
+      isGlitching = true;
+      glitchUntil = nowMs + cfg.glitchDuration;
+    }
+
+    if (pulseUntil && nowMs < pulseUntil) {
+      targetIntensity = cfg.pulseIntensity;
+    } else if (isClicking || isGlitching) {
+      targetIntensity = 1;
+    } else if (isHovering) {
+      targetIntensity = cfg.hoverIntensity;
+    } else {
+      targetIntensity = cfg.baseIntensity;
+    }
+    if (cfg.transitionDuration > 0) {
+      const step = 1 / (cfg.transitionDuration / frameMs);
+      if (currentIntensity < targetIntensity) {
+        currentIntensity = Math.min(currentIntensity + step, targetIntensity);
+      } else if (currentIntensity > targetIntensity) {
+        currentIntensity = Math.max(currentIntensity - step, targetIntensity);
+      }
+    } else {
+      currentIntensity += (targetIntensity - currentIntensity) * 0.22;
+    }
+
+    if (isGlitching && glitchUntil && nowMs >= glitchUntil) {
+      isGlitching = false;
+      glitchUntil = nowMs + cfg.glitchInterval;
+    }
+
+    const clearW = offscreen.width + 2 * (cfg.fuzzRange + 24);
+    const clearH = textH + 2 * (cfg.fuzzRange + 14);
+    ctx.clearRect(-(cfg.fuzzRange + 24), -(cfg.fuzzRange + 14), clearW, clearH);
+    if (cfg.direction === "vertical") {
+      for (let i = 0; i < offscreen.width; i += 1) {
+        const dy = Math.floor(currentIntensity * (Math.random() - 0.5) * cfg.fuzzRange);
+        ctx.drawImage(offscreen, i, 0, 1, textH, i, dy, 1, textH);
+      }
+    } else {
+      for (let j = 0; j < textH; j += 1) {
+        const dx = Math.floor(currentIntensity * (Math.random() - 0.5) * cfg.fuzzRange);
+        ctx.drawImage(offscreen, 0, j, offscreen.width, 1, dx, j, offscreen.width, 1);
+      }
+    }
+
+    raf = requestAnimationFrame(tick);
+  }
+
+  function start() {
+    if (destroyed || raf) return;
+    raf = requestAnimationFrame(tick);
+  }
+
+  const onEnter = () => {
+    if (!cfg.enableHover) return;
+    isHovering = true;
+    start();
+  };
+  const onLeave = () => {
+    if (!cfg.enableHover) return;
+    isHovering = false;
+    start();
+  };
+  const onDown = () => {
+    if (!cfg.clickEffect) return;
+    isClicking = true;
+    clickUntil = performance.now() + 130;
+    start();
+  };
+  const onResize = () => {
+    setupCanvases();
+    start();
+  };
+
+  canvas.addEventListener("pointerenter", onEnter);
+  canvas.addEventListener("pointerleave", onLeave);
+  canvas.addEventListener("pointerdown", onDown);
+  window.addEventListener("resize", onResize);
+
+  setupCanvases();
+  if (cfg.pulseOnMount) {
+    pulseUntil = performance.now() + cfg.pulseMs;
+  }
+  start();
+
+  return {
+    destroy() {
+      destroyed = true;
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      canvas.removeEventListener("pointerenter", onEnter);
+      canvas.removeEventListener("pointerleave", onLeave);
+      canvas.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("resize", onResize);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    },
+  };
+}
+
+function fuzzyNeonPreset(text) {
+  return {
+    text,
+    fontSize: 64,
+    baseIntensity: 0.18,
+    hoverIntensity: 0.5,
+    fuzzRange: 30,
+    fps: 60,
+    direction: "horizontal",
+    transitionDuration: 0,
+    clickEffect: true,
+    glitchMode: false,
+    glitchInterval: 2000,
+    glitchDuration: 200,
+    letterSpacing: 0,
+    pulseOnMount: false,
+    pulseIntensity: 1.0,
+    pulseMs: 350,
+  };
+}
+
+function ensureGameOverFuzzyCanvas() {
+  if (!arcadeOverlay) return null;
+  let canvas = document.getElementById("gameOverFuzzy");
+  if (!canvas) {
+    canvas = document.createElement("canvas");
+    canvas.id = "gameOverFuzzy";
+    canvas.setAttribute("aria-hidden", "true");
+    canvas.style.display = "none";
+    canvas.style.width = "min(92vw, 680px)";
+    canvas.style.height = "64px";
+    canvas.style.margin = "6px auto 4px";
+    canvas.style.pointerEvents = "auto";
+    arcadeOverlay.insertBefore(canvas, arcadeOverlayBtn || null);
+  }
+  return canvas;
+}
+
+function unmountGameOverFuzzy() {
+  if (gameOverFuzzyInstance) {
+    gameOverFuzzyInstance.destroy();
+    gameOverFuzzyInstance = null;
+  }
+  const c = document.getElementById("gameOverFuzzy");
+  if (c) c.style.display = "none";
+}
+
+function mountGameOverFuzzy() {
+  const c = ensureGameOverFuzzyCanvas();
+  if (!c) return;
+  if (gameOverFuzzyInstance) gameOverFuzzyInstance.destroy();
+
+  const preset = fuzzyNeonPreset("You Died. Try Again.");
+  preset.pulseOnMount = true;
+  preset.pulseIntensity = 1.0;
+  preset.pulseMs = 360;
+  preset.fuzzRange = 22;
+  preset.fps = 50;
+  preset.enableHover = false;
+  preset.clickEffect = false;
+  preset.glitchMode = true;
+  preset.glitchDuration = 140;
+  preset.glitchInterval = 1200;
+
+  c.style.display = "block";
+  gameOverFuzzyInstance = createFuzzyText(c, preset);
+}
+
+function unmountRetryFuzzy() {
+  if (retryFuzzyInstance) {
+    retryFuzzyInstance.destroy();
+    retryFuzzyInstance = null;
+  }
+}
+
+function mountRetryFuzzy() {
+  const c = ensureGameOverFuzzyCanvas();
+  if (!c) return;
+  if (retryFuzzyInstance) retryFuzzyInstance.destroy();
+
+  const preset = fuzzyNeonPreset("Try Again?");
+  preset.pulseOnMount = false;
+  preset.baseIntensity = 0.11;
+  preset.hoverIntensity = 0.2;
+  preset.fuzzRange = 10;
+  preset.fps = 42;
+  preset.enableHover = false;
+  preset.clickEffect = false;
+  preset.glitchMode = false;
+
+  c.style.display = "block";
+  retryFuzzyInstance = createFuzzyText(c, preset);
+}
 
 const audioEngine = {
   ctx: null,
@@ -593,7 +913,7 @@ const audioEngine = {
   setMusicDim(dimOn) {
     this.ensureMusic();
     if (!this.musicGain || !this.ctx) return;
-    const target = dimOn ? MUSIC_MAX_GAIN * 0.4 : MUSIC_MAX_GAIN;
+    const target = dimOn ? MUSIC_MAX_GAIN * 0.2 : MUSIC_MAX_GAIN;
     const now = this.ctx.currentTime;
     this.musicGain.gain.cancelScheduledValues(now);
     this.musicGain.gain.setValueAtTime(this.musicGain.gain.value, now);
@@ -664,6 +984,17 @@ function addListeners() {
   document.addEventListener("pointerdown", primeMediaOnGesture, { once: true });
   document.addEventListener("touchstart", primeMediaOnGesture, { once: true, passive: true });
   document.addEventListener("keydown", primeMediaOnGesture, { once: true });
+  const resumeAudioOnGesture = () => {
+    audioEngine.resume();
+    try {
+      if ("speechSynthesis" in window) window.speechSynthesis.resume();
+    } catch {
+      // ignore
+    }
+  };
+  document.addEventListener("pointerdown", resumeAudioOnGesture, { passive: true });
+  document.addEventListener("touchstart", resumeAudioOnGesture, { passive: true });
+  document.addEventListener("keydown", resumeAudioOnGesture);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       audioEngine.stopAllLoops();
@@ -671,6 +1002,11 @@ function addListeners() {
       return;
     }
     audioEngine.resume();
+    try {
+      if ("speechSynthesis" in window) window.speechSynthesis.resume();
+    } catch {
+      // ignore
+    }
   });
 
   questionInput.addEventListener("input", () => {
@@ -1255,6 +1591,8 @@ function darkenStage(on) {
 
 async function speakLine(text, { rate = 1, pitch = 1.1, voiceName = "", timeoutMs = 6000 } = {}) {
   if (!text) return;
+  const nativeSpoken = await speakNativeText(text, { rate, pitch, voiceName });
+  if (nativeSpoken) return;
   if (!("speechSynthesis" in window)) return;
   const synth = window.speechSynthesis;
   synth.cancel();
@@ -2203,7 +2541,7 @@ function primeSpeechFromGesture() {
   }
 }
 
-async function speakNativeText(text, { rate = 1, pitch = 1.2 } = {}) {
+async function speakNativeText(text, { rate = 1, pitch = 1.2, voiceName = "" } = {}) {
   const plugin = getNativeTtsPlugin();
   if (!plugin) return false;
 
@@ -2213,6 +2551,7 @@ async function speakNativeText(text, { rate = 1, pitch = 1.2 } = {}) {
     await plugin.speak({
       text,
       lang: "en-GB",
+      voice: voiceName || state.selectedVoice || undefined,
       rate: Math.max(0.2, Math.min(2, rate)),
       pitch: Math.max(0.5, Math.min(2, pitch)),
       volume: state.whisper ? 0.5 : 1,
@@ -2632,8 +2971,9 @@ function waitVideoReady(video) {
 function setGalaxyBackgroundDim(ratio = 0) {
   if (!bgTint) return;
   const safe = clamp(ratio, 0, 1);
-  const alpha = (0.18 + safe * 0.44).toFixed(3);
-  bgTint.style.background = `radial-gradient(circle at 50% 30%, rgba(140, 90, 255, ${alpha}), rgba(0, 0, 0, 0.55))`;
+  const alpha = (0.14 + safe * 0.34).toFixed(3);
+  const vignette = (0.22 + safe * 0.18).toFixed(3);
+  bgTint.style.background = `radial-gradient(circle at 50% 32%, rgba(140, 90, 255, ${alpha}), rgba(0, 0, 0, 0.54)), radial-gradient(circle at 50% 50%, rgba(0,0,0,0), rgba(0,0,0,${vignette}))`;
 }
 
 async function setGalaxyBackgroundKey(key, opts = {}) {
@@ -2644,6 +2984,7 @@ async function setGalaxyBackgroundKey(key, opts = {}) {
   const fadeMs = opts.fadeMs ?? 450;
   const fadeInSeconds = opts.fadeInSeconds ?? 20;
   const immediate = opts.immediate ?? false;
+  const entryOpacity = immediate ? 1 : 0.34;
 
   if (bgCtl.currentKey === key && bgCtl.front) {
     try {
@@ -2683,14 +3024,17 @@ async function setGalaxyBackgroundKey(key, opts = {}) {
   }
 
   if (!front || !bgCtl.currentKey) {
-    back.style.transition = immediate ? "none" : `opacity ${fadeMs}ms ease`;
+    back.style.transition = `opacity ${fadeMs}ms ease`;
     back.classList.add("isOn");
-    back.style.opacity = "1";
+    back.style.opacity = String(entryOpacity);
     bgCtl.front = back;
     bgCtl.back = front || (back === bgCtl.a ? bgCtl.b : bgCtl.a);
     bgCtl.currentKey = key;
     if (!immediate && fadeInSeconds > 0) {
-      back.style.transition = `opacity ${fadeInSeconds}s linear`;
+      requestAnimationFrame(() => {
+        back.style.transition = `opacity ${fadeInSeconds}s linear`;
+        back.style.opacity = "1";
+      });
     }
     return;
   }
@@ -2699,7 +3043,7 @@ async function setGalaxyBackgroundKey(key, opts = {}) {
   front.style.transition = `opacity ${fadeMs}ms ease`;
   back.classList.add("isOn");
   requestAnimationFrame(() => {
-    back.style.opacity = "1";
+    back.style.opacity = String(entryOpacity);
     front.style.opacity = "0";
   });
 
@@ -2716,8 +3060,10 @@ async function setGalaxyBackgroundKey(key, opts = {}) {
     bgCtl.back = front;
     bgCtl.currentKey = key;
     if (!immediate && fadeInSeconds > 0) {
-      bgCtl.front.style.transition = `opacity ${fadeInSeconds}s linear`;
-      bgCtl.front.style.opacity = "1";
+      requestAnimationFrame(() => {
+        bgCtl.front.style.transition = `opacity ${fadeInSeconds}s linear`;
+        bgCtl.front.style.opacity = "1";
+      });
     }
   }, fadeMs + 40);
 }
@@ -2839,6 +3185,38 @@ function initGalaxyCanvas() {
   let debugLevelUnlocked = false;
   let debugModeTapCount = 0;
   let debugModeTapLastAt = 0;
+  const initialUfoFxPreset = (() => {
+    try {
+      return localStorage.getItem(ufoFxPresetKey) || "cyan";
+    } catch {
+      return "cyan";
+    }
+  })();
+  const ufoDeathFx = typeof window.UfoDeathEffect === "function"
+    ? new window.UfoDeathEffect({ maxParticles: 320, preset: initialUfoFxPreset })
+    : null;
+  const effects = {
+    triggerUfoDeath(x, y, presetName = "") {
+      ufoDeathFx?.trigger(x, y, presetName);
+    },
+    update(dtMs) {
+      ufoDeathFx?.update(dtMs, sim.width, sim.height);
+    },
+    draw(drawCtx) {
+      ufoDeathFx?.draw(drawCtx, sim.width, sim.height);
+    },
+  };
+  window.setUfoFxPreset = (name) => {
+    const preset = ufoDeathFx?.setPreset?.(name) || "cyan";
+    try {
+      localStorage.setItem(ufoFxPresetKey, preset);
+    } catch {
+      // ignore
+    }
+    return preset;
+  };
+  window.getUfoFxPreset = () => ufoDeathFx?.getPreset?.() || initialUfoFxPreset || "cyan";
+  window.listUfoFxPresets = () => (window.UfoDeathEffect?.PRESETS ? [...window.UfoDeathEffect.PRESETS] : ["cyan", "red", "white"]);
 
   const galaxyModeTitleEl = document.getElementById("galaxyModeTitle");
   const debugLevelPanel = document.getElementById("debugLevelPanel");
@@ -2861,6 +3239,7 @@ function initGalaxyCanvas() {
   let debugDots = [];
   let practiceLastInput = "idle";
   let practiceTapMarker = null;
+  let lastPrimaryPointerAt = 0;
 
   function showEl(el) {
     if (!el) return;
@@ -2978,7 +3357,7 @@ function initGalaxyCanvas() {
         const currentKey = bgKeyForLevel(currentLevelNum);
         const nextKey = bgKeyForLevel(nextLevelNum);
         if (nextKey && nextKey !== currentKey) {
-          setGalaxyBackgroundKey(nextKey, { fadeMs: 600, fadeInSeconds: 20, immediate: true });
+          setGalaxyBackgroundKey(nextKey, { fadeMs: 600, fadeInSeconds: 20, immediate: false });
         }
       }
     } else if (warningActive) {
@@ -3082,6 +3461,20 @@ function initGalaxyCanvas() {
       arcadeOverlayBtnSecondary.textContent = opts?.secondaryButtonText || "";
       arcadeOverlayBtnSecondary.onclick = opts?.secondaryButtonAction || null;
     }
+    const normalizedText = String(text || "").trim().toUpperCase();
+    const isGameOver = normalizedText === "GAME OVER";
+    const isRetryOverlay = normalizedText === "TIME'S UP";
+    if (isGameOver) {
+      arcadeOverlaySub.textContent = "";
+      unmountRetryFuzzy();
+      mountGameOverFuzzy();
+    } else if (isRetryOverlay) {
+      unmountGameOverFuzzy();
+      mountRetryFuzzy();
+    } else {
+      unmountGameOverFuzzy();
+      unmountRetryFuzzy();
+    }
     showEl(arcadeOverlay);
     arcadeOverlay.classList.add("show");
     if (durationMs > 0) {
@@ -3100,6 +3493,8 @@ function initGalaxyCanvas() {
     }
     arcadeOverlay.classList.remove("show");
     arcadeOverlayText.classList.remove("show", "fadeOut");
+    unmountGameOverFuzzy();
+    unmountRetryFuzzy();
     hideEl(arcadeOverlay);
     if (arcadeOverlayBtn) {
       arcadeOverlayBtn.style.display = "none";
@@ -3398,17 +3793,15 @@ function initGalaxyCanvas() {
   }
 
   function levelHasLandmine(levelNum) {
-    return levelNum === 3 || levelNum === 5 || levelNum === 8;
+    return levelNum === 1 || levelNum === 3 || levelNum === 5 || levelNum === 8;
   }
 
   function setupUfoSpawnForLevel(cfg) {
     arcadeUfoSpawnAt = 0;
     ufo = null;
     if (engineMode !== "arcade") return;
-    const chance = cfg.level >= 2 ? 0.6 : 0;
-    if (Math.random() > chance) return;
-    const totalMs = cfg.time * 1000;
-    arcadeUfoSpawnAt = performance.now() + totalMs * (0.25 + Math.random() * 0.45);
+    // Spawn one UFO 10s into every arcade level.
+    arcadeUfoSpawnAt = performance.now() + 10000;
   }
 
   function spawnUfo() {
@@ -3452,6 +3845,7 @@ function initGalaxyCanvas() {
     }
     playGameSfx("ufo_destroy", 0.84);
     playGameSfx("life_gain", 0.84);
+    effects.triggerUfoDeath(x, y);
     spawnExplosion(x, y, 28, false, 1.25, 1.2);
     addWarpRing(x, y, "rgba(172,255,214,1)");
     ufo = null;
@@ -3833,7 +4227,7 @@ function initGalaxyCanvas() {
     clearArcadeProgress();
     syncArcadeMenuButtons();
     playGameSfx("gameover", 0.96);
-    showArcadeOverlay("GAME OVER", "You died. Progress lost. Try again.", 0, {
+    showArcadeOverlay("GAME OVER", "You died. Try Again.", 0, {
       buttonText: "Back to Modes",
       buttonAction: () => showModeSelect(),
     });
@@ -4129,6 +4523,15 @@ function initGalaxyCanvas() {
           }
         }
 
+        // Keep gameplay visually alive between stagger waves.
+        if (cfg.spawnEveryMs > 0 && spawnQueue > 0 && sim.asteroids.length === 0) {
+          const p = randomPerimeterPoint();
+          spawnAsteroid(p.x, p.y, 3, true);
+          spawnQueue -= 1;
+          spawnedTotal += 1;
+          nextSpawnAt = Math.max(nextSpawnAt, now + Math.max(350, cfg.spawnEveryMs));
+        }
+
         const elapsedMs = Math.max(0, now - levelRunStartAt);
         if (!landmineSpawnedThisLevel && levelHasLandmine(cfg.level) && elapsedMs >= levelDurationMs / 2) {
           spawnLandmine();
@@ -4185,6 +4588,7 @@ function initGalaxyCanvas() {
             ufo.x = playfield.x + playfield.w * (0.1 + Math.random() * 0.8);
             ufo.y = playfield.y + playfield.h * (0.1 + Math.random() * 0.8);
             ufo.teleportAt = now + (900 + Math.random() * 500);
+            playGameSfx("ufo_teleport", 0.62);
             addWarpRing(ufo.x, ufo.y, "rgba(160,255,255,0.9)");
           }
           for (let i = 0; i < sim.asteroids.length; i += 1) {
@@ -4236,6 +4640,7 @@ function initGalaxyCanvas() {
       if (sim.shooting.life >= sim.shooting.ttl) sim.shooting = null;
     }
 
+    effects.update(dt);
     draw(now);
   }
 
@@ -4401,6 +4806,7 @@ function initGalaxyCanvas() {
       ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
       ctx.stroke();
     }
+    effects.draw(ctx);
 
     for (let i = 0; i < sim.particles.length; i += 1) {
       const p = sim.particles[i];
@@ -4511,6 +4917,10 @@ function initGalaxyCanvas() {
 
   function onGalaxyPointerDown(event) {
     const now = performance.now();
+    if (event.type === "click" && now - lastPrimaryPointerAt < 550) return;
+    if (event.type === "pointerdown" || event.type === "mousedown" || event.type === "touchstart") {
+      lastPrimaryPointerAt = now;
+    }
     if (now - sim.lastTapAt < 55) return;
     sim.lastTapAt = now;
     const target = event.target;
@@ -4600,22 +5010,19 @@ function initGalaxyCanvas() {
 
   if (!galaxyPlayCanvas.__polyPointerBound) {
     galaxyPlayCanvas.__polyPointerBound = true;
-    galaxyPlayCanvas.addEventListener("pointerdown", onGalaxyPointerDown, { passive: false });
-    galaxyPlayCanvas.addEventListener("pointermove", onGalaxyPointerMove, { passive: false });
-    galaxyPlayCanvas.addEventListener("pointerup", onGalaxyPointerUp, { passive: false });
-    // Keep explicit fallbacks even when PointerEvent exists; some iOS webviews report
-    // support but still route taps inconsistently.
-    galaxyPlayCanvas.addEventListener("touchstart", onGalaxyPointerDown, { passive: false });
-    galaxyPlayCanvas.addEventListener("mousedown", onGalaxyPointerDown, { passive: false });
-    galaxyPlayCanvas.addEventListener("click", onGalaxyPointerDown, { passive: false });
-  }
-  if (galaxyView && !galaxyView.__polyInputCaptureBound) {
-    galaxyView.__polyInputCaptureBound = true;
-    const captureOpts = { passive: false, capture: true };
-    galaxyView.addEventListener("pointerdown", onGalaxyPointerDown, captureOpts);
-    galaxyView.addEventListener("touchstart", onGalaxyPointerDown, captureOpts);
-    galaxyView.addEventListener("mousedown", onGalaxyPointerDown, captureOpts);
-    galaxyView.addEventListener("click", onGalaxyPointerDown, captureOpts);
+    if ("PointerEvent" in window) {
+      galaxyPlayCanvas.addEventListener("pointerdown", onGalaxyPointerDown, { passive: false });
+      galaxyPlayCanvas.addEventListener("pointermove", onGalaxyPointerMove, { passive: false });
+      galaxyPlayCanvas.addEventListener("pointerup", onGalaxyPointerUp, { passive: false });
+      galaxyPlayCanvas.addEventListener("click", onGalaxyPointerDown, { passive: false });
+    } else {
+      galaxyPlayCanvas.addEventListener("touchstart", onGalaxyPointerDown, { passive: false });
+      galaxyPlayCanvas.addEventListener("touchmove", onGalaxyPointerMove, { passive: false });
+      galaxyPlayCanvas.addEventListener("touchend", onGalaxyPointerUp, { passive: false });
+      galaxyPlayCanvas.addEventListener("mousedown", onGalaxyPointerDown, { passive: false });
+      galaxyPlayCanvas.addEventListener("mousemove", onGalaxyPointerMove, { passive: false });
+      galaxyPlayCanvas.addEventListener("mouseup", onGalaxyPointerUp, { passive: false });
+    }
   }
   galaxyPlayCanvas.addEventListener("pointerenter", (event) => {
     setCrosshairVisible(true);

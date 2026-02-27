@@ -392,6 +392,8 @@ let titleSparkleTimer = null;
 let mediaPrimed = false;
 let gamePageActive = false;
 let menuOverlayOpen = false;
+let gameOverFuzzyInstance = null;
+let retryFuzzyInstance = null;
 const bgCtl = {
   a: null,
   b: null,
@@ -408,6 +410,322 @@ let orbTapBuffer = null;
 let orbTapBufferPromise = null;
 let chaosShiftAudio = null;
 const boomTimes = [];
+
+function createFuzzyText(canvas, opts = {}) {
+  if (!canvas) {
+    return { destroy() {} };
+  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return { destroy() {} };
+  }
+
+  const cfg = {
+    text: opts?.text || "",
+    fontFamily: opts?.fontFamily || "\"Arial Black\", Impact, sans-serif",
+    fontWeight: opts?.fontWeight || 900,
+    fontSize: opts?.fontSize || 64,
+    color: opts?.color || "#ffe9e9",
+    enableHover: opts?.enableHover ?? true,
+    baseIntensity: opts?.baseIntensity ?? 0.18,
+    hoverIntensity: opts?.hoverIntensity ?? 0.5,
+    fuzzRange: opts?.fuzzRange ?? 30,
+    fps: opts?.fps ?? 60,
+    direction: opts?.direction || "horizontal",
+    transitionDuration: opts?.transitionDuration ?? 0,
+    clickEffect: opts?.clickEffect ?? true,
+    glitchMode: opts?.glitchMode ?? false,
+    glitchInterval: opts?.glitchInterval ?? 2000,
+    glitchDuration: opts?.glitchDuration ?? 200,
+    letterSpacing: opts?.letterSpacing ?? 0,
+    pulseOnMount: opts?.pulseOnMount ?? false,
+    pulseIntensity: opts?.pulseIntensity ?? 1.0,
+    pulseMs: opts?.pulseMs ?? 350,
+  };
+
+  let raf = 0;
+  let destroyed = false;
+  let lastFrameAt = 0;
+  let isHovering = false;
+  let isClicking = false;
+  let isGlitching = false;
+  let clickUntil = 0;
+  let glitchUntil = 0;
+  let pulseUntil = 0;
+  let targetIntensity = cfg.baseIntensity;
+  let currentIntensity = cfg.baseIntensity;
+  const frameMs = 1000 / Math.max(20, cfg.fps);
+  const offscreen = document.createElement("canvas");
+  const offCtx = offscreen.getContext("2d");
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  let textW = 0;
+  let textH = 0;
+  let marginX = 0;
+
+  function setupCanvases() {
+    if (!offCtx) return;
+    const fontPx = Math.max(28, Number(cfg.fontSize) || 64);
+    offCtx.font = `${cfg.fontWeight} ${fontPx}px ${cfg.fontFamily}`;
+    offCtx.textBaseline = "alphabetic";
+
+    let totalWidth = 0;
+    if (cfg.letterSpacing !== 0) {
+      for (const ch of cfg.text) {
+        totalWidth += offCtx.measureText(ch).width + cfg.letterSpacing;
+      }
+      totalWidth -= cfg.letterSpacing;
+    } else {
+      totalWidth = offCtx.measureText(cfg.text).width;
+    }
+    const metrics = offCtx.measureText(cfg.text);
+    const actualLeft = metrics.actualBoundingBoxLeft ?? 0;
+    const actualRight = cfg.letterSpacing !== 0 ? totalWidth : (metrics.actualBoundingBoxRight ?? metrics.width);
+    const actualAscent = metrics.actualBoundingBoxAscent ?? fontPx;
+    const actualDescent = metrics.actualBoundingBoxDescent ?? fontPx * 0.2;
+    textW = Math.ceil(cfg.letterSpacing !== 0 ? totalWidth : actualLeft + actualRight);
+    textH = Math.ceil(actualAscent + actualDescent);
+
+    const extraWidthBuffer = 10;
+    const xOffset = extraWidthBuffer / 2;
+    offscreen.width = textW + extraWidthBuffer;
+    offscreen.height = textH;
+    offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
+    offCtx.font = `${cfg.fontWeight} ${fontPx}px ${cfg.fontFamily}`;
+    offCtx.textBaseline = "alphabetic";
+    offCtx.fillStyle = cfg.color;
+    if (cfg.letterSpacing !== 0) {
+      let xPos = xOffset;
+      for (const ch of cfg.text) {
+        offCtx.fillText(ch, xPos, actualAscent);
+        xPos += offCtx.measureText(ch).width + cfg.letterSpacing;
+      }
+    } else {
+      offCtx.fillText(cfg.text, xOffset - actualLeft, actualAscent);
+    }
+
+    marginX = cfg.fuzzRange + 20;
+    const cssW = offscreen.width + marginX * 2;
+    const cssH = textH;
+    canvas.width = Math.floor(cssW * dpr);
+    canvas.height = Math.floor(cssH * dpr);
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.translate(marginX, 0);
+  }
+
+  function tick(ts) {
+    if (destroyed) return;
+    if (ts - lastFrameAt < frameMs) {
+      raf = requestAnimationFrame(tick);
+      return;
+    }
+    lastFrameAt = ts;
+
+    const nowMs = performance.now();
+    if (clickUntil && nowMs >= clickUntil) {
+      isClicking = false;
+      clickUntil = 0;
+    }
+    if (glitchUntil && nowMs >= glitchUntil) {
+      isGlitching = false;
+      glitchUntil = 0;
+    }
+    if (cfg.glitchMode && !isGlitching && !glitchUntil) {
+      glitchUntil = nowMs + cfg.glitchInterval;
+    }
+    if (cfg.glitchMode && glitchUntil && nowMs >= glitchUntil && !isGlitching) {
+      isGlitching = true;
+      glitchUntil = nowMs + cfg.glitchDuration;
+    }
+
+    if (pulseUntil && nowMs < pulseUntil) {
+      targetIntensity = cfg.pulseIntensity;
+    } else if (isClicking || isGlitching) {
+      targetIntensity = 1;
+    } else if (isHovering) {
+      targetIntensity = cfg.hoverIntensity;
+    } else {
+      targetIntensity = cfg.baseIntensity;
+    }
+    if (cfg.transitionDuration > 0) {
+      const step = 1 / (cfg.transitionDuration / frameMs);
+      if (currentIntensity < targetIntensity) {
+        currentIntensity = Math.min(currentIntensity + step, targetIntensity);
+      } else if (currentIntensity > targetIntensity) {
+        currentIntensity = Math.max(currentIntensity - step, targetIntensity);
+      }
+    } else {
+      currentIntensity += (targetIntensity - currentIntensity) * 0.22;
+    }
+
+    if (isGlitching && glitchUntil && nowMs >= glitchUntil) {
+      isGlitching = false;
+      glitchUntil = nowMs + cfg.glitchInterval;
+    }
+
+    const clearW = offscreen.width + 2 * (cfg.fuzzRange + 24);
+    const clearH = textH + 2 * (cfg.fuzzRange + 14);
+    ctx.clearRect(-(cfg.fuzzRange + 24), -(cfg.fuzzRange + 14), clearW, clearH);
+    if (cfg.direction === "vertical") {
+      for (let i = 0; i < offscreen.width; i += 1) {
+        const dy = Math.floor(currentIntensity * (Math.random() - 0.5) * cfg.fuzzRange);
+        ctx.drawImage(offscreen, i, 0, 1, textH, i, dy, 1, textH);
+      }
+    } else {
+      for (let j = 0; j < textH; j += 1) {
+        const dx = Math.floor(currentIntensity * (Math.random() - 0.5) * cfg.fuzzRange);
+        ctx.drawImage(offscreen, 0, j, offscreen.width, 1, dx, j, offscreen.width, 1);
+      }
+    }
+
+    raf = requestAnimationFrame(tick);
+  }
+
+  function start() {
+    if (destroyed || raf) return;
+    raf = requestAnimationFrame(tick);
+  }
+
+  const onEnter = () => {
+    if (!cfg.enableHover) return;
+    isHovering = true;
+    start();
+  };
+  const onLeave = () => {
+    if (!cfg.enableHover) return;
+    isHovering = false;
+    start();
+  };
+  const onDown = () => {
+    if (!cfg.clickEffect) return;
+    isClicking = true;
+    clickUntil = performance.now() + 130;
+    start();
+  };
+  const onResize = () => {
+    setupCanvases();
+    start();
+  };
+
+  canvas.addEventListener("pointerenter", onEnter);
+  canvas.addEventListener("pointerleave", onLeave);
+  canvas.addEventListener("pointerdown", onDown);
+  window.addEventListener("resize", onResize);
+
+  setupCanvases();
+  if (cfg.pulseOnMount) {
+    pulseUntil = performance.now() + cfg.pulseMs;
+  }
+  start();
+
+  return {
+    destroy() {
+      destroyed = true;
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      canvas.removeEventListener("pointerenter", onEnter);
+      canvas.removeEventListener("pointerleave", onLeave);
+      canvas.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("resize", onResize);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    },
+  };
+}
+
+function fuzzyNeonPreset(text) {
+  return {
+    text,
+    fontSize: 64,
+    baseIntensity: 0.18,
+    hoverIntensity: 0.5,
+    fuzzRange: 30,
+    fps: 60,
+    direction: "horizontal",
+    transitionDuration: 0,
+    clickEffect: true,
+    glitchMode: false,
+    glitchInterval: 2000,
+    glitchDuration: 200,
+    letterSpacing: 0,
+    pulseOnMount: false,
+    pulseIntensity: 1.0,
+    pulseMs: 350,
+  };
+}
+
+function ensureGameOverFuzzyCanvas() {
+  if (!arcadeOverlay) return null;
+  let canvas = document.getElementById("gameOverFuzzy");
+  if (!canvas) {
+    canvas = document.createElement("canvas");
+    canvas.id = "gameOverFuzzy";
+    canvas.setAttribute("aria-hidden", "true");
+    canvas.style.display = "none";
+    canvas.style.width = "min(92vw, 680px)";
+    canvas.style.height = "64px";
+    canvas.style.margin = "6px auto 4px";
+    canvas.style.pointerEvents = "auto";
+    arcadeOverlay.insertBefore(canvas, arcadeOverlayBtn || null);
+  }
+  return canvas;
+}
+
+function unmountGameOverFuzzy() {
+  if (gameOverFuzzyInstance) {
+    gameOverFuzzyInstance.destroy();
+    gameOverFuzzyInstance = null;
+  }
+  const c = document.getElementById("gameOverFuzzy");
+  if (c) c.style.display = "none";
+}
+
+function mountGameOverFuzzy() {
+  const c = ensureGameOverFuzzyCanvas();
+  if (!c) return;
+  if (gameOverFuzzyInstance) gameOverFuzzyInstance.destroy();
+
+  const preset = fuzzyNeonPreset("You Died. Try Again.");
+  preset.pulseOnMount = true;
+  preset.pulseIntensity = 1.0;
+  preset.pulseMs = 360;
+  preset.fuzzRange = 22;
+  preset.fps = 50;
+  preset.enableHover = false;
+  preset.clickEffect = false;
+  preset.glitchMode = true;
+  preset.glitchDuration = 140;
+  preset.glitchInterval = 1200;
+
+  c.style.display = "block";
+  gameOverFuzzyInstance = createFuzzyText(c, preset);
+}
+
+function unmountRetryFuzzy() {
+  if (retryFuzzyInstance) {
+    retryFuzzyInstance.destroy();
+    retryFuzzyInstance = null;
+  }
+}
+
+function mountRetryFuzzy() {
+  const c = ensureGameOverFuzzyCanvas();
+  if (!c) return;
+  if (retryFuzzyInstance) retryFuzzyInstance.destroy();
+
+  const preset = fuzzyNeonPreset("Try Again?");
+  preset.pulseOnMount = false;
+  preset.baseIntensity = 0.11;
+  preset.hoverIntensity = 0.2;
+  preset.fuzzRange = 10;
+  preset.fps = 42;
+  preset.enableHover = false;
+  preset.clickEffect = false;
+  preset.glitchMode = false;
+
+  c.style.display = "block";
+  retryFuzzyInstance = createFuzzyText(c, preset);
+}
 
 const audioEngine = {
   ctx: null,
@@ -3143,6 +3461,20 @@ function initGalaxyCanvas() {
       arcadeOverlayBtnSecondary.textContent = opts?.secondaryButtonText || "";
       arcadeOverlayBtnSecondary.onclick = opts?.secondaryButtonAction || null;
     }
+    const normalizedText = String(text || "").trim().toUpperCase();
+    const isGameOver = normalizedText === "GAME OVER";
+    const isRetryOverlay = normalizedText === "TIME'S UP";
+    if (isGameOver) {
+      arcadeOverlaySub.textContent = "";
+      unmountRetryFuzzy();
+      mountGameOverFuzzy();
+    } else if (isRetryOverlay) {
+      unmountGameOverFuzzy();
+      mountRetryFuzzy();
+    } else {
+      unmountGameOverFuzzy();
+      unmountRetryFuzzy();
+    }
     showEl(arcadeOverlay);
     arcadeOverlay.classList.add("show");
     if (durationMs > 0) {
@@ -3161,6 +3493,8 @@ function initGalaxyCanvas() {
     }
     arcadeOverlay.classList.remove("show");
     arcadeOverlayText.classList.remove("show", "fadeOut");
+    unmountGameOverFuzzy();
+    unmountRetryFuzzy();
     hideEl(arcadeOverlay);
     if (arcadeOverlayBtn) {
       arcadeOverlayBtn.style.display = "none";
@@ -3466,8 +3800,8 @@ function initGalaxyCanvas() {
     arcadeUfoSpawnAt = 0;
     ufo = null;
     if (engineMode !== "arcade") return;
-    // Testing mode: spawn one UFO 5s into every level.
-    arcadeUfoSpawnAt = performance.now() + 5000;
+    // Spawn one UFO 10s into every arcade level.
+    arcadeUfoSpawnAt = performance.now() + 10000;
   }
 
   function spawnUfo() {
@@ -3893,7 +4227,7 @@ function initGalaxyCanvas() {
     clearArcadeProgress();
     syncArcadeMenuButtons();
     playGameSfx("gameover", 0.96);
-    showArcadeOverlay("GAME OVER", "You died. Progress lost. Try again.", 0, {
+    showArcadeOverlay("GAME OVER", "You died. Try Again.", 0, {
       buttonText: "Back to Modes",
       buttonAction: () => showModeSelect(),
     });

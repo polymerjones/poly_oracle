@@ -62,6 +62,7 @@ const GAME_SFX = {
 
 const PRACTICE_MAX_ASTEROIDS = 40;
 const PRACTICE_SPAWN_COOLDOWN_MS = 1000;
+const PRACTICE_ENABLED = false;
 const MAX_LIVES = 3;
 const MUSIC_MAX_GAIN = 0.85;
 const MUSIC = {
@@ -1124,9 +1125,16 @@ function addListeners() {
     });
   }
   if (btnPractice) {
-    btnPractice.addEventListener("click", () => {
-      galaxyCanvasController?.startPractice?.();
-    });
+    if (!PRACTICE_ENABLED) {
+      btnPractice.disabled = true;
+      btnPractice.classList.add("is-disabled");
+      btnPractice.setAttribute("aria-disabled", "true");
+      btnPractice.title = "Practice mode temporarily unavailable";
+    } else {
+      btnPractice.addEventListener("click", () => {
+        galaxyCanvasController?.startPractice?.();
+      });
+    }
   }
   if (btnGalaxyBack) {
     btnGalaxyBack.addEventListener("click", () => closeGalaxyView());
@@ -4358,6 +4366,7 @@ function initGalaxyCanvas() {
   }
 
   function startPracticeMode() {
+    if (!PRACTICE_ENABLED) return;
     hideArcadeOverlay();
     stopWarningState();
     engineMode = "practice";
@@ -5071,6 +5080,7 @@ function initGalaxyCanvas() {
       showModeSelect(opts);
     },
     startPractice() {
+      if (!PRACTICE_ENABLED) return;
       startPracticeMode();
     },
     startArcadeFromSave() {

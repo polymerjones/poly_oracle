@@ -1554,6 +1554,16 @@ select:focus-visible {
   font-weight: 700;
 }
 
+.modeBtn:disabled,
+.modeBtn.is-disabled {
+  border-color: rgba(184, 196, 220, 0.28);
+  background: linear-gradient(125deg, rgba(120, 132, 154, 0.52), rgba(96, 108, 130, 0.58));
+  color: rgba(236, 242, 255, 0.78);
+  cursor: not-allowed;
+  opacity: 0.82;
+  box-shadow: none;
+}
+
 .modeBackBtn {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.06);

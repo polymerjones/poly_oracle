@@ -1100,7 +1100,7 @@ function addListeners() {
   });
 
   closeGalaxy.addEventListener("click", () => {
-    galaxyCanvasController?.showModeSelect?.();
+    galaxyCanvasController?.showModeSelect?.({ preserveArcade: true, openArcadeMenu: true });
   });
 
   toolDraw.addEventListener("click", () => {
@@ -1141,7 +1141,7 @@ function addListeners() {
   }
   if (arcadeBack) {
     arcadeBack.addEventListener("click", () => {
-      galaxyCanvasController?.showModeSelect?.({ preserveArcade: true });
+      galaxyCanvasController?.showModeSelect?.({ preserveArcade: true, openArcadeMenu: true });
     });
   }
   if (btnArcadeNew) {
@@ -4392,7 +4392,7 @@ function initGalaxyCanvas() {
     startGalaxyLoop();
   }
 
-  function showModeSelect({ preserveArcade = false } = {}) {
+  function showModeSelect({ preserveArcade = false, openArcadeMenu = false } = {}) {
     hideArcadeOverlay();
     retryPending = false;
     stopWarningState();
@@ -4411,7 +4411,7 @@ function initGalaxyCanvas() {
     }
     engineMode = "menu";
     syncArcadeEntryLabel();
-    setArcadeSubmenu("root");
+    setArcadeSubmenu(canPreserve && openArcadeMenu ? "arcade" : "root");
     syncArcadeMenuButtons();
     setGalaxyViewMode("menu");
     setMenuOverlayOpen(true);
@@ -5072,7 +5072,7 @@ function initGalaxyCanvas() {
   draw(performance.now());
 
   galaxyCanvasController = {
-    showModeSelect(opts = { preserveArcade: false }) {
+    showModeSelect(opts = { preserveArcade: false, openArcadeMenu: false }) {
       resizeGalaxyCanvas();
       computePlayfield();
       setTimeout(computePlayfield, 50);

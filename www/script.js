@@ -62,6 +62,7 @@ const GAME_SFX = {
 
 const PRACTICE_MAX_ASTEROIDS = 40;
 const PRACTICE_SPAWN_COOLDOWN_MS = 1000;
+const PRACTICE_ENABLED = false;
 const MAX_LIVES = 3;
 const MUSIC_MAX_GAIN = 0.85;
 const MUSIC = {
@@ -1099,7 +1100,7 @@ function addListeners() {
   });
 
   closeGalaxy.addEventListener("click", () => {
-    galaxyCanvasController?.showModeSelect?.();
+    galaxyCanvasController?.showModeSelect?.({ preserveArcade: true, openArcadeMenu: true });
   });
 
   toolDraw.addEventListener("click", () => {
@@ -1124,16 +1125,23 @@ function addListeners() {
     });
   }
   if (btnPractice) {
-    btnPractice.addEventListener("click", () => {
-      galaxyCanvasController?.startPractice?.();
-    });
+    if (!PRACTICE_ENABLED) {
+      btnPractice.disabled = true;
+      btnPractice.classList.add("is-disabled");
+      btnPractice.setAttribute("aria-disabled", "true");
+      btnPractice.title = "Practice mode temporarily unavailable";
+    } else {
+      btnPractice.addEventListener("click", () => {
+        galaxyCanvasController?.startPractice?.();
+      });
+    }
   }
   if (btnGalaxyBack) {
     btnGalaxyBack.addEventListener("click", () => closeGalaxyView());
   }
   if (arcadeBack) {
     arcadeBack.addEventListener("click", () => {
-      galaxyCanvasController?.showModeSelect?.({ preserveArcade: true });
+      galaxyCanvasController?.showModeSelect?.({ preserveArcade: true, openArcadeMenu: true });
     });
   }
   if (btnArcadeNew) {
@@ -4358,6 +4366,7 @@ function initGalaxyCanvas() {
   }
 
   function startPracticeMode() {
+    if (!PRACTICE_ENABLED) return;
     hideArcadeOverlay();
     stopWarningState();
     engineMode = "practice";
@@ -4383,7 +4392,7 @@ function initGalaxyCanvas() {
     startGalaxyLoop();
   }
 
-  function showModeSelect({ preserveArcade = false } = {}) {
+  function showModeSelect({ preserveArcade = false, openArcadeMenu = false } = {}) {
     hideArcadeOverlay();
     retryPending = false;
     stopWarningState();
@@ -4402,7 +4411,7 @@ function initGalaxyCanvas() {
     }
     engineMode = "menu";
     syncArcadeEntryLabel();
-    setArcadeSubmenu("root");
+    setArcadeSubmenu(canPreserve && openArcadeMenu ? "arcade" : "root");
     syncArcadeMenuButtons();
     setGalaxyViewMode("menu");
     setMenuOverlayOpen(true);
@@ -5063,7 +5072,7 @@ function initGalaxyCanvas() {
   draw(performance.now());
 
   galaxyCanvasController = {
-    showModeSelect(opts = { preserveArcade: false }) {
+    showModeSelect(opts = { preserveArcade: false, openArcadeMenu: false }) {
       resizeGalaxyCanvas();
       computePlayfield();
       setTimeout(computePlayfield, 50);
@@ -5071,6 +5080,7 @@ function initGalaxyCanvas() {
       showModeSelect(opts);
     },
     startPractice() {
+      if (!PRACTICE_ENABLED) return;
       startPracticeMode();
     },
     startArcadeFromSave() {

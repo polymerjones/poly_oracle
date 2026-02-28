@@ -35,7 +35,7 @@ const GAME_SFX = {
   explosion_big: "gamesfx/explo1.mp3",
   explosion_med: "gamesfx/explo1.mp3",
   explosion_small: "gamesfx/smallboom1.mp3",
-  reveal_magic: "newprereveal.mp3",
+  reveal_magic: "reveal1.mp3",
   reveal_flash: "reveal4.mp3",
   reveal2: "reveal2.mp3",
   landmine_arm: "gamesfx/minepreexplode.mp3",
@@ -52,12 +52,12 @@ const GAME_SFX = {
   newreveal005: "gamesfx/newreveal005.mp3",
   newreveal007: "gamesfx/newreveal007.mp3",
   newreveal008: "gamesfx/newreveal008.mp3",
-  warning10: "10secwarningloop.mp3",
-  ufo_spawn: "assets/sfx/ufo_spawn.mp3",
+  warning10: "gamesfx/newreveal008.mp3",
+  ufo_spawn: "gamesfx/blip1.mp3",
   ufo_teleport: "newsfxdesigned/ufoteleport.mp3",
-  ufo_hit1: "assets/sfx/ufo_hit1.mp3",
+  ufo_hit1: "gamesfx/astcollide2.mp3",
   ufo_destroy: "newsfxdesigned/ufodeath.mp3",
-  life_gain: "assets/sfx/life_gain.mp3",
+  life_gain: "gamesfx/popandsparkle.mp3",
 };
 
 const PRACTICE_MAX_ASTEROIDS = 40;
@@ -4786,13 +4786,49 @@ function initGalaxyCanvas() {
 
     if (ufo && ufo.alive) {
       ctx.save();
+      const damaged = ufo.hitCount >= 1;
       const shakeX = ufo.hitCount >= 1 ? Math.sin(now / 28) * 1.8 : 0;
       const shakeY = ufo.hitCount >= 1 ? Math.cos(now / 24) * 1.5 : 0;
       ctx.translate(ufo.x + shakeX, ufo.y + shakeY);
-      ctx.fillStyle = ufo.hitCount >= 1 ? "rgba(255,96,96,0.94)" : "rgba(154,235,255,0.92)";
+
+      // Restored UFO halo/glow pass for clearer presence on iOS and desktop.
+      const glowGrad = ctx.createRadialGradient(0, 0, ufo.r * 0.2, 0, 0, ufo.r * (damaged ? 2.2 : 2.6));
+      glowGrad.addColorStop(0, damaged ? "rgba(255,96,96,0.34)" : "rgba(134,255,176,0.36)");
+      glowGrad.addColorStop(0.65, damaged ? "rgba(255,96,96,0.12)" : "rgba(94,235,148,0.16)");
+      glowGrad.addColorStop(1, "rgba(94,235,148,0)");
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = glowGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, ufo.r * (damaged ? 2.2 : 2.6), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalCompositeOperation = "source-over";
+
+      ctx.strokeStyle = damaged ? "rgba(255,124,124,0.55)" : "rgba(156,255,194,0.58)";
+      ctx.lineWidth = 1.4;
+      ctx.shadowBlur = prefersReducedMotion ? 0 : 14;
+      ctx.shadowColor = damaged ? "rgba(255,110,110,0.75)" : "rgba(112,245,166,0.8)";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, ufo.r * 1.32, ufo.r * 0.72, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      ctx.fillStyle = damaged ? "rgba(255,96,96,0.94)" : "rgba(154,235,255,0.92)";
       ctx.beginPath();
       ctx.ellipse(0, 0, ufo.r * 1.1, ufo.r * 0.55, 0, 0, Math.PI * 2);
       ctx.fill();
+      if (!damaged) {
+        // Add green energy tint onto the UFO skin itself.
+        const skinGlow = ctx.createRadialGradient(0, 0, ufo.r * 0.08, 0, 0, ufo.r * 1.2);
+        skinGlow.addColorStop(0, "rgba(198,255,214,0.34)");
+        skinGlow.addColorStop(0.5, "rgba(128,245,166,0.2)");
+        skinGlow.addColorStop(1, "rgba(96,235,148,0)");
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = skinGlow;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, ufo.r * 1.1, ufo.r * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = "source-over";
+      }
       ctx.strokeStyle = "rgba(255,255,255,0.25)";
       ctx.lineWidth = 1.3;
       ctx.stroke();

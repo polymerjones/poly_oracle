@@ -5,7 +5,7 @@
   "main": "script.js",
   "scripts": {
     "doctor:ios": "xcodebuild -version",
-    "prepare:web": "mkdir -p www www/gamesfx www/astgfx && cp -f index.html style.css script.js favicon.png Kaleidoscope_Magic.mp3 reveal1.mp3 reveal2.mp3 reveal3.mp3 reveal4.mp3 newprereveal.mp3 taporb.mp3 crystalballfx.mp4 galaxybg1b-h264.mp4 level5-h264.mp4 level8-h264.mp4 level10-h264.mp4 www/ && cp -f gamesfx/*.mp3 www/gamesfx/ && cp -f astgfx/*.png www/astgfx/",
+    "prepare:web": "mkdir -p www www/gamesfx www/astgfx www/newsfxdesigned && cp -f index.html style.css script.js favicon.png Kaleidoscope_Magic.mp3 reveal1.mp3 reveal2.mp3 reveal3.mp3 reveal4.mp3 taporb.mp3 crystalballfx.mp4 galaxybg1b-h264.mp4 level5-h264.mp4 level8-h264.mp4 level10-h264.mp4 www/ && cp -f gamesfx/*.mp3 www/gamesfx/ && cp -f newsfxdesigned/*.mp3 www/newsfxdesigned/ && cp -f astgfx/*.png www/astgfx/",
     "install:cap": "npm install @capacitor/core @capacitor/cli @capacitor/ios",
     "cap:init": "npx cap init \"Poly Oracle\" com.polyoracle.app --web-dir www",
     "cap:add:ios": "npx cap add ios",
@@ -20,5 +20,9 @@
   ],
   "author": "",
   "license": "ISC",
-  "devDependencies": {}
+  "dependencies": {
+    "@capacitor/cli": "^8.1.0",
+    "@capacitor/core": "^8.1.0",
+    "@capacitor/ios": "^8.1.0"
+  }
 }

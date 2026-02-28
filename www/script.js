@@ -19,7 +19,7 @@ const BG = {
   L1_3: "galaxybg1b-h264.mp4",
   L4_7: "level5-h264.mp4",
   L8_9: "level8-h264.mp4",
-  L10: "newbossbg.mp4",
+  L10: "level10-h264.mp4",
 };
 
 function bgKeyForLevel(levelNum) {
@@ -687,6 +687,7 @@ function mountGameOverFuzzy() {
   if (gameOverFuzzyInstance) gameOverFuzzyInstance.destroy();
 
   const preset = fuzzyNeonPreset("You Died. Try Again.");
+  preset.fontSize = Math.max(42, Math.min(58, Math.floor((window.innerWidth || 390) * 0.105)));
   preset.pulseOnMount = true;
   preset.pulseIntensity = 1.0;
   preset.pulseMs = 360;
@@ -715,6 +716,7 @@ function mountRetryFuzzy() {
   if (retryFuzzyInstance) retryFuzzyInstance.destroy();
 
   const preset = fuzzyNeonPreset("Try Again?");
+  preset.fontSize = Math.max(36, Math.min(52, Math.floor((window.innerWidth || 390) * 0.09)));
   preset.pulseOnMount = false;
   preset.baseIntensity = 0.11;
   preset.hoverIntensity = 0.2;
@@ -734,8 +736,10 @@ const audioEngine = {
   musicGain: null,
   musicBuffers: new Map(),
   currentMusic: null,
+  currentMusicHtml: null,
   buffers: new Map(),
   loops: new Map(),
+  htmlAudioPool: new Map(),
   unlocked: false,
   ensureContext() {
     if (this.ctx) return this.ctx;
@@ -781,11 +785,62 @@ const audioEngine = {
     const entries = Object.entries(mapNameToUrl || {});
     return Promise.all(entries.map(([name, url]) => this.loadSound(name, url)));
   },
+  playHtmlAudio(name, { volume = 1, rate = 1, loop = false } = {}) {
+    const src = GAME_SFX?.[name];
+    if (!src) return { stop() {}, ended: Promise.resolve() };
+    const pool = this.htmlAudioPool.get(src) || [];
+    let node = null;
+    for (let i = 0; i < pool.length; i += 1) {
+      if (pool[i].paused || pool[i].ended) {
+        node = pool[i];
+        break;
+      }
+    }
+    if (!node) {
+      node = new Audio(src);
+      node.preload = "auto";
+      node.playsInline = true;
+      pool.push(node);
+      this.htmlAudioPool.set(src, pool);
+    }
+    node.loop = !!loop;
+    node.playbackRate = clamp(rate, 0.5, 2);
+    node.volume = clamp(volume, 0, 1);
+    try {
+      node.currentTime = 0;
+    } catch {
+      // ignore
+    }
+    const ended = new Promise((resolve) => {
+      if (loop) {
+        resolve();
+        return;
+      }
+      const finish = () => {
+        node.removeEventListener("ended", finish);
+        node.removeEventListener("error", finish);
+        resolve();
+      };
+      node.addEventListener("ended", finish, { once: true });
+      node.addEventListener("error", finish, { once: true });
+    });
+    node.play().catch(() => {});
+    return {
+      stop() {
+        node.pause();
+      },
+      ended,
+    };
+  },
   play(name, { volume = 1, rate = 1, detune = 0 } = {}) {
     const ctx = this.ensureContext();
-    if (!ctx || !this.unlocked) return { source: null, ended: Promise.resolve() };
+    if (!ctx || !this.unlocked) {
+      return this.playHtmlAudio(name, { volume, rate, loop: false });
+    }
     const buffer = this.buffers.get(name);
-    if (!buffer) return { source: null, ended: Promise.resolve() };
+    if (!buffer) {
+      return this.playHtmlAudio(name, { volume, rate, loop: false });
+    }
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
     source.buffer = buffer;
@@ -802,10 +857,10 @@ const audioEngine = {
   },
   playLoop(name, { volume = 1, rate = 1, detune = 0 } = {}) {
     const ctx = this.ensureContext();
-    if (!ctx || !this.unlocked) return { stop() {}, ended: Promise.resolve() };
+    if (!ctx || !this.unlocked) return this.playHtmlAudio(name, { volume, rate, loop: true });
     if (this.loops.has(name)) return this.loops.get(name);
     const buffer = this.buffers.get(name);
-    if (!buffer) return { stop() {}, ended: Promise.resolve() };
+    if (!buffer) return this.playHtmlAudio(name, { volume, rate, loop: true });
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
     source.buffer = buffer;
@@ -866,11 +921,37 @@ const audioEngine = {
     }
   },
   async playMusic(key, url, { crossfadeMs = 250 } = {}) {
+    if (!url) return;
     this.ensureMusic();
-    if (!this.ctx || !this.unlocked) return;
+    if (!this.unlocked) {
+      try {
+        await this.unlock();
+      } catch {
+        // ignore
+      }
+    }
     if (this.currentMusic && this.currentMusic.key === key) return;
+    if (this.currentMusicHtml && this.currentMusicHtml.key === key) return;
     const buffer = await this.loadMusicBuffer(url);
-    if (!buffer || !this.ctx) return;
+    if (!buffer || !this.ctx || !this.unlocked) {
+      const prev = this.currentMusicHtml;
+      if (prev && prev.key === key) return;
+      if (prev && prev.node) {
+        prev.node.pause();
+      }
+      const node = new Audio(url);
+      node.preload = "auto";
+      node.loop = true;
+      node.playsInline = true;
+      node.volume = state.whisper ? 0.22 : 0.44;
+      node.play().catch(() => {});
+      this.currentMusicHtml = { key, node };
+      return;
+    }
+    if (this.currentMusicHtml?.node) {
+      this.currentMusicHtml.node.pause();
+      this.currentMusicHtml = null;
+    }
     const source = this.ctx.createBufferSource();
     const gain = this.ctx.createGain();
     source.buffer = buffer;
@@ -903,6 +984,10 @@ const audioEngine = {
     this.currentMusic = { key, source, gain, startedAt: performance.now() };
   },
   stopMusic() {
+    if (this.currentMusicHtml?.node) {
+      this.currentMusicHtml.node.pause();
+      this.currentMusicHtml = null;
+    }
     if (!this.currentMusic) return;
     try {
       this.currentMusic.source.stop();
@@ -912,6 +997,9 @@ const audioEngine = {
     this.currentMusic = null;
   },
   setMusicDim(dimOn) {
+    if (this.currentMusicHtml?.node) {
+      this.currentMusicHtml.node.volume = dimOn ? (state.whisper ? 0.08 : 0.16) : (state.whisper ? 0.22 : 0.44);
+    }
     this.ensureMusic();
     if (!this.musicGain || !this.ctx) return;
     const target = dimOn ? MUSIC_MAX_GAIN * 0.2 : MUSIC_MAX_GAIN;
@@ -1027,7 +1115,8 @@ function addListeners() {
     if (event.cancelable) event.preventDefault();
     audioEngine.unlock();
     const now = performance.now();
-    if (now - lastOrbTapAt < 40) return;
+    const tapCooldownMs = isIOSWebKit ? 95 : 40;
+    if (now - lastOrbTapAt < tapCooldownMs) return;
     lastOrbTapAt = now;
     const intensity = registerOrbTap();
     const safeIntensity = isIOSWebKit
@@ -1444,6 +1533,9 @@ function setSettingsOpen(open) {
 function setVh() {
   const vh = window.innerHeight * 0.01;
   document.documentElement.style.setProperty("--vh", `${vh}px`);
+  if (!galaxyView.hidden && galaxyCanvasController?.relayout) {
+    galaxyCanvasController.relayout();
+  }
 }
 
 function openGalaxyView() {
@@ -4444,12 +4536,20 @@ function initGalaxyCanvas() {
     const height = Math.max(1, Math.floor(rect.height || window.innerHeight));
     sim.width = width;
     sim.height = height;
+    galaxyPlayCanvas.style.width = `${width}px`;
+    galaxyPlayCanvas.style.height = `${height}px`;
     galaxyPlayCanvas.width = Math.floor(width * sim.dpr);
     galaxyPlayCanvas.height = Math.floor(height * sim.dpr);
     ctx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
     sim.maxAsteroids = engineMode === "practice" ? PRACTICE_MAX_ASTEROIDS : (engineMode === "arcade" ? sim.maxAsteroids : (sim.width < 700 ? 80 : 120));
     seedStars();
     computePlayfield();
+  }
+
+  function relayoutGalaxyCanvas() {
+    resizeGalaxyCanvas();
+    computePlayfield();
+    if (!galaxyView.hidden) draw(performance.now());
   }
 
   function seedStars() {
@@ -5075,10 +5175,16 @@ function initGalaxyCanvas() {
   });
   galaxyPlayCanvas.addEventListener("pointerleave", () => setCrosshairVisible(false));
 
-  window.addEventListener("resize", () => {
-    resizeGalaxyCanvas();
-    computePlayfield();
-  });
+  window.addEventListener("resize", relayoutGalaxyCanvas);
+  const delayedRelayout = () => {
+    relayoutGalaxyCanvas();
+    setTimeout(relayoutGalaxyCanvas, 120);
+    setTimeout(relayoutGalaxyCanvas, 420);
+  };
+  window.addEventListener("orientationchange", delayedRelayout);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", delayedRelayout, { passive: true });
+  }
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopGalaxyLoop();
@@ -5145,6 +5251,7 @@ function initGalaxyCanvas() {
     },
     stopAndMenu,
     stop: stopGalaxyLoop,
+    relayout: relayoutGalaxyCanvas,
     clear() {
       if (engineMode === "arcade") return;
       clearGameplayEntities();

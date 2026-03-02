@@ -393,6 +393,7 @@ let galaxyCanvasController;
 let oracleBgController;
 let titleSparkleTimer = null;
 let mediaPrimed = false;
+let speechPrimed = false;
 let gamePageActive = false;
 let menuOverlayOpen = false;
 let gameOverFuzzyInstance = null;
@@ -409,6 +410,7 @@ const bgCtl = {
 const orbTapPool = [];
 let orbTapPoolIndex = 0;
 let lastOrbTapAt = 0;
+let lastOrbTouchEndAt = 0;
 let orbTapBuffer = null;
 let orbTapBufferPromise = null;
 let chaosShiftAudio = null;
@@ -1137,8 +1139,21 @@ function addListeners() {
   };
   if ("PointerEvent" in window) {
     orb.addEventListener("pointerdown", onOrbTap);
+    orb.addEventListener("touchend", (event) => {
+      const now = performance.now();
+      if (now - lastOrbTouchEndAt < 320 && event.cancelable) event.preventDefault();
+      lastOrbTouchEndAt = now;
+    }, { passive: false });
+    orb.addEventListener("dblclick", (event) => {
+      if (event.cancelable) event.preventDefault();
+    }, { passive: false });
   } else {
     orb.addEventListener("touchstart", onOrbTap, { passive: false });
+    orb.addEventListener("touchend", (event) => {
+      const now = performance.now();
+      if (now - lastOrbTouchEndAt < 320 && event.cancelable) event.preventDefault();
+      lastOrbTouchEndAt = now;
+    }, { passive: false });
     orb.addEventListener("mousedown", onOrbTap);
   }
 
@@ -1727,13 +1742,15 @@ async function speakLine(text, { rate = 1, pitch = 1.1, voiceName = "", timeoutM
   synth.cancel();
   synth.resume();
   const voices = getWebVoices();
-  await new Promise((resolve) => {
+  const speakAttempt = (useFallbackVoice = false) => new Promise((resolve) => {
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = rate;
     utter.pitch = pitch;
     utter.volume = state.whisper ? 0.5 : 1;
-    const selected = voices.find((voice) => voice.name === (voiceName || state.selectedVoice));
-    if (selected) utter.voice = selected;
+    if (!useFallbackVoice) {
+      const selected = voices.find((voice) => voice.name === (voiceName || state.selectedVoice));
+      if (selected) utter.voice = selected;
+    }
     let done = false;
     const finish = () => {
       if (done) return;
@@ -1750,7 +1767,17 @@ async function speakLine(text, { rate = 1, pitch = 1.1, voiceName = "", timeoutM
       finish();
     };
     synth.speak(utter);
+    setTimeout(() => {
+      if (!synth.speaking && !synth.pending) {
+        clearTimeout(tid);
+        finish();
+      }
+    }, 500);
   });
+  await speakAttempt(false);
+  if (!synth.speaking && !synth.pending) {
+    await speakAttempt(true);
+  }
 }
 
 function lerp(a, b, t) {
@@ -2665,6 +2692,15 @@ function primeSpeechFromGesture() {
     const synth = window.speechSynthesis;
     synth.resume();
     synth.getVoices();
+    if (!speechPrimed) {
+      speechPrimed = true;
+      const warm = new SpeechSynthesisUtterance(".");
+      warm.volume = 0;
+      warm.rate = 1;
+      warm.pitch = 1;
+      synth.cancel();
+      synth.speak(warm);
+    }
   } catch {
     // ignore priming errors
   }

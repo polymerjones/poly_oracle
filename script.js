@@ -34,7 +34,9 @@ const GAME_SFX = {
   warp: "assets/newsfx/subswoosh.mp3",
   explosion_big: "gamesfx/explo1.mp3",
   explosion_med: "gamesfx/explo1.mp3",
+  explosion_med_alt: "gamesfx/smallboom2.mp3",
   explosion_small: "gamesfx/smallboom1.mp3",
+  explosion_small_alt: "gamesfx/smallboom2.mp3",
   reveal_magic: "reveal1.mp3",
   reveal_flash: "reveal4.mp3",
   reveal2: "reveal2.mp3",
@@ -3971,15 +3973,33 @@ function initGalaxyCanvas() {
     const iosBoost = isIOSWebKit
       ? ({
         explosion_small: 1.35,
+        explosion_small_alt: 1.35,
         explosion_med: 1.25,
+        explosion_med_alt: 1.25,
         explosion_big: 1.12,
       }[name] || 1)
       : 1;
+    const finalVolume = clamp(volume * (state.whisper ? 0.55 : 1) * iosBoost, 0, 1);
+    if (opts.forceHtmlOnIOS && isIOSWebKit) {
+      audioEngine.playHtmlAudio(name, {
+        volume: finalVolume,
+        rate: opts.rate || 1,
+        loop: false,
+      });
+      return;
+    }
     audioEngine.play(name, {
-      volume: clamp(volume * (state.whisper ? 0.55 : 1) * iosBoost, 0, 1),
+      volume: finalVolume,
       rate: opts.rate || 1,
       detune: opts.detune || 0,
     });
+  }
+
+  function playAsteroidExplosionBoom(kind, volume, rate) {
+    const mediumKeys = ["explosion_med", "explosion_med_alt"];
+    const smallKeys = ["explosion_small", "explosion_small_alt"];
+    const key = kind >= 3 ? "explosion_big" : kind === 2 ? pick(mediumKeys) : pick(smallKeys);
+    playGameSfx(key, volume, { rate, forceHtmlOnIOS: true });
   }
 
   // === Warp Spawns ===
@@ -4391,12 +4411,13 @@ function initGalaxyCanvas() {
     const mediumBlast = wasKind === 2;
     const ttlScale = bigBlast ? 1.4 : mediumBlast ? 1.18 : 1;
     spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale);
-    const explodeKey = wasKind === 3 ? "explosion_big" : wasKind === 2 ? "explosion_med" : "explosion_small";
     const baseBoomVol = wasKind === 3 ? 0.9 : wasKind === 2 ? 0.92 : 0.78;
     const minBoomRatio = wasKind === 3 ? 0.62 : wasKind === 2 ? 0.8 : 0.9;
-    playGameSfx(explodeKey, boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }), {
-      rate: 0.92 + Math.random() * 0.16,
-    });
+    playAsteroidExplosionBoom(
+      wasKind,
+      boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }),
+      0.92 + Math.random() * 0.16,
+    );
     suppressAstCollisionSfxUntil = performance.now() + 180;
     if (isLevel10) {
       triggerLevel10AsteroidFlash(bigBlast);
@@ -4432,10 +4453,13 @@ function initGalaxyCanvas() {
     const bigBlast = a.kind === 3;
     const mediumBlast = a.kind === 2;
     spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1);
-    const explodeKey = bigBlast ? "explosion_big" : mediumBlast ? "explosion_med" : "explosion_small";
     const baseBoomVol = bigBlast ? 0.9 : mediumBlast ? 0.9 : 0.76;
     const minBoomRatio = bigBlast ? 0.62 : mediumBlast ? 0.82 : 0.9;
-    playGameSfx(explodeKey, boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }), { rate: 0.92 + Math.random() * 0.14 });
+    playAsteroidExplosionBoom(
+      a.kind,
+      boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }),
+      0.92 + Math.random() * 0.14,
+    );
     if (isLevel10) {
       triggerLevel10AsteroidFlash(bigBlast);
       if (bigBlast) {

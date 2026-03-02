@@ -798,9 +798,23 @@ const audioEngine = {
     const entries = Object.entries(mapNameToUrl || {});
     return Promise.all(entries.map(([name, url]) => this.loadSound(name, url)));
   },
-  enforcePolyphony(name, maxVoices = this.maxVoicesPerSound) {
+  enforcePolyphony(name, maxVoices = this.maxVoicesPerSound, mode = "drop_newest") {
     const voices = this.voices.get(name);
     if (!voices || voices.length < maxVoices) return true;
+    if (mode === "steal_oldest") {
+      const dropCount = voices.length - maxVoices + 1;
+      for (let i = 0; i < dropCount; i += 1) {
+        const oldest = voices.shift();
+        if (!oldest?.source) continue;
+        try {
+          oldest.source.stop();
+        } catch {
+          // ignore
+        }
+      }
+      if (!voices.length) this.voices.delete(name);
+      return true;
+    }
     // Do not cut currently playing voices on spam; drop newest trigger instead.
     return false;
   },
@@ -867,8 +881,15 @@ const audioEngine = {
     if (!buffer) {
       return this.playHtmlAudio(name, { volume, rate, loop: false });
     }
-    const maxVoices = name === "orb_tap" ? 6 : this.maxVoicesPerSound;
-    if (!this.enforcePolyphony(name, maxVoices)) {
+    const isExplosionLike = name === "explosion_big"
+      || name === "explosion_med"
+      || name === "explosion_small"
+      || name === "landmine_boom"
+      || name === "astcollide1"
+      || name === "astcollide2";
+    const maxVoices = name === "orb_tap" ? 10 : (isExplosionLike ? 16 : this.maxVoicesPerSound);
+    const mode = name === "orb_tap" ? "drop_newest" : (isExplosionLike ? "steal_oldest" : "drop_newest");
+    if (!this.enforcePolyphony(name, maxVoices, mode)) {
       return { source: null, ended: Promise.resolve() };
     }
     const source = ctx.createBufferSource();
@@ -1151,7 +1172,8 @@ function addListeners() {
     if (event.cancelable) event.preventDefault();
     audioEngine.unlock();
     const now = performance.now();
-    const tapCooldownMs = isIOSWebKit ? 95 : 40;
+    // Keep only a tiny dedupe window so rapid intentional taps still sound on iOS.
+    const tapCooldownMs = isIOSWebKit ? 24 : 24;
     if (now - lastOrbTapAt < tapCooldownMs) return;
     lastOrbTapAt = now;
     const intensity = registerOrbTap();
@@ -3901,10 +3923,11 @@ function initGalaxyCanvas() {
 
   function boomStackVolume(baseVolume) {
     const now = performance.now();
-    while (boomTimes.length && now - boomTimes[0] > 150) boomTimes.shift();
+    while (boomTimes.length && now - boomTimes[0] > 220) boomTimes.shift();
     const count = boomTimes.length;
     boomTimes.push(now);
-    return baseVolume * (1 / (1 + count * 0.35));
+    const scaled = baseVolume * (1 / (1 + count * 0.2));
+    return Math.max(baseVolume * 0.58, scaled);
   }
 
   function playGameSfx(name, volume = 0.9, opts = {}) {

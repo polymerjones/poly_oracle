@@ -1817,30 +1817,34 @@ async function speakLine(text, { rate = 1, pitch = 1.1, voiceName = "", timeoutM
       if (selected) utter.voice = selected;
     }
     let done = false;
-    const finish = () => {
+    let started = false;
+    const finish = (result) => {
       if (done) return;
       done = true;
-      resolve();
+      resolve(result);
     };
-    const tid = setTimeout(finish, timeoutMs);
+    const tid = setTimeout(() => finish({ started, reason: "timeout" }), timeoutMs);
+    utter.onstart = () => {
+      started = true;
+    };
     utter.onend = () => {
       clearTimeout(tid);
-      finish();
+      finish({ started, reason: "end" });
     };
     utter.onerror = () => {
       clearTimeout(tid);
-      finish();
+      finish({ started, reason: "error" });
     };
     synth.speak(utter);
     setTimeout(() => {
       if (!synth.speaking && !synth.pending) {
         clearTimeout(tid);
-        finish();
+        finish({ started, reason: "no-start" });
       }
     }, 500);
   });
-  await speakAttempt(false);
-  if (!synth.speaking && !synth.pending) {
+  const first = await speakAttempt(false);
+  if (!first?.started) {
     await speakAttempt(true);
   }
 }

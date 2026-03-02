@@ -95,6 +95,7 @@ function nextMusicKeyForLevel(levelNum) {
 }
 
 const DEBUG_FORCE_LEVEL_SELECT = true;
+const DEBUG_SHOW_LEVEL_DROPDOWN = false;
 const REVEAL_VARIANT_SFX = [
   "newreveal001",
   "newreveal002",
@@ -799,18 +800,9 @@ const audioEngine = {
   },
   enforcePolyphony(name, maxVoices = this.maxVoicesPerSound) {
     const voices = this.voices.get(name);
-    if (!voices || voices.length < maxVoices) return;
-    const dropCount = voices.length - maxVoices + 1;
-    for (let i = 0; i < dropCount; i += 1) {
-      const oldest = voices.shift();
-      if (!oldest?.source) continue;
-      try {
-        oldest.source.stop();
-      } catch {
-        // ignore
-      }
-    }
-    if (!voices.length) this.voices.delete(name);
+    if (!voices || voices.length < maxVoices) return true;
+    // Do not cut currently playing voices on spam; drop newest trigger instead.
+    return false;
   },
   releaseVoice(name, source) {
     const voices = this.voices.get(name);
@@ -875,7 +867,10 @@ const audioEngine = {
     if (!buffer) {
       return this.playHtmlAudio(name, { volume, rate, loop: false });
     }
-    this.enforcePolyphony(name);
+    const maxVoices = name === "orb_tap" ? 6 : this.maxVoicesPerSound;
+    if (!this.enforcePolyphony(name, maxVoices)) {
+      return { source: null, ended: Promise.resolve() };
+    }
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
     source.buffer = buffer;
@@ -3396,7 +3391,7 @@ function initGalaxyCanvas() {
   let ufo = null;
   let arcadeUfoSpawnAt = 0;
   let retryPending = false;
-  let debugLevelUnlocked = true;
+  let debugLevelUnlocked = false;
   let debugModeTapCount = 0;
   let debugModeTapLastAt = 0;
   const initialUfoFxPreset = (() => {
@@ -3593,7 +3588,7 @@ function initGalaxyCanvas() {
     const showLevels = mode === "levels";
     if (btnArcade) btnArcade.style.display = showRoot ? "" : "none";
     if (btnPractice) btnPractice.style.display = showRoot ? "" : "none";
-    if (debugLevelPanel) debugLevelPanel.style.display = showRoot && debugLevelUnlocked ? "" : "none";
+    if (debugLevelPanel) debugLevelPanel.style.display = "none";
     if (arcadeMenuPanel) {
       arcadeMenuPanel.hidden = !showArcade;
       arcadeMenuPanel.classList.toggle("show", showArcade);
@@ -3630,10 +3625,9 @@ function initGalaxyCanvas() {
 
   function syncDebugLevelPanel() {
     if (!debugLevelPanel) return;
-    const visible = debugLevelUnlocked && engineMode === "menu" && btnArcade?.style.display !== "none";
-    debugLevelPanel.hidden = !visible;
-    debugLevelPanel.classList.toggle("unlocked", visible);
-    debugLevelPanel.setAttribute("aria-hidden", visible ? "false" : "true");
+    debugLevelPanel.hidden = true;
+    debugLevelPanel.classList.remove("unlocked");
+    debugLevelPanel.setAttribute("aria-hidden", "true");
   }
 
   function buildDebugLevelSelect() {
@@ -3650,7 +3644,7 @@ function initGalaxyCanvas() {
   }
 
   function registerDebugLevelUnlockTap() {
-    if (engineMode !== "menu") return;
+    if (!DEBUG_SHOW_LEVEL_DROPDOWN || engineMode !== "menu") return;
     const now = performance.now();
     if (now - debugModeTapLastAt > 1600) debugModeTapCount = 0;
     debugModeTapLastAt = now;
@@ -4607,7 +4601,7 @@ function initGalaxyCanvas() {
   }
 
   function openArcadeLevelSelect() {
-    if (!hasArcadeWon()) return;
+    if (!(DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon())) return;
     buildArcadeLevelSelect();
     setArcadeSubmenu("levels");
   }

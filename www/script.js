@@ -1,4 +1,4 @@
-const APP_VERSION = "v2.2";
+const APP_VERSION = "v3.1";
 const storageKey = "poly-oracle-v11-state";
 const firstRunHintKey = "poly_oracle_seen_hint_v1_2_1";
 const verboseKey = "poly_oracle_verbose_details";
@@ -31,11 +31,11 @@ function bgKeyForLevel(levelNum) {
 
 const GAME_SFX = {
   orb_tap: "taporb.mp3",
-  warp: "gamesfx/blip1.mp3",
+  warp: "assets/newsfx/subswoosh.mp3",
   explosion_big: "gamesfx/explo1.mp3",
   explosion_med: "gamesfx/explo1.mp3",
   explosion_small: "gamesfx/smallboom1.mp3",
-  reveal_magic: "newprereveal.mp3",
+  reveal_magic: "reveal1.mp3",
   reveal_flash: "reveal4.mp3",
   reveal2: "reveal2.mp3",
   landmine_arm: "gamesfx/minepreexplode.mp3",
@@ -52,19 +52,21 @@ const GAME_SFX = {
   newreveal005: "gamesfx/newreveal005.mp3",
   newreveal007: "gamesfx/newreveal007.mp3",
   newreveal008: "gamesfx/newreveal008.mp3",
-  warning10: "10secwarningloop.mp3",
-  ufo_spawn: "assets/sfx/ufo_spawn.mp3",
-  ufo_teleport: "newsfxdesigned/ufoteleport.mp3",
-  ufo_hit1: "assets/sfx/ufo_hit1.mp3",
+  warning10: "assets/newsfx/newnewwarningloop.mp3",
+  ufo_spawn: "gamesfx/blip1.mp3",
+  ufo_teleport: "assets/newsfx/phantom.mp3",
+  ufo_hit1: "gamesfx/astcollide2.mp3",
   ufo_destroy: "newsfxdesigned/ufodeath.mp3",
-  life_gain: "assets/sfx/life_gain.mp3",
+  life_gain: "gamesfx/popandsparkle.mp3",
+  tryagain: "assets/newsfx/tryagain.mp3",
+  retry_appear: "assets/newsfx/appear.mp3",
 };
 
 const PRACTICE_MAX_ASTEROIDS = 40;
 const PRACTICE_SPAWN_COOLDOWN_MS = 1000;
 const PRACTICE_ENABLED = false;
 const MAX_LIVES = 3;
-const MUSIC_MAX_GAIN = 0.85;
+const MUSIC_MAX_GAIN = 0.95;
 const MUSIC = {
   L1_3: "assets/music/E1L1-3.mp3",
   L4_7: "assets/music/E1L4-7.mp3",
@@ -88,7 +90,7 @@ function nextMusicKeyForLevel(levelNum) {
   return null;
 }
 
-const DEBUG_FORCE_LEVEL_SELECT = true;
+const DEBUG_FORCE_LEVEL_SELECT = false;
 const REVEAL_VARIANT_SFX = [
   "newreveal001",
   "newreveal002",
@@ -686,7 +688,8 @@ function mountGameOverFuzzy() {
   if (!c) return;
   if (gameOverFuzzyInstance) gameOverFuzzyInstance.destroy();
 
-  const preset = fuzzyNeonPreset("You Died. Try Again.");
+  const preset = fuzzyNeonPreset("You Died. Progress Lost.");
+  preset.fontSize = Math.max(30, Math.min(48, Math.floor((window.innerWidth || 390) * 0.082)));
   preset.pulseOnMount = true;
   preset.pulseIntensity = 1.0;
   preset.pulseMs = 360;
@@ -715,6 +718,7 @@ function mountRetryFuzzy() {
   if (retryFuzzyInstance) retryFuzzyInstance.destroy();
 
   const preset = fuzzyNeonPreset("Try Again?");
+  preset.fontSize = Math.max(36, Math.min(52, Math.floor((window.innerWidth || 390) * 0.09)));
   preset.pulseOnMount = false;
   preset.baseIntensity = 0.11;
   preset.hoverIntensity = 0.2;
@@ -734,8 +738,10 @@ const audioEngine = {
   musicGain: null,
   musicBuffers: new Map(),
   currentMusic: null,
+  currentMusicHtml: null,
   buffers: new Map(),
   loops: new Map(),
+  htmlAudioPool: new Map(),
   unlocked: false,
   ensureContext() {
     if (this.ctx) return this.ctx;
@@ -781,11 +787,62 @@ const audioEngine = {
     const entries = Object.entries(mapNameToUrl || {});
     return Promise.all(entries.map(([name, url]) => this.loadSound(name, url)));
   },
+  playHtmlAudio(name, { volume = 1, rate = 1, loop = false } = {}) {
+    const src = GAME_SFX?.[name];
+    if (!src) return { stop() {}, ended: Promise.resolve() };
+    const pool = this.htmlAudioPool.get(src) || [];
+    let node = null;
+    for (let i = 0; i < pool.length; i += 1) {
+      if (pool[i].paused || pool[i].ended) {
+        node = pool[i];
+        break;
+      }
+    }
+    if (!node) {
+      node = new Audio(src);
+      node.preload = "auto";
+      node.playsInline = true;
+      pool.push(node);
+      this.htmlAudioPool.set(src, pool);
+    }
+    node.loop = !!loop;
+    node.playbackRate = clamp(rate, 0.5, 2);
+    node.volume = clamp(volume, 0, 1);
+    try {
+      node.currentTime = 0;
+    } catch {
+      // ignore
+    }
+    const ended = new Promise((resolve) => {
+      if (loop) {
+        resolve();
+        return;
+      }
+      const finish = () => {
+        node.removeEventListener("ended", finish);
+        node.removeEventListener("error", finish);
+        resolve();
+      };
+      node.addEventListener("ended", finish, { once: true });
+      node.addEventListener("error", finish, { once: true });
+    });
+    node.play().catch(() => {});
+    return {
+      stop() {
+        node.pause();
+      },
+      ended,
+    };
+  },
   play(name, { volume = 1, rate = 1, detune = 0 } = {}) {
     const ctx = this.ensureContext();
-    if (!ctx || !this.unlocked) return { source: null, ended: Promise.resolve() };
+    if (!ctx || !this.unlocked) {
+      return this.playHtmlAudio(name, { volume, rate, loop: false });
+    }
     const buffer = this.buffers.get(name);
-    if (!buffer) return { source: null, ended: Promise.resolve() };
+    if (!buffer) {
+      return this.playHtmlAudio(name, { volume, rate, loop: false });
+    }
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
     source.buffer = buffer;
@@ -802,10 +859,10 @@ const audioEngine = {
   },
   playLoop(name, { volume = 1, rate = 1, detune = 0 } = {}) {
     const ctx = this.ensureContext();
-    if (!ctx || !this.unlocked) return { stop() {}, ended: Promise.resolve() };
+    if (!ctx || !this.unlocked) return this.playHtmlAudio(name, { volume, rate, loop: true });
     if (this.loops.has(name)) return this.loops.get(name);
     const buffer = this.buffers.get(name);
-    if (!buffer) return { stop() {}, ended: Promise.resolve() };
+    if (!buffer) return this.playHtmlAudio(name, { volume, rate, loop: true });
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
     source.buffer = buffer;
@@ -866,11 +923,37 @@ const audioEngine = {
     }
   },
   async playMusic(key, url, { crossfadeMs = 250 } = {}) {
+    if (!url) return;
     this.ensureMusic();
-    if (!this.ctx || !this.unlocked) return;
+    if (!this.unlocked) {
+      try {
+        await this.unlock();
+      } catch {
+        // ignore
+      }
+    }
     if (this.currentMusic && this.currentMusic.key === key) return;
+    if (this.currentMusicHtml && this.currentMusicHtml.key === key) return;
     const buffer = await this.loadMusicBuffer(url);
-    if (!buffer || !this.ctx) return;
+    if (!buffer || !this.ctx || !this.unlocked) {
+      const prev = this.currentMusicHtml;
+      if (prev && prev.key === key) return;
+      if (prev && prev.node) {
+        prev.node.pause();
+      }
+      const node = new Audio(url);
+      node.preload = "auto";
+      node.loop = true;
+      node.playsInline = true;
+      node.volume = state.whisper ? 0.48 : 0.95;
+      node.play().catch(() => {});
+      this.currentMusicHtml = { key, node };
+      return;
+    }
+    if (this.currentMusicHtml?.node) {
+      this.currentMusicHtml.node.pause();
+      this.currentMusicHtml = null;
+    }
     const source = this.ctx.createBufferSource();
     const gain = this.ctx.createGain();
     source.buffer = buffer;
@@ -903,6 +986,10 @@ const audioEngine = {
     this.currentMusic = { key, source, gain, startedAt: performance.now() };
   },
   stopMusic() {
+    if (this.currentMusicHtml?.node) {
+      this.currentMusicHtml.node.pause();
+      this.currentMusicHtml = null;
+    }
     if (!this.currentMusic) return;
     try {
       this.currentMusic.source.stop();
@@ -912,6 +999,9 @@ const audioEngine = {
     this.currentMusic = null;
   },
   setMusicDim(dimOn) {
+    if (this.currentMusicHtml?.node) {
+      this.currentMusicHtml.node.volume = dimOn ? (state.whisper ? 0.2 : 0.38) : (state.whisper ? 0.48 : 0.95);
+    }
     this.ensureMusic();
     if (!this.musicGain || !this.ctx) return;
     const target = dimOn ? MUSIC_MAX_GAIN * 0.2 : MUSIC_MAX_GAIN;
@@ -1027,7 +1117,8 @@ function addListeners() {
     if (event.cancelable) event.preventDefault();
     audioEngine.unlock();
     const now = performance.now();
-    if (now - lastOrbTapAt < 40) return;
+    const tapCooldownMs = isIOSWebKit ? 95 : 40;
+    if (now - lastOrbTapAt < tapCooldownMs) return;
     lastOrbTapAt = now;
     const intensity = registerOrbTap();
     const safeIntensity = isIOSWebKit
@@ -1444,6 +1535,36 @@ function setSettingsOpen(open) {
 function setVh() {
   const vh = window.innerHeight * 0.01;
   document.documentElement.style.setProperty("--vh", `${vh}px`);
+  if (!galaxyView.hidden && galaxyCanvasController?.relayout) {
+    galaxyCanvasController.relayout();
+  }
+}
+
+function ensureScreenFlashOverlay() {
+  let overlay = document.getElementById("screenFlashOverlay");
+  if (overlay) return overlay;
+  overlay = document.createElement("div");
+  overlay.id = "screenFlashOverlay";
+  overlay.style.position = "fixed";
+  overlay.style.inset = "0";
+  overlay.style.zIndex = "9998";
+  overlay.style.pointerEvents = "none";
+  overlay.style.opacity = "0";
+  overlay.style.background = "#ffffff";
+  overlay.style.transition = "opacity 120ms ease";
+  overlay.style.mixBlendMode = "screen";
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function flashScreen(color = "#ffffff", ms = 250, peak = 0.9) {
+  const overlay = ensureScreenFlashOverlay();
+  overlay.style.background = color;
+  overlay.style.opacity = String(clamp(peak, 0, 1));
+  if (overlay.__fadeTimer) clearTimeout(overlay.__fadeTimer);
+  overlay.__fadeTimer = setTimeout(() => {
+    overlay.style.opacity = "0";
+  }, Math.max(40, ms));
 }
 
 function openGalaxyView() {
@@ -3133,6 +3254,7 @@ function initGalaxyCanvas() {
     asteroids: [],
     particles: [],
     warpRings: [],
+    lightningRings: [],
     shooting: null,
     shootingTimer: null,
     maxAsteroids: 120,
@@ -3160,6 +3282,9 @@ function initGalaxyCanvas() {
   let galaxyRaf = 0;
   let galaxyRunning = false;
   let engineMode = "menu"; // menu | practice | arcade
+  let worldLockEnabled = false;
+  let worldLockWidth = 0;
+  let worldLockHeight = 0;
   let overlayTimer = null;
   let bgPreRolledForLevel = false;
 
@@ -3273,6 +3398,9 @@ function initGalaxyCanvas() {
     galaxyView.classList.toggle("mode-practice", mode === "practice");
     galaxyView.classList.toggle("mode-arcade", mode === "arcade");
     if (mode === "menu") {
+      worldLockEnabled = false;
+      worldLockWidth = 0;
+      worldLockHeight = 0;
       showEl(galaxyModeSelect);
       hideEl(arcadeHud);
       hideEl(galaxyTopbar);
@@ -3416,7 +3544,7 @@ function initGalaxyCanvas() {
 
   function syncArcadeMenuButtons() {
     if (btnArcadeResume) btnArcadeResume.disabled = !(arcadeResumeAvailable || hasArcadeSave());
-    if (btnArcadeLevelSelect) btnArcadeLevelSelect.disabled = !(DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon());
+    if (btnArcadeLevelSelect) btnArcadeLevelSelect.disabled = !hasArcadeWon();
   }
 
   function syncDebugLevelPanel() {
@@ -3477,6 +3605,7 @@ function initGalaxyCanvas() {
       unmountRetryFuzzy();
       mountGameOverFuzzy();
     } else if (isRetryOverlay) {
+      playGameSfx("tryagain", 0.96);
       unmountGameOverFuzzy();
       mountRetryFuzzy();
     } else {
@@ -3735,6 +3864,27 @@ function initGalaxyCanvas() {
     asteroidImpactFlashIntensity = safeIntensity;
     const duration = safeIntensity <= 0.25 ? 80 : safeIntensity <= 0.55 ? 120 : (prefersReducedMotion ? 100 : 220);
     asteroidImpactFlashUntil = performance.now() + duration;
+  }
+
+  function triggerLevel10AsteroidFlash(big = false) {
+    flashScreen("#ff1b1b", big ? 180 : 140, big ? 0.55 : 0.35);
+  }
+
+  function addLightningRing(x, y, opts = {}) {
+    sim.lightningRings.push({
+      x,
+      y,
+      life: 0,
+      ttl: opts.ttl || 460,
+      radius: opts.radius || 64,
+      thickness: opts.thickness || 3,
+      arcCount: opts.arcCount || (isIOSWebKit ? 10 : 16),
+      jitter: opts.jitter || 10,
+      spin: Math.random() * Math.PI * 2,
+      colorA: opts.colorA || "rgba(215,248,255,0.95)",
+      colorB: opts.colorB || "rgba(160,235,255,0.65)",
+      glow: opts.glow || "rgba(185,240,255,0.75)",
+    });
   }
 
   function addWarpRing(x, y, color = "rgba(112,255,178,1)") {
@@ -4094,6 +4244,8 @@ function initGalaxyCanvas() {
       }
     }
 
+    const levelNum = ARCADE_LEVELS[currentLevelIndex]?.level || 1;
+    const isLevel10 = levelNum === 10;
     const bigBlast = wasKind === 3;
     const mediumBlast = wasKind === 2;
     const ttlScale = bigBlast ? 1.4 : mediumBlast ? 1.18 : 1;
@@ -4103,6 +4255,20 @@ function initGalaxyCanvas() {
       rate: 0.92 + Math.random() * 0.16,
     });
     suppressAstCollisionSfxUntil = performance.now() + 180;
+    if (isLevel10) {
+      triggerLevel10AsteroidFlash(bigBlast);
+      if (bigBlast) {
+        addLightningRing(baseX, baseY, {
+          radius: 60,
+          ttl: 520,
+          arcCount: isIOSWebKit ? 10 : 16,
+          jitter: 11,
+          colorA: "rgba(255,110,30,0.95)",
+          colorB: "rgba(255,38,20,0.72)",
+          glow: "rgba(255,138,50,0.86)",
+        });
+      }
+    }
     if (bigBlast) {
       triggerAsteroidImpactFlash(1);
     } else if (mediumBlast) {
@@ -4118,10 +4284,26 @@ function initGalaxyCanvas() {
   function vaporizeAsteroidByIndex(targetIndex) {
     const a = removeAsteroidAt(targetIndex);
     if (!a) return;
+    const levelNum = ARCADE_LEVELS[currentLevelIndex]?.level || 1;
+    const isLevel10 = levelNum === 10;
     const bigBlast = a.kind === 3;
     spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1);
     const explodeKey = bigBlast ? "explosion_big" : a.kind === 2 ? "explosion_med" : "explosion_small";
     playGameSfx(explodeKey, boomStackVolume(bigBlast ? 0.82 : 0.56), { rate: 0.92 + Math.random() * 0.14 });
+    if (isLevel10) {
+      triggerLevel10AsteroidFlash(bigBlast);
+      if (bigBlast) {
+        addLightningRing(a.x, a.y, {
+          radius: 56,
+          ttl: 500,
+          arcCount: isIOSWebKit ? 10 : 16,
+          jitter: 10,
+          colorA: "rgba(255,110,30,0.95)",
+          colorB: "rgba(255,38,20,0.72)",
+          glow: "rgba(255,138,50,0.86)",
+        });
+      }
+    }
     releaseAsteroid(a);
   }
 
@@ -4165,6 +4347,7 @@ function initGalaxyCanvas() {
     while (sim.asteroids.length) releaseAsteroid(sim.asteroids.pop());
     while (sim.particles.length) releaseParticle(sim.particles.pop());
     while (sim.warpRings.length) releaseRing(sim.warpRings.pop());
+    sim.lightningRings.length = 0;
     sim.shooting = null;
     landmine = null;
     landmineSpawnedThisLevel = false;
@@ -4197,7 +4380,7 @@ function initGalaxyCanvas() {
     } catch {
       // ignore
     }
-    showArcadeOverlay("YOU WIN", "Reward unlocked: Celestial Pack", 0, {
+    showArcadeOverlay("YOU WIN", "You Win Control of the Polyverse", 0, {
       buttonText: "Back to Modes",
       buttonAction: () => showModeSelect(),
     });
@@ -4209,6 +4392,8 @@ function initGalaxyCanvas() {
     showArcadeOverlay("TIME'S UP", "Use 1 life to retry this level?", 0, {
       buttonText: "Retry (1 Life)",
       buttonAction: () => {
+        playGameSfx("retry_appear", 1);
+        flashScreen("#00ff3b", 1500, 1);
         retryPending = false;
         setMenuOverlayOpen(false);
         arcadeLives = clamp(arcadeLives - 1, 0, MAX_LIVES);
@@ -4235,7 +4420,7 @@ function initGalaxyCanvas() {
     clearArcadeProgress();
     syncArcadeMenuButtons();
     playGameSfx("gameover", 0.96);
-    showArcadeOverlay("GAME OVER", "You died. Try Again.", 0, {
+    showArcadeOverlay("GAME OVER", "You Died. Progress Lost.", 0, {
       buttonText: "Back to Modes",
       buttonAction: () => showModeSelect(),
     });
@@ -4341,7 +4526,7 @@ function initGalaxyCanvas() {
   }
 
   function openArcadeLevelSelect() {
-    if (!(DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon())) return;
+    if (!hasArcadeWon()) return;
     buildArcadeLevelSelect();
     setArcadeSubmenu("levels");
   }
@@ -4440,16 +4625,37 @@ function initGalaxyCanvas() {
   function resizeGalaxyCanvas() {
     sim.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     const rect = galaxyPlayCanvas.getBoundingClientRect();
-    const width = Math.max(1, Math.floor(rect.width || window.innerWidth));
-    const height = Math.max(1, Math.floor(rect.height || window.innerHeight));
+    const rawWidth = Math.max(1, Math.floor(rect.width || window.innerWidth));
+    const rawHeight = Math.max(1, Math.floor(rect.height || window.innerHeight));
+    const gameplayMode = engineMode === "arcade" || engineMode === "practice";
+    if (gameplayMode && !worldLockEnabled) {
+      worldLockEnabled = true;
+      worldLockWidth = rawWidth;
+      worldLockHeight = rawHeight;
+    }
+    const width = gameplayMode && worldLockEnabled ? worldLockWidth : rawWidth;
+    const height = gameplayMode && worldLockEnabled ? worldLockHeight : rawHeight;
     sim.width = width;
     sim.height = height;
+    galaxyPlayCanvas.style.inset = "auto";
+    galaxyPlayCanvas.style.right = "auto";
+    galaxyPlayCanvas.style.bottom = "auto";
+    galaxyPlayCanvas.style.left = `${Math.max(0, Math.floor((rawWidth - width) * 0.5))}px`;
+    galaxyPlayCanvas.style.top = `${Math.max(0, Math.floor((rawHeight - height) * 0.5))}px`;
+    galaxyPlayCanvas.style.width = `${width}px`;
+    galaxyPlayCanvas.style.height = `${height}px`;
     galaxyPlayCanvas.width = Math.floor(width * sim.dpr);
     galaxyPlayCanvas.height = Math.floor(height * sim.dpr);
     ctx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
     sim.maxAsteroids = engineMode === "practice" ? PRACTICE_MAX_ASTEROIDS : (engineMode === "arcade" ? sim.maxAsteroids : (sim.width < 700 ? 80 : 120));
     seedStars();
     computePlayfield();
+  }
+
+  function relayoutGalaxyCanvas() {
+    resizeGalaxyCanvas();
+    computePlayfield();
+    if (!galaxyView.hidden) draw(performance.now());
   }
 
   function seedStars() {
@@ -4641,6 +4847,15 @@ function initGalaxyCanvas() {
         releaseRing(ring);
       }
     }
+    for (let i = sim.lightningRings.length - 1; i >= 0; i -= 1) {
+      const ring = sim.lightningRings[i];
+      ring.life += dt;
+      ring.spin += dt * 0.004;
+      if (ring.life >= ring.ttl) {
+        sim.lightningRings[i] = sim.lightningRings[sim.lightningRings.length - 1];
+        sim.lightningRings.pop();
+      }
+    }
 
     if (sim.shooting) {
       sim.shooting.life += dt;
@@ -4786,13 +5001,49 @@ function initGalaxyCanvas() {
 
     if (ufo && ufo.alive) {
       ctx.save();
+      const damaged = ufo.hitCount >= 1;
       const shakeX = ufo.hitCount >= 1 ? Math.sin(now / 28) * 1.8 : 0;
       const shakeY = ufo.hitCount >= 1 ? Math.cos(now / 24) * 1.5 : 0;
       ctx.translate(ufo.x + shakeX, ufo.y + shakeY);
-      ctx.fillStyle = ufo.hitCount >= 1 ? "rgba(255,96,96,0.94)" : "rgba(154,235,255,0.92)";
+
+      // Restored UFO halo/glow pass for clearer presence on iOS and desktop.
+      const glowGrad = ctx.createRadialGradient(0, 0, ufo.r * 0.2, 0, 0, ufo.r * (damaged ? 2.2 : 2.6));
+      glowGrad.addColorStop(0, damaged ? "rgba(255,96,96,0.34)" : "rgba(134,255,176,0.36)");
+      glowGrad.addColorStop(0.65, damaged ? "rgba(255,96,96,0.12)" : "rgba(94,235,148,0.16)");
+      glowGrad.addColorStop(1, "rgba(94,235,148,0)");
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = glowGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, ufo.r * (damaged ? 2.2 : 2.6), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalCompositeOperation = "source-over";
+
+      ctx.strokeStyle = damaged ? "rgba(255,124,124,0.55)" : "rgba(156,255,194,0.58)";
+      ctx.lineWidth = 1.4;
+      ctx.shadowBlur = prefersReducedMotion ? 0 : 14;
+      ctx.shadowColor = damaged ? "rgba(255,110,110,0.75)" : "rgba(112,245,166,0.8)";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, ufo.r * 1.32, ufo.r * 0.72, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      ctx.fillStyle = damaged ? "rgba(255,96,96,0.94)" : "rgba(154,235,255,0.92)";
       ctx.beginPath();
       ctx.ellipse(0, 0, ufo.r * 1.1, ufo.r * 0.55, 0, 0, Math.PI * 2);
       ctx.fill();
+      if (!damaged) {
+        // Add green energy tint onto the UFO skin itself.
+        const skinGlow = ctx.createRadialGradient(0, 0, ufo.r * 0.08, 0, 0, ufo.r * 1.2);
+        skinGlow.addColorStop(0, "rgba(198,255,214,0.34)");
+        skinGlow.addColorStop(0.5, "rgba(128,245,166,0.2)");
+        skinGlow.addColorStop(1, "rgba(96,235,148,0)");
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = skinGlow;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, ufo.r * 1.1, ufo.r * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalCompositeOperation = "source-over";
+      }
       ctx.strokeStyle = "rgba(255,255,255,0.25)";
       ctx.lineWidth = 1.3;
       ctx.stroke();
@@ -4814,6 +5065,48 @@ function initGalaxyCanvas() {
       ctx.lineWidth = prefersReducedMotion ? 1.2 : 1.8;
       ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
       ctx.stroke();
+    }
+    for (let i = 0; i < sim.lightningRings.length; i += 1) {
+      const ring = sim.lightningRings[i];
+      const t = ring.life / ring.ttl;
+      const alpha = 1 - t;
+      const radius = ring.radius + t * 24;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.lineWidth = ring.thickness + (1 - t) * 1.8;
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = ring.glow.replace(/[\d.]+\)$/u, `${(0.9 * alpha).toFixed(3)})`);
+      ctx.strokeStyle = ring.colorA.replace(/[\d.]+\)$/u, `${(0.95 * alpha).toFixed(3)})`);
+      const seed = ((ring.life * 0.03) | 0) % 997;
+      for (let j = 0; j < ring.arcCount; j += 1) {
+        const a0 = ring.spin + (j / ring.arcCount) * Math.PI * 2;
+        const arcLen = 0.16 + (((seed + j * 17) % 100) / 100) * 0.18;
+        const a1 = a0 + arcLen;
+        const n0 = Math.sin((seed + j * 1.7) * 0.18);
+        const n1 = Math.sin((seed + j * 2.3) * 0.21);
+        const nMid = Math.sin((seed + j * 2.9) * 0.24);
+        const r0 = radius + n0 * ring.jitter;
+        const r1 = radius + n1 * ring.jitter;
+        const rMid = radius + nMid * ring.jitter * 1.6;
+        const am = (a0 + a1) * 0.5;
+        const x0 = ring.x + Math.cos(a0) * r0;
+        const y0 = ring.y + Math.sin(a0) * r0;
+        const xm = ring.x + Math.cos(am) * rMid;
+        const ym = ring.y + Math.sin(am) * rMid;
+        const x1 = ring.x + Math.cos(a1) * r1;
+        const y1 = ring.y + Math.sin(a1) * r1;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.quadraticCurveTo(xm, ym, x1, y1);
+        ctx.stroke();
+      }
+      ctx.lineWidth = 1.4;
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = ring.colorB.replace(/[\d.]+\)$/u, `${(0.28 * alpha).toFixed(3)})`);
+      ctx.beginPath();
+      ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
     effects.draw(ctx);
 
@@ -5039,10 +5332,16 @@ function initGalaxyCanvas() {
   });
   galaxyPlayCanvas.addEventListener("pointerleave", () => setCrosshairVisible(false));
 
-  window.addEventListener("resize", () => {
-    resizeGalaxyCanvas();
-    computePlayfield();
-  });
+  window.addEventListener("resize", relayoutGalaxyCanvas);
+  const delayedRelayout = () => {
+    relayoutGalaxyCanvas();
+    setTimeout(relayoutGalaxyCanvas, 120);
+    setTimeout(relayoutGalaxyCanvas, 420);
+  };
+  window.addEventListener("orientationchange", delayedRelayout);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", delayedRelayout, { passive: true });
+  }
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopGalaxyLoop();
@@ -5109,6 +5408,7 @@ function initGalaxyCanvas() {
     },
     stopAndMenu,
     stop: stopGalaxyLoop,
+    relayout: relayoutGalaxyCanvas,
     clear() {
       if (engineMode === "arcade") return;
       clearGameplayEntities();

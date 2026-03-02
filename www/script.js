@@ -3921,13 +3921,13 @@ function initGalaxyCanvas() {
     }
   }
 
-  function boomStackVolume(baseVolume) {
+  function boomStackVolume(baseVolume, { minRatio = 0.58, windowMs = 220, attenuation = 0.2 } = {}) {
     const now = performance.now();
-    while (boomTimes.length && now - boomTimes[0] > 220) boomTimes.shift();
+    while (boomTimes.length && now - boomTimes[0] > windowMs) boomTimes.shift();
     const count = boomTimes.length;
     boomTimes.push(now);
-    const scaled = baseVolume * (1 / (1 + count * 0.2));
-    return Math.max(baseVolume * 0.58, scaled);
+    const scaled = baseVolume * (1 / (1 + count * attenuation));
+    return Math.max(baseVolume * minRatio, scaled);
   }
 
   function playGameSfx(name, volume = 0.9, opts = {}) {
@@ -4349,7 +4349,9 @@ function initGalaxyCanvas() {
     const ttlScale = bigBlast ? 1.4 : mediumBlast ? 1.18 : 1;
     spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale);
     const explodeKey = wasKind === 3 ? "explosion_big" : wasKind === 2 ? "explosion_med" : "explosion_small";
-    playGameSfx(explodeKey, boomStackVolume(wasKind === 3 ? 0.9 : wasKind === 2 ? 0.72 : 0.56), {
+    const baseBoomVol = wasKind === 3 ? 0.9 : wasKind === 2 ? 0.92 : 0.78;
+    const minBoomRatio = wasKind === 3 ? 0.62 : wasKind === 2 ? 0.8 : 0.9;
+    playGameSfx(explodeKey, boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }), {
       rate: 0.92 + Math.random() * 0.16,
     });
     suppressAstCollisionSfxUntil = performance.now() + 180;
@@ -4385,9 +4387,12 @@ function initGalaxyCanvas() {
     const levelNum = ARCADE_LEVELS[currentLevelIndex]?.level || 1;
     const isLevel10 = levelNum === 10;
     const bigBlast = a.kind === 3;
+    const mediumBlast = a.kind === 2;
     spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1);
-    const explodeKey = bigBlast ? "explosion_big" : a.kind === 2 ? "explosion_med" : "explosion_small";
-    playGameSfx(explodeKey, boomStackVolume(bigBlast ? 0.82 : 0.56), { rate: 0.92 + Math.random() * 0.14 });
+    const explodeKey = bigBlast ? "explosion_big" : mediumBlast ? "explosion_med" : "explosion_small";
+    const baseBoomVol = bigBlast ? 0.9 : mediumBlast ? 0.9 : 0.76;
+    const minBoomRatio = bigBlast ? 0.62 : mediumBlast ? 0.82 : 0.9;
+    playGameSfx(explodeKey, boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }), { rate: 0.92 + Math.random() * 0.14 });
     if (isLevel10) {
       triggerLevel10AsteroidFlash(bigBlast);
       if (bigBlast) {

@@ -1,6 +1,6 @@
 {
   "name": "poly_oracle",
-  "version": "3.1.1",
+  "version": "3.2.0",
   "description": "Poly Oracle iOS app",
   "main": "script.js",
   "scripts": {

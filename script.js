@@ -272,6 +272,7 @@ const state = {
   whisper: false,
   minimal: false,
   randomVoiceEachReveal: false,
+  multiVoiceQA: false,
   verboseDetails: false,
   chaosThemeEnabled: false,
   themePalette: null,
@@ -326,6 +327,7 @@ const packSelect = document.getElementById("packSelect");
 const whisperModeToggle = document.getElementById("whisperMode");
 const minimalModeToggle = document.getElementById("minimalMode");
 const randomVoiceEachRevealToggle = document.getElementById("randomVoiceEachReveal");
+const multiVoiceQAToggle = document.getElementById("multiVoiceQA");
 const verboseDetailsToggle = document.getElementById("verboseDetails");
 const randomVoiceNow = document.getElementById("randomVoiceNow");
 const voiceSelect = document.getElementById("voiceSelect");
@@ -887,7 +889,9 @@ const audioEngine = {
       || name === "landmine_boom"
       || name === "astcollide1"
       || name === "astcollide2";
-    const maxVoices = name === "orb_tap" ? 10 : (isExplosionLike ? 16 : this.maxVoicesPerSound);
+    const maxVoices = name === "orb_tap"
+      ? 10
+      : (isExplosionLike ? (isIOSWebKit ? 24 : 16) : this.maxVoicesPerSound);
     const mode = name === "orb_tap" ? "drop_newest" : (isExplosionLike ? "steal_oldest" : "drop_newest");
     if (!this.enforcePolyphony(name, maxVoices, mode)) {
       return { source: null, ended: Promise.resolve() };
@@ -1055,11 +1059,12 @@ const audioEngine = {
   },
   setMusicDim(dimOn) {
     if (this.currentMusicHtml?.node) {
-      this.currentMusicHtml.node.volume = dimOn ? (state.whisper ? 0.2 : 0.38) : (state.whisper ? 0.48 : 0.95);
+      const full = state.whisper ? 0.48 : 0.95;
+      this.currentMusicHtml.node.volume = dimOn ? (full * 0.3) : full;
     }
     this.ensureMusic();
     if (!this.musicGain || !this.ctx) return;
-    const target = dimOn ? MUSIC_MAX_GAIN * 0.2 : MUSIC_MAX_GAIN;
+    const target = dimOn ? MUSIC_MAX_GAIN * 0.3 : MUSIC_MAX_GAIN;
     const now = this.ctx.currentTime;
     this.musicGain.gain.cancelScheduledValues(now);
     this.musicGain.gain.setValueAtTime(this.musicGain.gain.value, now);
@@ -1428,6 +1433,11 @@ function addListeners() {
     saveState();
   });
 
+  multiVoiceQAToggle.addEventListener("change", (event) => {
+    state.multiVoiceQA = !!event.target.checked;
+    saveState();
+  });
+
   verboseDetailsToggle.addEventListener("change", (event) => {
     state.verboseDetails = !!event.target.checked;
     applySettingsToUi();
@@ -1751,6 +1761,7 @@ function applySettingsToUi() {
   whisperModeToggle.checked = state.whisper;
   minimalModeToggle.checked = state.minimal;
   randomVoiceEachRevealToggle.checked = state.randomVoiceEachReveal;
+  multiVoiceQAToggle.checked = state.multiVoiceQA;
   verboseDetailsToggle.checked = state.verboseDetails;
 
   document.body.classList.toggle("whisper", state.whisper);
@@ -2085,7 +2096,10 @@ async function revealAnswer() {
   const microLine = pick(packs[state.selectedPack][polarity]);
   const modeId = effectiveModeId();
   const mode = revealModes.find((item) => item.id === modeId) || revealModes[0];
-  const revealVoice = state.randomVoiceEachReveal ? pickRandomVoiceName() || state.selectedVoice : state.selectedVoice;
+  const baseVoice = resolvePrimaryVoiceName();
+  const revealVoice = state.randomVoiceEachReveal ? (pickRandomVoiceName() || baseVoice) : baseVoice;
+  const questionVoice = state.multiVoiceQA ? (pickRandomVoiceName() || revealVoice) : revealVoice;
+  const answerVoice = state.multiVoiceQA ? (pickDifferentRandomVoiceName(questionVoice) || revealVoice) : revealVoice;
 
   hapticReveal();
   primeSpeechFromGesture();
@@ -2113,7 +2127,7 @@ async function revealAnswer() {
     await speakLine(normalizedQuestion, {
       rate: state.whisper ? 0.92 : 1,
       pitch: 1.1,
-      voiceName: revealVoice,
+      voiceName: questionVoice,
       timeoutMs: 6500,
     });
 
@@ -2157,7 +2171,7 @@ async function revealAnswer() {
     await delay(620);
 
     if (state.voiceReadsAnswer !== false) {
-      await speakAnswer(answerLine, revealVoice);
+      await speakAnswer(answerLine, answerVoice);
     }
   } finally {
     darkenStage(false);
@@ -2680,6 +2694,20 @@ function pickRandomVoiceName() {
   return pick(voices).name;
 }
 
+function pickDifferentRandomVoiceName(excludeVoice = "") {
+  const voices = getWebVoices();
+  if (!voices.length) return "";
+  const filtered = excludeVoice ? voices.filter((voice) => voice.name !== excludeVoice) : voices;
+  const pool = filtered.length ? filtered : voices;
+  return pick(pool).name;
+}
+
+function resolvePrimaryVoiceName() {
+  if (state.selectedVoice) return state.selectedVoice;
+  const voices = getWebVoices();
+  return voices[0]?.name || "";
+}
+
 function populateVoices() {
   if (!("speechSynthesis" in window)) {
     voiceSelect.innerHTML = "<option value=''>Voice unavailable</option>";
@@ -2774,11 +2802,13 @@ async function speakNativeText(text, { rate = 1, pitch = 1.2, voiceName = "" } =
 
   try {
     if (typeof plugin.stop === "function") await plugin.stop();
+    const selectedVoiceName = voiceName || resolvePrimaryVoiceName();
+    const selectedVoice = getWebVoices().find((voice) => voice.name === selectedVoiceName);
 
     await plugin.speak({
       text,
-      lang: "en-GB",
-      voice: voiceName || state.selectedVoice || undefined,
+      lang: selectedVoice?.lang || "en-US",
+      voice: selectedVoiceName || undefined,
       rate: Math.max(0.2, Math.min(2, rate)),
       pitch: Math.max(0.5, Math.min(2, pitch)),
       volume: state.whisper ? 0.5 : 1,
@@ -2932,6 +2962,7 @@ function loadState() {
       state.whisper = !!saved.whisper;
       state.minimal = !!saved.minimal;
       state.randomVoiceEachReveal = !!saved.randomVoiceEachReveal;
+      state.multiVoiceQA = !!saved.multiVoiceQA;
       state.vault = Array.isArray(saved.vault) ? saved.vault.slice(0, 200) : [];
       state.vaultFilter = saved.vaultFilter === "fav" ? "fav" : "all";
       state.vaultSearch = typeof saved.vaultSearch === "string" ? saved.vaultSearch : "";
@@ -2949,6 +2980,7 @@ function loadState() {
   state.chaosThemeEnabled = false;
   state.themePalette = null;
   state.randomVoiceEachReveal = false;
+  state.multiVoiceQA = false;
   state.verboseDetails = false;
   try {
     const savedTool = localStorage.getItem(galaxyToolKey);
@@ -2967,6 +2999,7 @@ function saveState() {
     whisper: state.whisper,
     minimal: state.minimal,
     randomVoiceEachReveal: state.randomVoiceEachReveal,
+    multiVoiceQA: state.multiVoiceQA,
     vault: state.vault,
     vaultFilter: state.vaultFilter,
     vaultSearch: state.vaultSearch,
@@ -3932,8 +3965,15 @@ function initGalaxyCanvas() {
 
   function playGameSfx(name, volume = 0.9, opts = {}) {
     if (state.minimal) return;
+    const iosBoost = isIOSWebKit
+      ? ({
+        explosion_small: 1.35,
+        explosion_med: 1.25,
+        explosion_big: 1.12,
+      }[name] || 1)
+      : 1;
     audioEngine.play(name, {
-      volume: clamp(volume * (state.whisper ? 0.55 : 1), 0, 1),
+      volume: clamp(volume * (state.whisper ? 0.55 : 1) * iosBoost, 0, 1),
       rate: opts.rate || 1,
       detune: opts.detune || 0,
     });

@@ -52,6 +52,10 @@ const GAME_SFX = {
   newreveal005: "gamesfx/newreveal005.mp3",
   newreveal007: "gamesfx/newreveal007.mp3",
   newreveal008: "gamesfx/newreveal008.mp3",
+  reveal1_pool: "reveal1.mp3",
+  reveal2_pool: "reveal2.mp3",
+  reveal3_pool: "reveal3.mp3",
+  reveal4_pool: "reveal4.mp3",
   warning10: "assets/newsfx/newnewwarningloop.mp3",
   ufo_spawn: "gamesfx/blip1.mp3",
   ufo_teleport: "assets/newsfx/phantom.mp3",
@@ -90,7 +94,7 @@ function nextMusicKeyForLevel(levelNum) {
   return null;
 }
 
-const DEBUG_FORCE_LEVEL_SELECT = false;
+const DEBUG_FORCE_LEVEL_SELECT = true;
 const REVEAL_VARIANT_SFX = [
   "newreveal001",
   "newreveal002",
@@ -100,6 +104,8 @@ const REVEAL_VARIANT_SFX = [
   "newreveal007",
   "newreveal008",
 ];
+const REVEAL_POOL_SFX = ["reveal1_pool", "reveal2_pool", "reveal3_pool", "reveal4_pool"];
+const ARCADE_OVERLAY_FADE_MS = 500;
 const REVEAL = {
   TAP_BURST_MS: 1500,
   TAP_INTERVAL_MS_START: 60,
@@ -744,6 +750,8 @@ const audioEngine = {
   buffers: new Map(),
   loops: new Map(),
   htmlAudioPool: new Map(),
+  voices: new Map(),
+  maxVoicesPerSound: 8,
   unlocked: false,
   ensureContext() {
     if (this.ctx) return this.ctx;
@@ -788,6 +796,28 @@ const audioEngine = {
   loadMany(mapNameToUrl) {
     const entries = Object.entries(mapNameToUrl || {});
     return Promise.all(entries.map(([name, url]) => this.loadSound(name, url)));
+  },
+  enforcePolyphony(name, maxVoices = this.maxVoicesPerSound) {
+    const voices = this.voices.get(name);
+    if (!voices || voices.length < maxVoices) return;
+    const dropCount = voices.length - maxVoices + 1;
+    for (let i = 0; i < dropCount; i += 1) {
+      const oldest = voices.shift();
+      if (!oldest?.source) continue;
+      try {
+        oldest.source.stop();
+      } catch {
+        // ignore
+      }
+    }
+    if (!voices.length) this.voices.delete(name);
+  },
+  releaseVoice(name, source) {
+    const voices = this.voices.get(name);
+    if (!voices || !voices.length) return;
+    const index = voices.findIndex((voice) => voice.source === source);
+    if (index >= 0) voices.splice(index, 1);
+    if (!voices.length) this.voices.delete(name);
   },
   playHtmlAudio(name, { volume = 1, rate = 1, loop = false } = {}) {
     const src = GAME_SFX?.[name];
@@ -845,6 +875,7 @@ const audioEngine = {
     if (!buffer) {
       return this.playHtmlAudio(name, { volume, rate, loop: false });
     }
+    this.enforcePolyphony(name);
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
     source.buffer = buffer;
@@ -853,8 +884,14 @@ const audioEngine = {
     gain.gain.value = clamp(volume, 0, 1);
     source.connect(gain);
     gain.connect(this.masterGain);
+    const voices = this.voices.get(name) || [];
+    voices.push({ source, startedAt: ctx.currentTime });
+    this.voices.set(name, voices);
     const ended = new Promise((resolve) => {
-      source.onended = resolve;
+      source.onended = () => {
+        this.releaseVoice(name, source);
+        resolve();
+      };
     });
     source.start(0);
     return { source, ended };
@@ -2540,6 +2577,14 @@ function spawnAnswerSparkles(count = 14, scale = 1) {
 }
 
 function playRevealSoundAndWait() {
+  const selectedSfx = pick(REVEAL_POOL_SFX);
+  const volume = state.whisper ? 0.32 : 0.82;
+  const handle = selectedSfx ? audioEngine.play(selectedSfx, { volume, rate: 1 }) : { source: null, ended: Promise.resolve() };
+  const sfxDurationMs = selectedSfx ? audioEngine.getDuration(selectedSfx, 1) * 1000 : 0;
+  if (handle?.source) {
+    const waitMs = Math.min(2400, Math.max(750, Math.round(sfxDurationMs || 1250)));
+    return Promise.race([handle.ended || Promise.resolve(), delay(waitMs)]);
+  }
   if (!revealAudio) return Promise.resolve();
   const nextRevealSound = pick(revealSoundPool);
   if (nextRevealSound && revealAudio.getAttribute("src") !== nextRevealSound) {
@@ -3351,7 +3396,7 @@ function initGalaxyCanvas() {
   let ufo = null;
   let arcadeUfoSpawnAt = 0;
   let retryPending = false;
-  let debugLevelUnlocked = false;
+  let debugLevelUnlocked = true;
   let debugModeTapCount = 0;
   let debugModeTapLastAt = 0;
   const initialUfoFxPreset = (() => {
@@ -3580,7 +3625,7 @@ function initGalaxyCanvas() {
 
   function syncArcadeMenuButtons() {
     if (btnArcadeResume) btnArcadeResume.disabled = !(arcadeResumeAvailable || hasArcadeSave());
-    if (btnArcadeLevelSelect) btnArcadeLevelSelect.disabled = !hasArcadeWon();
+    if (btnArcadeLevelSelect) btnArcadeLevelSelect.disabled = !(DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon());
   }
 
   function syncDebugLevelPanel() {
@@ -3702,7 +3747,7 @@ function initGalaxyCanvas() {
         arcadeOverlayText.classList.remove("show", "fadeOut");
         hideEl(arcadeOverlay);
         overlayTimer = null;
-      }, 1000);
+      }, ARCADE_OVERLAY_FADE_MS);
     }, 400);
   }
 

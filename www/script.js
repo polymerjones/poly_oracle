@@ -2980,7 +2980,6 @@ function loadState() {
   state.chaosThemeEnabled = false;
   state.themePalette = null;
   state.randomVoiceEachReveal = false;
-  state.multiVoiceQA = false;
   state.verboseDetails = false;
   try {
     const savedTool = localStorage.getItem(galaxyToolKey);

@@ -1,5 +1,9 @@
 # Submission Readiness Checklist
 
+## 2026 platform requirements
+- [x] Apple toolchain installed: Xcode 26.2 detected.
+- [ ] Final archive built with iOS 26 SDK or later (required for uploads after April 28, 2026).
+
 ## App code
 - [x] Mobile viewport and iOS web app meta tags added.
 - [x] Reduced motion accessibility support added.
@@ -13,10 +17,17 @@
 - [x] Privacy policy text created (`PRIVACY_POLICY.md`).
 
 ## Native iOS shell
-- [x] Capacitor config file created (`capacitor.config.ts`).
-- [ ] Install Capacitor dependencies.
-- [ ] Generate iOS project (`npx cap add ios`).
+- [x] Capacitor config file created (`capacitor.config.json`).
+- [x] Install Capacitor dependencies.
+- [x] Generate iOS project (`npx cap add ios`).
 - [ ] Open in Xcode and configure signing.
+- [x] Version aligned to `3.2.0` / build `3`.
+
+## Native Android shell (Google Play)
+- [ ] Install Android dependency (`npm install @capacitor/android@^8.1.0`).
+- [ ] Generate Android project (`npx cap add android`).
+- [ ] Open in Android Studio (`npx cap open android`).
+- [ ] Build signed Android App Bundle (`.aab`) for Play upload.
 
 ## App Store Connect
 - [ ] Create app record.

@@ -1,10 +1,11 @@
 # iOS App Submission Guide (First Time)
 
 This guide is written for your first App Store submission.
+As of April 28, 2026, iOS and iPadOS uploads must be built with the iOS 26 SDK or later.
 
 ## 1. Prerequisites
 - Apple Developer Program membership: active.
-- Mac with Xcode installed.
+- Mac with Xcode 26 or later installed.
 - Logged in to Xcode with your Apple ID (`Xcode -> Settings -> Accounts`).
 - Unique bundle ID reserved in your Apple Developer account (for example: `com.polyoracle.app`).
 
@@ -31,8 +32,8 @@ In Xcode:
 - Team: select your Apple Developer team.
 - Bundle Identifier: `com.polyoracle.app` (or your final choice).
 4. On `General`:
-- Version: `1.0.0`
-- Build: `1`
+- Version: `3.2.0`
+- Build: `3` (increase this for each new upload)
 - Deployment target: choose iOS version you support.
 5. Add app icons in `Assets.xcassets`.
 

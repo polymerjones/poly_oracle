@@ -21,6 +21,17 @@ npm run cap:sync
 npm run cap:open:ios
 ```
 
+## Android Setup (Google Play)
+```bash
+npm install @capacitor/android@^8.1.0
+npm run cap:add:android
+npm run cap:sync:all
+npm run cap:open:android
+```
+
+## Store Submission (2026)
+- See `STORE_SUBMISSION_RUNBOOK_2026.md` for Apple + Google upload flow.
+
 ## Native iOS Voice (Recommended)
 Poly Oracle now supports a hybrid speech layer:
 - iOS native TTS first (if Capacitor TextToSpeech plugin is installed)

@@ -1,4 +1,44 @@
-const APP_VERSION = "v3.2";
+let capacitorHaptics = null;
+let hapticImpactStyle = { Heavy: "HEAVY", Medium: "MEDIUM", Light: "LIGHT" };
+let hapticNotificationType = { Success: "SUCCESS" };
+
+function loadCapacitorHaptics() {
+  try {
+    const H = globalThis.Capacitor?.Plugins?.Haptics;
+    if (!H) return;
+    capacitorHaptics = H;
+    const bridge = globalThis.Capacitor?.getPlatform?.();
+    if (globalThis.CapacitorHaptics) {
+      hapticImpactStyle = globalThis.CapacitorHaptics.ImpactStyle || hapticImpactStyle;
+      hapticNotificationType = globalThis.CapacitorHaptics.NotificationType || hapticNotificationType;
+    }
+  } catch {
+    // Haptics unavailable outside native runtime
+  }
+}
+document.addEventListener("DOMContentLoaded", loadCapacitorHaptics);
+
+function getCapacitorHaptics() {
+  return capacitorHaptics || globalThis.Capacitor?.Plugins?.Haptics || null;
+}
+
+function triggerHapticImpact(style) {
+  try {
+    getCapacitorHaptics()?.impact?.({ style })?.catch?.(() => {});
+  } catch {
+    // Haptics are optional outside a native Capacitor runtime.
+  }
+}
+
+function triggerHapticNotification(type) {
+  try {
+    getCapacitorHaptics()?.notification?.({ type })?.catch?.(() => {});
+  } catch {
+    // Haptics are optional outside a native Capacitor runtime.
+  }
+}
+
+const APP_VERSION = "v3.3.0";
 const storageKey = "poly-oracle-v11-state";
 const firstRunHintKey = "poly_oracle_seen_hint_v1_2_1";
 const verboseKey = "poly_oracle_verbose_details";
@@ -44,6 +84,7 @@ const GAME_SFX = {
   landmine_boom: "gamesfx/minefinalexplo.mp3",
   blip1: "gamesfx/blip1.mp3",
   gameover: "gamesfx/gameover.mp3",
+  level_up: "gamesfx/level-up-191997.mp3",
   lastlevelstart: "gamesfx/lastlevelstart.mp3",
   astcollide1: "gamesfx/astcollide1.mp3",
   astcollide2: "gamesfx/astcollide2.mp3",
@@ -59,6 +100,7 @@ const GAME_SFX = {
   reveal3_pool: "reveal3.mp3",
   reveal4_pool: "reveal4.mp3",
   warning10: "assets/newsfx/newnewwarningloop.mp3",
+  plasma_charge: "assets/newsfx/newnewwarningloop.mp3",
   ufo_spawn: "gamesfx/blip1.mp3",
   ufo_teleport: "assets/newsfx/phantom.mp3",
   ufo_hit1: "gamesfx/astcollide2.mp3",
@@ -71,6 +113,10 @@ const GAME_SFX = {
 const PRACTICE_MAX_ASTEROIDS = 40;
 const PRACTICE_SPAWN_COOLDOWN_MS = 1000;
 const PRACTICE_ENABLED = false;
+const MAX_EXPLOSION_PARTICLES = 120;
+const PLASMA_CAGE_CHARGE_MS = 1000;
+const PLASMA_CAGE_COOLDOWN_MS = 5000;
+const PLASMA_CAGE_DRAG_THRESHOLD = 20;
 const MAX_LIVES = 3;
 const MUSIC_MAX_GAIN = 0.95;
 const MUSIC = {
@@ -359,6 +405,8 @@ const arcadeLevelPanel = document.getElementById("arcadeLevelPanel");
 const btnArcadeNew = document.getElementById("btnArcadeNew");
 const btnArcadeResume = document.getElementById("btnArcadeResume");
 const btnArcadeLevelSelect = document.getElementById("btnArcadeLevelSelect");
+const btnArcadeScores = document.getElementById("btnArcadeScores");
+const btnScores = document.getElementById("btnScores");
 const btnArcadeMenuBack = document.getElementById("btnArcadeMenuBack");
 const btnArcadeLevelBack = document.getElementById("btnArcadeLevelBack");
 const arcadeLevelGrid = document.getElementById("arcadeLevelGrid");
@@ -367,6 +415,7 @@ const arcadeBack = document.getElementById("arcadeBack");
 const hudLevel = document.getElementById("hudLevel");
 const hudTimer = document.getElementById("hudTimer");
 const hudLives = document.getElementById("hudLives");
+const hudScore = document.getElementById("hudScore");
 const arcadeTimerBackdrop = document.getElementById("arcadeTimerBackdrop");
 const arcadeTimerGhost = document.getElementById("arcadeTimerGhost");
 const arcadeOverlay = document.getElementById("arcadeOverlay");
@@ -1181,22 +1230,24 @@ function addListeners() {
     const now = performance.now();
     // Keep only a tiny dedupe window so rapid intentional taps still sound on iOS.
     const tapCooldownMs = isIOSWebKit ? 24 : 24;
-    if (now - lastOrbTapAt < tapCooldownMs) return;
-    lastOrbTapAt = now;
-    const intensity = registerOrbTap();
-    const safeIntensity = isIOSWebKit
-      ? {
-          ...intensity,
-          burstCount: Math.min(intensity.burstCount, 8),
-          sizeMultiplier: Math.min(intensity.sizeMultiplier, 1.5),
-          brightnessMultiplier: Math.min(intensity.brightnessMultiplier, 1.5),
-        }
-      : intensity;
-    if (intensity.shouldShiftTheme) {
-      triggerChaosTheme();
+    if (now - lastOrbTapAt >= tapCooldownMs) {
+      lastOrbTapAt = now;
+      const intensity = registerOrbTap();
+      const safeIntensity = isIOSWebKit
+        ? {
+            ...intensity,
+            burstCount: Math.min(intensity.burstCount, 8),
+            sizeMultiplier: Math.min(intensity.sizeMultiplier, 1.5),
+            brightnessMultiplier: Math.min(intensity.brightnessMultiplier, 1.5),
+          }
+        : intensity;
+      if (intensity.shouldShiftTheme) {
+        triggerChaosTheme();
+      }
+      playPixySound(safeIntensity);
+      spawnSparkles(safeIntensity.burstCount, safeIntensity.sizeMultiplier, safeIntensity.brightnessMultiplier);
     }
-    playPixySound(safeIntensity);
-    spawnSparkles(safeIntensity.burstCount, safeIntensity.sizeMultiplier, safeIntensity.brightnessMultiplier);
+    revealAnswer();
   };
   if ("PointerEvent" in window) {
     orb.addEventListener("pointerdown", onOrbTap);
@@ -1319,6 +1370,12 @@ function addListeners() {
   }
   if (btnArcadeLevelSelect) {
     btnArcadeLevelSelect.addEventListener("click", () => galaxyCanvasController?.openArcadeLevelSelect?.());
+  }
+  if (btnArcadeScores) {
+    btnArcadeScores.addEventListener("click", () => showLeaderboard());
+  }
+  if (btnScores) {
+    btnScores.addEventListener("click", () => showLeaderboard());
   }
   if (btnArcadeMenuBack) {
     btnArcadeMenuBack.addEventListener("click", () => galaxyCanvasController?.showModeSelect?.());
@@ -3071,6 +3128,247 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+let leaderboardDb = null;
+let leaderboardOverlay = null;
+let leaderboardHighlightId = "";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAA5YrR7IaARE_des5z58BHs_v3cuD7EKk",
+  authDomain: "poly-oracle-scoreboard.firebaseapp.com",
+  projectId: "poly-oracle-scoreboard",
+  storageBucket: "poly-oracle-scoreboard.firebasestorage.app",
+  messagingSenderId: "453209878852",
+  appId: "1:453209878852:web:841318ca5e508d13a32711",
+  measurementId: "G-6P3ZEMJW52",
+};
+
+const firebaseCompatScriptUrls = [
+  "https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js",
+  "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js",
+];
+let firebaseCompatScriptsPromise = null;
+
+function loadExternalScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing?.dataset.loaded === "true") {
+      resolve();
+      return;
+    }
+    const script = existing || document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.dataset.leaderboardFirebase = "true";
+    script.addEventListener("load", () => {
+      script.dataset.loaded = "true";
+      resolve();
+    }, { once: true });
+    script.addEventListener("error", () => reject(new Error(`Could not load ${src}`)), { once: true });
+    if (!existing) document.head.appendChild(script);
+  });
+}
+
+async function loadFirebaseCompatScripts() {
+  if (globalThis.firebase?.initializeApp && globalThis.firebase?.firestore) return;
+  if (!firebaseCompatScriptsPromise) {
+    firebaseCompatScriptsPromise = firebaseCompatScriptUrls
+      .reduce((promise, src) => promise.then(() => loadExternalScript(src)), Promise.resolve())
+      .catch((error) => {
+        firebaseCompatScriptsPromise = null;
+        throw error;
+      });
+  }
+  await firebaseCompatScriptsPromise;
+}
+
+async function initLeaderboardFirestore() {
+  if (leaderboardDb) return leaderboardDb;
+  try {
+    await loadFirebaseCompatScripts();
+    const fb = globalThis.firebase;
+    if (!fb?.initializeApp || !fb?.firestore) return leaderboardDb;
+    if (!fb.apps.length) fb.initializeApp(firebaseConfig);
+    leaderboardDb = fb.firestore();
+    // TODO before public launch: tighten Firestore rules so only valid initials/score/timestamp writes are accepted.
+  } catch (error) {
+    console.warn("[leaderboard] Firebase init failed", error);
+  }
+  return leaderboardDb;
+}
+
+function ensureLeaderboardStyles() {
+  if (document.getElementById("leaderboardStyles")) return;
+  const style = document.createElement("style");
+  style.id = "leaderboardStyles";
+  style.textContent = `
+    .leaderboardOverlay{position:fixed;inset:0;z-index:-1;display:none;visibility:hidden;pointer-events:none;align-items:center;justify-content:center;padding:24px;background:radial-gradient(circle at 50% 18%,rgba(0,255,209,.16),rgba(4,9,22,.96) 42%,rgba(0,0,0,.98));color:#dff;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+    .leaderboardOverlay.show{z-index:10000;display:flex;visibility:visible;pointer-events:auto}
+    .leaderboardPanel{position:relative;width:min(560px,94vw);max-height:min(760px,92vh);overflow:hidden;padding:26px;border:1px solid rgba(0,255,209,.52);border-radius:20px;background:linear-gradient(180deg,rgba(5,18,32,.94),rgba(2,8,18,.98));box-shadow:0 0 36px rgba(0,255,209,.22),inset 0 0 32px rgba(0,255,209,.08)}
+    .leaderboardPanel::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(180deg,rgba(255,255,255,.045) 0 1px,transparent 1px 7px);mix-blend-mode:screen;opacity:.36}
+    .leaderboardTitle{position:relative;z-index:1;margin:0 0 18px;text-align:center;font-size:clamp(1.5rem,6vw,2.6rem);letter-spacing:.18em;color:#dffff8;text-shadow:0 0 10px #00FFD1,0 0 28px rgba(0,255,209,.5)}
+    .leaderboardSub{position:relative;z-index:1;text-align:center;color:rgba(210,255,248,.76);margin:0 0 18px}
+    .initialsForm{position:relative;z-index:1;display:grid;gap:14px;justify-items:center}
+    .initialsInput{width:8ch;text-align:center;text-transform:uppercase;font:700 2rem ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.24em;color:#fff;background:rgba(0,255,209,.08);border:1px solid rgba(0,255,209,.72);border-radius:12px;padding:10px 8px;box-shadow:0 0 18px rgba(0,255,209,.22)}
+    .leaderboardBtn{position:relative;z-index:1;border:1px solid rgba(0,255,209,.7);border-radius:999px;background:rgba(0,255,209,.1);color:#eafffb;padding:10px 18px;text-transform:uppercase;letter-spacing:.12em;box-shadow:0 0 16px rgba(0,255,209,.18);cursor:pointer}
+    .leaderboardBtn:hover{background:rgba(0,255,209,.2)}
+    .leaderboardRows{position:relative;z-index:1;display:grid;gap:8px;margin:18px 0}
+    .leaderboardRow{display:grid;grid-template-columns:3ch 1fr 7ch;gap:12px;align-items:center;padding:9px 12px;border:1px solid rgba(0,255,209,.18);background:rgba(0,255,209,.045);border-radius:10px;color:rgba(225,255,250,.88);transform:translateY(-16px);opacity:0;animation:scoreRowIn 360ms ease forwards;animation-delay:calc(var(--row-index,0)*65ms)}
+    .leaderboardRow.highlight{color:#fff;border-color:rgba(220,255,250,.95);background:rgba(0,255,209,.16);box-shadow:0 0 22px rgba(0,255,209,.42);animation:scoreRowIn 360ms ease forwards,scorePulse 1.2s ease-in-out infinite}
+    .leaderboardRank{color:#00FFD1}.leaderboardInitials{font-weight:800;letter-spacing:.18em}.leaderboardScore{text-align:right;color:#fff}
+    .leaderboardActions{position:relative;z-index:1;display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
+    .leaderboardStatus{position:relative;z-index:1;text-align:center;color:rgba(220,255,248,.8);min-height:1.2em}
+    @keyframes scoreRowIn{to{transform:translateY(0);opacity:1}}
+    @keyframes scorePulse{0%,100%{text-shadow:0 0 8px rgba(0,255,209,.45)}50%{text-shadow:0 0 18px rgba(255,255,255,.95)}}
+  `;
+  document.head.appendChild(style);
+}
+
+function ensureLeaderboardOverlay() {
+  ensureLeaderboardStyles();
+  if (leaderboardOverlay) return leaderboardOverlay;
+  leaderboardOverlay = document.createElement("div");
+  leaderboardOverlay.id = "leaderboardOverlay";
+  leaderboardOverlay.className = "leaderboardOverlay";
+  leaderboardOverlay.setAttribute("aria-hidden", "true");
+  leaderboardOverlay.hidden = true;
+  leaderboardOverlay.style.display = "none";
+  leaderboardOverlay.style.visibility = "hidden";
+  leaderboardOverlay.style.pointerEvents = "none";
+  leaderboardOverlay.style.zIndex = "-1";
+  document.body.appendChild(leaderboardOverlay);
+  return leaderboardOverlay;
+}
+
+function setLeaderboardOverlayVisible(visible) {
+  const overlay = ensureLeaderboardOverlay();
+  overlay.classList.toggle("show", visible);
+  overlay.hidden = !visible;
+  overlay.style.display = visible ? "flex" : "none";
+  overlay.style.visibility = visible ? "visible" : "hidden";
+  overlay.style.pointerEvents = visible ? "auto" : "none";
+  overlay.style.zIndex = visible ? "10000" : "-1";
+  overlay.setAttribute("aria-hidden", visible ? "false" : "true");
+  return overlay;
+}
+
+function closeLeaderboardOverlay() {
+  setLeaderboardOverlayVisible(false);
+  galaxyCanvasController?.showModeSelect?.({ preserveArcade: false });
+}
+
+function renderLeaderboardShell(title, bodyHtml, status = "") {
+  const overlay = setLeaderboardOverlayVisible(true);
+  overlay.innerHTML = `
+    <div class="leaderboardPanel" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+      <h2 class="leaderboardTitle">${escapeHtml(title)}</h2>
+      ${bodyHtml}
+      <div class="leaderboardStatus">${escapeHtml(status)}</div>
+    </div>
+  `;
+  return overlay;
+}
+
+async function fetchLeaderboardRows() {
+  const db = await initLeaderboardFirestore();
+  if (!db) throw new Error("Firebase unavailable");
+  const snap = await db.collection("scores").orderBy("score", "desc").limit(12).get();
+  return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+}
+
+function renderLeaderboardRows(rows, highlightId = "") {
+  if (!rows.length) return `<p class="leaderboardSub">No scores yet. Claim the first slot.</p>`;
+  return `
+    <div class="leaderboardRows">
+      ${rows.map((row, index) => `
+        <div class="leaderboardRow ${row.id === highlightId ? "highlight" : ""}" style="--row-index:${index}">
+          <span class="leaderboardRank">${index + 1}</span>
+          <span class="leaderboardInitials">${escapeHtml(row.initials || "---")}</span>
+          <span class="leaderboardScore">${Number(row.score || 0)}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+async function showLeaderboard({ highlightId = leaderboardHighlightId } = {}) {
+  renderLeaderboardShell("WORLD SCOREBOARD", `<p class="leaderboardSub">Loading global scores...</p>`);
+  try {
+    const rows = await fetchLeaderboardRows();
+    const overlay = renderLeaderboardShell("WORLD SCOREBOARD", `
+      ${renderLeaderboardRows(rows, highlightId)}
+      <div class="leaderboardActions">
+        <button id="leaderboardClose" class="leaderboardBtn" type="button">Back</button>
+      </div>
+    `);
+    overlay.querySelector("#leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
+  } catch (error) {
+    const overlay = renderLeaderboardShell("WORLD SCOREBOARD", `
+      <p class="leaderboardSub">Could not load scores.</p>
+      <div class="leaderboardActions">
+        <button id="leaderboardClose" class="leaderboardBtn" type="button">Back</button>
+      </div>
+    `, error.message || "Offline");
+    overlay.querySelector("#leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
+  }
+}
+
+async function submitLeaderboardScore(initials, score) {
+  const db = await initLeaderboardFirestore();
+  if (!db) throw new Error("Firebase unavailable");
+  const cleanInitials = String(initials || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3).padEnd(3, "-");
+  const doc = await db.collection("scores").add({
+    initials: cleanInitials,
+    score: Math.max(0, Math.floor(Number(score) || 0)),
+    timestamp: globalThis.firebase.firestore.FieldValue.serverTimestamp(),
+  });
+  leaderboardHighlightId = doc.id;
+  return doc.id;
+}
+
+function showInitialsEntry(score) {
+  const safeScore = Math.max(0, Math.floor(Number(score) || 0));
+  const overlay = renderLeaderboardShell("WORLD SCOREBOARD", `
+    <form id="initialsForm" class="initialsForm">
+      <p class="leaderboardSub">Score ${safeScore}. Enter initials.</p>
+      <input id="leaderboardInitials" class="initialsInput" maxlength="3" minlength="3" placeholder="AAA" inputmode="latin" autocomplete="off" aria-label="Three initials" />
+      <button class="leaderboardBtn" type="submit">Submit Score</button>
+      <button id="leaderboardSkip" class="leaderboardBtn" type="button">Skip</button>
+    </form>
+  `);
+  const input = overlay.querySelector("#leaderboardInitials");
+  const form = overlay.querySelector("#initialsForm");
+  const skip = overlay.querySelector("#leaderboardSkip");
+  input?.focus();
+  input?.addEventListener("input", () => {
+    input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3);
+  });
+  skip?.addEventListener("click", () => showLeaderboard());
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const initials = input?.value || "";
+    if (initials.length !== 3) {
+      input?.focus();
+      return;
+    }
+    const button = form.querySelector("button[type='submit']");
+    if (button) button.disabled = true;
+    try {
+      const id = await submitLeaderboardScore(initials, safeScore);
+      await showLeaderboard({ highlightId: id });
+    } catch (error) {
+      renderLeaderboardShell("WORLD SCOREBOARD", `
+        <p class="leaderboardSub">Score saved locally could not be sent.</p>
+        <div class="leaderboardActions">
+          <button id="leaderboardRetry" class="leaderboardBtn" type="button">Try Again</button>
+          <button id="leaderboardClose" class="leaderboardBtn" type="button">Back</button>
+        </div>
+      `, error.message || "Submit failed");
+      document.getElementById("leaderboardRetry")?.addEventListener("click", () => showInitialsEntry(safeScore));
+      document.getElementById("leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
+    }
+  });
+}
+
 function makeId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return `id-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -3368,6 +3666,14 @@ function initGalaxyCanvas() {
   if (!galaxyPlayCanvas) return;
   const ctx = galaxyPlayCanvas.getContext("2d");
   if (!ctx) return;
+  const plasmaOverlayCanvas = document.createElement("canvas");
+  const plasmaCtx = plasmaOverlayCanvas.getContext("2d");
+  plasmaOverlayCanvas.setAttribute("aria-hidden", "true");
+  plasmaOverlayCanvas.style.position = "absolute";
+  plasmaOverlayCanvas.style.pointerEvents = "none";
+  plasmaOverlayCanvas.style.zIndex = "2";
+  plasmaOverlayCanvas.style.inset = "auto";
+  galaxyView.appendChild(plasmaOverlayCanvas);
 
   const debugTaps = (() => {
     try {
@@ -3380,6 +3686,22 @@ function initGalaxyCanvas() {
 
   const EPS = 0.01;
   const MIN_SPEED = 10;
+  const plasmaCage = {
+    active: false,
+    startX: 0,
+    startY: 0,
+    currentX: 0,
+    currentY: 0,
+    chargeStart: 0,
+    charged: false,
+    cooldownUntil: 0,
+    cooldownStart: 0,
+    lastPulseAt: 0,
+    releaseFx: null,
+    chargeLoopHandle: null,
+    chargeLoopRate: 0,
+  };
+  const laserBeams = [];
 
   const sim = {
     dpr: 1,
@@ -3441,13 +3763,13 @@ function initGalaxyCanvas() {
   let pausedLevelRemainingMs = 0;
   let pausedLandmineRemainingMs = 0;
   let landmineFlashUntil = 0;
-  let asteroidImpactFlashUntil = 0;
-  let asteroidImpactFlashIntensity = 1;
   let lastAsteroidCollisionSfxAt = 0;
   let suppressAstCollisionSfxUntil = 0;
   let warningActive = false;
   let warningLoopHandle = null;
+  let warningHapticInterval = null;
   let arcadeLives = 0;
+  let arcadeScore = 0;
   let ufo = null;
   let arcadeUfoSpawnAt = 0;
   let retryPending = false;
@@ -3564,12 +3886,27 @@ function initGalaxyCanvas() {
     hudLives.textContent = `Lives: ${arcadeLives}`;
   }
 
+  function renderScore() {
+    if (!hudScore) return;
+    hudScore.textContent = `Score: ${arcadeScore}`;
+  }
+
+  function addArcadeScore(points) {
+    if (engineMode !== "arcade") return;
+    arcadeScore = Math.max(0, arcadeScore + Math.floor(points || 0));
+    renderScore();
+  }
+
   function stopWarningState() {
     warningActive = false;
     galaxyView.classList.remove("warning");
     if (warningLoopHandle) {
       warningLoopHandle.stop();
       warningLoopHandle = null;
+    }
+    if (warningHapticInterval) {
+      clearInterval(warningHapticInterval);
+      warningHapticInterval = null;
     }
     audioEngine.stopLoop("warning10");
   }
@@ -3604,6 +3941,7 @@ function initGalaxyCanvas() {
     const safeRemaining = Math.max(0, remainingMs);
     if (hudLevel) hudLevel.textContent = `LEVEL ${ARCADE_LEVELS[currentLevelIndex]?.level || 1}`;
     renderLives();
+    renderScore();
     if (hudTimer) {
       hudTimer.textContent = formatMs(safeRemaining);
       hudTimer.classList.toggle("danger", safeRemaining <= 10000 && safeRemaining > 0);
@@ -3621,6 +3959,11 @@ function initGalaxyCanvas() {
         warningActive = true;
         galaxyView.classList.add("warning");
         warningLoopHandle = audioEngine.playLoop("warning10", { volume: state.whisper ? 0.28 : 0.6, rate: 1 });
+        triggerHapticImpact(hapticImpactStyle.Medium);
+        warningHapticInterval = setInterval(() => {
+          if (!warningActive) return;
+          triggerHapticImpact(hapticImpactStyle.Medium);
+        }, 600);
       }
       if (!bgPreRolledForLevel) {
         bgPreRolledForLevel = true;
@@ -4022,9 +4365,8 @@ function initGalaxyCanvas() {
 
   function triggerAsteroidImpactFlash(intensity = 1) {
     const safeIntensity = clamp(intensity, 0, 1);
-    asteroidImpactFlashIntensity = safeIntensity;
-    const duration = safeIntensity <= 0.25 ? 80 : safeIntensity <= 0.55 ? 120 : (prefersReducedMotion ? 100 : 220);
-    asteroidImpactFlashUntil = performance.now() + duration;
+    const duration = safeIntensity <= 0.25 ? 80 : safeIntensity <= 0.55 ? 120 : (prefersReducedMotion ? 100 : 180);
+    flashScreen("rgba(255,245,220,1)", duration, Math.min(0.35, safeIntensity * 0.35));
   }
 
   function triggerLevel10AsteroidFlash(big = false) {
@@ -4168,6 +4510,8 @@ function initGalaxyCanvas() {
     spawnExplosion(x, y, 28, false, 1.25, 1.2);
     addWarpRing(x, y, "rgba(172,255,214,1)");
     ufo = null;
+    plasmaCage.cooldownUntil = 0;
+    addArcadeScore(100);
     arcadeLives = clamp(arcadeLives + 1, 0, MAX_LIVES);
     renderLives();
   }
@@ -4175,6 +4519,7 @@ function initGalaxyCanvas() {
   function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1) {
     const emitCount = prefersReducedMotion ? Math.min(6, count) : count;
     for (let i = 0; i < emitCount; i += 1) {
+      if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
       const angle = Math.random() * Math.PI * 2;
       const speed = 30 + Math.random() * 110;
       const p = getParticle();
@@ -4301,7 +4646,12 @@ function initGalaxyCanvas() {
     if (count > 40 && engineMode !== "arcade") return;
     for (let i = 0; i < count - 1; i += 1) {
       for (let j = i + 1; j < count; j += 1) {
-        resolveCircleCollision(sim.asteroids[i], sim.asteroids[j], 0.92);
+        const a = sim.asteroids[i];
+        const b = sim.asteroids[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        if ((dx * dx) + (dy * dy) > 40000) continue;
+        resolveCircleCollision(a, b, 0.92);
       }
     }
     for (let i = 0; i < sim.asteroids.length; i += 1) {
@@ -4388,9 +4738,11 @@ function initGalaxyCanvas() {
     if (!a) return;
 
     const wasKind = a.kind;
+    const destroyedRadius = a.r;
     const baseX = a.x;
     const baseY = a.y;
     const parentSpeed = Math.sqrt(a.vx * a.vx + a.vy * a.vy);
+    addArcadeScore(wasKind >= 2 ? 25 : 10);
     releaseAsteroid(a);
 
     if (wasKind > 1) {
@@ -4418,6 +4770,7 @@ function initGalaxyCanvas() {
       boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }),
       0.92 + Math.random() * 0.16,
     );
+    triggerHapticImpact(destroyedRadius >= 30 ? hapticImpactStyle.Heavy : hapticImpactStyle.Light);
     suppressAstCollisionSfxUntil = performance.now() + 180;
     if (isLevel10) {
       triggerLevel10AsteroidFlash(bigBlast);
@@ -4452,6 +4805,7 @@ function initGalaxyCanvas() {
     const isLevel10 = levelNum === 10;
     const bigBlast = a.kind === 3;
     const mediumBlast = a.kind === 2;
+    addArcadeScore(a.kind >= 2 ? 25 : 10);
     spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1);
     const baseBoomVol = bigBlast ? 0.9 : mediumBlast ? 0.9 : 0.76;
     const minBoomRatio = bigBlast ? 0.62 : mediumBlast ? 0.82 : 0.9;
@@ -4460,6 +4814,7 @@ function initGalaxyCanvas() {
       boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }),
       0.92 + Math.random() * 0.14,
     );
+    triggerHapticImpact(a.r >= 30 ? hapticImpactStyle.Heavy : hapticImpactStyle.Light);
     if (isLevel10) {
       triggerLevel10AsteroidFlash(bigBlast);
       if (bigBlast) {
@@ -4475,6 +4830,265 @@ function initGalaxyCanvas() {
       }
     }
     releaseAsteroid(a);
+  }
+
+  function getPlasmaRect(source = plasmaCage) {
+    const x = Math.min(source.startX, source.currentX);
+    const y = Math.min(source.startY, source.currentY);
+    const w = Math.abs(source.currentX - source.startX);
+    const h = Math.abs(source.currentY - source.startY);
+    return { x, y, w, h };
+  }
+
+  function resetPlasmaCageGesture() {
+    plasmaCage.active = false;
+    plasmaCage.startX = 0;
+    plasmaCage.startY = 0;
+    plasmaCage.currentX = 0;
+    plasmaCage.currentY = 0;
+    plasmaCage.chargeStart = 0;
+    plasmaCage.charged = false;
+    plasmaCage.lastPulseAt = 0;
+    plasmaCage.chargeLoopRate = 0;
+  }
+
+  function isPlasmaCageReady(now = performance.now()) {
+    return now >= plasmaCage.cooldownUntil;
+  }
+
+  function beginPlasmaCage(start, current, now) {
+    if (!isPlasmaCageReady(now)) return false;
+    plasmaCage.active = true;
+    plasmaCage.startX = start.x;
+    plasmaCage.startY = start.y;
+    plasmaCage.currentX = current.x;
+    plasmaCage.currentY = current.y;
+    plasmaCage.chargeStart = now;
+    plasmaCage.charged = false;
+    plasmaCage.lastPulseAt = now;
+    updatePlasmaChargeSound(now);
+    return true;
+  }
+
+  function updatePlasmaCageCharge(now) {
+    if (!plasmaCage.active || plasmaCage.charged) return;
+    if (now - plasmaCage.chargeStart >= PLASMA_CAGE_CHARGE_MS) {
+      plasmaCage.charged = true;
+      return;
+    }
+    if (now - plasmaCage.lastPulseAt >= 250) {
+      plasmaCage.lastPulseAt = now;
+      triggerHapticImpact(hapticImpactStyle.Light);
+    }
+  }
+
+  function stopPlasmaChargeSound() {
+    if (plasmaCage.chargeLoopHandle) {
+      plasmaCage.chargeLoopHandle.stop();
+      plasmaCage.chargeLoopHandle = null;
+    }
+    audioEngine.stopLoop("plasma_charge");
+    plasmaCage.chargeLoopRate = 0;
+  }
+
+  function updatePlasmaChargeSound(now) {
+    if (!plasmaCage.active) return;
+    const progress = clamp((now - plasmaCage.chargeStart) / PLASMA_CAGE_CHARGE_MS, 0, 1);
+    const steppedRate = Math.round((0.8 + progress * 0.6) * 10) / 10;
+    if (plasmaCage.chargeLoopHandle && plasmaCage.chargeLoopRate === steppedRate) return;
+    stopPlasmaChargeSound();
+    plasmaCage.chargeLoopRate = steppedRate;
+    plasmaCage.chargeLoopHandle = audioEngine.playLoop("plasma_charge", {
+      volume: state.whisper ? 0.12 : 0.24,
+      rate: steppedRate,
+    });
+  }
+
+  function destroyAsteroidsInPlasmaCage(rect) {
+    const toDestroy = [];
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const a = sim.asteroids[i];
+      if (a.x >= rect.x && a.x <= rect.x + rect.w && a.y >= rect.y && a.y <= rect.y + rect.h) {
+        toDestroy.push(i);
+      }
+    }
+    for (let i = toDestroy.length - 1; i >= 0; i -= 1) {
+      vaporizeAsteroidByIndex(toDestroy[i]);
+    }
+  }
+
+  function releasePlasmaCage(now) {
+    if (!plasmaCage.active) return false;
+    updatePlasmaCageCharge(now);
+    const rect = getPlasmaRect();
+    const charged = plasmaCage.charged;
+    stopPlasmaChargeSound();
+    resetPlasmaCageGesture();
+    if (charged) {
+      destroyAsteroidsInPlasmaCage(rect);
+      triggerHapticImpact(hapticImpactStyle.Heavy);
+      plasmaCage.cooldownStart = now;
+      plasmaCage.cooldownUntil = now + PLASMA_CAGE_COOLDOWN_MS;
+      plasmaCage.releaseFx = { ...rect, type: "fire", start: now, ttl: 220 };
+    } else {
+      plasmaCage.releaseFx = { ...rect, type: "fizzle", start: now, ttl: 200 };
+    }
+    return true;
+  }
+
+  function resizePlasmaOverlayCanvas() {
+    if (!plasmaCtx) return;
+    plasmaOverlayCanvas.style.left = galaxyPlayCanvas.style.left;
+    plasmaOverlayCanvas.style.top = galaxyPlayCanvas.style.top;
+    plasmaOverlayCanvas.style.width = galaxyPlayCanvas.style.width;
+    plasmaOverlayCanvas.style.height = galaxyPlayCanvas.style.height;
+    plasmaOverlayCanvas.width = galaxyPlayCanvas.width;
+    plasmaOverlayCanvas.height = galaxyPlayCanvas.height;
+    plasmaCtx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
+  }
+
+  function drawPlasmaGrid(rect, alpha) {
+    if (!plasmaCtx || rect.w < 2 || rect.h < 2) return;
+    plasmaCtx.save();
+    plasmaCtx.beginPath();
+    plasmaCtx.rect(rect.x, rect.y, rect.w, rect.h);
+    plasmaCtx.clip();
+    plasmaCtx.globalAlpha = alpha;
+    plasmaCtx.strokeStyle = "#00FFD1";
+    plasmaCtx.lineWidth = 1;
+    const spacing = 18;
+    const startX = rect.x - ((rect.x % spacing) + spacing);
+    const startY = rect.y - ((rect.y % spacing) + spacing);
+    for (let x = startX; x <= rect.x + rect.w + spacing; x += spacing) {
+      plasmaCtx.beginPath();
+      plasmaCtx.moveTo(x, rect.y);
+      plasmaCtx.lineTo(x, rect.y + rect.h);
+      plasmaCtx.stroke();
+    }
+    for (let y = startY; y <= rect.y + rect.h + spacing; y += spacing) {
+      plasmaCtx.beginPath();
+      plasmaCtx.moveTo(rect.x, y);
+      plasmaCtx.lineTo(rect.x + rect.w, y);
+      plasmaCtx.stroke();
+    }
+    plasmaCtx.restore();
+  }
+
+  function drawPlasmaCageRect(rect, now, progress, charged, alpha = 1, scale = 1) {
+    if (!plasmaCtx || rect.w < 2 || rect.h < 2) return;
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h / 2;
+    const w = rect.w * scale;
+    const h = rect.h * scale;
+    const x = cx - w / 2;
+    const y = cy - h / 2;
+    const corner = Math.max(12, Math.min(34, Math.min(w, h) * 0.28));
+    const glow = charged ? 18 : 5 + progress * 12;
+    const borderAlpha = alpha * (0.18 + progress * 0.82);
+    const color = charged ? "rgba(220,255,250,1)" : "#00FFD1";
+    drawPlasmaGrid({ x, y, w, h }, (charged ? 0.18 : 0.08 + progress * 0.25) * alpha);
+    plasmaCtx.save();
+    plasmaCtx.globalAlpha = borderAlpha;
+    plasmaCtx.shadowColor = "#00FFD1";
+    plasmaCtx.shadowBlur = glow;
+    plasmaCtx.strokeStyle = color;
+    plasmaCtx.lineWidth = charged ? 2.4 : 1.4 + progress * 1.2;
+    plasmaCtx.setLineDash([10, 8]);
+    plasmaCtx.lineDashOffset = -(now / 32) % 18;
+    plasmaCtx.strokeRect(x, y, w, h);
+    plasmaCtx.setLineDash([]);
+    if (charged) {
+      plasmaCtx.globalAlpha = alpha * (0.7 + 0.3 * Math.sin(now / 70));
+      plasmaCtx.lineWidth = 3;
+    } else {
+      plasmaCtx.globalAlpha = alpha * (0.42 + progress * 0.58);
+      plasmaCtx.lineWidth = 2;
+    }
+    const x2 = x + w;
+    const y2 = y + h;
+    const segments = [
+      [x, y, x + corner, y], [x, y, x, y + corner],
+      [x2, y, x2 - corner, y], [x2, y, x2, y + corner],
+      [x, y2, x + corner, y2], [x, y2, x, y2 - corner],
+      [x2, y2, x2 - corner, y2], [x2, y2, x2, y2 - corner],
+    ];
+    for (let i = 0; i < segments.length; i += 1) {
+      const s = segments[i];
+      plasmaCtx.beginPath();
+      plasmaCtx.moveTo(s[0], s[1]);
+      plasmaCtx.lineTo(s[2], s[3]);
+      plasmaCtx.stroke();
+    }
+    plasmaCtx.restore();
+  }
+
+  function drawPlasmaCooldown(now) {
+    if (!plasmaCtx || now >= plasmaCage.cooldownUntil) return;
+    const total = Math.max(1, plasmaCage.cooldownUntil - plasmaCage.cooldownStart);
+    const progress = clamp((now - plasmaCage.cooldownStart) / total, 0, 1);
+    const x = sim.width - 28;
+    const y = sim.height - 28;
+    plasmaCtx.save();
+    plasmaCtx.lineWidth = 3;
+    plasmaCtx.strokeStyle = "rgba(0,255,209,0.22)";
+    plasmaCtx.beginPath();
+    plasmaCtx.arc(x, y, 14, 0, Math.PI * 2);
+    plasmaCtx.stroke();
+    plasmaCtx.strokeStyle = "rgba(0,255,209,0.9)";
+    plasmaCtx.shadowColor = "#00FFD1";
+    plasmaCtx.shadowBlur = 8;
+    plasmaCtx.beginPath();
+    plasmaCtx.arc(x, y, 14, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+    plasmaCtx.stroke();
+    plasmaCtx.restore();
+  }
+
+  function drawPlasmaOverlay(now) {
+    if (!plasmaCtx) return;
+    plasmaCtx.clearRect(0, 0, sim.width, sim.height);
+    updatePlasmaCageCharge(now);
+    updatePlasmaChargeSound(now);
+    for (let i = laserBeams.length - 1; i >= 0; i -= 1) {
+      const beam = laserBeams[i];
+      const t = clamp((now - beam.startedAt) / 150, 0, 1);
+      if (t >= 1) {
+        laserBeams.splice(i, 1);
+        continue;
+      }
+      plasmaCtx.save();
+      plasmaCtx.globalAlpha = 1 - t;
+      plasmaCtx.strokeStyle = "#00FFD1";
+      plasmaCtx.lineWidth = 2;
+      plasmaCtx.shadowColor = "#00FFD1";
+      plasmaCtx.shadowBlur = 12;
+      plasmaCtx.beginPath();
+      plasmaCtx.moveTo(beam.x1, beam.y1);
+      plasmaCtx.lineTo(beam.x2, beam.y2);
+      plasmaCtx.stroke();
+      plasmaCtx.restore();
+    }
+    if (plasmaCage.active) {
+      const progress = clamp((now - plasmaCage.chargeStart) / PLASMA_CAGE_CHARGE_MS, 0, 1);
+      drawPlasmaCageRect(getPlasmaRect(), now, progress, plasmaCage.charged);
+    }
+    if (plasmaCage.releaseFx) {
+      const fx = plasmaCage.releaseFx;
+      const t = clamp((now - fx.start) / fx.ttl, 0, 1);
+      if (t >= 1) {
+        plasmaCage.releaseFx = null;
+      } else if (fx.type === "fire") {
+        const flash = 1 - t;
+        drawPlasmaCageRect(fx, now, 1, true, flash, 1 - t * 0.82);
+        plasmaCtx.save();
+        plasmaCtx.globalAlpha = flash * 0.5;
+        plasmaCtx.fillStyle = "rgba(255,255,255,1)";
+        plasmaCtx.fillRect(fx.x, fx.y, fx.w, fx.h);
+        plasmaCtx.restore();
+      } else {
+        drawPlasmaCageRect(fx, now, 0.25, false, 1 - t, 1);
+      }
+    }
+    drawPlasmaCooldown(now);
   }
 
   function armLandmine() {
@@ -4495,11 +5109,17 @@ function initGalaxyCanvas() {
     const toDestroy = [];
     for (let i = 0; i < sim.asteroids.length; i += 1) {
       const a = sim.asteroids[i];
-      if (Math.hypot(a.x - x, a.y - y) <= radius + a.r) toDestroy.push(i);
+      if (Math.hypot(a.x - x, a.y - y) <= radius + a.r) toDestroy.push(a);
     }
-    for (let i = toDestroy.length - 1; i >= 0; i -= 1) {
-      vaporizeAsteroidByIndex(toDestroy[i]);
-    }
+    const vaporizeBatch = () => {
+      for (let i = 0; i < 3 && toDestroy.length; i += 1) {
+        const asteroid = toDestroy.pop();
+        const index = sim.asteroids.indexOf(asteroid);
+        if (index >= 0) vaporizeAsteroidByIndex(index);
+      }
+      if (toDestroy.length) setTimeout(vaporizeBatch, 16);
+    };
+    vaporizeBatch();
     addWarpRing(x, y, "rgba(255,90,90,1)");
     spawnExplosion(x, y, 80, true);
     triggerLandmineScreenFlash();
@@ -4523,6 +5143,10 @@ function initGalaxyCanvas() {
     landmineSpawnedThisLevel = false;
     ufo = null;
     arcadeUfoSpawnAt = 0;
+    resetPlasmaCageGesture();
+    plasmaCage.releaseFx = null;
+    laserBeams.length = 0;
+    stopPlasmaChargeSound();
     stopWarningState();
   }
 
@@ -4532,6 +5156,9 @@ function initGalaxyCanvas() {
     stopWarningState();
     arcadeResumeAvailable = false;
     syncArcadeEntryLabel();
+    addArcadeScore(500);
+    playGameSfx("level_up", 0.9);
+    triggerHapticNotification(hapticNotificationType.Success);
     const cfg = ARCADE_LEVELS[currentLevelIndex];
     const nextLevel = cfg.level + 1;
     if (nextLevel <= ARCADE_LEVELS.length) {
@@ -4549,6 +5176,10 @@ function initGalaxyCanvas() {
       localStorage.setItem(STORAGE.rewardCelestial, "1");
     } catch {
       // ignore
+    }
+    if (arcadeScore > 0) {
+      showInitialsEntry(arcadeScore);
+      return;
     }
     showArcadeOverlay("YOU WIN", "You Win Control of the Polyverse", 0, {
       buttonText: "Back to Modes",
@@ -4590,6 +5221,10 @@ function initGalaxyCanvas() {
     clearArcadeProgress();
     syncArcadeMenuButtons();
     playGameSfx("gameover", 0.96);
+    if (arcadeScore > 0) {
+      showInitialsEntry(arcadeScore);
+      return;
+    }
     showArcadeOverlay("GAME OVER", "You Died. Progress Lost.", 0, {
       buttonText: "Back to Modes",
       buttonAction: () => showModeSelect(),
@@ -4663,6 +5298,8 @@ function initGalaxyCanvas() {
       syncArcadeEntryLabel();
       return;
     }
+    arcadeScore = 0;
+    renderScore();
     engineMode = "arcade";
     arcadeActive = true;
     retryPending = false;
@@ -4682,7 +5319,9 @@ function initGalaxyCanvas() {
     clearArcadeProgress();
     setSavedArcadeLevel(1);
     arcadeLives = 0;
+    arcadeScore = 0;
     renderLives();
+    renderScore();
     startArcadeAtLevel(1);
   }
 
@@ -4703,6 +5342,8 @@ function initGalaxyCanvas() {
 
   function startArcadeAtLevel(levelNum) {
     hideArcadeOverlay();
+    arcadeScore = 0;
+    renderScore();
     engineMode = "arcade";
     arcadeActive = true;
     retryPending = false;
@@ -4817,6 +5458,7 @@ function initGalaxyCanvas() {
     galaxyPlayCanvas.width = Math.floor(width * sim.dpr);
     galaxyPlayCanvas.height = Math.floor(height * sim.dpr);
     ctx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
+    resizePlasmaOverlayCanvas();
     sim.maxAsteroids = engineMode === "practice" ? PRACTICE_MAX_ASTEROIDS : (engineMode === "arcade" ? sim.maxAsteroids : (sim.width < 700 ? 80 : 120));
     seedStars();
     computePlayfield();
@@ -5106,6 +5748,22 @@ function initGalaxyCanvas() {
         ctx.lineWidth = 1;
         ctx.stroke();
       }
+      if (plasmaCage.active) {
+        const rect = getPlasmaRect();
+        if (a.x >= rect.x && a.x <= rect.x + rect.w && a.y >= rect.y && a.y <= rect.y + rect.h) {
+          const chargeProgress = clamp((now - plasmaCage.chargeStart) / PLASMA_CAGE_CHARGE_MS, 0, 1);
+          ctx.save();
+          ctx.globalAlpha = chargeProgress;
+          ctx.strokeStyle = "#00FFD1";
+          ctx.lineWidth = 2;
+          ctx.shadowColor = "#00FFD1";
+          ctx.shadowBlur = 8;
+          ctx.beginPath();
+          ctx.arc(a.x, a.y, a.r + 5, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
     }
 
     if (landmine) {
@@ -5295,14 +5953,6 @@ function initGalaxyCanvas() {
       ctx.fillStyle = `rgba(255,214,170,${alpha.toFixed(3)})`;
       ctx.fillRect(0, 0, sim.width, sim.height);
     }
-    if (asteroidImpactFlashUntil > now) {
-      const t = (asteroidImpactFlashUntil - now) / 220;
-      const base = prefersReducedMotion ? 0.13 : 0.2;
-      const alpha = Math.max(0, Math.min(1, t)) * base * asteroidImpactFlashIntensity;
-      ctx.fillStyle = `rgba(255,245,220,${alpha.toFixed(3)})`;
-      ctx.fillRect(0, 0, sim.width, sim.height);
-    }
-
     if (sim.shooting && !prefersReducedMotion && !state.minimal) {
       const progress = sim.shooting.life / sim.shooting.ttl;
       const fade = progress < 0.2 ? progress / 0.2 : 1 - (progress - 0.2) / 0.8;
@@ -5313,6 +5963,7 @@ function initGalaxyCanvas() {
       ctx.lineTo(sim.shooting.x - sim.shooting.length, sim.shooting.y - sim.shooting.length * 0.55);
       ctx.stroke();
     }
+    drawPlasmaOverlay(now);
   }
 
   function frame(now) {
@@ -5347,6 +5998,13 @@ function initGalaxyCanvas() {
   }
 
   function handleArcadeTap(x, y, now) {
+    laserBeams.push({
+      x1: sim.width / 2,
+      y1: sim.height / 2,
+      x2: x,
+      y2: y,
+      startedAt: now,
+    });
     if (landmine && isPointOnLandmine(x, y)) {
       triggerCrosshairFire();
       armLandmine();
@@ -5387,14 +6045,14 @@ function initGalaxyCanvas() {
     draw(now);
   }
 
+  let galaxyGesture = null;
+
   function onGalaxyPointerDown(event) {
     const now = performance.now();
-    if (event.type === "click" && now - lastPrimaryPointerAt < 550) return;
+    if (event.type === "click") return;
     if (event.type === "pointerdown" || event.type === "mousedown" || event.type === "touchstart") {
       lastPrimaryPointerAt = now;
     }
-    if (now - sim.lastTapAt < 55) return;
-    sim.lastTapAt = now;
     const target = event.target;
     const uiBlocker = target?.closest?.(".galaxyModeSelect:not(.hidden), .arcadeHud:not(.hidden), .arcadeOverlay.show:not(.hidden), .galaxy-topbar:not(.hidden)");
     if (uiBlocker) {
@@ -5420,20 +6078,81 @@ function initGalaxyCanvas() {
       updatePracticeDebug();
       return;
     }
-    if (engineMode === "practice") {
-      handlePracticeTap(point.x, point.y, now);
-      return;
-    }
-    if (engineMode === "arcade") {
-      handleArcadeTap(point.x, point.y, now);
+    galaxyGesture = {
+      start: point,
+      current: point,
+      mode: "tap",
+      canceled: false,
+      pointerId: event.pointerId ?? null,
+    };
+    if (typeof galaxyPlayCanvas.setPointerCapture === "function" && event.pointerId != null) {
+      try {
+        galaxyPlayCanvas.setPointerCapture(event.pointerId);
+      } catch {
+        // ignore capture failures
+      }
     }
   }
 
   function onGalaxyPointerMove(event) {
     updateCrosshairPosition(event);
+    if (!galaxyGesture) return;
+    const now = performance.now();
+    const point = getPointerWorld(event);
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+    galaxyGesture.current = point;
+    if (event.cancelable) event.preventDefault();
+    const dx = point.x - galaxyGesture.start.x;
+    const dy = point.y - galaxyGesture.start.y;
+    const dragged = Math.hypot(dx, dy) > PLASMA_CAGE_DRAG_THRESHOLD;
+    if (engineMode === "arcade" && arcadeActive && dragged) {
+      if (!plasmaCage.active && galaxyGesture.mode !== "cage") {
+        galaxyGesture.mode = "cage";
+        galaxyGesture.canceled = !beginPlasmaCage(galaxyGesture.start, point, now);
+      } else if (plasmaCage.active) {
+        plasmaCage.currentX = point.x;
+        plasmaCage.currentY = point.y;
+      }
+    }
   }
 
-  function onGalaxyPointerUp() {}
+  function onGalaxyPointerUp(event) {
+    if (!galaxyGesture) return;
+    const now = performance.now();
+    const point = getPointerWorld(event);
+    if (Number.isFinite(point.x) && Number.isFinite(point.y)) {
+      galaxyGesture.current = point;
+      if (plasmaCage.active) {
+        plasmaCage.currentX = point.x;
+        plasmaCage.currentY = point.y;
+      }
+    }
+    if (event.cancelable) event.preventDefault();
+    if (typeof galaxyPlayCanvas.releasePointerCapture === "function" && galaxyGesture.pointerId != null) {
+      try {
+        galaxyPlayCanvas.releasePointerCapture(galaxyGesture.pointerId);
+      } catch {
+        // ignore capture failures
+      }
+    }
+    if (plasmaCage.active) {
+      releasePlasmaCage(now);
+      galaxyGesture = null;
+      draw(now);
+      return;
+    }
+    const shouldTap = !galaxyGesture.canceled && galaxyGesture.mode === "tap" && now - sim.lastTapAt >= 55;
+    const tapPoint = galaxyGesture.current;
+    galaxyGesture = null;
+    if (!shouldTap) return;
+    sim.lastTapAt = now;
+    if (tapPoint.x < 0 || tapPoint.x > sim.width || tapPoint.y < 0 || tapPoint.y > sim.height) return;
+    if (engineMode === "practice") {
+      handlePracticeTap(tapPoint.x, tapPoint.y, now);
+    } else if (engineMode === "arcade") {
+      handleArcadeTap(tapPoint.x, tapPoint.y, now);
+    }
+  }
 
   function setCrosshairVisible(visible) {
     if (!canvasCrosshair || !canShowCrosshair) return;
@@ -5529,6 +6248,7 @@ function initGalaxyCanvas() {
   buildDebugLevelSelect();
   syncDebugLevelPanel();
   renderLives();
+  renderScore();
   if (galaxyModeTitleEl) {
     galaxyModeTitleEl.addEventListener("pointerdown", registerDebugLevelUnlockTap);
   }

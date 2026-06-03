@@ -101,6 +101,7 @@ const GAME_SFX = {
   reveal4_pool: "reveal4.mp3",
   warning10: "assets/newsfx/newnewwarningloop.mp3",
   plasma_charge: "assets/newsfx/newnewwarningloop.mp3",
+  reveal4: "reveal4.mp3",
   ufo_spawn: "gamesfx/blip1.mp3",
   ufo_teleport: "assets/newsfx/phantom.mp3",
   ufo_hit1: "gamesfx/astcollide2.mp3",
@@ -117,6 +118,7 @@ const MAX_EXPLOSION_PARTICLES = 120;
 const PLASMA_CAGE_CHARGE_MS = 1000;
 const PLASMA_CAGE_COOLDOWN_MS = 5000;
 const PLASMA_CAGE_DRAG_THRESHOLD = 20;
+const PLASMA_CAGE_VOLUME_BOOST = Math.pow(10, 4 / 20);
 const MAX_LIVES = 3;
 const MUSIC_MAX_GAIN = 0.85;
 const MUSIC = {
@@ -144,6 +146,7 @@ function nextMusicKeyForLevel(levelNum) {
 
 const DEBUG_FORCE_LEVEL_SELECT = true;
 const DEBUG_SHOW_LEVEL_DROPDOWN = false;
+let canvasFlash = null;
 const REVEAL_VARIANT_SFX = [
   "newreveal001",
   "newreveal002",
@@ -416,6 +419,7 @@ const hudLevel = document.getElementById("hudLevel");
 const hudTimer = document.getElementById("hudTimer");
 const hudLives = document.getElementById("hudLives");
 const hudScore = document.getElementById("hudScore");
+let hudMultiplier = document.getElementById("hudMultiplier");
 const arcadeTimerBackdrop = document.getElementById("arcadeTimerBackdrop");
 const arcadeTimerGhost = document.getElementById("arcadeTimerGhost");
 const arcadeOverlay = document.getElementById("arcadeOverlay");
@@ -1338,11 +1342,13 @@ function addListeners() {
   }
 
   if (btnArcade) {
+    btnArcade.textContent = "Arcade";
     btnArcade.addEventListener("click", () => {
       galaxyCanvasController?.openArcadeMenu?.();
     });
   }
   if (btnPractice) {
+    btnPractice.textContent = "Practice";
     if (!PRACTICE_ENABLED) {
       btnPractice.disabled = true;
       btnPractice.classList.add("is-disabled");
@@ -1355,6 +1361,7 @@ function addListeners() {
     }
   }
   if (btnGalaxyBack) {
+    btnGalaxyBack.textContent = "\u2190 Oracle";
     btnGalaxyBack.addEventListener("click", () => closeGalaxyView());
   }
   if (arcadeBack) {
@@ -1372,9 +1379,13 @@ function addListeners() {
     btnArcadeLevelSelect.addEventListener("click", () => galaxyCanvasController?.openArcadeLevelSelect?.());
   }
   if (btnArcadeScores) {
+    btnArcadeScores.hidden = true;
+    btnArcadeScores.style.display = "none";
+    btnArcadeScores.setAttribute("aria-hidden", "true");
     btnArcadeScores.addEventListener("click", () => showLeaderboard());
   }
   if (btnScores) {
+    btnScores.textContent = "Scores";
     btnScores.addEventListener("click", () => showLeaderboard());
   }
   if (btnArcadeMenuBack) {
@@ -1678,31 +1689,32 @@ function setVh() {
   }
 }
 
-function ensureScreenFlashOverlay() {
-  let overlay = document.getElementById("screenFlashOverlay");
-  if (overlay) return overlay;
-  overlay = document.createElement("div");
-  overlay.id = "screenFlashOverlay";
-  overlay.style.position = "fixed";
-  overlay.style.inset = "0";
-  overlay.style.zIndex = "9998";
-  overlay.style.pointerEvents = "none";
-  overlay.style.opacity = "0";
-  overlay.style.background = "#ffffff";
-  overlay.style.transition = "opacity 120ms ease";
-  overlay.style.mixBlendMode = "screen";
-  document.body.appendChild(overlay);
-  return overlay;
+function _parseFlashColor(color) {
+  if (!color || color === "#ffffff") return { r: 255, g: 255, b: 255 };
+  if (color.startsWith("#")) {
+    const hex = color.slice(1);
+    return {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16),
+    };
+  }
+  const m = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (m) return { r: +m[1], g: +m[2], b: +m[3] };
+  return { r: 255, g: 255, b: 255 };
 }
 
 function flashScreen(color = "#ffffff", ms = 250, peak = 0.9) {
-  const overlay = ensureScreenFlashOverlay();
-  overlay.style.background = color;
-  overlay.style.opacity = String(clamp(peak, 0, 1));
-  if (overlay.__fadeTimer) clearTimeout(overlay.__fadeTimer);
-  overlay.__fadeTimer = setTimeout(() => {
-    overlay.style.opacity = "0";
-  }, Math.max(40, ms));
+  if (!canvasFlash) return;
+  const { r, g, b } = _parseFlashColor(color);
+  const safePeak = clamp(peak, 0, 1);
+  const safeMs = Math.max(40, ms);
+  canvasFlash.r = r;
+  canvasFlash.g = g;
+  canvasFlash.b = b;
+  canvasFlash.alpha = safePeak;
+  canvasFlash.peak = safePeak;
+  canvasFlash.decayPerMs = safePeak / safeMs;
 }
 
 function openGalaxyView() {
@@ -3288,22 +3300,23 @@ function renderLeaderboardRows(rows, highlightId = "") {
   `;
 }
 
-async function showLeaderboard({ highlightId = leaderboardHighlightId } = {}) {
-  renderLeaderboardShell("WORLD SCOREBOARD", `<p class="leaderboardSub">Loading global scores...</p>`);
+async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubmit = false } = {}) {
+  const closeText = afterSubmit ? "Done" : "Back";
+  renderLeaderboardShell("POLYVERSE SCOREBOARD", `<p class="leaderboardSub">Loading global scores...</p>`);
   try {
     const rows = await fetchLeaderboardRows();
-    const overlay = renderLeaderboardShell("WORLD SCOREBOARD", `
+    const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
       ${renderLeaderboardRows(rows, highlightId)}
       <div class="leaderboardActions">
-        <button id="leaderboardClose" class="leaderboardBtn" type="button">Back</button>
+        <button id="leaderboardClose" class="leaderboardBtn" type="button">${closeText}</button>
       </div>
     `);
     overlay.querySelector("#leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
   } catch (error) {
-    const overlay = renderLeaderboardShell("WORLD SCOREBOARD", `
+    const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
       <p class="leaderboardSub">Could not load scores.</p>
       <div class="leaderboardActions">
-        <button id="leaderboardClose" class="leaderboardBtn" type="button">Back</button>
+        <button id="leaderboardClose" class="leaderboardBtn" type="button">${closeText}</button>
       </div>
     `, error.message || "Offline");
     overlay.querySelector("#leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
@@ -3325,7 +3338,7 @@ async function submitLeaderboardScore(initials, score) {
 
 function showInitialsEntry(score) {
   const safeScore = Math.max(0, Math.floor(Number(score) || 0));
-  const overlay = renderLeaderboardShell("WORLD SCOREBOARD", `
+  const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
     <form id="initialsForm" class="initialsForm">
       <p class="leaderboardSub">Score ${safeScore}. Enter initials.</p>
       <input id="leaderboardInitials" class="initialsInput" maxlength="3" minlength="3" placeholder="AAA" inputmode="latin" autocomplete="off" aria-label="Three initials" />
@@ -3352,9 +3365,9 @@ function showInitialsEntry(score) {
     if (button) button.disabled = true;
     try {
       const id = await submitLeaderboardScore(initials, safeScore);
-      await showLeaderboard({ highlightId: id });
+      await showLeaderboard({ highlightId: id, afterSubmit: true });
     } catch (error) {
-      renderLeaderboardShell("WORLD SCOREBOARD", `
+      renderLeaderboardShell("POLYVERSE SCOREBOARD", `
         <p class="leaderboardSub">Score saved locally could not be sent.</p>
         <div class="leaderboardActions">
           <button id="leaderboardRetry" class="leaderboardBtn" type="button">Try Again</button>
@@ -3698,8 +3711,10 @@ function initGalaxyCanvas() {
     releaseFx: null,
     chargeLoopHandle: null,
     chargeLoopRate: 0,
+    readySoundPlayed: false,
   };
   const laserBeams = [];
+  canvasFlash = { r: 0, g: 255, b: 255, peak: 0, alpha: 0, decayPerMs: 0 };
 
   const sim = {
     dpr: 1,
@@ -3821,6 +3836,17 @@ function initGalaxyCanvas() {
     practiceDebugEl.className = "practiceDebug";
     galaxyView.appendChild(practiceDebugEl);
   }
+  if (!hudMultiplier && arcadeHud) {
+    hudMultiplier = document.createElement("div");
+    hudMultiplier.id = "hudMultiplier";
+    hudMultiplier.className = hudScore?.className || "hudLives";
+    hudMultiplier.textContent = "3.0x";
+    if (hudScore?.parentNode) {
+      hudScore.parentNode.insertBefore(hudMultiplier, hudScore.nextSibling);
+    } else {
+      arcadeHud.appendChild(hudMultiplier);
+    }
+  }
 
   const playfield = { x: 0, y: 0, w: 0, h: 0, pad: 12, topPad: 0, bottomPad: 0 };
   const canShowCrosshair = typeof window.matchMedia === "function"
@@ -3889,6 +3915,25 @@ function initGalaxyCanvas() {
     hudScore.textContent = `Score: ${arcadeScore}`;
   }
 
+  function getArcadeScoreMultiplier(now = performance.now()) {
+    if (engineMode !== "arcade" || !levelDurationMs) return 1;
+    const elapsed = clamp(now - levelRunStartAt, 0, levelDurationMs);
+    const progress = elapsed / levelDurationMs;
+    return 3 - progress * 2;
+  }
+
+  function arcadeMultiplierPoints(basePoints) {
+    const safeBase = Math.floor(basePoints || 0);
+    if (engineMode !== "arcade") return safeBase;
+    return Math.round(safeBase * getArcadeScoreMultiplier());
+  }
+
+  function renderScoreMultiplier(now = performance.now()) {
+    if (!hudMultiplier) return;
+    const multiplier = engineMode === "arcade" ? getArcadeScoreMultiplier(now) : 1;
+    hudMultiplier.textContent = `${multiplier.toFixed(1)}x`;
+  }
+
   function addArcadeScore(points) {
     if (engineMode !== "arcade") return;
     arcadeScore = Math.max(0, arcadeScore + Math.floor(points || 0));
@@ -3940,6 +3985,7 @@ function initGalaxyCanvas() {
     if (hudLevel) hudLevel.textContent = `LEVEL ${ARCADE_LEVELS[currentLevelIndex]?.level || 1}`;
     renderLives();
     renderScore();
+    renderScoreMultiplier(now);
     if (hudTimer) {
       hudTimer.textContent = formatMs(safeRemaining);
       hudTimer.classList.toggle("danger", safeRemaining <= 10000 && safeRemaining > 0);
@@ -4336,6 +4382,14 @@ function initGalaxyCanvas() {
     });
   }
 
+  function resolveGameSfxKey(...keys) {
+    for (let i = 0; i < keys.length; i += 1) {
+      const key = keys[i];
+      if (GAME_SFX[key]) return key;
+    }
+    return "";
+  }
+
   function playAsteroidExplosionBoom(kind, volume, rate) {
     const mediumKeys = ["explosion_med", "explosion_med_alt"];
     const smallKeys = ["explosion_small", "explosion_small_alt"];
@@ -4638,13 +4692,46 @@ function initGalaxyCanvas() {
   }
 
   // === Collisions ===
+  const _collGrid = { cells: {}, cellSize: 120 };
+  function _gridKey(cx, cy) {
+    return (cx << 16) ^ cy;
+  }
+
   function resolveAsteroidCollisions() {
     const count = sim.asteroids.length;
     if (count < 2) return;
     if (count > 40 && engineMode !== "arcade") return;
-    for (let i = 0; i < count - 1; i += 1) {
-      for (let j = i + 1; j < count; j += 1) {
-        const a = sim.asteroids[i];
+
+    const cs = _collGrid.cellSize;
+    const cells = _collGrid.cells;
+    for (const k in cells) cells[k] = null;
+
+    for (let i = 0; i < count; i += 1) {
+      const a = sim.asteroids[i];
+      const cx = Math.floor(a.x / cs);
+      const cy = Math.floor(a.y / cs);
+      for (let ox = -1; ox <= 1; ox += 1) {
+        for (let oy = -1; oy <= 1; oy += 1) {
+          const key = _gridKey(cx + ox, cy + oy);
+          if (!cells[key]) cells[key] = [];
+          cells[key].push(i);
+        }
+      }
+    }
+
+    const checked = new Set();
+    for (let i = 0; i < count; i += 1) {
+      const a = sim.asteroids[i];
+      const cx = Math.floor(a.x / cs);
+      const cy = Math.floor(a.y / cs);
+      const bucket = cells[_gridKey(cx, cy)];
+      if (!bucket) continue;
+      for (let k = 0; k < bucket.length; k += 1) {
+        const j = bucket[k];
+        if (j <= i) continue;
+        const pairKey = (i << 12) ^ j;
+        if (checked.has(pairKey)) continue;
+        checked.add(pairKey);
         const b = sim.asteroids[j];
         const dx = b.x - a.x;
         const dy = b.y - a.y;
@@ -4740,7 +4827,7 @@ function initGalaxyCanvas() {
     const baseX = a.x;
     const baseY = a.y;
     const parentSpeed = Math.sqrt(a.vx * a.vx + a.vy * a.vy);
-    addArcadeScore(wasKind >= 2 ? 25 : 10);
+    addArcadeScore(arcadeMultiplierPoints(wasKind >= 2 ? 25 : 10));
     releaseAsteroid(a);
 
     if (wasKind > 1) {
@@ -4803,7 +4890,7 @@ function initGalaxyCanvas() {
     const isLevel10 = levelNum === 10;
     const bigBlast = a.kind === 3;
     const mediumBlast = a.kind === 2;
-    addArcadeScore(a.kind >= 2 ? 25 : 10);
+    addArcadeScore(arcadeMultiplierPoints(a.kind >= 2 ? 25 : 10));
     spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1);
     const baseBoomVol = bigBlast ? 0.9 : mediumBlast ? 0.9 : 0.76;
     const minBoomRatio = bigBlast ? 0.62 : mediumBlast ? 0.82 : 0.9;
@@ -4848,9 +4935,13 @@ function initGalaxyCanvas() {
     plasmaCage.charged = false;
     plasmaCage.lastPulseAt = 0;
     plasmaCage.chargeLoopRate = 0;
+    plasmaCage.readySoundPlayed = false;
   }
 
   function isPlasmaCageReady(now = performance.now()) {
+    if (plasmaCage.active) {
+      return plasmaCage.charged || now - plasmaCage.chargeStart >= PLASMA_CAGE_CHARGE_MS;
+    }
     return now >= plasmaCage.cooldownUntil;
   }
 
@@ -4863,6 +4954,7 @@ function initGalaxyCanvas() {
     plasmaCage.currentY = current.y;
     plasmaCage.chargeStart = now;
     plasmaCage.charged = false;
+    plasmaCage.readySoundPlayed = false;
     plasmaCage.lastPulseAt = now;
     updatePlasmaChargeSound(now);
     return true;
@@ -4872,6 +4964,11 @@ function initGalaxyCanvas() {
     if (!plasmaCage.active || plasmaCage.charged) return;
     if (now - plasmaCage.chargeStart >= PLASMA_CAGE_CHARGE_MS) {
       plasmaCage.charged = true;
+      if (!plasmaCage.readySoundPlayed) {
+        plasmaCage.readySoundPlayed = true;
+        const readyKey = resolveGameSfxKey("plasma_ready", "reveal4");
+        if (readyKey) playGameSfx(readyKey, 0.82);
+      }
       return;
     }
     if (now - plasmaCage.lastPulseAt >= 250) {
@@ -4897,7 +4994,7 @@ function initGalaxyCanvas() {
     stopPlasmaChargeSound();
     plasmaCage.chargeLoopRate = steppedRate;
     plasmaCage.chargeLoopHandle = audioEngine.playLoop("plasma_charge", {
-      volume: state.whisper ? 0.17 : 0.34,
+      volume: clamp((state.whisper ? 0.17 : 0.34) * PLASMA_CAGE_VOLUME_BOOST, 0, 1),
       rate: steppedRate,
     });
   }
@@ -4913,6 +5010,7 @@ function initGalaxyCanvas() {
     for (let i = toDestroy.length - 1; i >= 0; i -= 1) {
       vaporizeAsteroidByIndex(toDestroy[i]);
     }
+    return toDestroy.length;
   }
 
   function releasePlasmaCage(now) {
@@ -4923,7 +5021,9 @@ function initGalaxyCanvas() {
     stopPlasmaChargeSound();
     resetPlasmaCageGesture();
     if (charged) {
-      destroyAsteroidsInPlasmaCage(rect);
+      const destroyedCount = destroyAsteroidsInPlasmaCage(rect);
+      const fireKey = destroyedCount > 0 ? resolveGameSfxKey("plasma_fire", "ufo_destroy") : "";
+      if (fireKey) playGameSfx(fireKey, 0.92);
       triggerHapticImpact(hapticImpactStyle.Heavy);
       plasmaCage.cooldownStart = now;
       plasmaCage.cooldownUntil = now + PLASMA_CAGE_COOLDOWN_MS;
@@ -5674,6 +5774,10 @@ function initGalaxyCanvas() {
       if (sim.shooting.life >= sim.shooting.ttl) sim.shooting = null;
     }
 
+    if (canvasFlash?.alpha > 0) {
+      canvasFlash.alpha = Math.max(0, canvasFlash.alpha - canvasFlash.decayPerMs * dt);
+    }
+
     effects.update(dt);
     draw(now);
   }
@@ -5708,20 +5812,34 @@ function initGalaxyCanvas() {
       }
     }
 
+    if (!prefersReducedMotion) {
+      sim._starFrame = ((sim._starFrame || 0) + 1) & 3;
+      if (sim._starFrame === 0) {
+        for (let i = 0; i < sim.stars.length; i += 1) {
+          const s = sim.stars[i];
+          s._cachedAlpha = Math.max(0.08, Math.min(0.9, s.baseAlpha + Math.sin(now * 0.001 * s.twinkleSpeed + s.phase) * 0.2));
+        }
+      }
+    }
     for (let i = 0; i < sim.stars.length; i += 1) {
       const s = sim.stars[i];
-      const twinkle = prefersReducedMotion ? 0 : Math.sin(now * 0.001 * s.twinkleSpeed + s.phase) * 0.2;
-      const alpha = Math.max(0.08, Math.min(0.9, s.baseAlpha + twinkle));
+      const alpha = prefersReducedMotion ? s.baseAlpha : (s._cachedAlpha ?? s.baseAlpha);
       ctx.beginPath();
       ctx.fillStyle = `rgba(214,227,255,${alpha.toFixed(3)})`;
       ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
       ctx.fill();
     }
 
+    const _plasmaActive = plasmaCage.active;
+    const _plasmaRect = _plasmaActive ? getPlasmaRect() : null;
+    const _plasmaCharge = _plasmaActive ? clamp((now - plasmaCage.chargeStart) / PLASMA_CAGE_CHARGE_MS, 0, 1) : 0;
+    const _plasmaCharged = _plasmaActive && isPlasmaCageReady(now);
+    const _levelNum = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
+    const _plasmaGlowAsteroids = [];
+
     for (let i = 0; i < sim.asteroids.length; i += 1) {
       const a = sim.asteroids[i];
-      const levelNum = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
-      const sprite = asteroidSprites[a.spriteKey] || getAsteroidSpriteForLevel(levelNum);
+      const sprite = asteroidSprites[a.spriteKey] || getAsteroidSpriteForLevel(_levelNum);
       if (sprite && sprite.complete && sprite.naturalWidth > 0) {
         const d = a.r * 2;
         ctx.save();
@@ -5746,22 +5864,33 @@ function initGalaxyCanvas() {
         ctx.lineWidth = 1;
         ctx.stroke();
       }
-      if (plasmaCage.active) {
-        const rect = getPlasmaRect();
-        if (a.x >= rect.x && a.x <= rect.x + rect.w && a.y >= rect.y && a.y <= rect.y + rect.h) {
-          const chargeProgress = clamp((now - plasmaCage.chargeStart) / PLASMA_CAGE_CHARGE_MS, 0, 1);
-          ctx.save();
-          ctx.globalAlpha = chargeProgress;
-          ctx.strokeStyle = "#00FFD1";
-          ctx.lineWidth = 2;
-          ctx.shadowColor = "#00FFD1";
-          ctx.shadowBlur = 8;
-          ctx.beginPath();
-          ctx.arc(a.x, a.y, a.r + 5, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.restore();
-        }
+      if (_plasmaCharged && _plasmaRect
+          && a.x >= _plasmaRect.x && a.x <= _plasmaRect.x + _plasmaRect.w
+          && a.y >= _plasmaRect.y && a.y <= _plasmaRect.y + _plasmaRect.h) {
+        _plasmaGlowAsteroids.push(a);
       }
+    }
+
+    if (_plasmaGlowAsteroids.length > 0) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(0,255,209,1)";
+      ctx.globalAlpha = _plasmaCharge * 0.28;
+      ctx.lineWidth = 7;
+      for (let i = 0; i < _plasmaGlowAsteroids.length; i += 1) {
+        const a = _plasmaGlowAsteroids[i];
+        ctx.beginPath();
+        ctx.arc(a.x, a.y, a.r + 7, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = _plasmaCharge * 0.85;
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < _plasmaGlowAsteroids.length; i += 1) {
+        const a = _plasmaGlowAsteroids[i];
+        ctx.beginPath();
+        ctx.arc(a.x, a.y, a.r + 5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
     if (landmine) {
@@ -5939,10 +6068,16 @@ function initGalaxyCanvas() {
     for (let i = 0; i < sim.particles.length; i += 1) {
       const p = sim.particles[i];
       const alpha = (1 - p.life / p.ttl) * p.alpha;
-      ctx.beginPath();
-      ctx.fillStyle = `${p.color || "rgba(111,255,128,"}${Math.max(0, alpha).toFixed(3)})`;
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fill();
+      if (alpha <= 0) continue;
+      ctx.fillStyle = `${p.color || "rgba(111,255,128,"}${alpha.toFixed(3)})`;
+      if (p.size <= 2.5) {
+        const s = p.size * 2;
+        ctx.fillRect(p.x - p.size, p.y - p.size, s, s);
+      } else {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     if (landmineFlashUntil > now) {
@@ -5960,6 +6095,13 @@ function initGalaxyCanvas() {
       ctx.moveTo(sim.shooting.x, sim.shooting.y);
       ctx.lineTo(sim.shooting.x - sim.shooting.length, sim.shooting.y - sim.shooting.length * 0.55);
       ctx.stroke();
+    }
+    if (canvasFlash?.alpha > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      ctx.fillStyle = `rgba(${canvasFlash.r},${canvasFlash.g},${canvasFlash.b},${canvasFlash.alpha.toFixed(3)})`;
+      ctx.fillRect(0, 0, sim.width, sim.height);
+      ctx.restore();
     }
     drawPlasmaOverlay(now);
   }

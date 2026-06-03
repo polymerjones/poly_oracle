@@ -118,7 +118,7 @@ const PLASMA_CAGE_CHARGE_MS = 1000;
 const PLASMA_CAGE_COOLDOWN_MS = 5000;
 const PLASMA_CAGE_DRAG_THRESHOLD = 20;
 const MAX_LIVES = 3;
-const MUSIC_MAX_GAIN = 0.95;
+const MUSIC_MAX_GAIN = 0.85;
 const MUSIC = {
   L1_3: "assets/music/E1L1-3.mp3",
   L4_7: "assets/music/E1L4-7.mp3",
@@ -1055,7 +1055,7 @@ const audioEngine = {
       node.preload = "auto";
       node.loop = true;
       node.playsInline = true;
-      node.volume = state.whisper ? 0.48 : 0.95;
+      node.volume = state.whisper ? 0.43 : MUSIC_MAX_GAIN;
       node.play().catch(() => {});
       this.currentMusicHtml = { key, node };
       return;
@@ -1110,7 +1110,7 @@ const audioEngine = {
   },
   setMusicDim(dimOn) {
     if (this.currentMusicHtml?.node) {
-      const full = state.whisper ? 0.48 : 0.95;
+      const full = state.whisper ? 0.43 : MUSIC_MAX_GAIN;
       this.currentMusicHtml.node.volume = dimOn ? (full * 0.3) : full;
     }
     this.ensureMusic();
@@ -4897,7 +4897,7 @@ function initGalaxyCanvas() {
     stopPlasmaChargeSound();
     plasmaCage.chargeLoopRate = steppedRate;
     plasmaCage.chargeLoopHandle = audioEngine.playLoop("plasma_charge", {
-      volume: state.whisper ? 0.12 : 0.24,
+      volume: state.whisper ? 0.17 : 0.34,
       rate: steppedRate,
     });
   }

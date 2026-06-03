@@ -1372,6 +1372,8 @@ function addListeners() {
     btnArcadeLevelSelect.addEventListener("click", () => galaxyCanvasController?.openArcadeLevelSelect?.());
   }
   if (btnArcadeScores) {
+    // Scores is already accessible from the root mode-select menu; hide it from the arcade submenu to avoid duplication.
+    btnArcadeScores.hidden = true;
     btnArcadeScores.addEventListener("click", () => showLeaderboard());
   }
   if (btnScores) {
@@ -1679,30 +1681,38 @@ function setVh() {
 }
 
 function ensureScreenFlashOverlay() {
-  let overlay = document.getElementById("screenFlashOverlay");
-  if (overlay) return overlay;
-  overlay = document.createElement("div");
-  overlay.id = "screenFlashOverlay";
-  overlay.style.position = "fixed";
-  overlay.style.inset = "0";
-  overlay.style.zIndex = "9998";
-  overlay.style.pointerEvents = "none";
-  overlay.style.opacity = "0";
-  overlay.style.background = "#ffffff";
-  overlay.style.transition = "opacity 120ms ease";
-  overlay.style.mixBlendMode = "screen";
-  document.body.appendChild(overlay);
-  return overlay;
+  // Kept for legacy callers; returns a no-op stub — flash now runs on canvas.
+  return { style: {}, __fadeTimer: null };
+}
+
+// Parse a CSS color string into {r,g,b}
+function _parseFlashColor(color) {
+  if (!color || color === "#ffffff") return { r: 255, g: 255, b: 255 };
+  if (color.startsWith("#")) {
+    const hex = color.slice(1);
+    return {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16),
+    };
+  }
+  const m = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (m) return { r: +m[1], g: +m[2], b: +m[3] };
+  return { r: 255, g: 255, b: 255 };
 }
 
 function flashScreen(color = "#ffffff", ms = 250, peak = 0.9) {
-  const overlay = ensureScreenFlashOverlay();
-  overlay.style.background = color;
-  overlay.style.opacity = String(clamp(peak, 0, 1));
-  if (overlay.__fadeTimer) clearTimeout(overlay.__fadeTimer);
-  overlay.__fadeTimer = setTimeout(() => {
-    overlay.style.opacity = "0";
-  }, Math.max(40, ms));
+  // Drive flash on the game canvas each frame — no DOM paint stutter.
+  if (typeof canvasFlash === "undefined") return;
+  const { r, g, b } = _parseFlashColor(color);
+  const safePeak = clamp(peak, 0, 1);
+  const safeMs = Math.max(40, ms);
+  canvasFlash.r = r;
+  canvasFlash.g = g;
+  canvasFlash.b = b;
+  canvasFlash.alpha = safePeak;
+  canvasFlash.peak = safePeak;
+  canvasFlash.decayPerMs = safePeak / safeMs;
 }
 
 function openGalaxyView() {
@@ -3288,22 +3298,23 @@ function renderLeaderboardRows(rows, highlightId = "") {
   `;
 }
 
-async function showLeaderboard({ highlightId = leaderboardHighlightId } = {}) {
-  renderLeaderboardShell("WORLD SCOREBOARD", `<p class="leaderboardSub">Loading global scores...</p>`);
+async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubmit = false } = {}) {
+  renderLeaderboardShell("POLYVERSE SCOREBOARD", `<p class="leaderboardSub">Loading global scores...</p>`);
+  const closeBtnLabel = afterSubmit ? "Done" : "Back";
   try {
     const rows = await fetchLeaderboardRows();
-    const overlay = renderLeaderboardShell("WORLD SCOREBOARD", `
+    const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
       ${renderLeaderboardRows(rows, highlightId)}
       <div class="leaderboardActions">
-        <button id="leaderboardClose" class="leaderboardBtn" type="button">Back</button>
+        <button id="leaderboardClose" class="leaderboardBtn" type="button">${closeBtnLabel}</button>
       </div>
     `);
     overlay.querySelector("#leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
   } catch (error) {
-    const overlay = renderLeaderboardShell("WORLD SCOREBOARD", `
+    const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
       <p class="leaderboardSub">Could not load scores.</p>
       <div class="leaderboardActions">
-        <button id="leaderboardClose" class="leaderboardBtn" type="button">Back</button>
+        <button id="leaderboardClose" class="leaderboardBtn" type="button">${closeBtnLabel}</button>
       </div>
     `, error.message || "Offline");
     overlay.querySelector("#leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
@@ -3325,7 +3336,7 @@ async function submitLeaderboardScore(initials, score) {
 
 function showInitialsEntry(score) {
   const safeScore = Math.max(0, Math.floor(Number(score) || 0));
-  const overlay = renderLeaderboardShell("WORLD SCOREBOARD", `
+  const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
     <form id="initialsForm" class="initialsForm">
       <p class="leaderboardSub">Score ${safeScore}. Enter initials.</p>
       <input id="leaderboardInitials" class="initialsInput" maxlength="3" minlength="3" placeholder="AAA" inputmode="latin" autocomplete="off" aria-label="Three initials" />
@@ -3352,9 +3363,9 @@ function showInitialsEntry(score) {
     if (button) button.disabled = true;
     try {
       const id = await submitLeaderboardScore(initials, safeScore);
-      await showLeaderboard({ highlightId: id });
+      await showLeaderboard({ highlightId: id, afterSubmit: true });
     } catch (error) {
-      renderLeaderboardShell("WORLD SCOREBOARD", `
+      renderLeaderboardShell("POLYVERSE SCOREBOARD", `
         <p class="leaderboardSub">Score saved locally could not be sent.</p>
         <div class="leaderboardActions">
           <button id="leaderboardRetry" class="leaderboardBtn" type="button">Try Again</button>
@@ -3700,6 +3711,9 @@ function initGalaxyCanvas() {
     chargeLoopRate: 0,
   };
   const laserBeams = [];
+
+  // Canvas-driven screen flash (avoids DOM style recalc / paint stutter)
+  const canvasFlash = { r: 0, g: 255, b: 255, peak: 0, alpha: 0, decayPerMs: 0 };
 
   const sim = {
     dpr: 1,
@@ -4638,13 +4652,49 @@ function initGalaxyCanvas() {
   }
 
   // === Collisions ===
+  // Spatial grid broadphase — reduces O(n²) to ~O(n) for evenly distributed asteroids
+  const _collGrid = { cells: {}, cellSize: 120 };
+  function _gridKey(cx, cy) { return (cx << 16) ^ cy; }
   function resolveAsteroidCollisions() {
     const count = sim.asteroids.length;
     if (count < 2) return;
     if (count > 40 && engineMode !== "arcade") return;
-    for (let i = 0; i < count - 1; i += 1) {
-      for (let j = i + 1; j < count; j += 1) {
-        const a = sim.asteroids[i];
+
+    const cs = _collGrid.cellSize;
+    const cells = _collGrid.cells;
+    // Clear grid
+    for (const k in cells) cells[k] = null;
+
+    // Insert asteroids into grid cells
+    for (let i = 0; i < count; i += 1) {
+      const a = sim.asteroids[i];
+      const cx = Math.floor(a.x / cs);
+      const cy = Math.floor(a.y / cs);
+      // Each asteroid touches up to 4 cells due to its radius
+      for (let ox = -1; ox <= 1; ox += 1) {
+        for (let oy = -1; oy <= 1; oy += 1) {
+          const key = _gridKey(cx + ox, cy + oy);
+          if (!cells[key]) cells[key] = [];
+          cells[key].push(i);
+        }
+      }
+    }
+
+    // Check pairs — use a Set to avoid duplicate checks
+    const checked = new Set();
+    for (let i = 0; i < count; i += 1) {
+      const a = sim.asteroids[i];
+      const cx = Math.floor(a.x / cs);
+      const cy = Math.floor(a.y / cs);
+      const key = _gridKey(cx, cy);
+      const bucket = cells[key];
+      if (!bucket) continue;
+      for (let k = 0; k < bucket.length; k += 1) {
+        const j = bucket[k];
+        if (j <= i) continue;
+        const pairKey = (i << 12) ^ j;
+        if (checked.has(pairKey)) continue;
+        checked.add(pairKey);
         const b = sim.asteroids[j];
         const dx = b.x - a.x;
         const dy = b.y - a.y;
@@ -4652,6 +4702,7 @@ function initGalaxyCanvas() {
         resolveCircleCollision(a, b, 0.92);
       }
     }
+
     for (let i = 0; i < sim.asteroids.length; i += 1) {
       wrapEntity(sim.asteroids[i]);
       clampSpeed(sim.asteroids[i]);
@@ -5674,6 +5725,11 @@ function initGalaxyCanvas() {
       if (sim.shooting.life >= sim.shooting.ttl) sim.shooting = null;
     }
 
+    // Decay canvas-based screen flash
+    if (canvasFlash.alpha > 0) {
+      canvasFlash.alpha = Math.max(0, canvasFlash.alpha - canvasFlash.decayPerMs * dt);
+    }
+
     effects.update(dt);
     draw(now);
   }
@@ -5708,20 +5764,39 @@ function initGalaxyCanvas() {
       }
     }
 
+    // Stars — throttle trig to every 4 frames for perf
+    if (!prefersReducedMotion) {
+      sim._starFrame = ((sim._starFrame || 0) + 1) & 3;
+      if (sim._starFrame === 0) {
+        for (let i = 0; i < sim.stars.length; i += 1) {
+          const s = sim.stars[i];
+          s._cachedAlpha = Math.max(0.08, Math.min(0.9, s.baseAlpha + Math.sin(now * 0.001 * s.twinkleSpeed + s.phase) * 0.2));
+        }
+      }
+    }
     for (let i = 0; i < sim.stars.length; i += 1) {
       const s = sim.stars[i];
-      const twinkle = prefersReducedMotion ? 0 : Math.sin(now * 0.001 * s.twinkleSpeed + s.phase) * 0.2;
-      const alpha = Math.max(0.08, Math.min(0.9, s.baseAlpha + twinkle));
+      const alpha = prefersReducedMotion ? s.baseAlpha : (s._cachedAlpha ?? s.baseAlpha);
       ctx.beginPath();
       ctx.fillStyle = `rgba(214,227,255,${alpha.toFixed(3)})`;
       ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
       ctx.fill();
     }
 
+    // Hoist plasma rect and charge progress outside asteroid loop
+    const _plasmaActive = plasmaCage.active;
+    const _plasmaRect = _plasmaActive ? getPlasmaRect() : null;
+    const _plasmaCharge = _plasmaActive ? clamp((now - plasmaCage.chargeStart) / PLASMA_CAGE_CHARGE_MS, 0, 1) : 0;
+    // Only show highlights once the plasma is fully charged
+    const _plasmaCharged = _plasmaActive && isPlasmaCageReady(now);
+    const _levelNum = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
+
+    // Collect plasma-highlighted asteroid positions for batched glow pass (no per-asteroid shadowBlur)
+    const _plasmaGlowAsteroids = [];
+
     for (let i = 0; i < sim.asteroids.length; i += 1) {
       const a = sim.asteroids[i];
-      const levelNum = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
-      const sprite = asteroidSprites[a.spriteKey] || getAsteroidSpriteForLevel(levelNum);
+      const sprite = asteroidSprites[a.spriteKey] || getAsteroidSpriteForLevel(_levelNum);
       if (sprite && sprite.complete && sprite.naturalWidth > 0) {
         const d = a.r * 2;
         ctx.save();
@@ -5746,22 +5821,38 @@ function initGalaxyCanvas() {
         ctx.lineWidth = 1;
         ctx.stroke();
       }
-      if (plasmaCage.active) {
-        const rect = getPlasmaRect();
-        if (a.x >= rect.x && a.x <= rect.x + rect.w && a.y >= rect.y && a.y <= rect.y + rect.h) {
-          const chargeProgress = clamp((now - plasmaCage.chargeStart) / PLASMA_CAGE_CHARGE_MS, 0, 1);
-          ctx.save();
-          ctx.globalAlpha = chargeProgress;
-          ctx.strokeStyle = "#00FFD1";
-          ctx.lineWidth = 2;
-          ctx.shadowColor = "#00FFD1";
-          ctx.shadowBlur = 8;
-          ctx.beginPath();
-          ctx.arc(a.x, a.y, a.r + 5, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.restore();
-        }
+      // Collect for batched glow — only when fully charged
+      if (_plasmaCharged && _plasmaRect &&
+          a.x >= _plasmaRect.x && a.x <= _plasmaRect.x + _plasmaRect.w &&
+          a.y >= _plasmaRect.y && a.y <= _plasmaRect.y + _plasmaRect.h) {
+        _plasmaGlowAsteroids.push(a);
       }
+    }
+
+    // Batched plasma glow pass — set shadowBlur ONCE for all highlighted asteroids
+    if (_plasmaGlowAsteroids.length > 0) {
+      ctx.save();
+      ctx.strokeStyle = "#00FFD1";
+      ctx.lineWidth = 2;
+      // Fake glow with two concentric arcs instead of shadowBlur (much cheaper on mobile)
+      ctx.globalAlpha = _plasmaCharge * 0.28;
+      ctx.strokeStyle = "rgba(0,255,209,1)";
+      ctx.lineWidth = 7;
+      for (let i = 0; i < _plasmaGlowAsteroids.length; i += 1) {
+        const a = _plasmaGlowAsteroids[i];
+        ctx.beginPath();
+        ctx.arc(a.x, a.y, a.r + 7, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = _plasmaCharge * 0.85;
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < _plasmaGlowAsteroids.length; i += 1) {
+        const a = _plasmaGlowAsteroids[i];
+        ctx.beginPath();
+        ctx.arc(a.x, a.y, a.r + 5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
     if (landmine) {
@@ -5936,13 +6027,22 @@ function initGalaxyCanvas() {
     }
     effects.draw(ctx);
 
+    // Particles — use fillRect for small particles (much faster than arc on mobile)
     for (let i = 0; i < sim.particles.length; i += 1) {
       const p = sim.particles[i];
       const alpha = (1 - p.life / p.ttl) * p.alpha;
-      ctx.beginPath();
-      ctx.fillStyle = `${p.color || "rgba(111,255,128,"}${Math.max(0, alpha).toFixed(3)})`;
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fill();
+      if (alpha <= 0) continue;
+      const colorStr = `${p.color || "rgba(111,255,128,"}${alpha.toFixed(3)})`;
+      ctx.fillStyle = colorStr;
+      if (p.size <= 2.5) {
+        // fillRect skips arc path setup — ~3x faster for small particles
+        const s = p.size * 2;
+        ctx.fillRect(p.x - p.size, p.y - p.size, s, s);
+      } else {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     if (landmineFlashUntil > now) {
@@ -5961,6 +6061,15 @@ function initGalaxyCanvas() {
       ctx.lineTo(sim.shooting.x - sim.shooting.length, sim.shooting.y - sim.shooting.length * 0.55);
       ctx.stroke();
     }
+    // Canvas-driven screen flash (replaces DOM overlay to avoid paint stutter)
+    if (canvasFlash.alpha > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      ctx.fillStyle = `rgba(${canvasFlash.r},${canvasFlash.g},${canvasFlash.b},${canvasFlash.alpha.toFixed(3)})`;
+      ctx.fillRect(0, 0, sim.width, sim.height);
+      ctx.restore();
+    }
+
     drawPlasmaOverlay(now);
   }
 

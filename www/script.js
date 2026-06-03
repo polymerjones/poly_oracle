@@ -3132,15 +3132,9 @@ let leaderboardDb = null;
 let leaderboardOverlay = null;
 let leaderboardHighlightId = "";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyAA5YrR7IaARE_des5z58BHs_v3cuD7EKk",
-  authDomain: "poly-oracle-scoreboard.firebaseapp.com",
-  projectId: "poly-oracle-scoreboard",
-  storageBucket: "poly-oracle-scoreboard.firebasestorage.app",
-  messagingSenderId: "453209878852",
-  appId: "1:453209878852:web:841318ca5e508d13a32711",
-  measurementId: "G-6P3ZEMJW52",
-};
+const firebaseConfig = globalThis.POLY_FIREBASE_CONFIG && typeof globalThis.POLY_FIREBASE_CONFIG === "object"
+  ? { ...globalThis.POLY_FIREBASE_CONFIG }
+  : null;
 
 const firebaseCompatScriptUrls = [
   "https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js",
@@ -3187,6 +3181,10 @@ async function initLeaderboardFirestore() {
     await loadFirebaseCompatScripts();
     const fb = globalThis.firebase;
     if (!fb?.initializeApp || !fb?.firestore) return leaderboardDb;
+    if (!firebaseConfig?.apiKey) {
+      console.warn("[leaderboard] Missing Firebase config");
+      return leaderboardDb;
+    }
     if (!fb.apps.length) fb.initializeApp(firebaseConfig);
     leaderboardDb = fb.firestore();
     // TODO before public launch: tighten Firestore rules so only valid initials/score/timestamp writes are accepted.

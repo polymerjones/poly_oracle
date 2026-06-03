@@ -1,6 +1,8 @@
 node_modules/
 .DS_Store
 *.log
+firebase-config.js
+www/firebase-config.js
 backups/
 ios/build/
 ios/DerivedData/

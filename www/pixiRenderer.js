@@ -5,12 +5,20 @@ const pixiRenderer = (() => {
   let initPromise = null;
   let legacyCanvas = null;
   let nativeMode = false;
+  let _width = 0;
+  let _height = 0;
 
   let starContainer = null;
   let asteroidContainer = null;
+  let ufoContainer = null;
   let particleContainer = null;
   let laserContainer = null;
   let warpRingContainer = null;
+  let lightningRingContainer = null;
+  let plasmaContainer = null;
+  let bombContainer = null;
+  let landmineContainer = null;
+  let debrisContainer = null;
   let flashContainer = null;
 
   const asteroidSprites = new Map();
@@ -32,16 +40,29 @@ const pixiRenderer = (() => {
 
   const warpRingPool = [];
   const activeWarpRings = new Map();
+  const lightningRingPool = [];
+  const activeLightningRings = new Map();
+  const debrisPool = [];
+  const activeBombs = [];
+  const activeDebris = [];
+  let ufoDisplay = null;
+  let ufoFallback = null;
+  let plasmaGraphics = null;
+  let bombGraphics = null;
+  let landmineGraphics = null;
 
   async function init(mountEl, width, height, isNative) {
     if (app) return app;
     if (initPromise) return initPromise;
     nativeMode = !!isNative;
+    _width = width;
+    _height = height;
 
     initPromise = (async () => {
       app = new PIXI.Application({
         width,
         height,
+        backgroundAlpha: 0,
         backgroundColor: 0x000000,
         antialias: !nativeMode,
         resolution: nativeMode ? 1 : Math.min(2, window.devicePixelRatio || 1),
@@ -66,7 +87,10 @@ const pixiRenderer = (() => {
       app.view.style.width = legacyCanvas?.style.width || `${width}px`;
       app.view.style.height = legacyCanvas?.style.height || `${height}px`;
       app.view.style.pointerEvents = 'none';
+      app.view.style.background = 'transparent';
+      app.view.style.zIndex = '1';
       app.view.setAttribute('aria-hidden', 'true');
+      app.renderer.background.alpha = 0;
 
       app.ticker.stop();
 
@@ -85,9 +109,13 @@ const pixiRenderer = (() => {
           }
         }),
       );
+      textures.ufo = await PIXI.Assets.load('astgfx/ufo.png').catch(() => null);
 
       starContainer = new PIXI.Graphics();
+      warpRingContainer = new PIXI.Container();
+      lightningRingContainer = new PIXI.Container();
       asteroidContainer = new PIXI.Container();
+      ufoContainer = new PIXI.Container();
       particleContainer = new PIXI.ParticleContainer(800, {
         position: true,
         rotation: true,
@@ -96,16 +124,47 @@ const pixiRenderer = (() => {
         tint: true,
       });
       laserContainer = new PIXI.Container();
-      warpRingContainer = new PIXI.Container();
+      plasmaContainer = new PIXI.Container();
+      bombContainer = new PIXI.Container();
+      landmineContainer = new PIXI.Container();
+      debrisContainer = new PIXI.ParticleContainer(80, {
+        position: true,
+        rotation: true,
+        alpha: true,
+        scale: true,
+        tint: true,
+      });
       flashContainer = new PIXI.Container();
 
       app.stage.addChild(starContainer);
+      app.stage.addChild(warpRingContainer);
+      app.stage.addChild(lightningRingContainer);
       app.stage.addChild(asteroidContainer);
+      app.stage.addChild(ufoContainer);
       app.stage.addChild(particleContainer);
       app.stage.addChild(laserContainer);
-      app.stage.addChild(warpRingContainer);
+      app.stage.addChild(plasmaContainer);
+      app.stage.addChild(bombContainer);
+      app.stage.addChild(landmineContainer);
+      app.stage.addChild(debrisContainer);
       app.stage.addChild(flashContainer);
       starGraphics = starContainer;
+      plasmaGraphics = new PIXI.Graphics();
+      plasmaContainer.addChild(plasmaGraphics);
+      bombGraphics = new PIXI.Graphics();
+      bombContainer.addChild(bombGraphics);
+      landmineGraphics = new PIXI.Graphics();
+      landmineContainer.addChild(landmineGraphics);
+
+      if (textures.ufo) {
+        ufoDisplay = new PIXI.Sprite(textures.ufo);
+        ufoDisplay.anchor.set(0.5);
+      } else {
+        ufoFallback = new PIXI.Graphics();
+        ufoDisplay = ufoFallback;
+      }
+      ufoDisplay.visible = false;
+      ufoContainer.addChild(ufoDisplay);
 
       const flashRect = new PIXI.Graphics();
       flashRect.beginFill(0xffffff);
@@ -300,13 +359,497 @@ const pixiRenderer = (() => {
     }
   }
 
+  function syncLightningRings(lightningRings, frameBudgetExceeded) {
+    if (!lightningRingContainer) return;
+    if (frameBudgetExceeded) {
+      lightningRingContainer.visible = false;
+      return;
+    }
+    lightningRingContainer.visible = true;
+    const seen = new Set();
+
+    for (let i = 0; i < lightningRings.length; i += 1) {
+      const ring = lightningRings[i];
+      seen.add(ring);
+
+      let g = activeLightningRings.get(ring);
+      if (!g) {
+        g = lightningRingPool.pop() || new PIXI.Graphics();
+        lightningRingContainer.addChild(g);
+        activeLightningRings.set(ring, g);
+      }
+
+      const t = Math.max(0, Math.min(1, ring.life / ring.ttl));
+      const radius = ring.baseR + (ring.maxR - ring.baseR) * t;
+      const alpha = Math.max(0, (ring.alpha || 1) * (1 - t));
+      const points = Math.max(18, ring.segments || 28);
+      const jitter = (ring.jitter || 10) * (1 - t);
+      const colorA = parseRgbaTint(ring.colorA || ring.color || 'rgba(0,255,209,1)');
+      const colorB = parseRgbaTint(ring.colorB || 'rgba(255,255,255,1)');
+
+      g.clear();
+      for (let pass = 0; pass < 2; pass += 1) {
+        const color = pass === 0 ? colorA : colorB;
+        const width = pass === 0 ? 2.2 : 1;
+        const passAlpha = pass === 0 ? alpha * 0.85 : alpha * 0.45;
+        g.lineStyle(width, color, passAlpha);
+        for (let p = 0; p <= points; p += 1) {
+          const angle = (p / points) * Math.PI * 2;
+          const seed = Math.sin(angle * 11 + ring.x * 0.03 + ring.life * 0.04) * Math.cos(angle * 7 + ring.y * 0.02);
+          const r = radius + seed * jitter;
+          const x = ring.x + Math.cos(angle) * r;
+          const y = ring.y + Math.sin(angle) * r;
+          if (p === 0) g.moveTo(x, y);
+          else g.lineTo(x, y);
+        }
+      }
+      g.visible = true;
+    }
+
+    for (const [ring, g] of activeLightningRings) {
+      if (!seen.has(ring)) {
+        g.clear();
+        g.visible = false;
+        lightningRingPool.push(g);
+        activeLightningRings.delete(ring);
+      }
+    }
+  }
+
+  function syncUFO(ufoState) {
+    if (!ufoDisplay) return;
+    if (!ufoState || !ufoState.alive) {
+      ufoDisplay.visible = false;
+      return;
+    }
+    const now = performance.now();
+    const damaged = ufoState.hitCount >= 1;
+    ufoDisplay.visible = true;
+    ufoDisplay.x = ufoState.x + (damaged ? Math.sin(now / 28) * 1.8 : 0);
+    ufoDisplay.y = ufoState.y + (damaged ? Math.cos(now / 24) * 1.5 : 0);
+    ufoDisplay.rotation = Math.sin((ufoState.x + ufoState.y) * 0.01) * 0.04;
+    ufoDisplay.alpha = 0.9 + Math.sin(now * 0.008) * 0.08;
+    if (textures.ufo && ufoDisplay instanceof PIXI.Sprite) {
+      const r = ufoState.r || 24;
+      ufoDisplay.width = r * 3.2;
+      ufoDisplay.height = r * 1.8;
+    } else if (ufoFallback) {
+      drawUFOGraphics(ufoFallback, ufoState.r || 24, damaged);
+    }
+  }
+
+  function drawUFOGraphics(g, r, damaged) {
+    g.clear();
+    const glowColor = damaged ? 0xff6060 : 0x86ffb0;
+    const strokeColor = damaged ? 0xff7c7c : 0x9cffc2;
+    const bodyColor = damaged ? 0xff6060 : 0x9aebff;
+
+    g.beginFill(glowColor, damaged ? 0.16 : 0.18);
+    g.drawCircle(0, 0, r * 2.6);
+    g.endFill();
+    g.beginFill(glowColor, damaged ? 0.14 : 0.16);
+    g.drawCircle(0, 0, r * 1.8);
+    g.endFill();
+    g.beginFill(glowColor, damaged ? 0.2 : 0.22);
+    g.drawCircle(0, 0, r * 1.05);
+    g.endFill();
+
+    g.lineStyle(1.4, strokeColor, damaged ? 0.55 : 0.58);
+    g.drawEllipse(0, 0, r * 1.32, r * 0.72);
+
+    g.beginFill(bodyColor, damaged ? 0.94 : 0.92);
+    g.drawEllipse(0, 0, r * 1.1, r * 0.55);
+    g.endFill();
+
+    g.beginFill(0x242a48, 0.86);
+    g.drawEllipse(0, -r * 0.22, r * 0.52, r * 0.28);
+    g.endFill();
+  }
+
+  function getPlasmaRect(plasmaCage) {
+    if (!plasmaCage) return null;
+    const x1 = plasmaCage.startX;
+    const y1 = plasmaCage.startY;
+    const x2 = plasmaCage.currentX;
+    const y2 = plasmaCage.currentY;
+    if (![x1, y1, x2, y2].every(Number.isFinite)) return null;
+    return {
+      x: Math.min(x1, x2),
+      y: Math.min(y1, y2),
+      w: Math.abs(x2 - x1),
+      h: Math.abs(y2 - y1),
+    };
+  }
+
+  function drawDashedRect(g, x, y, w, h, dashLen, gapLen, offset, lineW, color, alpha) {
+    if (w <= 0 || h <= 0 || alpha <= 0) return;
+    g.lineStyle(lineW, color, alpha);
+    const dashCycle = dashLen + gapLen;
+    let dist = ((offset % dashCycle) + dashCycle) % dashCycle;
+    const sides = [
+      { dx: 1, dy: 0, len: w, sx: x, sy: y },
+      { dx: 0, dy: 1, len: h, sx: x + w, sy: y },
+      { dx: -1, dy: 0, len: w, sx: x + w, sy: y + h },
+      { dx: 0, dy: -1, len: h, sx: x, sy: y + h },
+    ];
+    for (let s = 0; s < sides.length; s += 1) {
+      const side = sides[s];
+      let pos = 0;
+      while (pos < side.len) {
+        const cyclePos = dist % dashCycle;
+        const inDash = cyclePos < dashLen;
+        const segEnd = Math.min(side.len, pos + (dashCycle - cyclePos));
+        if (inDash) {
+          g.moveTo(side.sx + side.dx * pos, side.sy + side.dy * pos);
+          g.lineTo(side.sx + side.dx * segEnd, side.sy + side.dy * segEnd);
+        }
+        dist += segEnd - pos;
+        pos = segEnd;
+      }
+    }
+  }
+
+  function drawPlasmaGridPixi(g, x, y, w, h, alpha) {
+    if (w < 2 || h < 2 || alpha <= 0) return;
+    g.lineStyle(1, 0x00ffd1, alpha);
+    const spacing = 18;
+    const startX = x - ((x % spacing) + spacing);
+    const startY = y - ((y % spacing) + spacing);
+    for (let lx = startX; lx <= x + w + spacing; lx += spacing) {
+      if (lx < x || lx > x + w) continue;
+      g.moveTo(lx, y);
+      g.lineTo(lx, y + h);
+    }
+    for (let ly = startY; ly <= y + h + spacing; ly += spacing) {
+      if (ly < y || ly > y + h) continue;
+      g.moveTo(x, ly);
+      g.lineTo(x + w, ly);
+    }
+  }
+
+  function drawPlasmaCornerBrackets(g, x, y, w, h, now, progress, charged, alpha) {
+    const corner = Math.max(12, Math.min(34, Math.min(w, h) * 0.28));
+    const bracketAlpha = charged
+      ? alpha * (0.7 + 0.3 * Math.sin(now / 70))
+      : alpha * (0.42 + progress * 0.58);
+    const bracketW = charged ? 3 : 2;
+    const color = charged ? 0xdcfff0 : 0x00ffd1;
+    const x2 = x + w;
+    const y2 = y + h;
+    const segs = [
+      [x, y, x + corner, y],
+      [x, y, x, y + corner],
+      [x2, y, x2 - corner, y],
+      [x2, y, x2, y + corner],
+      [x, y2, x + corner, y2],
+      [x, y2, x, y2 - corner],
+      [x2, y2, x2 - corner, y2],
+      [x2, y2, x2, y2 - corner],
+    ];
+    g.lineStyle(bracketW, color, bracketAlpha);
+    for (let i = 0; i < segs.length; i += 1) {
+      g.moveTo(segs[i][0], segs[i][1]);
+      g.lineTo(segs[i][2], segs[i][3]);
+    }
+  }
+
+  function drawPlasmaCageRectPixi(g, rect, now, progress, charged, alpha = 1) {
+    if (!rect || rect.w < 2 || rect.h < 2) return;
+    const { x, y, w, h } = rect;
+    const borderAlpha = Math.max(0.2, Math.min(1, alpha * (0.22 + progress * 0.78)));
+    const color = charged ? 0xdcfff0 : 0x00ffd1;
+    const gridAlpha = (charged ? 0.18 : 0.08 + progress * 0.25) * alpha;
+    drawPlasmaGridPixi(g, x, y, w, h, gridAlpha);
+    drawDashedRect(
+      g,
+      x,
+      y,
+      w,
+      h,
+      10,
+      8,
+      -(now / 32) % 18,
+      charged ? 2.4 : 1.4 + progress * 1.2,
+      color,
+      borderAlpha,
+    );
+    drawPlasmaCornerBrackets(g, x, y, w, h, now, progress, charged, alpha);
+  }
+
+  function drawPlasmaLayer(plasmaCage, asteroids, now) {
+    if (!plasmaGraphics) return;
+    plasmaGraphics.clear();
+
+    const fx = plasmaCage?.releaseFx;
+    if (fx) {
+      const t = Math.max(0, Math.min(1, (now - fx.start) / fx.ttl));
+      if (t >= 1) {
+        plasmaCage.releaseFx = null;
+      } else {
+        const fade = 1 - t;
+        if (fx.type === 'fire') {
+          drawPlasmaCageRectPixi(plasmaGraphics, fx, now, 1, true, fade);
+          plasmaGraphics.beginFill(0xffffff, fade * 0.5);
+          plasmaGraphics.drawRect(fx.x, fx.y, fx.w, fx.h);
+          plasmaGraphics.endFill();
+        } else {
+          drawPlasmaCageRectPixi(plasmaGraphics, fx, now, 0.25, false, fade);
+        }
+      }
+    }
+
+    drawPlasmaRecharge(plasmaCage, now);
+    if (!plasmaCage?.active) return;
+    const rect = getPlasmaRect(plasmaCage);
+    if (!rect || rect.w < 2 || rect.h < 2) return;
+
+    const isReady = plasmaCage.charged === true || (now - (plasmaCage.chargeStart || 0)) >= 1000;
+    const progress = isReady ? 1 : Math.max(0, Math.min(1, (now - (plasmaCage.chargeStart || now)) / 1000));
+    drawPlasmaCageRectPixi(plasmaGraphics, rect, now, progress, isReady, 1);
+
+    if (!isReady) return;
+    for (let i = 0; i < asteroids.length; i += 1) {
+      const a = asteroids[i];
+      if (a.x < rect.x || a.x > rect.x + rect.w || a.y < rect.y || a.y > rect.y + rect.h) continue;
+      const r = Math.max(8, a.r + 5 + Math.sin(now * 0.008 + i) * 2);
+      plasmaGraphics.lineStyle(7, 0x00ffd1, 0.24);
+      plasmaGraphics.drawCircle(a.x, a.y, r);
+      plasmaGraphics.lineStyle(1.5, 0xffffff, 0.72);
+      plasmaGraphics.drawCircle(a.x, a.y, Math.max(5, a.r + 1));
+    }
+  }
+
+  function drawPlasmaRecharge(plasmaCage, now) {
+    if (!plasmaCage || plasmaCage.active) return;
+    if (!plasmaCage.cooldownUntil || plasmaCage.cooldownUntil <= now) return;
+
+    const total = plasmaCage.cooldownUntil - (plasmaCage.cooldownStart || 0);
+    const remaining = plasmaCage.cooldownUntil - now;
+    const progress = Math.max(0, Math.min(1, 1 - remaining / Math.max(1, total)));
+    const cx = _width - 28;
+    const cy = _height - 28;
+
+    plasmaGraphics.lineStyle(3, 0x004433, 0.4);
+    plasmaGraphics.arc(cx, cy, 22, -Math.PI / 2, Math.PI * 1.5, false);
+    plasmaGraphics.lineStyle(3, 0x00ffd1, 0.7);
+    plasmaGraphics.arc(cx, cy, 22, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress, false);
+  }
+
+  function drawLandmine(landmine, now) {
+    if (!landmineGraphics) return;
+    landmineGraphics.clear();
+    if (!landmine) return;
+
+    const x = landmine.x;
+    const y = landmine.y;
+    const r = landmine.r || 14;
+    const armed = !!landmine.explodeAt;
+    const pulse = armed ? Math.abs(Math.sin(now / 120)) : Math.abs(Math.sin(now / 400)) * 0.4;
+
+    landmineGraphics.beginFill(0x2a3a2a, 0.92);
+    landmineGraphics.drawCircle(x, y, r);
+    landmineGraphics.endFill();
+    landmineGraphics.beginFill(0x3a5a3a, 0.6);
+    landmineGraphics.drawCircle(x - r * 0.35, y - r * 0.35, r * 0.7);
+    landmineGraphics.endFill();
+
+    landmineGraphics.lineStyle(1.2, armed ? 0xff4444 : 0x44ff88, 0.55 + pulse * 0.3);
+    landmineGraphics.drawCircle(x, y, r);
+
+    landmineGraphics.lineStyle(1.5, armed ? 0xff6666 : 0x66ffaa, 0.7);
+    for (let i = 0; i < 8; i += 1) {
+      const angle = (i / 8) * Math.PI * 2;
+      landmineGraphics.moveTo(
+        x + Math.cos(angle) * r,
+        y + Math.sin(angle) * r,
+      );
+      landmineGraphics.lineTo(
+        x + Math.cos(angle) * (r + 5),
+        y + Math.sin(angle) * (r + 5),
+      );
+    }
+
+    landmineGraphics.beginFill(armed ? 0xff2222 : 0x44ff88, 0.8 + pulse * 0.2);
+    landmineGraphics.drawCircle(
+      x + r * 0.35,
+      y - r * 0.35,
+      armed ? 4 + pulse * 2 : 3,
+    );
+    landmineGraphics.endFill();
+
+    if (armed && landmine.explodeAt) {
+      const t = Math.max(0, Math.min(1, (landmine.explodeAt - now) / 1000));
+      landmineGraphics.lineStyle(2, 0xff2222, 0.7);
+      landmineGraphics.arc(x, y, r + 10 + (1 - t) * 10, 0, Math.PI * 2);
+    }
+  }
+
+  function triggerBombDetonation(x, y, radius) {
+    const effectRadius = Number.isFinite(radius) ? radius : 220;
+    const visualRadius = Math.min(280, Math.max(80, effectRadius * 0.4));
+    activeBombs.push({
+      x,
+      y,
+      visualRadius,
+      start: performance.now(),
+      flashTriggered: false,
+      debrisSpawned: false,
+    });
+  }
+
+  function spawnBombDebris(bomb, now) {
+    const colors = [0xff6600, 0xffaa00, 0xffffff, 0x00ffd1];
+    for (let i = 0; i < 40; i += 1) {
+      const sprite = debrisPool.pop() || new PIXI.Sprite(PIXI.Texture.WHITE);
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 160 + Math.random() * 520;
+      const size = 2 + Math.random() * 4;
+      sprite.x = bomb.x;
+      sprite.y = bomb.y;
+      sprite.width = size;
+      sprite.height = size;
+      sprite.anchor?.set?.(0.5);
+      sprite.tint = colors[(Math.random() * colors.length) | 0];
+      sprite.alpha = 1;
+      sprite.visible = true;
+      debrisContainer.addChild(sprite);
+      activeDebris.push({
+        sprite,
+        x: bomb.x,
+        y: bomb.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        start: now,
+        ttl: 1200,
+        spin: (Math.random() - 0.5) * 0.3,
+      });
+    }
+  }
+
+  function updateBombDebris(now) {
+    if (!debrisContainer) return;
+    for (let i = activeDebris.length - 1; i >= 0; i -= 1) {
+      const d = activeDebris[i];
+      const t = (now - d.start) / d.ttl;
+      if (t >= 1) {
+        d.sprite.visible = false;
+        debrisContainer.removeChild(d.sprite);
+        debrisPool.push(d.sprite);
+        activeDebris.splice(i, 1);
+        continue;
+      }
+      const seconds = (now - d.start) / 1000;
+      d.sprite.x = d.x + d.vx * seconds;
+      d.sprite.y = d.y + d.vy * seconds + 120 * seconds * seconds;
+      d.sprite.rotation += d.spin;
+      d.sprite.alpha = 1 - t;
+    }
+  }
+
+  function updateBombEffects(now) {
+    if (!bombGraphics) return;
+    bombGraphics.clear();
+
+    for (let i = activeBombs.length - 1; i >= 0; i -= 1) {
+      const bomb = activeBombs[i];
+      const age = now - bomb.start;
+      const r = bomb.visualRadius;
+
+      if (age < 500) {
+        const t = age / 500;
+        const pullR = r * 0.7 * t;
+
+        bombGraphics.lineStyle(2, 0x00ffd1, 0.6 * t);
+        bombGraphics.drawCircle(bomb.x, bomb.y, pullR * 1.4);
+
+        bombGraphics.beginFill(0x000000, 0.95 * t);
+        bombGraphics.drawCircle(bomb.x, bomb.y, pullR);
+        bombGraphics.endFill();
+
+        bombGraphics.beginFill(0x000000, 1.0);
+        bombGraphics.drawCircle(bomb.x, bomb.y, pullR * 0.6);
+        bombGraphics.endFill();
+
+        bombGraphics.lineStyle(1.5, 0x00ffd1, 0.45 * t);
+        for (let arm = 0; arm < 6; arm += 1) {
+          const baseAngle = arm * (Math.PI / 3) + t * 4;
+          bombGraphics.moveTo(
+            bomb.x + Math.cos(baseAngle) * pullR * 1.2,
+            bomb.y + Math.sin(baseAngle) * pullR * 1.2,
+          );
+          for (let step = 1; step <= 12; step += 1) {
+            const pct = step / 12;
+            const angle = baseAngle + pct * 2.2;
+            const armR = pullR * 1.2 * (1 - pct * 0.85);
+            bombGraphics.lineTo(
+              bomb.x + Math.cos(angle) * armR,
+              bomb.y + Math.sin(angle) * armR,
+            );
+          }
+        }
+
+        const horizonPulse = 0.5 + Math.sin(age * 0.04) * 0.3;
+        bombGraphics.lineStyle(3, 0x4400ff, 0.7 * t * horizonPulse);
+        bombGraphics.drawCircle(bomb.x, bomb.y, pullR * 0.65);
+
+        bombGraphics.lineStyle(2, 0xff6600, 0.5 * t);
+        bombGraphics.drawEllipse(bomb.x, bomb.y, pullR * 1.1, pullR * 0.25);
+        bombGraphics.lineStyle(1, 0xffaa00, 0.3 * t);
+        bombGraphics.drawEllipse(bomb.x, bomb.y, pullR * 0.9, pullR * 0.18);
+      } else if (age < 650) {
+        const t = (age - 500) / 150;
+        bombGraphics.beginFill(0x000000, 0.85 * (1 - t));
+        bombGraphics.drawCircle(bomb.x, bomb.y, r * 0.6 * (1 - t));
+        bombGraphics.endFill();
+        if (!bomb.flashTriggered) {
+          bomb.flashTriggered = true;
+          flashAlpha = 1.0;
+          if (flashContainer?._rect) {
+            flashContainer._rect.tint = 0xffffff;
+            flashContainer._rect.alpha = flashAlpha;
+          }
+        }
+      } else if (age < 1400) {
+        const rings = [
+          { delay: 0, from: 0.2, to: 2.5, color: 0xff6600, alpha: 0.8 },
+          { delay: 80, from: 0.1, to: 2.0, color: 0xffaa00, alpha: 0.6 },
+          { delay: 160, from: 0, to: 3.0, color: 0xffffff, alpha: 0.3 },
+          { delay: 240, from: 0, to: 3.5, color: 0x4400ff, alpha: 0.25 },
+        ];
+        for (let j = 0; j < rings.length; j += 1) {
+          const ring = rings[j];
+          const rt = Math.max(0, Math.min(1, (age - 650 - ring.delay) / (750 - ring.delay)));
+          if (rt <= 0 || rt >= 1) continue;
+          const rr = r * (ring.from + (ring.to - ring.from) * rt);
+          const alpha = ring.alpha * (1 - rt);
+          bombGraphics.lineStyle(j === 0 ? 6 : 4, ring.color, alpha);
+          bombGraphics.drawCircle(bomb.x, bomb.y, rr);
+          bombGraphics.lineStyle(1, ring.color, alpha * 0.45);
+          bombGraphics.drawCircle(bomb.x, bomb.y, rr + 10);
+        }
+      }
+
+      if (age >= 650 && !bomb.debrisSpawned && debrisContainer) {
+        bomb.debrisSpawned = true;
+        spawnBombDebris(bomb, now);
+      }
+      if (age >= 1800) activeBombs.splice(i, 1);
+    }
+
+    updateBombDebris(now);
+  }
+
   function updateFlash(canvasFlash) {
-    if (!flashContainer?._rect || nativeMode) return;
+    if (!flashContainer?._rect) return;
     const rect = flashContainer._rect;
-    if (canvasFlash && canvasFlash.alpha > 0) {
+    if (!nativeMode && canvasFlash && canvasFlash.alpha > 0) {
       rect.tint = (canvasFlash.r << 16) | (canvasFlash.g << 8) | canvasFlash.b;
       rect.alpha = canvasFlash.alpha;
       flashAlpha = canvasFlash.alpha;
+    } else if (flashAlpha > 0) {
+      rect.tint = 0xffffff;
+      rect.alpha = flashAlpha;
+      flashAlpha = Math.max(0, flashAlpha - 0.12);
     } else {
       rect.alpha = 0;
       flashAlpha = 0;
@@ -337,6 +880,8 @@ const pixiRenderer = (() => {
   }
 
   function resize(width, height) {
+    _width = width;
+    _height = height;
     if (!app) return;
     app.renderer.resize(width, height);
     syncViewStyles(width, height);
@@ -350,16 +895,21 @@ const pixiRenderer = (() => {
     starsSeeded = false;
   }
 
-  function draw(sim, laserBeams, canvasFlash, now) {
+  function draw(sim, laserBeams, canvasFlash, ufoState, plasmaCage, landmine, now) {
     if (!app) return false;
     const frameBudgetExceeded = !!sim._frameBudgetExceeded;
     const prefersReducedMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
     drawStars(sim.stars, now, prefersReducedMotion, frameBudgetExceeded);
     syncAsteroids(sim.asteroids);
+    syncUFO(ufoState);
     syncParticles(sim.particles);
     syncLasers(laserBeams, now);
     syncWarpRings(sim.warpRings, frameBudgetExceeded);
+    syncLightningRings(sim.lightningRings || [], frameBudgetExceeded);
+    drawPlasmaLayer(plasmaCage, sim.asteroids, now);
+    drawLandmine(landmine, now);
+    updateBombEffects(now);
     updateFlash(canvasFlash);
 
     app.renderer.render(app.stage);
@@ -377,25 +927,41 @@ const pixiRenderer = (() => {
     legacyCanvas = null;
     starContainer = null;
     asteroidContainer = null;
+    ufoContainer = null;
     particleContainer = null;
     laserContainer = null;
     warpRingContainer = null;
+    lightningRingContainer = null;
+    plasmaContainer = null;
+    bombContainer = null;
+    landmineContainer = null;
+    debrisContainer = null;
     flashContainer = null;
     starGraphics = null;
+    ufoDisplay = null;
+    ufoFallback = null;
+    plasmaGraphics = null;
+    bombGraphics = null;
+    landmineGraphics = null;
     asteroidSprites.clear();
     particleSprites.clear();
     activeLasers.clear();
     activeWarpRings.clear();
+    activeLightningRings.clear();
+    activeBombs.length = 0;
+    activeDebris.length = 0;
     asteroidSpritePool.length = 0;
     particleSpritePool.length = 0;
     laserPool.length = 0;
     warpRingPool.length = 0;
+    lightningRingPool.length = 0;
+    debrisPool.length = 0;
     starsSeeded = false;
     flashFilter = null;
     flashAlpha = 0;
   }
 
-  return { init, draw, resize, destroy };
+  return { init, draw, resize, destroy, triggerBombDetonation };
 })();
 
 window.pixiRenderer = pixiRenderer;

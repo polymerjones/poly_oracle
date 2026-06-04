@@ -3953,12 +3953,27 @@ function initGalaxyCanvas() {
     desynchronized: true,
     willReadFrequently: false,
   });
+  const ufoFxCanvas = document.createElement("canvas");
+  const ufoFxCtx = ufoFxCanvas.getContext("2d", {
+    alpha: true,
+    desynchronized: true,
+    willReadFrequently: false,
+  });
   plasmaOverlayCanvas.setAttribute("aria-hidden", "true");
   plasmaOverlayCanvas.style.position = "absolute";
   plasmaOverlayCanvas.style.pointerEvents = "none";
   plasmaOverlayCanvas.style.zIndex = "2";
   plasmaOverlayCanvas.style.inset = "auto";
   galaxyView.appendChild(plasmaOverlayCanvas);
+  ufoFxCanvas.setAttribute("aria-hidden", "true");
+  ufoFxCanvas.style.position = "absolute";
+  ufoFxCanvas.style.pointerEvents = "none";
+  ufoFxCanvas.style.zIndex = "3";
+  ufoFxCanvas.style.inset = "auto";
+  galaxyView.appendChild(ufoFxCanvas);
+  [bgVideoA, bgVideoB].forEach((video) => {
+    if (video) video.style.zIndex = "0";
+  });
 
   const debugTaps = (() => {
     try {
@@ -3987,6 +4002,8 @@ function initGalaxyCanvas() {
     chargeLoopRate: 0,
     readySoundPlayed: false,
     rechargeSoundPlayed: true,
+    lastRectCx: 0,
+    lastRectCy: 0,
   };
   const laserBeams = [];
   const _bombDestroyQueue = [];
@@ -4727,7 +4744,8 @@ function initGalaxyCanvas() {
   }
 
   function playBigBoomSound() {
-    playGameSfx("landmine_boom", 0.92);
+    playGameSfx("landmine_boom", 1.0);
+    setTimeout(() => playGameSfx("explosion_big", 0.85), 80);
   }
 
   function triggerLandmineScreenFlash() {
@@ -4820,6 +4838,11 @@ function initGalaxyCanvas() {
       lastY: y,
       lastMoveAt: performance.now(),
     };
+    commBoxController.triggerVO({
+      lines: ["LANDMINE", "DETECTED.", "WATCH OUT."],
+      audioSrc: null,
+      duration: 3000,
+    });
     playGameSfx("blip1", 0.8, { rate: 1.05 });
     addWarpRing(x, y, "rgba(124,255,91,1)");
   }
@@ -5284,6 +5307,7 @@ function initGalaxyCanvas() {
     plasmaCage.lastPulseAt = 0;
     plasmaCage.chargeLoopRate = 0;
     plasmaCage.readySoundPlayed = false;
+    plasmaCage.rechargeSoundPlayed = false;
   }
 
   function isPlasmaCageReady(now = performance.now()) {
@@ -5315,12 +5339,7 @@ function initGalaxyCanvas() {
       if (!plasmaCage.readySoundPlayed) {
         plasmaCage.readySoundPlayed = true;
         const readyKey = resolveGameSfxKey("plasma_ready", "reveal4");
-        if (readyKey) playGameSfx(readyKey, 0.82);
-        commBoxController.triggerVO({
-          lines: ["PLASMA", "CHARGED—", "FIRE NOW."],
-          audioSrc: commBoxController.commVoSrc("plasma_ready.mp3"),
-          duration: 2500,
-        });
+        if (readyKey) playGameSfx(readyKey, 1.0);
       }
       return;
     }
@@ -5347,16 +5366,23 @@ function initGalaxyCanvas() {
     stopPlasmaChargeSound();
     plasmaCage.chargeLoopRate = steppedRate;
     plasmaCage.chargeLoopHandle = audioEngine.playLoop("plasma_charge", {
-      volume: clamp((state.whisper ? 0.17 : 0.34) * PLASMA_CAGE_VOLUME_BOOST, 0, 1),
+      volume: state.whisper ? 0.22 : 0.55,
       rate: steppedRate,
     });
   }
 
   function updatePlasmaRechargeSound(now) {
-    if (plasmaCage.active || plasmaCage.rechargeSoundPlayed || plasmaCage.cooldownUntil <= 0) return;
+    if (plasmaCage.active) return;
+    if (plasmaCage.cooldownUntil <= 0) return;
     if (now < plasmaCage.cooldownUntil) return;
+    if (plasmaCage.rechargeSoundPlayed) return;
     plasmaCage.rechargeSoundPlayed = true;
-    playGameSfx("plasmarecharged", 0.82);
+    playGameSfx("plasmarecharged", 1.0);
+    commBoxController.triggerVO({
+      lines: ["PLASMA", "RECHARGED.", "READY."],
+      audioSrc: commBoxController.commVoSrc("plasma_ready.mp3"),
+      duration: 2500,
+    });
   }
 
   function destroyAsteroidsInPlasmaCage(rect) {
@@ -5378,6 +5404,8 @@ function initGalaxyCanvas() {
     updatePlasmaCageCharge(now);
     const rect = getPlasmaRect();
     const charged = plasmaCage.charged;
+    plasmaCage.lastRectCx = rect.x + rect.w / 2;
+    plasmaCage.lastRectCy = rect.y + rect.h / 2;
     stopPlasmaChargeSound();
     resetPlasmaCageGesture();
     if (charged) {
@@ -5404,6 +5432,30 @@ function initGalaxyCanvas() {
     plasmaOverlayCanvas.width = galaxyPlayCanvas.width;
     plasmaOverlayCanvas.height = galaxyPlayCanvas.height;
     plasmaCtx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
+  }
+
+  function resizeUfoFxCanvas() {
+    if (!ufoFxCtx) return;
+    ufoFxCanvas.style.left = galaxyPlayCanvas.style.left;
+    ufoFxCanvas.style.top = galaxyPlayCanvas.style.top;
+    ufoFxCanvas.style.width = galaxyPlayCanvas.style.width;
+    ufoFxCanvas.style.height = galaxyPlayCanvas.style.height;
+    ufoFxCanvas.width = galaxyPlayCanvas.width;
+    ufoFxCanvas.height = galaxyPlayCanvas.height;
+    ufoFxCtx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
+  }
+
+  function setPlasmaOverlayVisible(visible) {
+    plasmaOverlayCanvas.style.display = visible ? "" : "none";
+  }
+
+  function drawUfoFxOverlay(fallbackCtx) {
+    if (ufoFxCtx) {
+      ufoFxCtx.clearRect(0, 0, sim.width, sim.height);
+      effects.draw(ufoFxCtx);
+    } else {
+      effects.draw(fallbackCtx);
+    }
   }
 
   function drawPlasmaGrid(rect, alpha) {
@@ -5484,6 +5536,7 @@ function initGalaxyCanvas() {
   }
 
   function drawPlasmaCooldown(now) {
+    if (window.pixiRenderer) return;
     if (!plasmaCtx || now >= plasmaCage.cooldownUntil) return;
     const total = Math.max(1, plasmaCage.cooldownUntil - plasmaCage.cooldownStart);
     const progress = clamp((now - plasmaCage.cooldownStart) / total, 0, 1);
@@ -5511,7 +5564,6 @@ function initGalaxyCanvas() {
     plasmaCtx.clearRect(0, 0, sim.width, sim.height);
     updatePlasmaCageCharge(now);
     updatePlasmaChargeSound(now);
-    updatePlasmaRechargeSound(now);
     for (let i = laserBeams.length - 1; i >= 0; i -= 1) {
       const beam = laserBeams[i];
       const t = clamp((now - beam.startedAt) / 150, 0, 1);
@@ -5576,6 +5628,7 @@ function initGalaxyCanvas() {
       const a = sim.asteroids[i];
       if (Math.hypot(a.x - x, a.y - y) <= radius + a.r) _bombDestroyQueue.push(a);
     }
+    window.pixiRenderer?.triggerBombDetonation?.(x, y, radius);
     addWarpRing(x, y, "rgba(255,90,90,1)");
     spawnExplosion(x, y, 80, true);
     triggerLandmineScreenFlash();
@@ -5947,6 +6000,7 @@ function initGalaxyCanvas() {
     galaxyPlayCanvas.height = Math.floor(height * sim.dpr);
     ctx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
     resizePlasmaOverlayCanvas();
+    resizeUfoFxCanvas();
     sim.maxAsteroids = capIOSNativeAsteroids(
       engineMode === "practice" ? PRACTICE_MAX_ASTEROIDS : (engineMode === "arcade" ? sim.maxAsteroids : (sim.width < 700 ? 80 : 120)),
     );
@@ -5955,6 +6009,8 @@ function initGalaxyCanvas() {
     if (worldLockEnabled && window.pixiRenderer) {
       window.pixiRenderer.init(galaxyPlayCanvas.parentElement, sim.width, sim.height, isIOSNative).catch?.(() => {});
       window.pixiRenderer.resize(sim.width, sim.height);
+    } else {
+      setPlasmaOverlayVisible(true);
     }
   }
 
@@ -6007,6 +6063,7 @@ function initGalaxyCanvas() {
   function update(dt, now) {
     const _frameBudgetExceeded = isIOSNative && dt > 32;
     sim._frameBudgetExceeded = _frameBudgetExceeded;
+    updatePlasmaRechargeSound(now);
     const driftScale = prefersReducedMotion ? 0 : 1;
     for (let i = 0; i < sim.stars.length; i += 1) {
       const s = sim.stars[i];
@@ -6198,10 +6255,12 @@ function initGalaxyCanvas() {
   }
 
   function draw(now) {
-    if ((engineMode === "arcade" || engineMode === "practice") && window.pixiRenderer?.draw(sim, laserBeams, canvasFlash, now)) {
-      drawPlasmaOverlay(now);
+    if ((engineMode === "arcade" || engineMode === "practice") && window.pixiRenderer?.draw(sim, laserBeams, canvasFlash, ufo, plasmaCage, landmine, now)) {
+      setPlasmaOverlayVisible(false);
+      drawUfoFxOverlay(ctx);
       return;
     }
+    setPlasmaOverlayVisible(true);
 
     const _frameBudgetExceeded = !!sim._frameBudgetExceeded;
     ctx.clearRect(0, 0, sim.width, sim.height);
@@ -6316,7 +6375,7 @@ function initGalaxyCanvas() {
       ctx.restore();
     }
 
-    if (landmine) {
+    if (!window.pixiRenderer && landmine) {
       ctx.save();
       ctx.translate(landmine.x, landmine.y);
       const pulse = 0.6 + 0.4 * Math.sin(now / 180);
@@ -6492,7 +6551,7 @@ function initGalaxyCanvas() {
       ctx.stroke();
       ctx.restore();
     }
-    effects.draw(ctx);
+    drawUfoFxOverlay(ctx);
 
     const particleLimit = _frameBudgetExceeded ? Math.min(40, sim.particles.length) : sim.particles.length;
     for (let i = 0; i < particleLimit; i += 1) {
@@ -6762,6 +6821,7 @@ function initGalaxyCanvas() {
     galaxyRaf = 0;
     clearTimeout(sim.shootingTimer);
     sim.shootingTimer = null;
+    setPlasmaOverlayVisible(true);
     window.pixiRenderer?.destroy();
   }
 

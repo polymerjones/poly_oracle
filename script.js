@@ -445,22 +445,74 @@ const arcadeOverlayBtn = document.getElementById("arcadeOverlayBtn");
 const arcadeOverlayBtnSecondary = document.getElementById("arcadeOverlayBtnSecondary");
 
 const commBoxController = (() => {
-  const SKIN = "#c8956a";
-  const SKIN2 = "#b87d52";
-  const SKIN3 = "#a86a3a";
-  const HAIR = "#8B4513";
-  const HAIR2 = "#6b2e0a";
-  const UNIF = "#1a2a1a";
-  const UNIF2 = "#0d1a0d";
-  const EYE_W = "#e8e0d0";
-  const IRIS = "#3a6a3a";
-  const PUPIL = "#111";
-  const MUST = "#5a2a08";
-  const BEARD = "#6b3310";
-  const BEAD1 = "#7a5a28";
-  const BEAD2 = "#8a6a30";
-  const FG = "#080e08";
-  const GLITCH_CHARS = "▓░█▒╬╫╪╠╣╦╩╤╧╬▓";
+  const FRAMES = {
+    idle: "commander/idle_commander.jpg",
+    commander: "commander/commander.jpg",
+    talk1: "commander/talk1_commander.jpg",
+    talk2: "commander/talk2_commander.jpg",
+    blink: "commander/blink_commander.jpg",
+    angry: "commander/angry_commander.jpg",
+    shockd: "commander/shockd_commander.jpg",
+    laugh: "commander/laugh_commander.jpg",
+    laugh2: "commander/laugh2_commander.jpg",
+    smirk: "commander/smirk_commander.jpg",
+    smirktalkA: "commander/smirktalkA_commander.jpg",
+    smirktalkB: "commander/smirktalkB_commander.jpg",
+    exhausted: "commander/exhausted_commander.jpg",
+    eyesdown: "commander/eyesdown_commander.jpg",
+    lookleft: "commander/lookleft_commander.jpg",
+    lookright: "commander/lookright_commander.jpg",
+    thinking: "commander/thinking_commander.jpg",
+    lightdamage: "commander/lightdamage_commander.jpg",
+    lightdamageblink: "commander/lightdamage_blink_commander.jpg",
+    lightdamagelook: "commander/lightdamage_lookLeft_commander.jpg",
+    lightdamagelookB: "commander/lightdamage_lookLeftB_commander.jpg",
+    lightdamagetalkA: "commander/lightdamage_talkA_commander.jpg",
+    lightdamagetalkB: "commander/lightdamage_talkB_commander.jpg",
+    heavydamage: "commander/heavydamage_commander.jpg",
+    heavydamageblink: "commander/heavydamage_blink_commander.jpg",
+    heavydamagelook: "commander/heavydamage_lookLeft_commander.jpg",
+    heavydamagetalkA: "commander/heavydamage_talkA_commander.jpg",
+    heavydamagetalkB: "commander/heavydamage_talkB_commander.jpg",
+    coffee: "commander/easteregg_coffee_commander.jpg",
+    duckface: "commander/easteregg_duckface_commander.jpg",
+    tongueout: "commander/easteregg_tongueout_commander.jpg",
+  };
+
+  const preloaded = {};
+  Object.entries(FRAMES).forEach(([key, src]) => {
+    const img = new Image();
+    img.src = src;
+    preloaded[key] = img;
+  });
+
+  const hud = document.getElementById("commanderHUD");
+  const portrait = document.getElementById("commanderImg");
+  const ticker = document.getElementById("commanderTicker");
+  const tickerText = document.getElementById("commanderTickerText");
+
+  let currentFrame = "idle";
+  let damageState = "normal";
+  let idleTimer = null;
+  let tickerHideTimer = null;
+  let voAudio = null;
+  let typingToken = 0;
+  let mouthFlap = null;
+  let tickerVisible = false;
+  let hudVisible = false;
+
+  const IDLE_NORMAL = ["idle", "idle", "idle", "blink", "idle", "idle",
+    "lookleft", "idle", "lookright", "idle", "idle", "blink", "eyesdown", "idle"];
+  const IDLE_LIGHT = ["lightdamage", "lightdamage", "lightdamageblink",
+    "lightdamage", "lightdamagelook", "lightdamage", "lightdamageblink"];
+  const IDLE_HEAVY = ["heavydamage", "heavydamage", "heavydamageblink",
+    "heavydamage", "heavydamagelook", "heavydamage"];
+
+  const EASTER_EGG_FRAMES = ["coffee", "duckface", "tongueout"];
+  let idleIndex = 0;
+  let easterEggCooldown = 0;
+
+  const GLITCH = "▓░█▒╬╫╪";
   const availableVoFiles = new Set([
     "vo-hairytakeemout.mp3",
     "vo-lets_blast_these_stroids.mp3",
@@ -468,223 +520,248 @@ const commBoxController = (() => {
     "vo-ufo_spotted_takeemout.mp3",
   ]);
 
-  let mouthOpen = false;
-  let mouthInterval = null;
-  let active = false;
-  let voAudio = null;
-  let hideTimeout = null;
-  let typingToken = 0;
+  function setFrame(key) {
+    if (!portrait || !FRAMES[key]) return;
+    currentFrame = key;
+    portrait.src = FRAMES[key];
+  }
 
-  const box = document.getElementById("commBox");
-  const canvas1 = document.getElementById("commFaceCanvas");
-  const canvas2 = document.getElementById("commFaceSlice");
-  const line1 = document.getElementById("commLine1");
-  const line2 = document.getElementById("commLine2");
-  const line3 = document.getElementById("commLine3");
-  const cursor = document.getElementById("commCursor");
-  const ctx1 = canvas1?.getContext("2d");
-  const ctx2 = canvas2?.getContext("2d");
-
-  function roundedRect(c, x, y, w, h, r) {
-    if (typeof c.roundRect === "function") {
-      c.roundRect(x, y, w, h, r);
+  function tickIdle() {
+    if (mouthFlap) return;
+    const now = Date.now();
+    if (now > easterEggCooldown && Math.random() < 0.008) {
+      easterEggCooldown = now + 120000;
+      const egg = EASTER_EGG_FRAMES[Math.floor(Math.random() * EASTER_EGG_FRAMES.length)];
+      setFrame(egg);
+      setTimeout(() => {
+        const seq = damageState === "heavy" ? IDLE_HEAVY
+          : damageState === "light" ? IDLE_LIGHT : IDLE_NORMAL;
+        setFrame(seq[idleIndex % seq.length]);
+      }, 2200);
       return;
     }
-    c.rect(x, y, w, h);
+
+    const seq = damageState === "heavy" ? IDLE_HEAVY
+      : damageState === "light" ? IDLE_LIGHT : IDLE_NORMAL;
+    setFrame(seq[idleIndex % seq.length]);
+    idleIndex++;
   }
 
-  function drawFace(ctx, openMouth) {
-    const c = ctx;
-    if (!c) return;
-    c.clearRect(0, 0, 90, 130);
-    c.fillStyle = FG; c.fillRect(0, 0, 90, 130);
-    c.fillStyle = UNIF; c.fillRect(10, 98, 70, 32);
-    c.fillStyle = UNIF2; c.fillRect(22, 98, 46, 32);
-    c.fillStyle = "#2a4a2a"; c.fillRect(20, 96, 50, 7);
-    c.fillStyle = "#00cc66"; c.fillRect(25, 101, 40, 2); c.fillRect(25, 105, 40, 2);
-    c.fillStyle = SKIN; c.beginPath(); roundedRect(c, 12, 22, 66, 80, 3); c.fill();
-    c.fillStyle = SKIN2; c.beginPath(); roundedRect(c, 18, 90, 54, 14, 2); c.fill();
-    c.fillStyle = HAIR; c.beginPath(); roundedRect(c, 10, 14, 70, 18, 2); c.fill();
-    c.fillStyle = HAIR2; c.fillRect(8, 18, 12, 22); c.fillRect(70, 18, 12, 22);
-    c.fillStyle = "#9B5523"; c.beginPath(); roundedRect(c, 12, 10, 66, 14, 3); c.fill();
-    c.fillStyle = SKIN2; c.beginPath(); roundedRect(c, 6, 48, 8, 12, 2); c.fill();
-    c.fillStyle = SKIN2; c.beginPath(); roundedRect(c, 76, 48, 8, 12, 2); c.fill();
-    c.fillStyle = "#a86a3a"; c.fillRect(16, 38, 58, 5);
-    c.fillStyle = MUST; c.beginPath(); roundedRect(c, 15, 35, 26, 4, 1); c.fill();
-    c.fillStyle = MUST; c.beginPath(); roundedRect(c, 49, 35, 26, 4, 1); c.fill();
-    c.fillStyle = EYE_W; c.beginPath(); roundedRect(c, 17, 42, 22, 11, 2); c.fill();
-    c.fillStyle = EYE_W; c.beginPath(); roundedRect(c, 51, 42, 22, 11, 2); c.fill();
-    c.fillStyle = IRIS; c.beginPath(); roundedRect(c, 23, 43, 10, 8, 1); c.fill();
-    c.fillStyle = IRIS; c.beginPath(); roundedRect(c, 57, 43, 10, 8, 1); c.fill();
-    c.fillStyle = PUPIL; c.fillRect(26, 44, 5, 5); c.fillRect(60, 44, 5, 5);
-    c.fillStyle = "#fff"; c.fillRect(25, 43, 2, 2); c.fillRect(59, 43, 2, 2);
-    c.fillStyle = SKIN2; c.fillRect(39, 54, 12, 14);
-    c.fillStyle = SKIN3; c.beginPath(); roundedRect(c, 32, 63, 26, 8, 2); c.fill();
-    c.fillStyle = SKIN; c.beginPath(); roundedRect(c, 30, 65, 10, 6, 2); c.fill();
-    c.fillStyle = SKIN; c.beginPath(); roundedRect(c, 50, 65, 10, 6, 2); c.fill();
-    c.fillStyle = MUST; c.beginPath(); roundedRect(c, 26, 74, 38, 6, 2); c.fill();
-    c.fillStyle = SKIN; c.fillRect(43, 74, 4, 6);
-    c.fillStyle = BEARD; c.beginPath(); roundedRect(c, 28, 80, 34, 9, 3); c.fill();
-    if (openMouth) {
-      c.fillStyle = "#1a0404"; c.beginPath(); roundedRect(c, 30, 80, 30, 9, 3); c.fill();
-      c.fillStyle = MUST; c.beginPath(); roundedRect(c, 30, 78, 30, 5, 2); c.fill();
-      c.fillStyle = "#9a5020"; c.beginPath(); roundedRect(c, 32, 86, 26, 5, 2); c.fill();
-      c.fillStyle = EYE_W; c.fillRect(34, 81, 7, 5); c.fillRect(43, 81, 7, 5); c.fillRect(52, 81, 7, 5);
-      c.fillStyle = "#1a0404"; c.fillRect(41, 81, 2, 5); c.fillRect(50, 81, 2, 5);
-    } else {
-      c.fillStyle = "#7a3a18"; c.beginPath(); roundedRect(c, 32, 80, 4, 2, 1); c.fill();
-    }
-    c.fillStyle = SKIN3; c.fillRect(41, 97, 8, 4);
-    c.fillStyle = "#5a3a18"; c.fillRect(20, 95, 50, 4);
-    [22, 29, 36, 43, 50, 57, 64].forEach((x, i) => {
-      c.fillStyle = i % 2 === 0 ? BEAD1 : BEAD2;
-      c.beginPath(); roundedRect(c, x, 93, 5, 5, 2); c.fill();
-    });
+  function startIdle() {
+    if (idleTimer) return;
+    idleTimer = setInterval(tickIdle, 800);
   }
 
-  function renderFace() {
-    drawFace(ctx1, mouthOpen);
-    drawFace(ctx2, mouthOpen);
+  function stopIdle() {
+    clearInterval(idleTimer);
+    idleTimer = null;
   }
 
-  function startMouthFlap() {
-    if (mouthInterval) return;
-    mouthInterval = setInterval(() => {
-      mouthOpen = !mouthOpen;
-      renderFace();
-    }, 220);
+  function startMouthFlap(talkFrames) {
+    stopMouthFlap();
+    let i = 0;
+    mouthFlap = setInterval(() => {
+      setFrame(talkFrames[i % talkFrames.length]);
+      i++;
+    }, 180);
   }
 
   function stopMouthFlap() {
-    clearInterval(mouthInterval);
-    mouthInterval = null;
-    mouthOpen = false;
-    renderFace();
+    clearInterval(mouthFlap);
+    mouthFlap = null;
   }
 
-  function randGlitch(len) {
-    let s = "";
-    for (let i = 0; i < len; i += 1) {
-      s += GLITCH_CHARS[Math.floor(Math.random() * GLITCH_CHARS.length)];
-    }
-    return s;
+  function getTalkFrames() {
+    if (damageState === "heavy") return ["heavydamagetalkA", "heavydamagetalkB"];
+    if (damageState === "light") return ["lightdamagetalkA", "lightdamagetalkB"];
+    return ["talk1", "talk2"];
   }
 
-  function typeLine(el, text, token, cb) {
-    if (!el) {
-      if (cb) cb();
-      return;
-    }
-    el.innerHTML = "";
+  function typeText(lines) {
+    if (!tickerText) return;
+    const token = ++typingToken;
+    const text = Array.isArray(lines) ? lines.join(" ") : (lines || "");
+    tickerText.innerHTML = "";
     let i = 0;
+
     function step() {
       if (token !== typingToken) return;
       if (i <= text.length) {
         const typed = text.slice(0, i);
-        const glitch = i < text.length ? randGlitch(Math.min(3, text.length - i)) : "";
+        const glitch = i < text.length
+          ? Array.from({ length: Math.min(3, text.length - i) },
+            () => GLITCH[Math.floor(Math.random() * GLITCH.length)]).join("")
+          : "";
         const lead = typed.slice(-1) || "";
         const rest = typed.slice(0, -1);
-        el.innerHTML =
-          `<span style="color:#00ff88;text-shadow:0 0 8px #00ff88,0 0 16px #00cc66,0 0 2px #fff">${lead}</span>` +
-          `<span style="color:#00dd66">${rest}</span>` +
-          `<span style="color:#004422;opacity:0.6">${glitch}</span>`;
-        i += 1;
-        setTimeout(step, 55 + Math.random() * 40);
+        tickerText.innerHTML =
+          `<span style="color:#00ffee;text-shadow:0 0 6px #00ffee">${lead}</span>` +
+          `<span style="color:#00d4d4">${rest}</span>` +
+          `<span style="color:#003333;opacity:0.7">${glitch}</span>`;
+        i++;
+        setTimeout(step, 22 + Math.random() * 18);
       } else {
-        el.innerHTML = `<span style="color:#00cc66">${text}</span>`;
-        if (cb) setTimeout(cb, 120);
+        tickerText.innerHTML = `<span style="color:#00cccc">${text}</span>`;
       }
     }
     step();
   }
 
-  function typeLines(textArray, onDone) {
-    const els = [line1, line2, line3];
-    const token = ++typingToken;
-    els.forEach((e) => {
-      if (e) e.innerHTML = "";
-    });
-    if (cursor) cursor.style.display = "inline-block";
-    function doLine(idx) {
-      if (idx >= textArray.length || idx >= els.length) {
-        if (cursor) cursor.style.display = "none";
-        if (onDone) onDone();
-        return;
-      }
-      typeLine(els[idx], textArray[idx], token, () => doLine(idx + 1));
-    }
-    doLine(0);
+  function showTicker() {
+    if (!ticker) return;
+    ticker.classList.add("ticker-visible");
+    tickerVisible = true;
+  }
+
+  function hideTicker() {
+    if (!ticker) return;
+    ticker.classList.remove("ticker-visible");
+    tickerVisible = false;
+    if (tickerText) tickerText.innerHTML = "";
   }
 
   function show() {
-    if (!box) return;
-    box.style.display = "block";
-    box.setAttribute("aria-hidden", "false");
-    box.classList.remove("comm-hidden");
-    box.classList.add("comm-visible");
-    active = true;
-    renderFace();
+    if (!hud) return;
+    hud.style.display = "block";
+    hudVisible = true;
+    setFrame(currentFrame || "idle");
+    startIdle();
   }
 
   function hide() {
-    if (!box) return;
-    active = false;
+    if (!hud) return;
+    hud.style.display = "none";
+    hudVisible = false;
     typingToken += 1;
-    box.classList.remove("comm-visible");
-    box.classList.add("comm-hidden");
-    box.setAttribute("aria-hidden", "true");
-    setTimeout(() => {
-      if (!active) box.style.display = "none";
-    }, 350);
+    stopIdle();
     stopMouthFlap();
+    hideTicker();
+    clearTimeout(tickerHideTimer);
+    tickerHideTimer = null;
     if (voAudio) {
       voAudio.pause();
       voAudio = null;
     }
+  }
+
+  function setDamageState(state) {
+    damageState = state;
+  }
+
+  function reactTo(eventType) {
+    if (!hudVisible) return;
+    const reactions = {
+      ufo: "shockd",
+      landmine: "shockd",
+      chaos: "angry",
+      levelcomplete: ["laugh", "laugh2"],
+      lowlives: "exhausted",
+      plasmacharged: "smirk",
+      boss: "angry",
+      thinking: "thinking",
+    };
+    const r = reactions[eventType];
+    if (!r) return;
+    stopMouthFlap();
+    const frame = Array.isArray(r)
+      ? r[Math.floor(Math.random() * r.length)]
+      : r;
+    setFrame(frame);
+    setTimeout(() => {
+      if (!mouthFlap) tickIdle();
+    }, 2000);
   }
 
   function commVoSrc(filename) {
     return availableVoFiles.has(filename) ? `vo/${filename}` : null;
   }
 
-  function triggerVO({ lines = [], audioSrc = null, duration = 4000, onDone = null } = {}) {
-    if (hideTimeout) clearTimeout(hideTimeout);
+  function triggerVO({
+    lines = [],
+    audioSrc = null,
+    duration = 3500,
+    frame = null,
+    event = null,
+    onDone = null,
+  } = {}) {
+    if (!hudVisible) show();
+    if (!hudVisible) return;
+
+    if (tickerHideTimer) {
+      clearTimeout(tickerHideTimer);
+      tickerHideTimer = null;
+    }
     if (voAudio) {
       voAudio.pause();
       voAudio = null;
     }
-    show();
-    startMouthFlap();
-    typeLines(lines);
-    hideTimeout = setTimeout(() => {
-      stopMouthFlap();
-      hide();
-      if (onDone) onDone();
-    }, duration);
 
-    if (!audioSrc) return;
-    try {
-      voAudio = new Audio(audioSrc);
-      voAudio.volume = 0.9;
-      voAudio.play().catch(() => {});
-      voAudio.addEventListener("ended", () => {
-        if (hideTimeout) clearTimeout(hideTimeout);
-        stopMouthFlap();
-        hideTimeout = setTimeout(() => {
-          hide();
-          if (onDone) onDone();
-        }, 800);
-      });
-    } catch {
-      // VO is optional; captions still run.
+    stopMouthFlap();
+    if (frame) {
+      setFrame(frame);
+    } else if (event) {
+      reactTo(event);
+    }
+
+    startMouthFlap(getTalkFrames());
+    showTicker();
+    typeText(lines);
+
+    let doneCalled = false;
+    const finish = () => {
+      if (doneCalled) return;
+      doneCalled = true;
+      if (onDone) onDone();
+    };
+
+    let talkingEnded = false;
+    const endTalking = () => {
+      if (talkingEnded) return;
+      talkingEnded = true;
+      stopMouthFlap();
+      tickIdle();
+      tickerHideTimer = setTimeout(() => {
+        hideTicker();
+        finish();
+      }, 1200);
+    };
+
+    if (audioSrc) {
+      let audioFallbackTimer = null;
+      const finishAudio = () => {
+        if (audioFallbackTimer) clearTimeout(audioFallbackTimer);
+        endTalking();
+      };
+      try {
+        voAudio = new Audio(audioSrc);
+        voAudio.volume = 0.9;
+        voAudio.play().catch(() => {
+          if (!audioFallbackTimer) audioFallbackTimer = setTimeout(endTalking, duration);
+        });
+        voAudio.addEventListener("ended", finishAudio);
+        audioFallbackTimer = setTimeout(endTalking, duration);
+      } catch {
+        tickerHideTimer = setTimeout(endTalking, duration);
+      }
+    } else {
+      tickerHideTimer = setTimeout(endTalking, duration);
     }
   }
 
   function init() {
-    renderFace();
+    if (hud) hud.style.display = "none";
+    setFrame("idle");
   }
 
-  return { init, triggerVO, hide, show, commVoSrc };
+  return {
+    init,
+    show,
+    hide,
+    triggerVO,
+    commVoSrc,
+    setDamageState,
+    reactTo,
+  };
 })();
 
 if (document.readyState === "loading") {
@@ -4838,10 +4915,12 @@ function initGalaxyCanvas() {
       lastY: y,
       lastMoveAt: performance.now(),
     };
+    commBoxController.reactTo("landmine");
     commBoxController.triggerVO({
       lines: ["LANDMINE", "DETECTED.", "WATCH OUT."],
       audioSrc: null,
       duration: 3000,
+      event: "landmine",
     });
     playGameSfx("blip1", 0.8, { rate: 1.05 });
     addWarpRing(x, y, "rgba(124,255,91,1)");
@@ -4882,9 +4961,11 @@ function initGalaxyCanvas() {
     };
     playGameSfx("ufo_spawn", 0.6);
     startUfoDrone();
+    commBoxController.reactTo("ufo");
     commBoxController.triggerVO({
       lines: ["UFO SPOTTED.", "TAKE 'EM OUT."],
       audioSrc: commBoxController.commVoSrc("vo-ufo_spotted_takeemout.mp3"),
+      event: "ufo",
     });
     addWarpRing(x, y, "rgba(160,255,255,1)");
   }
@@ -5340,6 +5421,7 @@ function initGalaxyCanvas() {
         plasmaCage.readySoundPlayed = true;
         const readyKey = resolveGameSfxKey("plasma_ready", "reveal4");
         if (readyKey) playGameSfx(readyKey, 1.0);
+        commBoxController.reactTo("plasmacharged");
       }
       return;
     }
@@ -5382,6 +5464,7 @@ function initGalaxyCanvas() {
       lines: ["PLASMA", "RECHARGED.", "READY."],
       audioSrc: commBoxController.commVoSrc("plasma_ready.mp3"),
       duration: 2500,
+      event: "plasmacharged",
     });
   }
 
@@ -5671,9 +5754,11 @@ function initGalaxyCanvas() {
     addArcadeScore(500);
     playGameSfx("level_up", 0.9);
     triggerHapticNotification(hapticNotificationType.Success);
+    commBoxController.reactTo("levelcomplete");
     commBoxController.triggerVO({
       lines: ["SECTOR", "CLEARED."],
       audioSrc: commBoxController.commVoSrc("level_complete.mp3"),
+      event: "levelcomplete",
     });
     const cfg = ARCADE_LEVELS[currentLevelIndex];
     const nextLevel = cfg.level + 1;
@@ -5715,10 +5800,13 @@ function initGalaxyCanvas() {
         setMenuOverlayOpen(false);
         arcadeLives = clamp(arcadeLives - 1, 0, MAX_LIVES);
         renderLives();
+        if (arcadeLives === 2) commBoxController.setDamageState("light");
+        if (arcadeLives === 1) commBoxController.setDamageState("heavy");
         if (arcadeLives === 1) {
           commBoxController.triggerVO({
             lines: ["WARNING—", "LAST LIFE", "REMAINING."],
             audioSrc: commBoxController.commVoSrc("low_lives.mp3"),
+            event: "lowlives",
           });
         }
         hideArcadeOverlay();
@@ -5761,6 +5849,8 @@ function initGalaxyCanvas() {
     setSavedArcadeLevel(cfg.level);
 
     clearGameplayEntities();
+    commBoxController.show();
+    commBoxController.setDamageState("normal");
     totalToSpawn = cfg.totalToClear;
     spawnedTotal = 0;
     spawnQueue = Math.max(0, cfg.totalToClear - cfg.startSpawn);
@@ -5920,6 +6010,8 @@ function initGalaxyCanvas() {
     setPracticeToolUI();
     sim.nextDrawAt = 0;
     clearGameplayEntities();
+    commBoxController.show();
+    commBoxController.setDamageState("normal");
     updatePracticeDebug();
     audioEngine.stopMusic();
     audioEngine.playMusic("PRACTICE", MUSIC.PRACTICE || MUSIC.L1_3, { crossfadeMs: 200 });
@@ -5940,6 +6032,7 @@ function initGalaxyCanvas() {
       pausedLandmineRemainingMs = landmine && landmine.explodeAt ? Math.max(0, landmine.explodeAt - now) : 0;
       arcadeResumeAvailable = true;
     } else {
+      commBoxController.hide();
       clearGameplayEntities();
       arcadeActive = false;
       arcadeResumeAvailable = false;
@@ -6132,9 +6225,11 @@ function initGalaxyCanvas() {
           && sim.asteroids.length >= CHAOS_THRESHOLD
           && now - (sim._lastChaosTrigger || 0) > 45000) {
         sim._lastChaosTrigger = now;
+        commBoxController.reactTo("chaos");
         commBoxController.triggerVO({
           lines: ["IT'S HAIRY", "OUT THERE—", "TAKE 'EM OUT."],
           audioSrc: commBoxController.commVoSrc("vo-hairytakeemout.mp3"),
+          event: "chaos",
         });
       }
     }
@@ -6826,6 +6921,7 @@ function initGalaxyCanvas() {
   }
 
   function stopAndMenu() {
+    commBoxController.hide();
     stopGalaxyLoop();
     showModeSelect({ preserveArcade: false });
     stopGalaxyLoop();

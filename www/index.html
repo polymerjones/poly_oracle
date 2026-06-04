@@ -296,45 +296,81 @@
       </div>
     </section>
 
-    <div id="commBox" aria-hidden="true" style="display:none; position:fixed; bottom:24px; left:20px; z-index:9000; width:280px;">
-      <div id="commBoxInner">
-        <!-- header -->
-        <div id="commHeader">
-          <span id="commHeaderTitle">▶ INCOMING TRANSMISSION</span>
-          <div id="commSigBars">
-            <span style="height:4px"></span>
-            <span style="height:6px"></span>
-            <span style="height:9px"></span>
-            <span style="height:12px"></span>
-            <span style="height:7px" class="comm-sig-inactive"></span>
-          </div>
+    <!-- Commander HUD - persistent portrait -->
+    <div id="commanderHUD" style="display:none; position:fixed;
+      bottom:20px; left:16px; z-index:9000; pointer-events:none;">
+
+      <!-- Portrait frame - always visible during gameplay -->
+      <div id="commanderPortrait" style="
+        width:72px; height:72px;
+        border: 1.5px solid #00d4d4;
+        border-radius: 3px;
+        overflow: hidden;
+        background: #020d0d;
+        position: relative;
+        box-shadow: 0 0 8px rgba(0,212,212,0.3);
+      ">
+        <img id="commanderImg"
+          src="commander/idle_commander.jpg"
+          style="width:100%; height:100%;
+                 display:block; image-rendering:pixelated;
+                 object-fit:cover; object-position:top;"
+          alt="Commander">
+        <!-- CRT scanline overlay -->
+        <div style="position:absolute;inset:0;
+          background:repeating-linear-gradient(0deg,
+            transparent,transparent 3px,
+            rgba(0,212,212,0.04) 3px,rgba(0,212,212,0.04) 4px);
+          pointer-events:none;z-index:2;"></div>
+        <!-- Static flash overlay -->
+        <div id="commanderStatic" style="position:absolute;inset:0;
+          background:repeating-linear-gradient(90deg,
+            transparent 0px,transparent 2px,
+            rgba(0,212,212,0.06) 2px,rgba(0,212,212,0.06) 3px);
+          pointer-events:none;z-index:3;opacity:0;
+          animation:cmdStaticFlash 3.2s infinite;"></div>
+      </div>
+
+      <!-- Ticker bar - slides in when speaking -->
+      <div id="commanderTicker" style="
+        position:absolute;
+        bottom:0; left:78px;
+        width:260px; height:72px;
+        background:rgba(2,13,13,0.94);
+        border:1.5px solid #00d4d4;
+        border-radius:3px;
+        display:flex; align-items:center;
+        padding:0 10px 0 8px;
+        box-shadow:0 0 8px rgba(0,212,212,0.25);
+        opacity:0; transform:translateX(-8px);
+        transition:opacity 0.2s ease, transform 0.2s ease;
+        pointer-events:none;
+        overflow:hidden;
+      ">
+        <!-- Callsign -->
+        <div style="flex-shrink:0; margin-right:8px;
+          border-right:1px solid #004444; padding-right:8px;
+          display:flex;flex-direction:column;justify-content:center;">
+          <div style="color:#00e8e8;font-family:monospace;
+            font-size:8px;letter-spacing:2px;font-weight:bold;">CMDR</div>
+          <div style="color:#004444;font-family:monospace;
+            font-size:7px;letter-spacing:1px;margin-top:2px;">441.7</div>
         </div>
-        <!-- body -->
-        <div id="commBody">
-          <div id="commPortrait">
-            <canvas id="commFaceCanvas" width="90" height="130"></canvas>
-            <canvas id="commFaceSlice" width="90" height="130"></canvas>
-            <div id="commStaticOverlay"></div>
-            <div id="commScanRoll"></div>
-          </div>
-          <div id="commRight">
-            <div id="commCallsign"><span>COMMANDER</span></div>
-            <div id="commCaption">
-              <div class="comm-line" id="commLine1"></div>
-              <div class="comm-line" id="commLine2"></div>
-              <div class="comm-line" id="commLine3"></div>
-              <span id="commCursor"></span>
-            </div>
-            <div id="commFreq">
-              FREQ: <span class="comm-active">441.7 MHz</span>
-              &nbsp;ENC:<span class="comm-active">L3</span>
-            </div>
-          </div>
+        <!-- Text area -->
+        <div style="flex:1;overflow:hidden;">
+          <div id="commanderTickerText"
+            style="font-family:monospace;font-size:11px;
+              letter-spacing:1px;color:#00cccc;
+              line-height:1.5;"></div>
         </div>
-        <!-- footer -->
-        <div id="commFooter">
-          <span class="comm-live">◼ REC &nbsp; ▶ LIVE</span>
-          <span>SIG: <span class="comm-active">████</span>░░</span>
+        <!-- Signal bars -->
+        <div style="flex-shrink:0;margin-left:6px;
+          display:flex;gap:2px;align-items:flex-end;">
+          <span style="background:#00d4d4;width:3px;height:4px;display:block;"></span>
+          <span style="background:#00d4d4;width:3px;height:6px;display:block;"></span>
+          <span style="background:#00d4d4;width:3px;height:9px;display:block;"></span>
+          <span style="background:#00d4d4;width:3px;height:12px;display:block;"></span>
+          <span style="background:#003333;width:3px;height:7px;display:block;"></span>
         </div>
       </div>
     </div>

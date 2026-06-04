@@ -296,11 +296,55 @@
       </div>
     </section>
 
+    <div id="commBox" aria-hidden="true" style="display:none; position:fixed; bottom:24px; left:20px; z-index:9000; width:280px;">
+      <div id="commBoxInner">
+        <!-- header -->
+        <div id="commHeader">
+          <span id="commHeaderTitle">▶ INCOMING TRANSMISSION</span>
+          <div id="commSigBars">
+            <span style="height:4px"></span>
+            <span style="height:6px"></span>
+            <span style="height:9px"></span>
+            <span style="height:12px"></span>
+            <span style="height:7px" class="comm-sig-inactive"></span>
+          </div>
+        </div>
+        <!-- body -->
+        <div id="commBody">
+          <div id="commPortrait">
+            <canvas id="commFaceCanvas" width="90" height="130"></canvas>
+            <canvas id="commFaceSlice" width="90" height="130"></canvas>
+            <div id="commStaticOverlay"></div>
+            <div id="commScanRoll"></div>
+          </div>
+          <div id="commRight">
+            <div id="commCallsign"><span>COMMANDER</span></div>
+            <div id="commCaption">
+              <div class="comm-line" id="commLine1"></div>
+              <div class="comm-line" id="commLine2"></div>
+              <div class="comm-line" id="commLine3"></div>
+              <span id="commCursor"></span>
+            </div>
+            <div id="commFreq">
+              FREQ: <span class="comm-active">441.7 MHz</span>
+              &nbsp;ENC:<span class="comm-active">L3</span>
+            </div>
+          </div>
+        </div>
+        <!-- footer -->
+        <div id="commFooter">
+          <span class="comm-live">◼ REC &nbsp; ▶ LIVE</span>
+          <span>SIG: <span class="comm-active">████</span>░░</span>
+        </div>
+      </div>
+    </div>
+
     <script>
       window.POLY_CONTACT_FORM_ENDPOINT = "";
     </script>
     <script src="firebase-config.js"></script>
     <script src="ufo-death-effect.js"></script>
+    <script type="module" src="pixiRenderer.js"></script>
     <script src="script.js?v=3.3"></script>
   </body>
 </html>

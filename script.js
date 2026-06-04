@@ -5952,6 +5952,10 @@ function initGalaxyCanvas() {
     );
     seedStars();
     computePlayfield();
+    if (worldLockEnabled && window.pixiRenderer) {
+      window.pixiRenderer.init(galaxyPlayCanvas.parentElement, sim.width, sim.height, isIOSNative).catch?.(() => {});
+      window.pixiRenderer.resize(sim.width, sim.height);
+    }
   }
 
   function relayoutGalaxyCanvas() {
@@ -6194,6 +6198,11 @@ function initGalaxyCanvas() {
   }
 
   function draw(now) {
+    if ((engineMode === "arcade" || engineMode === "practice") && window.pixiRenderer?.draw(sim, laserBeams, canvasFlash, now)) {
+      drawPlasmaOverlay(now);
+      return;
+    }
+
     const _frameBudgetExceeded = !!sim._frameBudgetExceeded;
     ctx.clearRect(0, 0, sim.width, sim.height);
 
@@ -6753,6 +6762,7 @@ function initGalaxyCanvas() {
     galaxyRaf = 0;
     clearTimeout(sim.shootingTimer);
     sim.shootingTimer = null;
+    window.pixiRenderer?.destroy();
   }
 
   function stopAndMenu() {

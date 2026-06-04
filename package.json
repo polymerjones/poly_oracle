@@ -5,7 +5,7 @@
   "main": "script.js",
   "scripts": {
     "doctor:ios": "xcodebuild -version",
-    "prepare:web": "mkdir -p www www/gamesfx www/astgfx www/newsfx www/newsfxdesigned www/assets/music www/assets/newsfx && cp -f index.html style.css script.js ufo-death-effect.js favicon.png Kaleidoscope_Magic.mp3 reveal1.mp3 reveal2.mp3 reveal3.mp3 reveal4.mp3 taporb.mp3 crystalballfx.mp4 galaxybg1b-h264.mp4 level5-h264.mp4 level8-h264.mp4 level10-h264.mp4 newbossbg.mp4 www/ && if [ -f firebase-config.js ]; then cp -f firebase-config.js www/; fi && cp -f gamesfx/*.mp3 www/gamesfx/ && cp -f newsfx/*.mp3 www/newsfx/ && cp -f newsfxdesigned/*.mp3 www/newsfxdesigned/ && cp -f assets/music/*.mp3 www/assets/music/ && cp -f assets/newsfx/*.mp3 www/assets/newsfx/ && cp -f astgfx/*.png www/astgfx/ && mkdir -p www/vo && (cp -f vo/*.mp3 www/vo/ 2>/dev/null || true)",
+    "prepare:web": "mkdir -p www www/gamesfx www/astgfx www/newsfx www/newsfxdesigned www/assets/music www/assets/newsfx && cp -f index.html style.css script.js pixiRenderer.js ufo-death-effect.js favicon.png Kaleidoscope_Magic.mp3 reveal1.mp3 reveal2.mp3 reveal3.mp3 reveal4.mp3 taporb.mp3 crystalballfx.mp4 galaxybg1b-h264.mp4 level5-h264.mp4 level8-h264.mp4 level10-h264.mp4 newbossbg.mp4 www/ && if [ -f firebase-config.js ]; then cp -f firebase-config.js www/; fi && cp -f gamesfx/*.mp3 www/gamesfx/ && cp -f newsfx/*.mp3 www/newsfx/ && cp -f newsfxdesigned/*.mp3 www/newsfxdesigned/ && cp -f assets/music/*.mp3 www/assets/music/ && cp -f assets/newsfx/*.mp3 www/assets/newsfx/ && cp -f astgfx/*.png www/astgfx/ && mkdir -p www/vendor && cp -f node_modules/pixi.js/dist/pixi.min.mjs www/vendor/pixi.min.js && cp -f node_modules/pixi.js/dist/pixi.min.mjs www/vendor/pixi.min.mjs && mkdir -p www/vo && (cp -f vo/*.mp3 www/vo/ 2>/dev/null || true)",
     "install:cap": "npm install @capacitor/core @capacitor/cli @capacitor/ios",
     "cap:init": "npx cap init \"Poly Oracle\" com.polyoracle.app --web-dir www",
     "cap:add:ios": "npx cap add ios",
@@ -28,6 +28,7 @@
     "@capacitor/cli": "^8.1.0",
     "@capacitor/core": "^8.1.0",
     "@capacitor/haptics": "^8.0.2",
-    "@capacitor/ios": "^8.1.0"
+    "@capacitor/ios": "^8.1.0",
+    "pixi.js": "^7.4.3"
   }
 }

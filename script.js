@@ -514,11 +514,147 @@ const commBoxController = (() => {
 
   const GLITCH = "▓░█▒╬╫╪";
   const availableVoFiles = new Set([
+    // dump1
     "vo-hairytakeemout.mp3",
     "vo-lets_blast_these_stroids.mp3",
     "vo-welcometothepolyverse.mp3",
     "vo-ufo_spotted_takeemout.mp3",
+    // dump2
+    "danger_loop.mp3",
+    "vo-cadet_theres_a_bomb.mp3",
+    "vo-detonate_the_bomb.mp3",
+    "vo-detonate_the_bomb2.mp3",
+    "vo-dont_get_cocky_on_me_kid.mp3",
+    "vo-dont_get_cocky_on_me.mp3",
+    "vo-excellent_work_cadet.mp3",
+    "vo-i_believe_in_you_cadet.mp3",
+    "vo-i_believe_in_you_cadet2.mp3",
+    "vo-interferenceambience.mp3",
+    "vo-lets_go_ahead_blast_em.mp3",
+    "vo-lets_show_em_whos_boss_get_out_of_here.mp3",
+    "vo-lets_show_the_polyverse_that_you_are_a_force_to_be_reckoned_with.mp3",
+    "vo-lets_show_up_and_show_em_whos_boss_kid.mp3",
+    "vo-nice_victory.mp3",
+    "vo-nice.mp3",
+    "vo-nice2.mp3",
+    "vo-nice_shot_cadet.mp3",
+    "vo-niceone.mp3",
+    "vo-phenomenal_work_cadet.mp3",
+    "vo-quicklaugh.mp3",
+    "vo-that_was_a_nice_shot_cadet.mp3",
+    "vo-thats_right_cadet.mp3",
+    "vo-theres_a_bomb.mp3",
+    "vo-very_nice_shot_cadet.mp3",
+    "vo-YES.mp3",
+    "vo-you_show_em_whos_boss_cadet.mp3",
+    "vo-you_show_em_whos_boss.mp3",
+    "vo-you_show_em_whos_boss2.mp3",
+    "vo-you_show_em_whos_boss3.mp3",
   ]);
+
+  const _poolIndices = {};
+  function pickFromPool(poolKey, arr) {
+    if (!_poolIndices[poolKey] || _poolIndices[poolKey] >= arr.length) {
+      _poolIndices[poolKey] = 0;
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+    }
+    return arr[_poolIndices[poolKey]++];
+  }
+
+  const POOL_LEVEL_START = [
+    "vo-lets_go_ahead_blast_em.mp3",
+    "vo-lets_show_em_whos_boss_get_out_of_here.mp3",
+    "vo-lets_show_up_and_show_em_whos_boss_kid.mp3",
+    "vo-lets_show_the_polyverse_that_you_are_a_force_to_be_reckoned_with.mp3",
+    "vo-lets_blast_these_stroids.mp3",
+  ];
+
+  const POOL_LEVEL_COMPLETE = [
+    "vo-nice_victory.mp3",
+    "vo-excellent_work_cadet.mp3",
+    "vo-phenomenal_work_cadet.mp3",
+    "vo-you_show_em_whos_boss_cadet.mp3",
+    "vo-you_show_em_whos_boss.mp3",
+    "vo-you_show_em_whos_boss2.mp3",
+    "vo-you_show_em_whos_boss3.mp3",
+  ];
+
+  const POOL_NICE_SHOT = [
+    "vo-nice.mp3",
+    "vo-nice2.mp3",
+    "vo-niceone.mp3",
+    "vo-nice_shot_cadet.mp3",
+    "vo-that_was_a_nice_shot_cadet.mp3",
+    "vo-very_nice_shot_cadet.mp3",
+    "vo-thats_right_cadet.mp3",
+    "vo-YES.mp3",
+  ];
+
+  const POOL_HYPE = [
+    "vo-you_show_em_whos_boss_cadet.mp3",
+    "vo-you_show_em_whos_boss.mp3",
+    "vo-you_show_em_whos_boss2.mp3",
+    "vo-you_show_em_whos_boss3.mp3",
+    "vo-lets_go_ahead_blast_em.mp3",
+  ];
+
+  const POOL_BOMB = [
+    "vo-cadet_theres_a_bomb.mp3",
+    "vo-theres_a_bomb.mp3",
+  ];
+
+  const POOL_DETONATE = [
+    "vo-detonate_the_bomb.mp3",
+    "vo-detonate_the_bomb2.mp3",
+  ];
+
+  const POOL_LOW_LIVES = [
+    "vo-i_believe_in_you_cadet.mp3",
+    "vo-i_believe_in_you_cadet2.mp3",
+  ];
+
+  const POOL_COCKY = [
+    "vo-dont_get_cocky_on_me_kid.mp3",
+    "vo-dont_get_cocky_on_me.mp3",
+  ];
+
+  const VO_CAPTIONS = {
+    "vo-hairytakeemout.mp3": "IT'S HAIRY OUT THERE. TAKE 'EM OUT.",
+    "vo-lets_blast_these_stroids.mp3": "LET'S BLAST THESE 'STROIDS.",
+    "vo-welcometothepolyverse.mp3": "WELCOME TO THE POLYVERSE.",
+    "vo-ufo_spotted_takeemout.mp3": "UFO SPOTTED. TAKE 'EM OUT.",
+    "vo-cadet_theres_a_bomb.mp3": "CADET - THERE'S A BOMB.",
+    "vo-theres_a_bomb.mp3": "THERE'S A BOMB.",
+    "vo-detonate_the_bomb.mp3": "DETONATE THE BOMB.",
+    "vo-detonate_the_bomb2.mp3": "DETONATE THE BOMB.",
+    "vo-dont_get_cocky_on_me_kid.mp3": "DON'T GET COCKY ON ME, KID.",
+    "vo-dont_get_cocky_on_me.mp3": "DON'T GET COCKY ON ME.",
+    "vo-excellent_work_cadet.mp3": "EXCELLENT WORK, CADET.",
+    "vo-i_believe_in_you_cadet.mp3": "I BELIEVE IN YOU, CADET.",
+    "vo-i_believe_in_you_cadet2.mp3": "I BELIEVE IN YOU.",
+    "vo-lets_go_ahead_blast_em.mp3": "LET'S GO AHEAD AND BLAST 'EM.",
+    "vo-lets_show_em_whos_boss_get_out_of_here.mp3": "LET'S SHOW 'EM WHO'S BOSS.",
+    "vo-lets_show_the_polyverse_that_you_are_a_force_to_be_reckoned_with.mp3": "SHOW THE POLYVERSE YOU'RE A FORCE.",
+    "vo-lets_show_up_and_show_em_whos_boss_kid.mp3": "SHOW 'EM WHO'S BOSS, KID.",
+    "vo-nice_victory.mp3": "NICE VICTORY.",
+    "vo-nice.mp3": "NICE.",
+    "vo-nice2.mp3": "NICE.",
+    "vo-nice_shot_cadet.mp3": "NICE SHOT, CADET.",
+    "vo-niceone.mp3": "NICE ONE.",
+    "vo-phenomenal_work_cadet.mp3": "PHENOMENAL WORK, CADET.",
+    "vo-quicklaugh.mp3": "HA.",
+    "vo-that_was_a_nice_shot_cadet.mp3": "THAT WAS A NICE SHOT, CADET.",
+    "vo-thats_right_cadet.mp3": "THAT'S RIGHT, CADET.",
+    "vo-very_nice_shot_cadet.mp3": "VERY NICE SHOT, CADET.",
+    "vo-YES.mp3": "YES!",
+    "vo-you_show_em_whos_boss_cadet.mp3": "YOU SHOW 'EM WHO'S BOSS, CADET.",
+    "vo-you_show_em_whos_boss.mp3": "YOU SHOW 'EM WHO'S BOSS.",
+    "vo-you_show_em_whos_boss2.mp3": "YOU SHOW 'EM WHO'S BOSS.",
+    "vo-you_show_em_whos_boss3.mp3": "YOU SHOW 'EM WHO'S BOSS.",
+  };
 
   function setFrame(key) {
     if (!portrait || !FRAMES[key]) return;
@@ -654,6 +790,9 @@ const commBoxController = (() => {
       ufo: "shockd",
       landmine: "shockd",
       chaos: "angry",
+      commander: "commander",
+      angry: "angry",
+      smirk: "smirk",
       levelcomplete: ["laugh", "laugh2"],
       lowlives: "exhausted",
       plasmacharged: "smirk",
@@ -687,6 +826,13 @@ const commBoxController = (() => {
     if (!hudVisible) show();
     if (!hudVisible) return;
 
+    let resolvedLines = lines;
+    if ((!lines || lines.length === 0) && audioSrc) {
+      const filename = audioSrc.split("/").pop();
+      const caption = VO_CAPTIONS[filename];
+      if (caption) resolvedLines = [caption];
+    }
+
     if (tickerHideTimer) {
       clearTimeout(tickerHideTimer);
       tickerHideTimer = null;
@@ -705,7 +851,7 @@ const commBoxController = (() => {
 
     startMouthFlap(getTalkFrames());
     showTicker();
-    typeText(lines);
+    typeText(resolvedLines);
 
     let doneCalled = false;
     const finish = () => {
@@ -761,6 +907,15 @@ const commBoxController = (() => {
     commVoSrc,
     setDamageState,
     reactTo,
+    pickFromPool,
+    POOL_LEVEL_START,
+    POOL_LEVEL_COMPLETE,
+    POOL_NICE_SHOT,
+    POOL_HYPE,
+    POOL_BOMB,
+    POOL_DETONATE,
+    POOL_LOW_LIVES,
+    POOL_COCKY,
   };
 })();
 
@@ -4146,6 +4301,11 @@ function initGalaxyCanvas() {
   let pausedLevelRemainingMs = 0;
   let pausedLandmineRemainingMs = 0;
   let landmineFlashUntil = 0;
+  let _dangerLoopAudio = null;
+  let _streakCount = 0;
+  let _streakTimer = null;
+  let _praiseCount = 0;
+  let _lastPraiseAt = 0;
   let lastAsteroidCollisionSfxAt = 0;
   let suppressAstCollisionSfxUntil = 0;
   let _lastExplosionSoundAt = 0;
@@ -4917,9 +5077,9 @@ function initGalaxyCanvas() {
     };
     commBoxController.reactTo("landmine");
     commBoxController.triggerVO({
-      lines: ["LANDMINE", "DETECTED.", "WATCH OUT."],
-      audioSrc: null,
-      duration: 3000,
+      audioSrc: commBoxController.commVoSrc(
+        commBoxController.pickFromPool("bomb", commBoxController.POOL_BOMB),
+      ),
       event: "landmine",
     });
     playGameSfx("blip1", 0.8, { rate: 1.05 });
@@ -4963,7 +5123,6 @@ function initGalaxyCanvas() {
     startUfoDrone();
     commBoxController.reactTo("ufo");
     commBoxController.triggerVO({
-      lines: ["UFO SPOTTED.", "TAKE 'EM OUT."],
       audioSrc: commBoxController.commVoSrc("vo-ufo_spotted_takeemout.mp3"),
       event: "ufo",
     });
@@ -5246,6 +5405,58 @@ function initGalaxyCanvas() {
     return d <= landmine.r + 10;
   }
 
+  function stopDangerLoop() {
+    if (!_dangerLoopAudio) return;
+    _dangerLoopAudio.pause();
+    _dangerLoopAudio.currentTime = 0;
+    _dangerLoopAudio = null;
+  }
+
+  function resetKillStreak() {
+    _streakCount = 0;
+    clearTimeout(_streakTimer);
+    _streakTimer = null;
+  }
+
+  function resetPraiseState() {
+    resetKillStreak();
+    _praiseCount = 0;
+    _lastPraiseAt = 0;
+  }
+
+  function trackKillStreak() {
+    _streakCount++;
+    clearTimeout(_streakTimer);
+    _streakTimer = setTimeout(() => {
+      _streakCount = 0;
+    }, 3000);
+
+    const now2 = performance.now();
+    if (_streakCount >= 4 && now2 - _lastPraiseAt > 6000) {
+      _lastPraiseAt = now2;
+      _praiseCount++;
+
+      if (_praiseCount % 3 === 0) {
+        setTimeout(() => {
+          commBoxController.triggerVO({
+            audioSrc: commBoxController.commVoSrc(
+              commBoxController.pickFromPool("cocky", commBoxController.POOL_COCKY),
+            ),
+            event: "angry",
+          });
+        }, 1200);
+      } else {
+        commBoxController.triggerVO({
+          audioSrc: commBoxController.commVoSrc(
+            commBoxController.pickFromPool("niceshot", commBoxController.POOL_NICE_SHOT),
+          ),
+          event: "smirk",
+        });
+      }
+      _streakCount = 0;
+    }
+  }
+
   function removeAsteroidAt(index) {
     const a = sim.asteroids[index];
     if (!a) return null;
@@ -5266,6 +5477,7 @@ function initGalaxyCanvas() {
     const parentSpeed = Math.sqrt(a.vx * a.vx + a.vy * a.vy);
     addArcadeScore(arcadeMultiplierPoints(wasKind >= 2 ? 25 : 10));
     releaseAsteroid(a);
+    trackKillStreak();
 
     if (wasKind > 1) {
       const childCount = wasKind === 3 ? (3 + Math.floor(Math.random() * 3)) : (2 + Math.floor(Math.random() * 2));
@@ -5343,6 +5555,7 @@ function initGalaxyCanvas() {
     const bigBlast = a.kind === 3;
     const mediumBlast = a.kind === 2;
     addArcadeScore(arcadeMultiplierPoints(a.kind >= 2 ? 25 : 10));
+    trackKillStreak();
     spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1, 1, a.kind);
     const baseBoomVol = bigBlast ? 0.9 : mediumBlast ? 0.9 : 0.76;
     const minBoomRatio = bigBlast ? 0.62 : mediumBlast ? 0.82 : 0.9;
@@ -5461,7 +5674,7 @@ function initGalaxyCanvas() {
     plasmaCage.rechargeSoundPlayed = true;
     playGameSfx("plasmarecharged", 1.0);
     commBoxController.triggerVO({
-      lines: ["PLASMA", "RECHARGED.", "READY."],
+      lines: ["PLASMA RECHARGED. READY."],
       audioSrc: commBoxController.commVoSrc("plasma_ready.mp3"),
       duration: 2500,
       event: "plasmacharged",
@@ -5698,6 +5911,18 @@ function initGalaxyCanvas() {
     landmine.armedAt = now;
     landmine.explodeAt = now + 1000;
     playGameSfx("landmine_arm", 0.96);
+    if (!_dangerLoopAudio) {
+      _dangerLoopAudio = new Audio(commBoxController.commVoSrc("danger_loop.mp3"));
+      _dangerLoopAudio.loop = true;
+      _dangerLoopAudio.volume = 0.4;
+      _dangerLoopAudio.play().catch(() => {});
+    }
+    commBoxController.triggerVO({
+      audioSrc: commBoxController.commVoSrc(
+        commBoxController.pickFromPool("detonate", commBoxController.POOL_DETONATE),
+      ),
+      event: "landmine",
+    });
   }
 
   function explodeLandmine() {
@@ -5706,6 +5931,7 @@ function initGalaxyCanvas() {
     const y = landmine.y;
     const radius = 700;
     landmine = null;
+    stopDangerLoop();
 
     for (let i = 0; i < sim.asteroids.length; i += 1) {
       const a = sim.asteroids[i];
@@ -5732,6 +5958,7 @@ function initGalaxyCanvas() {
     sim.lightningRings.length = 0;
     sim.shooting = null;
     landmine = null;
+    stopDangerLoop();
     landmineSpawnedThisLevel = false;
     stopUfoDrone();
     ufo = null;
@@ -5756,8 +5983,9 @@ function initGalaxyCanvas() {
     triggerHapticNotification(hapticNotificationType.Success);
     commBoxController.reactTo("levelcomplete");
     commBoxController.triggerVO({
-      lines: ["SECTOR", "CLEARED."],
-      audioSrc: commBoxController.commVoSrc("level_complete.mp3"),
+      audioSrc: commBoxController.commVoSrc(
+        commBoxController.pickFromPool("levelcomplete", commBoxController.POOL_LEVEL_COMPLETE),
+      ),
       event: "levelcomplete",
     });
     const cfg = ARCADE_LEVELS[currentLevelIndex];
@@ -5804,8 +6032,9 @@ function initGalaxyCanvas() {
         if (arcadeLives === 1) commBoxController.setDamageState("heavy");
         if (arcadeLives === 1) {
           commBoxController.triggerVO({
-            lines: ["WARNING—", "LAST LIFE", "REMAINING."],
-            audioSrc: commBoxController.commVoSrc("low_lives.mp3"),
+            audioSrc: commBoxController.commVoSrc(
+              commBoxController.pickFromPool("lowlives", commBoxController.POOL_LOW_LIVES),
+            ),
             event: "lowlives",
           });
         }
@@ -5851,6 +6080,7 @@ function initGalaxyCanvas() {
     clearGameplayEntities();
     commBoxController.show();
     commBoxController.setDamageState("normal");
+    resetPraiseState();
     totalToSpawn = cfg.totalToClear;
     spawnedTotal = 0;
     spawnQueue = Math.max(0, cfg.totalToClear - cfg.startSpawn);
@@ -5862,6 +6092,7 @@ function initGalaxyCanvas() {
     levelEndsAt = levelRunStartAt + levelDurationMs;
     nextSpawnAt = cfg.spawnEveryMs > 0 ? levelRunStartAt + cfg.spawnEveryMs : Infinity;
     landmine = null;
+    stopDangerLoop();
     landmineSpawnedThisLevel = false;
     ufo = null;
     setupUfoSpawnForLevel(cfg);
@@ -5886,24 +6117,32 @@ function initGalaxyCanvas() {
     retryPending = false;
     updateArcadeHud(now);
     showLevelIntro(cfg.level);
-    const playStroidsComm = () => {
-      commBoxController.triggerVO({
-        lines: ["LET'S BLAST", "THESE 'STROIDS."],
-        audioSrc: commBoxController.commVoSrc("vo-lets_blast_these_stroids.mp3"),
-      });
-    };
-    if (cfg.level === 1) {
-      commBoxController.triggerVO({
-        lines: ["WELCOME TO", "THE POLYVERSE."],
-        audioSrc: commBoxController.commVoSrc("vo-welcometothepolyverse.mp3"),
-        onDone: playStroidsComm,
-      });
+
+    const levelNum = cfg.level;
+    let levelStartVO = null;
+
+    if (levelNum === 1) {
+      levelStartVO = "vo-welcometothepolyverse.mp3";
+    } else if (levelNum === 5) {
+      levelStartVO = "vo-hairytakeemout.mp3";
     } else {
-      commBoxController.triggerVO({
-        lines: ["GOOD LUCK,", "PILOT."],
-        audioSrc: null,
-      });
-      setTimeout(playStroidsComm, 600);
+      levelStartVO = commBoxController.pickFromPool(
+        "levelstart",
+        commBoxController.POOL_LEVEL_START,
+      );
+    }
+
+    commBoxController.triggerVO({
+      audioSrc: commBoxController.commVoSrc(levelStartVO),
+      event: "commander",
+    });
+
+    if (levelNum === 1) {
+      setTimeout(() => {
+        commBoxController.triggerVO({
+          audioSrc: commBoxController.commVoSrc("vo-lets_blast_these_stroids.mp3"),
+        });
+      }, 600);
     }
   }
 
@@ -6227,7 +6466,6 @@ function initGalaxyCanvas() {
         sim._lastChaosTrigger = now;
         commBoxController.reactTo("chaos");
         commBoxController.triggerVO({
-          lines: ["IT'S HAIRY", "OUT THERE—", "TAKE 'EM OUT."],
           audioSrc: commBoxController.commVoSrc("vo-hairytakeemout.mp3"),
           event: "chaos",
         });
@@ -6912,6 +7150,7 @@ function initGalaxyCanvas() {
   function stopGalaxyLoop() {
     galaxyRunning = false;
     stopWarningState();
+    stopDangerLoop();
     if (galaxyRaf) cancelAnimationFrame(galaxyRaf);
     galaxyRaf = 0;
     clearTimeout(sim.shootingTimer);

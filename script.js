@@ -123,6 +123,7 @@ const PLASMA_CAGE_COOLDOWN_MS = 5000;
 const PLASMA_CAGE_DRAG_THRESHOLD = 20;
 const PLASMA_CAGE_VOLUME_BOOST = Math.pow(10, 4 / 20);
 const CHAOS_THRESHOLD = 60;
+const IOS_NATIVE_MAX_ASTEROIDS = 55;
 const MAX_LIVES = 3;
 const MUSIC_MAX_GAIN = 0.85;
 const MUSIC = {
@@ -318,6 +319,17 @@ const defaultPalette = {
 const prefersReducedMotion =
   typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const isIOSWebKit = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isCapacitorNative = !!(globalThis.Capacitor?.isNativePlatform?.());
+const isIOSNative = isCapacitorNative && isIOSWebKit;
+
+function nativeCanvasDpr() {
+  return isIOSNative ? 1 : Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+}
+
+function capIOSNativeAsteroids(value) {
+  const safeValue = Math.max(0, Math.floor(value || 0));
+  return isIOSNative ? Math.min(safeValue, IOS_NATIVE_MAX_ASTEROIDS) : safeValue;
+}
 
 const state = {
   selectedMode: "classic",
@@ -779,7 +791,7 @@ function createFuzzyText(canvas, opts = {}) {
   const frameMs = 1000 / Math.max(20, cfg.fps);
   const offscreen = document.createElement("canvas");
   const offCtx = offscreen.getContext("2d");
-  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const dpr = nativeCanvasDpr();
   let textW = 0;
   let textH = 0;
   let marginX = 0;
@@ -1958,6 +1970,7 @@ function _parseFlashColor(color) {
 }
 
 function flashScreen(color = "#ffffff", ms = 250, peak = 0.9) {
+  if (isIOSNative) return;
   if (!canvasFlash) return;
   const { r, g, b } = _parseFlashColor(color);
   const safePeak = clamp(peak, 0, 1);
@@ -3928,10 +3941,18 @@ function stopGalaxyBackground() {
 // === Arcade Mode ===
 function initGalaxyCanvas() {
   if (!galaxyPlayCanvas) return;
-  const ctx = galaxyPlayCanvas.getContext("2d");
+  const ctx = galaxyPlayCanvas.getContext("2d", {
+    alpha: false,
+    desynchronized: true,
+    willReadFrequently: false,
+  });
   if (!ctx) return;
   const plasmaOverlayCanvas = document.createElement("canvas");
-  const plasmaCtx = plasmaOverlayCanvas.getContext("2d");
+  const plasmaCtx = plasmaOverlayCanvas.getContext("2d", {
+    alpha: true,
+    desynchronized: true,
+    willReadFrequently: false,
+  });
   plasmaOverlayCanvas.setAttribute("aria-hidden", "true");
   plasmaOverlayCanvas.style.position = "absolute";
   plasmaOverlayCanvas.style.pointerEvents = "none";
@@ -3968,6 +3989,7 @@ function initGalaxyCanvas() {
     rechargeSoundPlayed: true,
   };
   const laserBeams = [];
+  const _bombDestroyQueue = [];
   canvasFlash = { r: 0, g: 255, b: 255, peak: 0, alpha: 0, decayPerMs: 0 };
 
   const sim = {
@@ -4032,6 +4054,8 @@ function initGalaxyCanvas() {
   let landmineFlashUntil = 0;
   let lastAsteroidCollisionSfxAt = 0;
   let suppressAstCollisionSfxUntil = 0;
+  let _lastExplosionSoundAt = 0;
+  let scoreRenderRaf = 0;
   let warningActive = false;
   let warningLoopHandle = null;
   let warningHapticInterval = null;
@@ -4189,10 +4213,24 @@ function initGalaxyCanvas() {
     hudMultiplier.textContent = `${multiplier.toFixed(1)}x`;
   }
 
+  function scheduleScoreRender() {
+    if (isIOSNative) {
+      if (scoreRenderRaf) return;
+      scoreRenderRaf = requestAnimationFrame(() => {
+        scoreRenderRaf = 0;
+        renderScore();
+        renderScoreMultiplier();
+      });
+      return;
+    }
+    renderScore();
+    renderScoreMultiplier();
+  }
+
   function addArcadeScore(points) {
     if (engineMode !== "arcade") return;
     arcadeScore = Math.max(0, arcadeScore + Math.floor(points || 0));
-    renderScore();
+    scheduleScoreRender();
   }
 
   function stopWarningState() {
@@ -4667,6 +4705,11 @@ function initGalaxyCanvas() {
   }
 
   function playAsteroidExplosionBoom(kind, volume, rate) {
+    if (isIOSNative) {
+      const now = performance.now();
+      if (now - _lastExplosionSoundAt < 80) return;
+      _lastExplosionSoundAt = now;
+    }
     const mediumKeys = ["explosion_med", "explosion_med_alt"];
     const smallKeys = ["explosion_small", "explosion_small_alt"];
     const key = kind >= 3 ? "explosion_big" : kind === 2 ? pick(mediumKeys) : pick(smallKeys);
@@ -4852,9 +4895,15 @@ function initGalaxyCanvas() {
     renderLives();
   }
 
-  function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1) {
-    const emitCount = prefersReducedMotion ? Math.min(6, count) : count;
+  function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1, asteroidKind = 3) {
+    if (isIOSNative && sim.particles.length >= 60) return;
+    const isLarge = asteroidKind >= 2;
+    const particleCount = isIOSNative
+      ? (isLarge ? Math.ceil(count / 2) : Math.ceil(count / 3))
+      : count;
+    const emitCount = prefersReducedMotion ? Math.min(6, particleCount) : particleCount;
     for (let i = 0; i < emitCount; i += 1) {
+      if (isIOSNative && sim.particles.length >= 60) break;
       if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
       const angle = Math.random() * Math.PI * 2;
       const speed = 30 + Math.random() * 110;
@@ -5116,13 +5165,28 @@ function initGalaxyCanvas() {
 
     if (wasKind > 1) {
       const childCount = wasKind === 3 ? (3 + Math.floor(Math.random() * 3)) : (2 + Math.floor(Math.random() * 2));
-      for (let i = 0; i < childCount; i += 1) {
-        if (sim.asteroids.length >= sim.maxAsteroids) break;
+      const spawnSplitChild = () => {
+        if (sim.asteroids.length >= sim.maxAsteroids) return false;
         const child = spawnAsteroid(baseX, baseY, wasKind - 1, false);
-        if (!child) break;
+        if (!child) return false;
         const boost = 1.5 + Math.random() * 0.7;
         child.vx += (child.vx / Math.max(1, Math.abs(child.vx))) * parentSpeed * 0.2 * boost;
         child.vy += (child.vy / Math.max(1, Math.abs(child.vy))) * parentSpeed * 0.2 * boost;
+        return true;
+      };
+      if (isIOSNative) {
+        let spawnedChildren = 0;
+        const spawnNextChild = () => {
+          if (spawnedChildren >= childCount) return;
+          if (!spawnSplitChild()) return;
+          spawnedChildren += 1;
+          if (spawnedChildren < childCount) requestAnimationFrame(spawnNextChild);
+        };
+        spawnNextChild();
+      } else {
+        for (let i = 0; i < childCount; i += 1) {
+          if (!spawnSplitChild()) break;
+        }
       }
     }
 
@@ -5131,7 +5195,7 @@ function initGalaxyCanvas() {
     const bigBlast = wasKind === 3;
     const mediumBlast = wasKind === 2;
     const ttlScale = bigBlast ? 1.4 : mediumBlast ? 1.18 : 1;
-    spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale);
+    spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale, wasKind);
     const baseBoomVol = wasKind === 3 ? 0.9 : wasKind === 2 ? 0.92 : 0.78;
     const minBoomRatio = wasKind === 3 ? 0.62 : wasKind === 2 ? 0.8 : 0.9;
     playAsteroidExplosionBoom(
@@ -5175,7 +5239,7 @@ function initGalaxyCanvas() {
     const bigBlast = a.kind === 3;
     const mediumBlast = a.kind === 2;
     addArcadeScore(arcadeMultiplierPoints(a.kind >= 2 ? 25 : 10));
-    spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1);
+    spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1, 1, a.kind);
     const baseBoomVol = bigBlast ? 0.9 : mediumBlast ? 0.9 : 0.76;
     const minBoomRatio = bigBlast ? 0.62 : mediumBlast ? 0.82 : 0.9;
     playAsteroidExplosionBoom(
@@ -5384,8 +5448,10 @@ function initGalaxyCanvas() {
     drawPlasmaGrid({ x, y, w, h }, (charged ? 0.18 : 0.08 + progress * 0.25) * alpha);
     plasmaCtx.save();
     plasmaCtx.globalAlpha = borderAlpha;
-    plasmaCtx.shadowColor = "#00FFD1";
-    plasmaCtx.shadowBlur = glow;
+    if (!isIOSNative) {
+      plasmaCtx.shadowColor = "#00FFD1";
+      plasmaCtx.shadowBlur = glow;
+    }
     plasmaCtx.strokeStyle = color;
     plasmaCtx.lineWidth = charged ? 2.4 : 1.4 + progress * 1.2;
     plasmaCtx.setLineDash([10, 8]);
@@ -5430,8 +5496,10 @@ function initGalaxyCanvas() {
     plasmaCtx.arc(x, y, 14, 0, Math.PI * 2);
     plasmaCtx.stroke();
     plasmaCtx.strokeStyle = "rgba(0,255,209,0.9)";
-    plasmaCtx.shadowColor = "#00FFD1";
-    plasmaCtx.shadowBlur = 8;
+    if (!isIOSNative) {
+      plasmaCtx.shadowColor = "#00FFD1";
+      plasmaCtx.shadowBlur = 8;
+    }
     plasmaCtx.beginPath();
     plasmaCtx.arc(x, y, 14, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
     plasmaCtx.stroke();
@@ -5455,8 +5523,10 @@ function initGalaxyCanvas() {
       plasmaCtx.globalAlpha = 1 - t;
       plasmaCtx.strokeStyle = "#00FFD1";
       plasmaCtx.lineWidth = 2;
-      plasmaCtx.shadowColor = "#00FFD1";
-      plasmaCtx.shadowBlur = 12;
+      if (!isIOSNative) {
+        plasmaCtx.shadowColor = "#00FFD1";
+        plasmaCtx.shadowBlur = 12;
+      }
       plasmaCtx.beginPath();
       plasmaCtx.moveTo(beam.x1, beam.y1);
       plasmaCtx.lineTo(beam.x2, beam.y2);
@@ -5502,20 +5572,10 @@ function initGalaxyCanvas() {
     const radius = 700;
     landmine = null;
 
-    const toDestroy = [];
     for (let i = 0; i < sim.asteroids.length; i += 1) {
       const a = sim.asteroids[i];
-      if (Math.hypot(a.x - x, a.y - y) <= radius + a.r) toDestroy.push(a);
+      if (Math.hypot(a.x - x, a.y - y) <= radius + a.r) _bombDestroyQueue.push(a);
     }
-    const vaporizeBatch = () => {
-      for (let i = 0; i < 3 && toDestroy.length; i += 1) {
-        const asteroid = toDestroy.pop();
-        const index = sim.asteroids.indexOf(asteroid);
-        if (index >= 0) vaporizeAsteroidByIndex(index);
-      }
-      if (toDestroy.length) setTimeout(vaporizeBatch, 16);
-    };
-    vaporizeBatch();
     addWarpRing(x, y, "rgba(255,90,90,1)");
     spawnExplosion(x, y, 80, true);
     triggerLandmineScreenFlash();
@@ -5544,6 +5604,7 @@ function initGalaxyCanvas() {
     plasmaCage.releaseFx = null;
     plasmaCage.rechargeSoundPlayed = true;
     laserBeams.length = 0;
+    _bombDestroyQueue.length = 0;
     stopPlasmaChargeSound();
     stopWarningState();
   }
@@ -5650,8 +5711,8 @@ function initGalaxyCanvas() {
     totalToSpawn = cfg.totalToClear;
     spawnedTotal = 0;
     spawnQueue = Math.max(0, cfg.totalToClear - cfg.startSpawn);
-    maxOnScreen = cfg.maxOnScreen;
-    sim.maxAsteroids = cfg.maxOnScreen;
+    maxOnScreen = capIOSNativeAsteroids(cfg.maxOnScreen);
+    sim.maxAsteroids = capIOSNativeAsteroids(cfg.maxOnScreen);
     levelDurationMs = cfg.time * 1000;
     levelRunStartAt = now + 400;
     arcadePausedUntil = levelRunStartAt;
@@ -5799,7 +5860,7 @@ function initGalaxyCanvas() {
     setMenuOverlayOpen(false);
     syncArcadeEntryLabel();
     setGalaxyViewMode("practice");
-    sim.maxAsteroids = PRACTICE_MAX_ASTEROIDS;
+    sim.maxAsteroids = capIOSNativeAsteroids(PRACTICE_MAX_ASTEROIDS);
     setGalaxyBackgroundForLevel(1);
     setGalaxyTool("draw");
     state.practiceTool = "pencil";
@@ -5838,7 +5899,7 @@ function initGalaxyCanvas() {
     syncArcadeMenuButtons();
     setGalaxyViewMode("menu");
     setMenuOverlayOpen(true);
-    sim.maxAsteroids = sim.width < 700 ? 80 : 120;
+    sim.maxAsteroids = capIOSNativeAsteroids(sim.width < 700 ? 80 : 120);
     setGalaxyTool("draw");
     setPracticeToolUI();
     if (!canPreserve) {
@@ -5861,7 +5922,7 @@ function initGalaxyCanvas() {
   }
 
   function resizeGalaxyCanvas() {
-    sim.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    sim.dpr = nativeCanvasDpr();
     const rect = galaxyPlayCanvas.getBoundingClientRect();
     const rawWidth = Math.max(1, Math.floor(rect.width || window.innerWidth));
     const rawHeight = Math.max(1, Math.floor(rect.height || window.innerHeight));
@@ -5886,7 +5947,9 @@ function initGalaxyCanvas() {
     galaxyPlayCanvas.height = Math.floor(height * sim.dpr);
     ctx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
     resizePlasmaOverlayCanvas();
-    sim.maxAsteroids = engineMode === "practice" ? PRACTICE_MAX_ASTEROIDS : (engineMode === "arcade" ? sim.maxAsteroids : (sim.width < 700 ? 80 : 120));
+    sim.maxAsteroids = capIOSNativeAsteroids(
+      engineMode === "practice" ? PRACTICE_MAX_ASTEROIDS : (engineMode === "arcade" ? sim.maxAsteroids : (sim.width < 700 ? 80 : 120)),
+    );
     seedStars();
     computePlayfield();
   }
@@ -5938,6 +6001,8 @@ function initGalaxyCanvas() {
   }
 
   function update(dt, now) {
+    const _frameBudgetExceeded = isIOSNative && dt > 32;
+    sim._frameBudgetExceeded = _frameBudgetExceeded;
     const driftScale = prefersReducedMotion ? 0 : 1;
     for (let i = 0; i < sim.stars.length; i += 1) {
       const s = sim.stars[i];
@@ -6015,6 +6080,12 @@ function initGalaxyCanvas() {
 
     const gameplayAllowed = engineMode === "practice" || (engineMode === "arcade" && arcadeActive && now >= arcadePausedUntil);
     if (gameplayAllowed) {
+      for (let i = 0; i < 6 && _bombDestroyQueue.length; i += 1) {
+        const asteroid = _bombDestroyQueue.shift();
+        const index = sim.asteroids.indexOf(asteroid);
+        if (index >= 0) vaporizeAsteroidByIndex(index);
+      }
+
       for (let i = 0; i < sim.asteroids.length; i += 1) {
         const a = sim.asteroids[i];
         a.x += a.vx * (dt / 1000);
@@ -6123,6 +6194,7 @@ function initGalaxyCanvas() {
   }
 
   function draw(now) {
+    const _frameBudgetExceeded = !!sim._frameBudgetExceeded;
     ctx.clearRect(0, 0, sim.width, sim.height);
 
     if (engineMode === "practice" && practiceTapMarker) {
@@ -6152,7 +6224,7 @@ function initGalaxyCanvas() {
       }
     }
 
-    if (!prefersReducedMotion) {
+    if (!prefersReducedMotion && !_frameBudgetExceeded) {
       sim._starFrame = ((sim._starFrame || 0) + 1) & 3;
       if (sim._starFrame === 0) {
         for (let i = 0; i < sim.stars.length; i += 1) {
@@ -6161,13 +6233,15 @@ function initGalaxyCanvas() {
         }
       }
     }
-    for (let i = 0; i < sim.stars.length; i += 1) {
-      const s = sim.stars[i];
-      const alpha = prefersReducedMotion ? s.baseAlpha : (s._cachedAlpha ?? s.baseAlpha);
-      ctx.beginPath();
-      ctx.fillStyle = `rgba(214,227,255,${alpha.toFixed(3)})`;
-      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-      ctx.fill();
+    if (!_frameBudgetExceeded) {
+      for (let i = 0; i < sim.stars.length; i += 1) {
+        const s = sim.stars[i];
+        const alpha = prefersReducedMotion ? s.baseAlpha : (s._cachedAlpha ?? s.baseAlpha);
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(214,227,255,${alpha.toFixed(3)})`;
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     const _plasmaActive = plasmaCage.active;
@@ -6315,8 +6389,10 @@ function initGalaxyCanvas() {
 
       ctx.strokeStyle = damaged ? "rgba(255,124,124,0.55)" : "rgba(156,255,194,0.58)";
       ctx.lineWidth = 1.4;
-      ctx.shadowBlur = prefersReducedMotion ? 0 : 14;
-      ctx.shadowColor = damaged ? "rgba(255,110,110,0.75)" : "rgba(112,245,166,0.8)";
+      if (!isIOSNative) {
+        ctx.shadowBlur = prefersReducedMotion ? 0 : 14;
+        ctx.shadowColor = damaged ? "rgba(255,110,110,0.75)" : "rgba(112,245,166,0.8)";
+      }
       ctx.beginPath();
       ctx.ellipse(0, 0, ufo.r * 1.32, ufo.r * 0.72, 0, 0, Math.PI * 2);
       ctx.stroke();
@@ -6349,17 +6425,19 @@ function initGalaxyCanvas() {
       ctx.restore();
     }
 
-    for (let i = 0; i < sim.warpRings.length; i += 1) {
-      const ring = sim.warpRings[i];
-      const t = ring.life / ring.ttl;
-      const radius = ring.baseR + (ring.maxR - ring.baseR) * t;
-      const alpha = ring.alpha * (1 - t);
-      const base = ring.color || "rgba(112,255,178,1)";
-      ctx.beginPath();
-      ctx.strokeStyle = base.replace(/[\d.]+\)$/u, `${Math.max(0, alpha).toFixed(3)})`);
-      ctx.lineWidth = prefersReducedMotion ? 1.2 : 1.8;
-      ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
-      ctx.stroke();
+    if (!_frameBudgetExceeded) {
+      for (let i = 0; i < sim.warpRings.length; i += 1) {
+        const ring = sim.warpRings[i];
+        const t = ring.life / ring.ttl;
+        const radius = ring.baseR + (ring.maxR - ring.baseR) * t;
+        const alpha = ring.alpha * (1 - t);
+        const base = ring.color || "rgba(112,255,178,1)";
+        ctx.beginPath();
+        ctx.strokeStyle = base.replace(/[\d.]+\)$/u, `${Math.max(0, alpha).toFixed(3)})`);
+        ctx.lineWidth = prefersReducedMotion ? 1.2 : 1.8;
+        ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
     for (let i = 0; i < sim.lightningRings.length; i += 1) {
       const ring = sim.lightningRings[i];
@@ -6369,8 +6447,10 @@ function initGalaxyCanvas() {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.lineWidth = ring.thickness + (1 - t) * 1.8;
-      ctx.shadowBlur = 18;
-      ctx.shadowColor = ring.glow.replace(/[\d.]+\)$/u, `${(0.9 * alpha).toFixed(3)})`);
+      if (!isIOSNative) {
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = ring.glow.replace(/[\d.]+\)$/u, `${(0.9 * alpha).toFixed(3)})`);
+      }
       ctx.strokeStyle = ring.colorA.replace(/[\d.]+\)$/u, `${(0.95 * alpha).toFixed(3)})`);
       const seed = ((ring.life * 0.03) | 0) % 997;
       for (let j = 0; j < ring.arcCount; j += 1) {
@@ -6405,7 +6485,8 @@ function initGalaxyCanvas() {
     }
     effects.draw(ctx);
 
-    for (let i = 0; i < sim.particles.length; i += 1) {
+    const particleLimit = _frameBudgetExceeded ? Math.min(40, sim.particles.length) : sim.particles.length;
+    for (let i = 0; i < particleLimit; i += 1) {
       const p = sim.particles[i];
       const alpha = (1 - p.life / p.ttl) * p.alpha;
       if (alpha <= 0) continue;
@@ -6436,7 +6517,7 @@ function initGalaxyCanvas() {
       ctx.lineTo(sim.shooting.x - sim.shooting.length, sim.shooting.y - sim.shooting.length * 0.55);
       ctx.stroke();
     }
-    if (canvasFlash?.alpha > 0) {
+    if (canvasFlash?.alpha > 0 && !isIOSNative) {
       ctx.save();
       ctx.globalCompositeOperation = "screen";
       ctx.fillStyle = `rgba(${canvasFlash.r},${canvasFlash.g},${canvasFlash.b},${canvasFlash.alpha.toFixed(3)})`;
@@ -6838,7 +6919,7 @@ function initGalaxyBackground() {
   }
 
   function resize() {
-    galaxy.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    galaxy.dpr = nativeCanvasDpr();
     galaxy.width = Math.floor(window.innerWidth);
     galaxy.height = Math.floor(window.innerHeight);
 

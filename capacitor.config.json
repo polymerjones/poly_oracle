@@ -3,6 +3,19 @@
   "appName": "Poly Oracle",
   "webDir": "www",
   "bundledWebRuntime": false,
+  "ios": {
+    "backgroundColor": "#000000",
+    "allowsLinkPreview": false,
+    "scrollEnabled": false,
+    "contentInset": "never",
+    "preferredContentMode": "mobile"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "backgroundColor": "#000000"
+    }
+  },
   "server": {
     "androidScheme": "https"
   }

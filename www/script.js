@@ -101,6 +101,10 @@ const GAME_SFX = {
   reveal4_pool: "reveal4.mp3",
   warning10: "assets/newsfx/newnewwarningloop.mp3",
   plasma_charge: "assets/newsfx/newnewwarningloop.mp3",
+  advfire: "newsfx/advfire.mp3",
+  plasmarecharged: "newsfx/plasmarecharged.mp3",
+  droneufo: "newsfx/droneufo.mp3",
+  reveal4: "reveal4.mp3",
   ufo_spawn: "gamesfx/blip1.mp3",
   ufo_teleport: "assets/newsfx/phantom.mp3",
   ufo_hit1: "gamesfx/astcollide2.mp3",
@@ -117,6 +121,9 @@ const MAX_EXPLOSION_PARTICLES = 120;
 const PLASMA_CAGE_CHARGE_MS = 1000;
 const PLASMA_CAGE_COOLDOWN_MS = 5000;
 const PLASMA_CAGE_DRAG_THRESHOLD = 20;
+const PLASMA_CAGE_VOLUME_BOOST = Math.pow(10, 4 / 20);
+const CHAOS_THRESHOLD = 60;
+const IOS_NATIVE_MAX_ASTEROIDS = 55;
 const MAX_LIVES = 3;
 const MUSIC_MAX_GAIN = 0.85;
 const MUSIC = {
@@ -144,6 +151,7 @@ function nextMusicKeyForLevel(levelNum) {
 
 const DEBUG_FORCE_LEVEL_SELECT = true;
 const DEBUG_SHOW_LEVEL_DROPDOWN = false;
+let canvasFlash = null;
 const REVEAL_VARIANT_SFX = [
   "newreveal001",
   "newreveal002",
@@ -311,6 +319,17 @@ const defaultPalette = {
 const prefersReducedMotion =
   typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const isIOSWebKit = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isCapacitorNative = !!(globalThis.Capacitor?.isNativePlatform?.());
+const isIOSNative = isCapacitorNative && isIOSWebKit;
+
+function nativeCanvasDpr() {
+  return isIOSNative ? 1 : Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+}
+
+function capIOSNativeAsteroids(value) {
+  const safeValue = Math.max(0, Math.floor(value || 0));
+  return isIOSNative ? Math.min(safeValue, IOS_NATIVE_MAX_ASTEROIDS) : safeValue;
+}
 
 const state = {
   selectedMode: "classic",
@@ -416,6 +435,7 @@ const hudLevel = document.getElementById("hudLevel");
 const hudTimer = document.getElementById("hudTimer");
 const hudLives = document.getElementById("hudLives");
 const hudScore = document.getElementById("hudScore");
+let hudMultiplier = document.getElementById("hudMultiplier");
 const arcadeTimerBackdrop = document.getElementById("arcadeTimerBackdrop");
 const arcadeTimerGhost = document.getElementById("arcadeTimerGhost");
 const arcadeOverlay = document.getElementById("arcadeOverlay");
@@ -423,6 +443,255 @@ const arcadeOverlayText = document.getElementById("arcadeOverlayText");
 const arcadeOverlaySub = document.getElementById("arcadeOverlaySub");
 const arcadeOverlayBtn = document.getElementById("arcadeOverlayBtn");
 const arcadeOverlayBtnSecondary = document.getElementById("arcadeOverlayBtnSecondary");
+
+const commBoxController = (() => {
+  const SKIN = "#c8956a";
+  const SKIN2 = "#b87d52";
+  const SKIN3 = "#a86a3a";
+  const HAIR = "#8B4513";
+  const HAIR2 = "#6b2e0a";
+  const UNIF = "#1a2a1a";
+  const UNIF2 = "#0d1a0d";
+  const EYE_W = "#e8e0d0";
+  const IRIS = "#3a6a3a";
+  const PUPIL = "#111";
+  const MUST = "#5a2a08";
+  const BEARD = "#6b3310";
+  const BEAD1 = "#7a5a28";
+  const BEAD2 = "#8a6a30";
+  const FG = "#080e08";
+  const GLITCH_CHARS = "▓░█▒╬╫╪╠╣╦╩╤╧╬▓";
+  const availableVoFiles = new Set([
+    "vo-hairytakeemout.mp3",
+    "vo-lets_blast_these_stroids.mp3",
+    "vo-welcometothepolyverse.mp3",
+    "vo-ufo_spotted_takeemout.mp3",
+  ]);
+
+  let mouthOpen = false;
+  let mouthInterval = null;
+  let active = false;
+  let voAudio = null;
+  let hideTimeout = null;
+  let typingToken = 0;
+
+  const box = document.getElementById("commBox");
+  const canvas1 = document.getElementById("commFaceCanvas");
+  const canvas2 = document.getElementById("commFaceSlice");
+  const line1 = document.getElementById("commLine1");
+  const line2 = document.getElementById("commLine2");
+  const line3 = document.getElementById("commLine3");
+  const cursor = document.getElementById("commCursor");
+  const ctx1 = canvas1?.getContext("2d");
+  const ctx2 = canvas2?.getContext("2d");
+
+  function roundedRect(c, x, y, w, h, r) {
+    if (typeof c.roundRect === "function") {
+      c.roundRect(x, y, w, h, r);
+      return;
+    }
+    c.rect(x, y, w, h);
+  }
+
+  function drawFace(ctx, openMouth) {
+    const c = ctx;
+    if (!c) return;
+    c.clearRect(0, 0, 90, 130);
+    c.fillStyle = FG; c.fillRect(0, 0, 90, 130);
+    c.fillStyle = UNIF; c.fillRect(10, 98, 70, 32);
+    c.fillStyle = UNIF2; c.fillRect(22, 98, 46, 32);
+    c.fillStyle = "#2a4a2a"; c.fillRect(20, 96, 50, 7);
+    c.fillStyle = "#00cc66"; c.fillRect(25, 101, 40, 2); c.fillRect(25, 105, 40, 2);
+    c.fillStyle = SKIN; c.beginPath(); roundedRect(c, 12, 22, 66, 80, 3); c.fill();
+    c.fillStyle = SKIN2; c.beginPath(); roundedRect(c, 18, 90, 54, 14, 2); c.fill();
+    c.fillStyle = HAIR; c.beginPath(); roundedRect(c, 10, 14, 70, 18, 2); c.fill();
+    c.fillStyle = HAIR2; c.fillRect(8, 18, 12, 22); c.fillRect(70, 18, 12, 22);
+    c.fillStyle = "#9B5523"; c.beginPath(); roundedRect(c, 12, 10, 66, 14, 3); c.fill();
+    c.fillStyle = SKIN2; c.beginPath(); roundedRect(c, 6, 48, 8, 12, 2); c.fill();
+    c.fillStyle = SKIN2; c.beginPath(); roundedRect(c, 76, 48, 8, 12, 2); c.fill();
+    c.fillStyle = "#a86a3a"; c.fillRect(16, 38, 58, 5);
+    c.fillStyle = MUST; c.beginPath(); roundedRect(c, 15, 35, 26, 4, 1); c.fill();
+    c.fillStyle = MUST; c.beginPath(); roundedRect(c, 49, 35, 26, 4, 1); c.fill();
+    c.fillStyle = EYE_W; c.beginPath(); roundedRect(c, 17, 42, 22, 11, 2); c.fill();
+    c.fillStyle = EYE_W; c.beginPath(); roundedRect(c, 51, 42, 22, 11, 2); c.fill();
+    c.fillStyle = IRIS; c.beginPath(); roundedRect(c, 23, 43, 10, 8, 1); c.fill();
+    c.fillStyle = IRIS; c.beginPath(); roundedRect(c, 57, 43, 10, 8, 1); c.fill();
+    c.fillStyle = PUPIL; c.fillRect(26, 44, 5, 5); c.fillRect(60, 44, 5, 5);
+    c.fillStyle = "#fff"; c.fillRect(25, 43, 2, 2); c.fillRect(59, 43, 2, 2);
+    c.fillStyle = SKIN2; c.fillRect(39, 54, 12, 14);
+    c.fillStyle = SKIN3; c.beginPath(); roundedRect(c, 32, 63, 26, 8, 2); c.fill();
+    c.fillStyle = SKIN; c.beginPath(); roundedRect(c, 30, 65, 10, 6, 2); c.fill();
+    c.fillStyle = SKIN; c.beginPath(); roundedRect(c, 50, 65, 10, 6, 2); c.fill();
+    c.fillStyle = MUST; c.beginPath(); roundedRect(c, 26, 74, 38, 6, 2); c.fill();
+    c.fillStyle = SKIN; c.fillRect(43, 74, 4, 6);
+    c.fillStyle = BEARD; c.beginPath(); roundedRect(c, 28, 80, 34, 9, 3); c.fill();
+    if (openMouth) {
+      c.fillStyle = "#1a0404"; c.beginPath(); roundedRect(c, 30, 80, 30, 9, 3); c.fill();
+      c.fillStyle = MUST; c.beginPath(); roundedRect(c, 30, 78, 30, 5, 2); c.fill();
+      c.fillStyle = "#9a5020"; c.beginPath(); roundedRect(c, 32, 86, 26, 5, 2); c.fill();
+      c.fillStyle = EYE_W; c.fillRect(34, 81, 7, 5); c.fillRect(43, 81, 7, 5); c.fillRect(52, 81, 7, 5);
+      c.fillStyle = "#1a0404"; c.fillRect(41, 81, 2, 5); c.fillRect(50, 81, 2, 5);
+    } else {
+      c.fillStyle = "#7a3a18"; c.beginPath(); roundedRect(c, 32, 80, 4, 2, 1); c.fill();
+    }
+    c.fillStyle = SKIN3; c.fillRect(41, 97, 8, 4);
+    c.fillStyle = "#5a3a18"; c.fillRect(20, 95, 50, 4);
+    [22, 29, 36, 43, 50, 57, 64].forEach((x, i) => {
+      c.fillStyle = i % 2 === 0 ? BEAD1 : BEAD2;
+      c.beginPath(); roundedRect(c, x, 93, 5, 5, 2); c.fill();
+    });
+  }
+
+  function renderFace() {
+    drawFace(ctx1, mouthOpen);
+    drawFace(ctx2, mouthOpen);
+  }
+
+  function startMouthFlap() {
+    if (mouthInterval) return;
+    mouthInterval = setInterval(() => {
+      mouthOpen = !mouthOpen;
+      renderFace();
+    }, 220);
+  }
+
+  function stopMouthFlap() {
+    clearInterval(mouthInterval);
+    mouthInterval = null;
+    mouthOpen = false;
+    renderFace();
+  }
+
+  function randGlitch(len) {
+    let s = "";
+    for (let i = 0; i < len; i += 1) {
+      s += GLITCH_CHARS[Math.floor(Math.random() * GLITCH_CHARS.length)];
+    }
+    return s;
+  }
+
+  function typeLine(el, text, token, cb) {
+    if (!el) {
+      if (cb) cb();
+      return;
+    }
+    el.innerHTML = "";
+    let i = 0;
+    function step() {
+      if (token !== typingToken) return;
+      if (i <= text.length) {
+        const typed = text.slice(0, i);
+        const glitch = i < text.length ? randGlitch(Math.min(3, text.length - i)) : "";
+        const lead = typed.slice(-1) || "";
+        const rest = typed.slice(0, -1);
+        el.innerHTML =
+          `<span style="color:#00ff88;text-shadow:0 0 8px #00ff88,0 0 16px #00cc66,0 0 2px #fff">${lead}</span>` +
+          `<span style="color:#00dd66">${rest}</span>` +
+          `<span style="color:#004422;opacity:0.6">${glitch}</span>`;
+        i += 1;
+        setTimeout(step, 55 + Math.random() * 40);
+      } else {
+        el.innerHTML = `<span style="color:#00cc66">${text}</span>`;
+        if (cb) setTimeout(cb, 120);
+      }
+    }
+    step();
+  }
+
+  function typeLines(textArray, onDone) {
+    const els = [line1, line2, line3];
+    const token = ++typingToken;
+    els.forEach((e) => {
+      if (e) e.innerHTML = "";
+    });
+    if (cursor) cursor.style.display = "inline-block";
+    function doLine(idx) {
+      if (idx >= textArray.length || idx >= els.length) {
+        if (cursor) cursor.style.display = "none";
+        if (onDone) onDone();
+        return;
+      }
+      typeLine(els[idx], textArray[idx], token, () => doLine(idx + 1));
+    }
+    doLine(0);
+  }
+
+  function show() {
+    if (!box) return;
+    box.style.display = "block";
+    box.setAttribute("aria-hidden", "false");
+    box.classList.remove("comm-hidden");
+    box.classList.add("comm-visible");
+    active = true;
+    renderFace();
+  }
+
+  function hide() {
+    if (!box) return;
+    active = false;
+    typingToken += 1;
+    box.classList.remove("comm-visible");
+    box.classList.add("comm-hidden");
+    box.setAttribute("aria-hidden", "true");
+    setTimeout(() => {
+      if (!active) box.style.display = "none";
+    }, 350);
+    stopMouthFlap();
+    if (voAudio) {
+      voAudio.pause();
+      voAudio = null;
+    }
+  }
+
+  function commVoSrc(filename) {
+    return availableVoFiles.has(filename) ? `vo/${filename}` : null;
+  }
+
+  function triggerVO({ lines = [], audioSrc = null, duration = 4000, onDone = null } = {}) {
+    if (hideTimeout) clearTimeout(hideTimeout);
+    if (voAudio) {
+      voAudio.pause();
+      voAudio = null;
+    }
+    show();
+    startMouthFlap();
+    typeLines(lines);
+    hideTimeout = setTimeout(() => {
+      stopMouthFlap();
+      hide();
+      if (onDone) onDone();
+    }, duration);
+
+    if (!audioSrc) return;
+    try {
+      voAudio = new Audio(audioSrc);
+      voAudio.volume = 0.9;
+      voAudio.play().catch(() => {});
+      voAudio.addEventListener("ended", () => {
+        if (hideTimeout) clearTimeout(hideTimeout);
+        stopMouthFlap();
+        hideTimeout = setTimeout(() => {
+          hide();
+          if (onDone) onDone();
+        }, 800);
+      });
+    } catch {
+      // VO is optional; captions still run.
+    }
+  }
+
+  function init() {
+    renderFace();
+  }
+
+  return { init, triggerVO, hide, show, commVoSrc };
+})();
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => commBoxController.init());
+} else {
+  commBoxController.init();
+}
 
 const vault = document.getElementById("vault");
 const closeVault = document.getElementById("closeVault");
@@ -522,7 +791,7 @@ function createFuzzyText(canvas, opts = {}) {
   const frameMs = 1000 / Math.max(20, cfg.fps);
   const offscreen = document.createElement("canvas");
   const offCtx = offscreen.getContext("2d");
-  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const dpr = nativeCanvasDpr();
   let textW = 0;
   let textH = 0;
   let marginX = 0;
@@ -1338,11 +1607,13 @@ function addListeners() {
   }
 
   if (btnArcade) {
+    btnArcade.textContent = "Arcade";
     btnArcade.addEventListener("click", () => {
       galaxyCanvasController?.openArcadeMenu?.();
     });
   }
   if (btnPractice) {
+    btnPractice.textContent = "Practice";
     if (!PRACTICE_ENABLED) {
       btnPractice.disabled = true;
       btnPractice.classList.add("is-disabled");
@@ -1355,6 +1626,7 @@ function addListeners() {
     }
   }
   if (btnGalaxyBack) {
+    btnGalaxyBack.textContent = "\u2190 Oracle";
     btnGalaxyBack.addEventListener("click", () => closeGalaxyView());
   }
   if (arcadeBack) {
@@ -1372,11 +1644,13 @@ function addListeners() {
     btnArcadeLevelSelect.addEventListener("click", () => galaxyCanvasController?.openArcadeLevelSelect?.());
   }
   if (btnArcadeScores) {
-    // Scores is already accessible from the root mode-select menu; hide it from the arcade submenu to avoid duplication.
     btnArcadeScores.hidden = true;
+    btnArcadeScores.style.display = "none";
+    btnArcadeScores.setAttribute("aria-hidden", "true");
     btnArcadeScores.addEventListener("click", () => showLeaderboard());
   }
   if (btnScores) {
+    btnScores.textContent = "Scores";
     btnScores.addEventListener("click", () => showLeaderboard());
   }
   if (btnArcadeMenuBack) {
@@ -1680,12 +1954,6 @@ function setVh() {
   }
 }
 
-function ensureScreenFlashOverlay() {
-  // Kept for legacy callers; returns a no-op stub — flash now runs on canvas.
-  return { style: {}, __fadeTimer: null };
-}
-
-// Parse a CSS color string into {r,g,b}
 function _parseFlashColor(color) {
   if (!color || color === "#ffffff") return { r: 255, g: 255, b: 255 };
   if (color.startsWith("#")) {
@@ -1702,8 +1970,8 @@ function _parseFlashColor(color) {
 }
 
 function flashScreen(color = "#ffffff", ms = 250, peak = 0.9) {
-  // Drive flash on the game canvas each frame — no DOM paint stutter.
-  if (typeof canvasFlash === "undefined") return;
+  if (isIOSNative) return;
+  if (!canvasFlash) return;
   const { r, g, b } = _parseFlashColor(color);
   const safePeak = clamp(peak, 0, 1);
   const safeMs = Math.max(40, ms);
@@ -3299,14 +3567,14 @@ function renderLeaderboardRows(rows, highlightId = "") {
 }
 
 async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubmit = false } = {}) {
+  const closeText = afterSubmit ? "Done" : "Back";
   renderLeaderboardShell("POLYVERSE SCOREBOARD", `<p class="leaderboardSub">Loading global scores...</p>`);
-  const closeBtnLabel = afterSubmit ? "Done" : "Back";
   try {
     const rows = await fetchLeaderboardRows();
     const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
       ${renderLeaderboardRows(rows, highlightId)}
       <div class="leaderboardActions">
-        <button id="leaderboardClose" class="leaderboardBtn" type="button">${closeBtnLabel}</button>
+        <button id="leaderboardClose" class="leaderboardBtn" type="button">${closeText}</button>
       </div>
     `);
     overlay.querySelector("#leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
@@ -3314,7 +3582,7 @@ async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubm
     const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
       <p class="leaderboardSub">Could not load scores.</p>
       <div class="leaderboardActions">
-        <button id="leaderboardClose" class="leaderboardBtn" type="button">${closeBtnLabel}</button>
+        <button id="leaderboardClose" class="leaderboardBtn" type="button">${closeText}</button>
       </div>
     `, error.message || "Offline");
     overlay.querySelector("#leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
@@ -3673,10 +3941,18 @@ function stopGalaxyBackground() {
 // === Arcade Mode ===
 function initGalaxyCanvas() {
   if (!galaxyPlayCanvas) return;
-  const ctx = galaxyPlayCanvas.getContext("2d");
+  const ctx = galaxyPlayCanvas.getContext("2d", {
+    alpha: false,
+    desynchronized: true,
+    willReadFrequently: false,
+  });
   if (!ctx) return;
   const plasmaOverlayCanvas = document.createElement("canvas");
-  const plasmaCtx = plasmaOverlayCanvas.getContext("2d");
+  const plasmaCtx = plasmaOverlayCanvas.getContext("2d", {
+    alpha: true,
+    desynchronized: true,
+    willReadFrequently: false,
+  });
   plasmaOverlayCanvas.setAttribute("aria-hidden", "true");
   plasmaOverlayCanvas.style.position = "absolute";
   plasmaOverlayCanvas.style.pointerEvents = "none";
@@ -3709,11 +3985,12 @@ function initGalaxyCanvas() {
     releaseFx: null,
     chargeLoopHandle: null,
     chargeLoopRate: 0,
+    readySoundPlayed: false,
+    rechargeSoundPlayed: true,
   };
   const laserBeams = [];
-
-  // Canvas-driven screen flash (avoids DOM style recalc / paint stutter)
-  const canvasFlash = { r: 0, g: 255, b: 255, peak: 0, alpha: 0, decayPerMs: 0 };
+  const _bombDestroyQueue = [];
+  canvasFlash = { r: 0, g: 255, b: 255, peak: 0, alpha: 0, decayPerMs: 0 };
 
   const sim = {
     dpr: 1,
@@ -3777,12 +4054,15 @@ function initGalaxyCanvas() {
   let landmineFlashUntil = 0;
   let lastAsteroidCollisionSfxAt = 0;
   let suppressAstCollisionSfxUntil = 0;
+  let _lastExplosionSoundAt = 0;
+  let scoreRenderRaf = 0;
   let warningActive = false;
   let warningLoopHandle = null;
   let warningHapticInterval = null;
   let arcadeLives = 0;
   let arcadeScore = 0;
   let ufo = null;
+  let ufoDroneLoopHandle = null;
   let arcadeUfoSpawnAt = 0;
   let retryPending = false;
   let debugLevelUnlocked = false;
@@ -3834,6 +4114,17 @@ function initGalaxyCanvas() {
     practiceDebugEl.id = "practiceDebug";
     practiceDebugEl.className = "practiceDebug";
     galaxyView.appendChild(practiceDebugEl);
+  }
+  if (!hudMultiplier && arcadeHud) {
+    hudMultiplier = document.createElement("div");
+    hudMultiplier.id = "hudMultiplier";
+    hudMultiplier.className = hudScore?.className || "hudLives";
+    hudMultiplier.textContent = "3.0x";
+    if (hudScore?.parentNode) {
+      hudScore.parentNode.insertBefore(hudMultiplier, hudScore.nextSibling);
+    } else {
+      arcadeHud.appendChild(hudMultiplier);
+    }
   }
 
   const playfield = { x: 0, y: 0, w: 0, h: 0, pad: 12, topPad: 0, bottomPad: 0 };
@@ -3903,10 +4194,43 @@ function initGalaxyCanvas() {
     hudScore.textContent = `Score: ${arcadeScore}`;
   }
 
+  function getArcadeScoreMultiplier(now = performance.now()) {
+    if (engineMode !== "arcade" || !levelDurationMs) return 1;
+    const elapsed = clamp(now - levelRunStartAt, 0, levelDurationMs);
+    const progress = elapsed / levelDurationMs;
+    return 3 - progress * 2;
+  }
+
+  function arcadeMultiplierPoints(basePoints) {
+    const safeBase = Math.floor(basePoints || 0);
+    if (engineMode !== "arcade") return safeBase;
+    return Math.round(safeBase * getArcadeScoreMultiplier());
+  }
+
+  function renderScoreMultiplier(now = performance.now()) {
+    if (!hudMultiplier) return;
+    const multiplier = engineMode === "arcade" ? getArcadeScoreMultiplier(now) : 1;
+    hudMultiplier.textContent = `${multiplier.toFixed(1)}x`;
+  }
+
+  function scheduleScoreRender() {
+    if (isIOSNative) {
+      if (scoreRenderRaf) return;
+      scoreRenderRaf = requestAnimationFrame(() => {
+        scoreRenderRaf = 0;
+        renderScore();
+        renderScoreMultiplier();
+      });
+      return;
+    }
+    renderScore();
+    renderScoreMultiplier();
+  }
+
   function addArcadeScore(points) {
     if (engineMode !== "arcade") return;
     arcadeScore = Math.max(0, arcadeScore + Math.floor(points || 0));
-    renderScore();
+    scheduleScoreRender();
   }
 
   function stopWarningState() {
@@ -3954,6 +4278,7 @@ function initGalaxyCanvas() {
     if (hudLevel) hudLevel.textContent = `LEVEL ${ARCADE_LEVELS[currentLevelIndex]?.level || 1}`;
     renderLives();
     renderScore();
+    renderScoreMultiplier(now);
     if (hudTimer) {
       hudTimer.textContent = formatMs(safeRemaining);
       hudTimer.classList.toggle("danger", safeRemaining <= 10000 && safeRemaining > 0);
@@ -4350,7 +4675,41 @@ function initGalaxyCanvas() {
     });
   }
 
+  function resolveGameSfxKey(...keys) {
+    for (let i = 0; i < keys.length; i += 1) {
+      const key = keys[i];
+      if (GAME_SFX[key]) return key;
+    }
+    return "";
+  }
+
+  function playPlayerFireSound() {
+    playGameSfx("advfire", 0.86);
+  }
+
+  function startUfoDrone() {
+    if (state.minimal) return;
+    if (ufoDroneLoopHandle) return;
+    ufoDroneLoopHandle = audioEngine.playLoop("droneufo", {
+      volume: state.whisper ? 0.18 : 0.38,
+      rate: 1,
+    });
+  }
+
+  function stopUfoDrone() {
+    if (ufoDroneLoopHandle) {
+      ufoDroneLoopHandle.stop();
+      ufoDroneLoopHandle = null;
+    }
+    audioEngine.stopLoop("droneufo");
+  }
+
   function playAsteroidExplosionBoom(kind, volume, rate) {
+    if (isIOSNative) {
+      const now = performance.now();
+      if (now - _lastExplosionSoundAt < 80) return;
+      _lastExplosionSoundAt = now;
+    }
     const mediumKeys = ["explosion_med", "explosion_med_alt"];
     const smallKeys = ["explosion_small", "explosion_small_alt"];
     const key = kind >= 3 ? "explosion_big" : kind === 2 ? pick(mediumKeys) : pick(smallKeys);
@@ -4471,6 +4830,7 @@ function initGalaxyCanvas() {
 
   function setupUfoSpawnForLevel(cfg) {
     arcadeUfoSpawnAt = 0;
+    stopUfoDrone();
     ufo = null;
     if (engineMode !== "arcade") return;
     // Spawn one UFO 10s into every arcade level.
@@ -4498,6 +4858,11 @@ function initGalaxyCanvas() {
       lastMoveAt: performance.now(),
     };
     playGameSfx("ufo_spawn", 0.6);
+    startUfoDrone();
+    commBoxController.triggerVO({
+      lines: ["UFO SPOTTED.", "TAKE 'EM OUT."],
+      audioSrc: commBoxController.commVoSrc("vo-ufo_spotted_takeemout.mp3"),
+    });
     addWarpRing(x, y, "rgba(160,255,255,1)");
   }
 
@@ -4521,16 +4886,24 @@ function initGalaxyCanvas() {
     effects.triggerUfoDeath(x, y);
     spawnExplosion(x, y, 28, false, 1.25, 1.2);
     addWarpRing(x, y, "rgba(172,255,214,1)");
+    stopUfoDrone();
     ufo = null;
     plasmaCage.cooldownUntil = 0;
+    plasmaCage.rechargeSoundPlayed = true;
     addArcadeScore(100);
     arcadeLives = clamp(arcadeLives + 1, 0, MAX_LIVES);
     renderLives();
   }
 
-  function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1) {
-    const emitCount = prefersReducedMotion ? Math.min(6, count) : count;
+  function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1, asteroidKind = 3) {
+    if (isIOSNative && sim.particles.length >= 60) return;
+    const isLarge = asteroidKind >= 2;
+    const particleCount = isIOSNative
+      ? (isLarge ? Math.ceil(count / 2) : Math.ceil(count / 3))
+      : count;
+    const emitCount = prefersReducedMotion ? Math.min(6, particleCount) : particleCount;
     for (let i = 0; i < emitCount; i += 1) {
+      if (isIOSNative && sim.particles.length >= 60) break;
       if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
       const angle = Math.random() * Math.PI * 2;
       const speed = 30 + Math.random() * 110;
@@ -4652,9 +5025,11 @@ function initGalaxyCanvas() {
   }
 
   // === Collisions ===
-  // Spatial grid broadphase — reduces O(n²) to ~O(n) for evenly distributed asteroids
   const _collGrid = { cells: {}, cellSize: 120 };
-  function _gridKey(cx, cy) { return (cx << 16) ^ cy; }
+  function _gridKey(cx, cy) {
+    return (cx << 16) ^ cy;
+  }
+
   function resolveAsteroidCollisions() {
     const count = sim.asteroids.length;
     if (count < 2) return;
@@ -4662,15 +5037,12 @@ function initGalaxyCanvas() {
 
     const cs = _collGrid.cellSize;
     const cells = _collGrid.cells;
-    // Clear grid
     for (const k in cells) cells[k] = null;
 
-    // Insert asteroids into grid cells
     for (let i = 0; i < count; i += 1) {
       const a = sim.asteroids[i];
       const cx = Math.floor(a.x / cs);
       const cy = Math.floor(a.y / cs);
-      // Each asteroid touches up to 4 cells due to its radius
       for (let ox = -1; ox <= 1; ox += 1) {
         for (let oy = -1; oy <= 1; oy += 1) {
           const key = _gridKey(cx + ox, cy + oy);
@@ -4680,14 +5052,12 @@ function initGalaxyCanvas() {
       }
     }
 
-    // Check pairs — use a Set to avoid duplicate checks
     const checked = new Set();
     for (let i = 0; i < count; i += 1) {
       const a = sim.asteroids[i];
       const cx = Math.floor(a.x / cs);
       const cy = Math.floor(a.y / cs);
-      const key = _gridKey(cx, cy);
-      const bucket = cells[key];
+      const bucket = cells[_gridKey(cx, cy)];
       if (!bucket) continue;
       for (let k = 0; k < bucket.length; k += 1) {
         const j = bucket[k];
@@ -4702,7 +5072,6 @@ function initGalaxyCanvas() {
         resolveCircleCollision(a, b, 0.92);
       }
     }
-
     for (let i = 0; i < sim.asteroids.length; i += 1) {
       wrapEntity(sim.asteroids[i]);
       clampSpeed(sim.asteroids[i]);
@@ -4791,18 +5160,33 @@ function initGalaxyCanvas() {
     const baseX = a.x;
     const baseY = a.y;
     const parentSpeed = Math.sqrt(a.vx * a.vx + a.vy * a.vy);
-    addArcadeScore(wasKind >= 2 ? 25 : 10);
+    addArcadeScore(arcadeMultiplierPoints(wasKind >= 2 ? 25 : 10));
     releaseAsteroid(a);
 
     if (wasKind > 1) {
       const childCount = wasKind === 3 ? (3 + Math.floor(Math.random() * 3)) : (2 + Math.floor(Math.random() * 2));
-      for (let i = 0; i < childCount; i += 1) {
-        if (sim.asteroids.length >= sim.maxAsteroids) break;
+      const spawnSplitChild = () => {
+        if (sim.asteroids.length >= sim.maxAsteroids) return false;
         const child = spawnAsteroid(baseX, baseY, wasKind - 1, false);
-        if (!child) break;
+        if (!child) return false;
         const boost = 1.5 + Math.random() * 0.7;
         child.vx += (child.vx / Math.max(1, Math.abs(child.vx))) * parentSpeed * 0.2 * boost;
         child.vy += (child.vy / Math.max(1, Math.abs(child.vy))) * parentSpeed * 0.2 * boost;
+        return true;
+      };
+      if (isIOSNative) {
+        let spawnedChildren = 0;
+        const spawnNextChild = () => {
+          if (spawnedChildren >= childCount) return;
+          if (!spawnSplitChild()) return;
+          spawnedChildren += 1;
+          if (spawnedChildren < childCount) requestAnimationFrame(spawnNextChild);
+        };
+        spawnNextChild();
+      } else {
+        for (let i = 0; i < childCount; i += 1) {
+          if (!spawnSplitChild()) break;
+        }
       }
     }
 
@@ -4811,7 +5195,7 @@ function initGalaxyCanvas() {
     const bigBlast = wasKind === 3;
     const mediumBlast = wasKind === 2;
     const ttlScale = bigBlast ? 1.4 : mediumBlast ? 1.18 : 1;
-    spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale);
+    spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale, wasKind);
     const baseBoomVol = wasKind === 3 ? 0.9 : wasKind === 2 ? 0.92 : 0.78;
     const minBoomRatio = wasKind === 3 ? 0.62 : wasKind === 2 ? 0.8 : 0.9;
     playAsteroidExplosionBoom(
@@ -4854,8 +5238,8 @@ function initGalaxyCanvas() {
     const isLevel10 = levelNum === 10;
     const bigBlast = a.kind === 3;
     const mediumBlast = a.kind === 2;
-    addArcadeScore(a.kind >= 2 ? 25 : 10);
-    spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1);
+    addArcadeScore(arcadeMultiplierPoints(a.kind >= 2 ? 25 : 10));
+    spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1, 1, a.kind);
     const baseBoomVol = bigBlast ? 0.9 : mediumBlast ? 0.9 : 0.76;
     const minBoomRatio = bigBlast ? 0.62 : mediumBlast ? 0.82 : 0.9;
     playAsteroidExplosionBoom(
@@ -4899,9 +5283,13 @@ function initGalaxyCanvas() {
     plasmaCage.charged = false;
     plasmaCage.lastPulseAt = 0;
     plasmaCage.chargeLoopRate = 0;
+    plasmaCage.readySoundPlayed = false;
   }
 
   function isPlasmaCageReady(now = performance.now()) {
+    if (plasmaCage.active) {
+      return plasmaCage.charged || now - plasmaCage.chargeStart >= PLASMA_CAGE_CHARGE_MS;
+    }
     return now >= plasmaCage.cooldownUntil;
   }
 
@@ -4914,6 +5302,7 @@ function initGalaxyCanvas() {
     plasmaCage.currentY = current.y;
     plasmaCage.chargeStart = now;
     plasmaCage.charged = false;
+    plasmaCage.readySoundPlayed = false;
     plasmaCage.lastPulseAt = now;
     updatePlasmaChargeSound(now);
     return true;
@@ -4923,6 +5312,16 @@ function initGalaxyCanvas() {
     if (!plasmaCage.active || plasmaCage.charged) return;
     if (now - plasmaCage.chargeStart >= PLASMA_CAGE_CHARGE_MS) {
       plasmaCage.charged = true;
+      if (!plasmaCage.readySoundPlayed) {
+        plasmaCage.readySoundPlayed = true;
+        const readyKey = resolveGameSfxKey("plasma_ready", "reveal4");
+        if (readyKey) playGameSfx(readyKey, 0.82);
+        commBoxController.triggerVO({
+          lines: ["PLASMA", "CHARGED—", "FIRE NOW."],
+          audioSrc: commBoxController.commVoSrc("plasma_ready.mp3"),
+          duration: 2500,
+        });
+      }
       return;
     }
     if (now - plasmaCage.lastPulseAt >= 250) {
@@ -4948,9 +5347,16 @@ function initGalaxyCanvas() {
     stopPlasmaChargeSound();
     plasmaCage.chargeLoopRate = steppedRate;
     plasmaCage.chargeLoopHandle = audioEngine.playLoop("plasma_charge", {
-      volume: state.whisper ? 0.17 : 0.34,
+      volume: clamp((state.whisper ? 0.17 : 0.34) * PLASMA_CAGE_VOLUME_BOOST, 0, 1),
       rate: steppedRate,
     });
+  }
+
+  function updatePlasmaRechargeSound(now) {
+    if (plasmaCage.active || plasmaCage.rechargeSoundPlayed || plasmaCage.cooldownUntil <= 0) return;
+    if (now < plasmaCage.cooldownUntil) return;
+    plasmaCage.rechargeSoundPlayed = true;
+    playGameSfx("plasmarecharged", 0.82);
   }
 
   function destroyAsteroidsInPlasmaCage(rect) {
@@ -4964,6 +5370,7 @@ function initGalaxyCanvas() {
     for (let i = toDestroy.length - 1; i >= 0; i -= 1) {
       vaporizeAsteroidByIndex(toDestroy[i]);
     }
+    return toDestroy.length;
   }
 
   function releasePlasmaCage(now) {
@@ -4974,10 +5381,13 @@ function initGalaxyCanvas() {
     stopPlasmaChargeSound();
     resetPlasmaCageGesture();
     if (charged) {
-      destroyAsteroidsInPlasmaCage(rect);
+      const destroyedCount = destroyAsteroidsInPlasmaCage(rect);
+      const fireKey = destroyedCount > 0 ? resolveGameSfxKey("plasma_fire", "ufo_destroy") : "";
+      if (fireKey) playGameSfx(fireKey, 0.92);
       triggerHapticImpact(hapticImpactStyle.Heavy);
       plasmaCage.cooldownStart = now;
       plasmaCage.cooldownUntil = now + PLASMA_CAGE_COOLDOWN_MS;
+      plasmaCage.rechargeSoundPlayed = false;
       plasmaCage.releaseFx = { ...rect, type: "fire", start: now, ttl: 220 };
     } else {
       plasmaCage.releaseFx = { ...rect, type: "fizzle", start: now, ttl: 200 };
@@ -5038,8 +5448,10 @@ function initGalaxyCanvas() {
     drawPlasmaGrid({ x, y, w, h }, (charged ? 0.18 : 0.08 + progress * 0.25) * alpha);
     plasmaCtx.save();
     plasmaCtx.globalAlpha = borderAlpha;
-    plasmaCtx.shadowColor = "#00FFD1";
-    plasmaCtx.shadowBlur = glow;
+    if (!isIOSNative) {
+      plasmaCtx.shadowColor = "#00FFD1";
+      plasmaCtx.shadowBlur = glow;
+    }
     plasmaCtx.strokeStyle = color;
     plasmaCtx.lineWidth = charged ? 2.4 : 1.4 + progress * 1.2;
     plasmaCtx.setLineDash([10, 8]);
@@ -5084,8 +5496,10 @@ function initGalaxyCanvas() {
     plasmaCtx.arc(x, y, 14, 0, Math.PI * 2);
     plasmaCtx.stroke();
     plasmaCtx.strokeStyle = "rgba(0,255,209,0.9)";
-    plasmaCtx.shadowColor = "#00FFD1";
-    plasmaCtx.shadowBlur = 8;
+    if (!isIOSNative) {
+      plasmaCtx.shadowColor = "#00FFD1";
+      plasmaCtx.shadowBlur = 8;
+    }
     plasmaCtx.beginPath();
     plasmaCtx.arc(x, y, 14, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
     plasmaCtx.stroke();
@@ -5097,6 +5511,7 @@ function initGalaxyCanvas() {
     plasmaCtx.clearRect(0, 0, sim.width, sim.height);
     updatePlasmaCageCharge(now);
     updatePlasmaChargeSound(now);
+    updatePlasmaRechargeSound(now);
     for (let i = laserBeams.length - 1; i >= 0; i -= 1) {
       const beam = laserBeams[i];
       const t = clamp((now - beam.startedAt) / 150, 0, 1);
@@ -5108,8 +5523,10 @@ function initGalaxyCanvas() {
       plasmaCtx.globalAlpha = 1 - t;
       plasmaCtx.strokeStyle = "#00FFD1";
       plasmaCtx.lineWidth = 2;
-      plasmaCtx.shadowColor = "#00FFD1";
-      plasmaCtx.shadowBlur = 12;
+      if (!isIOSNative) {
+        plasmaCtx.shadowColor = "#00FFD1";
+        plasmaCtx.shadowBlur = 12;
+      }
       plasmaCtx.beginPath();
       plasmaCtx.moveTo(beam.x1, beam.y1);
       plasmaCtx.lineTo(beam.x2, beam.y2);
@@ -5155,20 +5572,10 @@ function initGalaxyCanvas() {
     const radius = 700;
     landmine = null;
 
-    const toDestroy = [];
     for (let i = 0; i < sim.asteroids.length; i += 1) {
       const a = sim.asteroids[i];
-      if (Math.hypot(a.x - x, a.y - y) <= radius + a.r) toDestroy.push(a);
+      if (Math.hypot(a.x - x, a.y - y) <= radius + a.r) _bombDestroyQueue.push(a);
     }
-    const vaporizeBatch = () => {
-      for (let i = 0; i < 3 && toDestroy.length; i += 1) {
-        const asteroid = toDestroy.pop();
-        const index = sim.asteroids.indexOf(asteroid);
-        if (index >= 0) vaporizeAsteroidByIndex(index);
-      }
-      if (toDestroy.length) setTimeout(vaporizeBatch, 16);
-    };
-    vaporizeBatch();
     addWarpRing(x, y, "rgba(255,90,90,1)");
     spawnExplosion(x, y, 80, true);
     triggerLandmineScreenFlash();
@@ -5190,11 +5597,14 @@ function initGalaxyCanvas() {
     sim.shooting = null;
     landmine = null;
     landmineSpawnedThisLevel = false;
+    stopUfoDrone();
     ufo = null;
     arcadeUfoSpawnAt = 0;
     resetPlasmaCageGesture();
     plasmaCage.releaseFx = null;
+    plasmaCage.rechargeSoundPlayed = true;
     laserBeams.length = 0;
+    _bombDestroyQueue.length = 0;
     stopPlasmaChargeSound();
     stopWarningState();
   }
@@ -5208,6 +5618,10 @@ function initGalaxyCanvas() {
     addArcadeScore(500);
     playGameSfx("level_up", 0.9);
     triggerHapticNotification(hapticNotificationType.Success);
+    commBoxController.triggerVO({
+      lines: ["SECTOR", "CLEARED."],
+      audioSrc: commBoxController.commVoSrc("level_complete.mp3"),
+    });
     const cfg = ARCADE_LEVELS[currentLevelIndex];
     const nextLevel = cfg.level + 1;
     if (nextLevel <= ARCADE_LEVELS.length) {
@@ -5248,6 +5662,12 @@ function initGalaxyCanvas() {
         setMenuOverlayOpen(false);
         arcadeLives = clamp(arcadeLives - 1, 0, MAX_LIVES);
         renderLives();
+        if (arcadeLives === 1) {
+          commBoxController.triggerVO({
+            lines: ["WARNING—", "LAST LIFE", "REMAINING."],
+            audioSrc: commBoxController.commVoSrc("low_lives.mp3"),
+          });
+        }
         hideArcadeOverlay();
         startLevel(currentLevelIndex);
       },
@@ -5291,8 +5711,8 @@ function initGalaxyCanvas() {
     totalToSpawn = cfg.totalToClear;
     spawnedTotal = 0;
     spawnQueue = Math.max(0, cfg.totalToClear - cfg.startSpawn);
-    maxOnScreen = cfg.maxOnScreen;
-    sim.maxAsteroids = cfg.maxOnScreen;
+    maxOnScreen = capIOSNativeAsteroids(cfg.maxOnScreen);
+    sim.maxAsteroids = capIOSNativeAsteroids(cfg.maxOnScreen);
     levelDurationMs = cfg.time * 1000;
     levelRunStartAt = now + 400;
     arcadePausedUntil = levelRunStartAt;
@@ -5323,6 +5743,25 @@ function initGalaxyCanvas() {
     retryPending = false;
     updateArcadeHud(now);
     showLevelIntro(cfg.level);
+    const playStroidsComm = () => {
+      commBoxController.triggerVO({
+        lines: ["LET'S BLAST", "THESE 'STROIDS."],
+        audioSrc: commBoxController.commVoSrc("vo-lets_blast_these_stroids.mp3"),
+      });
+    };
+    if (cfg.level === 1) {
+      commBoxController.triggerVO({
+        lines: ["WELCOME TO", "THE POLYVERSE."],
+        audioSrc: commBoxController.commVoSrc("vo-welcometothepolyverse.mp3"),
+        onDone: playStroidsComm,
+      });
+    } else {
+      commBoxController.triggerVO({
+        lines: ["GOOD LUCK,", "PILOT."],
+        audioSrc: null,
+      });
+      setTimeout(playStroidsComm, 600);
+    }
   }
 
   function startArcadeFromSave() {
@@ -5421,7 +5860,7 @@ function initGalaxyCanvas() {
     setMenuOverlayOpen(false);
     syncArcadeEntryLabel();
     setGalaxyViewMode("practice");
-    sim.maxAsteroids = PRACTICE_MAX_ASTEROIDS;
+    sim.maxAsteroids = capIOSNativeAsteroids(PRACTICE_MAX_ASTEROIDS);
     setGalaxyBackgroundForLevel(1);
     setGalaxyTool("draw");
     state.practiceTool = "pencil";
@@ -5460,7 +5899,7 @@ function initGalaxyCanvas() {
     syncArcadeMenuButtons();
     setGalaxyViewMode("menu");
     setMenuOverlayOpen(true);
-    sim.maxAsteroids = sim.width < 700 ? 80 : 120;
+    sim.maxAsteroids = capIOSNativeAsteroids(sim.width < 700 ? 80 : 120);
     setGalaxyTool("draw");
     setPracticeToolUI();
     if (!canPreserve) {
@@ -5483,7 +5922,7 @@ function initGalaxyCanvas() {
   }
 
   function resizeGalaxyCanvas() {
-    sim.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    sim.dpr = nativeCanvasDpr();
     const rect = galaxyPlayCanvas.getBoundingClientRect();
     const rawWidth = Math.max(1, Math.floor(rect.width || window.innerWidth));
     const rawHeight = Math.max(1, Math.floor(rect.height || window.innerHeight));
@@ -5508,7 +5947,9 @@ function initGalaxyCanvas() {
     galaxyPlayCanvas.height = Math.floor(height * sim.dpr);
     ctx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
     resizePlasmaOverlayCanvas();
-    sim.maxAsteroids = engineMode === "practice" ? PRACTICE_MAX_ASTEROIDS : (engineMode === "arcade" ? sim.maxAsteroids : (sim.width < 700 ? 80 : 120));
+    sim.maxAsteroids = capIOSNativeAsteroids(
+      engineMode === "practice" ? PRACTICE_MAX_ASTEROIDS : (engineMode === "arcade" ? sim.maxAsteroids : (sim.width < 700 ? 80 : 120)),
+    );
     seedStars();
     computePlayfield();
   }
@@ -5560,6 +6001,8 @@ function initGalaxyCanvas() {
   }
 
   function update(dt, now) {
+    const _frameBudgetExceeded = isIOSNative && dt > 32;
+    sim._frameBudgetExceeded = _frameBudgetExceeded;
     const driftScale = prefersReducedMotion ? 0 : 1;
     for (let i = 0; i < sim.stars.length; i += 1) {
       const s = sim.stars[i];
@@ -5623,10 +6066,26 @@ function initGalaxyCanvas() {
       if (spawnQueue === 0 && spawnedTotal >= totalToSpawn && sim.asteroids.length === 0) {
         levelComplete();
       }
+
+      if (engineMode === "arcade"
+          && sim.asteroids.length >= CHAOS_THRESHOLD
+          && now - (sim._lastChaosTrigger || 0) > 45000) {
+        sim._lastChaosTrigger = now;
+        commBoxController.triggerVO({
+          lines: ["IT'S HAIRY", "OUT THERE—", "TAKE 'EM OUT."],
+          audioSrc: commBoxController.commVoSrc("vo-hairytakeemout.mp3"),
+        });
+      }
     }
 
     const gameplayAllowed = engineMode === "practice" || (engineMode === "arcade" && arcadeActive && now >= arcadePausedUntil);
     if (gameplayAllowed) {
+      for (let i = 0; i < 6 && _bombDestroyQueue.length; i += 1) {
+        const asteroid = _bombDestroyQueue.shift();
+        const index = sim.asteroids.indexOf(asteroid);
+        if (index >= 0) vaporizeAsteroidByIndex(index);
+      }
+
       for (let i = 0; i < sim.asteroids.length; i += 1) {
         const a = sim.asteroids[i];
         a.x += a.vx * (dt / 1000);
@@ -5653,6 +6112,7 @@ function initGalaxyCanvas() {
 
       if (ufo && ufo.alive) {
         if (now >= ufo.despawnAt) {
+          stopUfoDrone();
           ufo = null;
         } else {
           ufo.x += ufo.vx * (dt / 1000);
@@ -5725,8 +6185,7 @@ function initGalaxyCanvas() {
       if (sim.shooting.life >= sim.shooting.ttl) sim.shooting = null;
     }
 
-    // Decay canvas-based screen flash
-    if (canvasFlash.alpha > 0) {
+    if (canvasFlash?.alpha > 0) {
       canvasFlash.alpha = Math.max(0, canvasFlash.alpha - canvasFlash.decayPerMs * dt);
     }
 
@@ -5735,6 +6194,7 @@ function initGalaxyCanvas() {
   }
 
   function draw(now) {
+    const _frameBudgetExceeded = !!sim._frameBudgetExceeded;
     ctx.clearRect(0, 0, sim.width, sim.height);
 
     if (engineMode === "practice" && practiceTapMarker) {
@@ -5764,8 +6224,7 @@ function initGalaxyCanvas() {
       }
     }
 
-    // Stars — throttle trig to every 4 frames for perf
-    if (!prefersReducedMotion) {
+    if (!prefersReducedMotion && !_frameBudgetExceeded) {
       sim._starFrame = ((sim._starFrame || 0) + 1) & 3;
       if (sim._starFrame === 0) {
         for (let i = 0; i < sim.stars.length; i += 1) {
@@ -5774,24 +6233,22 @@ function initGalaxyCanvas() {
         }
       }
     }
-    for (let i = 0; i < sim.stars.length; i += 1) {
-      const s = sim.stars[i];
-      const alpha = prefersReducedMotion ? s.baseAlpha : (s._cachedAlpha ?? s.baseAlpha);
-      ctx.beginPath();
-      ctx.fillStyle = `rgba(214,227,255,${alpha.toFixed(3)})`;
-      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-      ctx.fill();
+    if (!_frameBudgetExceeded) {
+      for (let i = 0; i < sim.stars.length; i += 1) {
+        const s = sim.stars[i];
+        const alpha = prefersReducedMotion ? s.baseAlpha : (s._cachedAlpha ?? s.baseAlpha);
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(214,227,255,${alpha.toFixed(3)})`;
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
-    // Hoist plasma rect and charge progress outside asteroid loop
     const _plasmaActive = plasmaCage.active;
     const _plasmaRect = _plasmaActive ? getPlasmaRect() : null;
     const _plasmaCharge = _plasmaActive ? clamp((now - plasmaCage.chargeStart) / PLASMA_CAGE_CHARGE_MS, 0, 1) : 0;
-    // Only show highlights once the plasma is fully charged
     const _plasmaCharged = _plasmaActive && isPlasmaCageReady(now);
     const _levelNum = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
-
-    // Collect plasma-highlighted asteroid positions for batched glow pass (no per-asteroid shadowBlur)
     const _plasmaGlowAsteroids = [];
 
     for (let i = 0; i < sim.asteroids.length; i += 1) {
@@ -5821,22 +6278,17 @@ function initGalaxyCanvas() {
         ctx.lineWidth = 1;
         ctx.stroke();
       }
-      // Collect for batched glow — only when fully charged
-      if (_plasmaCharged && _plasmaRect &&
-          a.x >= _plasmaRect.x && a.x <= _plasmaRect.x + _plasmaRect.w &&
-          a.y >= _plasmaRect.y && a.y <= _plasmaRect.y + _plasmaRect.h) {
+      if (_plasmaCharged && _plasmaRect
+          && a.x >= _plasmaRect.x && a.x <= _plasmaRect.x + _plasmaRect.w
+          && a.y >= _plasmaRect.y && a.y <= _plasmaRect.y + _plasmaRect.h) {
         _plasmaGlowAsteroids.push(a);
       }
     }
 
-    // Batched plasma glow pass — set shadowBlur ONCE for all highlighted asteroids
     if (_plasmaGlowAsteroids.length > 0) {
       ctx.save();
-      ctx.strokeStyle = "#00FFD1";
-      ctx.lineWidth = 2;
-      // Fake glow with two concentric arcs instead of shadowBlur (much cheaper on mobile)
-      ctx.globalAlpha = _plasmaCharge * 0.28;
       ctx.strokeStyle = "rgba(0,255,209,1)";
+      ctx.globalAlpha = _plasmaCharge * 0.28;
       ctx.lineWidth = 7;
       for (let i = 0; i < _plasmaGlowAsteroids.length; i += 1) {
         const a = _plasmaGlowAsteroids[i];
@@ -5937,8 +6389,10 @@ function initGalaxyCanvas() {
 
       ctx.strokeStyle = damaged ? "rgba(255,124,124,0.55)" : "rgba(156,255,194,0.58)";
       ctx.lineWidth = 1.4;
-      ctx.shadowBlur = prefersReducedMotion ? 0 : 14;
-      ctx.shadowColor = damaged ? "rgba(255,110,110,0.75)" : "rgba(112,245,166,0.8)";
+      if (!isIOSNative) {
+        ctx.shadowBlur = prefersReducedMotion ? 0 : 14;
+        ctx.shadowColor = damaged ? "rgba(255,110,110,0.75)" : "rgba(112,245,166,0.8)";
+      }
       ctx.beginPath();
       ctx.ellipse(0, 0, ufo.r * 1.32, ufo.r * 0.72, 0, 0, Math.PI * 2);
       ctx.stroke();
@@ -5971,17 +6425,19 @@ function initGalaxyCanvas() {
       ctx.restore();
     }
 
-    for (let i = 0; i < sim.warpRings.length; i += 1) {
-      const ring = sim.warpRings[i];
-      const t = ring.life / ring.ttl;
-      const radius = ring.baseR + (ring.maxR - ring.baseR) * t;
-      const alpha = ring.alpha * (1 - t);
-      const base = ring.color || "rgba(112,255,178,1)";
-      ctx.beginPath();
-      ctx.strokeStyle = base.replace(/[\d.]+\)$/u, `${Math.max(0, alpha).toFixed(3)})`);
-      ctx.lineWidth = prefersReducedMotion ? 1.2 : 1.8;
-      ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
-      ctx.stroke();
+    if (!_frameBudgetExceeded) {
+      for (let i = 0; i < sim.warpRings.length; i += 1) {
+        const ring = sim.warpRings[i];
+        const t = ring.life / ring.ttl;
+        const radius = ring.baseR + (ring.maxR - ring.baseR) * t;
+        const alpha = ring.alpha * (1 - t);
+        const base = ring.color || "rgba(112,255,178,1)";
+        ctx.beginPath();
+        ctx.strokeStyle = base.replace(/[\d.]+\)$/u, `${Math.max(0, alpha).toFixed(3)})`);
+        ctx.lineWidth = prefersReducedMotion ? 1.2 : 1.8;
+        ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
     for (let i = 0; i < sim.lightningRings.length; i += 1) {
       const ring = sim.lightningRings[i];
@@ -5991,8 +6447,10 @@ function initGalaxyCanvas() {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.lineWidth = ring.thickness + (1 - t) * 1.8;
-      ctx.shadowBlur = 18;
-      ctx.shadowColor = ring.glow.replace(/[\d.]+\)$/u, `${(0.9 * alpha).toFixed(3)})`);
+      if (!isIOSNative) {
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = ring.glow.replace(/[\d.]+\)$/u, `${(0.9 * alpha).toFixed(3)})`);
+      }
       ctx.strokeStyle = ring.colorA.replace(/[\d.]+\)$/u, `${(0.95 * alpha).toFixed(3)})`);
       const seed = ((ring.life * 0.03) | 0) % 997;
       for (let j = 0; j < ring.arcCount; j += 1) {
@@ -6027,15 +6485,13 @@ function initGalaxyCanvas() {
     }
     effects.draw(ctx);
 
-    // Particles — use fillRect for small particles (much faster than arc on mobile)
-    for (let i = 0; i < sim.particles.length; i += 1) {
+    const particleLimit = _frameBudgetExceeded ? Math.min(40, sim.particles.length) : sim.particles.length;
+    for (let i = 0; i < particleLimit; i += 1) {
       const p = sim.particles[i];
       const alpha = (1 - p.life / p.ttl) * p.alpha;
       if (alpha <= 0) continue;
-      const colorStr = `${p.color || "rgba(111,255,128,"}${alpha.toFixed(3)})`;
-      ctx.fillStyle = colorStr;
+      ctx.fillStyle = `${p.color || "rgba(111,255,128,"}${alpha.toFixed(3)})`;
       if (p.size <= 2.5) {
-        // fillRect skips arc path setup — ~3x faster for small particles
         const s = p.size * 2;
         ctx.fillRect(p.x - p.size, p.y - p.size, s, s);
       } else {
@@ -6061,15 +6517,13 @@ function initGalaxyCanvas() {
       ctx.lineTo(sim.shooting.x - sim.shooting.length, sim.shooting.y - sim.shooting.length * 0.55);
       ctx.stroke();
     }
-    // Canvas-driven screen flash (replaces DOM overlay to avoid paint stutter)
-    if (canvasFlash.alpha > 0) {
+    if (canvasFlash?.alpha > 0 && !isIOSNative) {
       ctx.save();
       ctx.globalCompositeOperation = "screen";
       ctx.fillStyle = `rgba(${canvasFlash.r},${canvasFlash.g},${canvasFlash.b},${canvasFlash.alpha.toFixed(3)})`;
       ctx.fillRect(0, 0, sim.width, sim.height);
       ctx.restore();
     }
-
     drawPlasmaOverlay(now);
   }
 
@@ -6105,6 +6559,7 @@ function initGalaxyCanvas() {
   }
 
   function handleArcadeTap(x, y, now) {
+    playPlayerFireSound();
     laserBeams.push({
       x1: sim.width / 2,
       y1: sim.height / 2,
@@ -6464,7 +6919,7 @@ function initGalaxyBackground() {
   }
 
   function resize() {
-    galaxy.dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    galaxy.dpr = nativeCanvasDpr();
     galaxy.width = Math.floor(window.innerWidth);
     galaxy.height = Math.floor(window.innerHeight);
 

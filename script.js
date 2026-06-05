@@ -2,6 +2,9 @@ let capacitorHaptics = null;
 let hapticImpactStyle = { Heavy: "HEAVY", Medium: "MEDIUM", Light: "LIGHT" };
 let hapticNotificationType = { Success: "SUCCESS" };
 const DISABLE_GAMEPLAY_HAPTICS = true; // perf test - re-enable after Release build comparison
+const UFO_BLAST_RADIUS = 220;
+const UFO_BLAST_FORCE = 3.5;
+const UFO_GLOW_DURATION = 4000;
 
 function loadCapacitorHaptics() {
   try {
@@ -1391,6 +1394,10 @@ function mountRetryFuzzy() {
 let _soundsLoading = false;
 let _soundsLoaded = false;
 let _soundsLoadPromise = null;
+let _musicWasPlaying = false;
+let _musicCurrentTime = 0;
+let _musicResumeKey = "";
+let _musicResumeUrl = "";
 
 const audioEngine = {
   ctx: null,
@@ -1710,7 +1717,7 @@ const audioEngine = {
       node.playsInline = true;
       node.volume = state.whisper ? 0.43 : MUSIC_MAX_GAIN;
       node.play().catch(() => {});
-      this.currentMusicHtml = { key, node };
+      this.currentMusicHtml = { key, url, node };
       return;
     }
     if (this.currentMusicHtml?.node) {
@@ -1746,9 +1753,13 @@ const audioEngine = {
         // ignore
       }
     }
-    this.currentMusic = { key, source, gain, startedAt: performance.now() };
+    this.currentMusic = { key, url, source, gain, startedAt: performance.now(), ctxStartedAt: this.ctx.currentTime };
   },
   stopMusic() {
+    _musicWasPlaying = false;
+    _musicCurrentTime = 0;
+    _musicResumeKey = "";
+    _musicResumeUrl = "";
     if (this.currentMusicHtml?.node) {
       this.currentMusicHtml.node.pause();
       this.currentMusicHtml = null;
@@ -1788,6 +1799,52 @@ const audioEngine = {
     return buffer.duration / Math.max(0.01, rate || 1);
   },
 };
+
+function saveBackgroundMusicState() {
+  const htmlMusic = audioEngine.currentMusicHtml?.node
+    || document.querySelector('audio[src*="Kaleidoscope"]')
+    || window._bgMusicAudio;
+  if (htmlMusic && !htmlMusic.paused) {
+    _musicWasPlaying = true;
+    _musicCurrentTime = htmlMusic.currentTime || 0;
+    _musicResumeKey = audioEngine.currentMusicHtml?.key || _musicResumeKey;
+    _musicResumeUrl = audioEngine.currentMusicHtml?.url || htmlMusic.currentSrc || htmlMusic.src || _musicResumeUrl;
+    return;
+  }
+
+  if (audioEngine.currentMusic) {
+    _musicWasPlaying = true;
+    _musicResumeKey = audioEngine.currentMusic.key || _musicResumeKey;
+    _musicResumeUrl = audioEngine.currentMusic.url || _musicResumeUrl;
+    const startedAt = audioEngine.currentMusic.ctxStartedAt || 0;
+    const elapsed = Math.max(0, (audioEngine.ctx?.currentTime || startedAt) - startedAt);
+    const buffer = _musicResumeUrl ? audioEngine.musicBuffers.get(_musicResumeUrl) : null;
+    _musicCurrentTime = buffer?.duration ? elapsed % buffer.duration : elapsed;
+  }
+}
+
+function resumeBackgroundMusic() {
+  if (!_musicWasPlaying) return;
+  const htmlMusic = audioEngine.currentMusicHtml?.node
+    || document.querySelector('audio[src*="Kaleidoscope"]')
+    || window._bgMusicAudio;
+  if (htmlMusic) {
+    if (htmlMusic.paused) {
+      try {
+        if (Number.isFinite(_musicCurrentTime)) htmlMusic.currentTime = _musicCurrentTime;
+      } catch {
+        // Some platforms reject currentTime while media is not ready.
+      }
+      htmlMusic.play().catch(() => {});
+    }
+    return;
+  }
+
+  if (audioEngine.currentMusic) return;
+  if (_musicResumeKey && _musicResumeUrl) {
+    audioEngine.playMusic(_musicResumeKey, _musicResumeUrl, { crossfadeMs: 0 }).catch?.(() => {});
+  }
+}
 
 function preloadSfx() {
   audioEngine.loadMany(GAME_SFX);
@@ -1851,12 +1908,28 @@ function addListeners() {
   document.addEventListener("touchstart", resumeAudioOnGesture, { passive: true });
   document.addEventListener("keydown", resumeAudioOnGesture);
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
+    if (document.visibilityState === "visible") {
+      if (audioEngine?.ctx?.state === "suspended") {
+        audioEngine.ctx.resume().catch(() => {});
+      }
+      audioEngine.resume();
+      resumeBackgroundMusic();
+      try {
+        if ("speechSynthesis" in window) window.speechSynthesis.resume();
+      } catch {
+        // ignore
+      }
+    } else {
+      saveBackgroundMusicState();
       audioEngine.stopAllLoops();
-      audioEngine.stopMusic();
-      return;
+    }
+  });
+  window.addEventListener("focus", () => {
+    if (audioEngine?.ctx?.state === "suspended") {
+      audioEngine.ctx.resume().catch(() => {});
     }
     audioEngine.resume();
+    resumeBackgroundMusic();
     try {
       if ("speechSynthesis" in window) window.speechSynthesis.resume();
     } catch {
@@ -4421,6 +4494,7 @@ function initGalaxyCanvas() {
   let _fpsWorst = 60;
   let _fpsWorstReset = 0;
   canvasFlash = { r: 0, g: 255, b: 255, peak: 0, alpha: 0, decayPerMs: 0 };
+  window.galaxyBackground?.init(isIOSNative);
 
   const sim = {
     dpr: 1,
@@ -5409,7 +5483,33 @@ function initGalaxyCanvas() {
       effects.triggerUfoDeath(x, y);
       spawnExplosion(x, y, 18, false, 1.4);
     }
-    cssFlash("#00ffee", 0.25, 200);
+    const ufoX = ufo.x;
+    const ufoY = ufo.y;
+    const blastTime = performance.now();
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const a = sim.asteroids[i];
+      const dx = a.x - ufoX;
+      const dy = a.y - ufoY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > UFO_BLAST_RADIUS) continue;
+      const falloff = 1 - (dist / UFO_BLAST_RADIUS);
+      const force = UFO_BLAST_FORCE * falloff;
+      const nx = dist > 0 ? dx / dist : Math.random() - 0.5;
+      const ny = dist > 0 ? dy / dist : Math.random() - 0.5;
+      a.vx += nx * force;
+      a.vy += ny * force;
+      const speed = Math.sqrt(a.vx * a.vx + a.vy * a.vy);
+      if (speed > 8) {
+        a.vx = (a.vx / speed) * 8;
+        a.vy = (a.vy / speed) * 8;
+      }
+      a._ufoBlasted = blastTime;
+      a._ufoBlastedDuration = UFO_GLOW_DURATION;
+      a._ufoBlastOriginX = ufoX;
+      a._ufoBlastOriginY = ufoY;
+      a._ufoBlastIntensity = falloff;
+    }
+    cssFlash("#00ffee", 0.3, 250);
     cssShake(1.0);
     addWarpRing(x, y, "rgba(172,255,214,1)");
     stopUfoDrone();
@@ -5772,6 +5872,9 @@ function initGalaxyCanvas() {
     if (wasKind === 3) {
       cssFlash("#ff8800", 0.18, 150);
       cssShake(0.6);
+    }
+    if (wasKind === 2) {
+      cssShake(0.3);
     }
     const baseBoomVol = wasKind === 3 ? 0.9 : wasKind === 2 ? 0.92 : 0.78;
     const minBoomRatio = wasKind === 3 ? 0.62 : wasKind === 2 ? 0.8 : 0.9;
@@ -6222,6 +6325,8 @@ function initGalaxyCanvas() {
     cssFlash("#ffffff", 0.55, 300);
     cssShake(1.8);
     setTimeout(() => cssShake(1.0), 120);
+    window.galaxyBackground?.setHectic(true);
+    setTimeout(() => window.galaxyBackground?.setHectic(false), 3000);
     playBigBoomSound();
   }
 
@@ -6388,6 +6493,11 @@ function initGalaxyCanvas() {
     _timerWarnedAt10 = false;
     syncArcadeEntryLabel();
     setGalaxyBackgroundForLevel(cfg.level);
+    window.galaxyBackground?.show();
+    window.galaxyBackground?.setTheme(cfg.level);
+    if (currentLevelIndex > 0) {
+      window.galaxyBackground?.triggerWarp();
+    }
     playArcadeMusicForLevel(cfg.level);
     if (cfg.level === 10) {
       playGameSfx("lastlevelstart", 0.96);
@@ -6542,6 +6652,8 @@ function initGalaxyCanvas() {
     setGalaxyViewMode("practice");
     sim.maxAsteroids = capIOSNativeAsteroids(PRACTICE_MAX_ASTEROIDS);
     setGalaxyBackgroundForLevel(1);
+    window.galaxyBackground?.show();
+    window.galaxyBackground?.setTheme(1);
     setGalaxyTool("draw");
     state.practiceTool = "pencil";
     setPracticeToolUI();
@@ -6632,6 +6744,7 @@ function initGalaxyCanvas() {
     ctx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
     resizePlasmaOverlayCanvas();
     resizeUfoFxCanvas();
+    window.galaxyBackground?.resize(sim.width, sim.height);
     sim.maxAsteroids = capIOSNativeAsteroids(
       engineMode === "practice" ? PRACTICE_MAX_ASTEROIDS : (engineMode === "arcade" ? sim.maxAsteroids : (sim.width < 700 ? 80 : 120)),
     );
@@ -6787,6 +6900,8 @@ function initGalaxyCanvas() {
           && now - (sim._lastChaosTrigger || 0) > 45000) {
         sim._lastChaosTrigger = now;
         commBoxController.reactTo("chaos");
+        window.galaxyBackground?.setHectic(true);
+        setTimeout(() => window.galaxyBackground?.setHectic(false), 5000);
         commBoxController.triggerVO({
           audioSrc: commBoxController.commVoSrc("vo-hairytakeemout.mp3"),
           event: "chaos",
@@ -7481,6 +7596,7 @@ function initGalaxyCanvas() {
     hideFpsOverlay();
     setPlasmaOverlayVisible(true);
     window.pixiRenderer?.destroy();
+    window.galaxyBackground?.hide();
   }
 
   function stopAndMenu() {
@@ -7525,11 +7641,11 @@ function initGalaxyCanvas() {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopGalaxyLoop();
-      audioEngine.stopMusic();
     } else if (!galaxyView.hidden) {
       resizeGalaxyCanvas();
       computePlayfield();
       startGalaxyLoop();
+      resumeBackgroundMusic();
     }
   });
 

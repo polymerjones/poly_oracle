@@ -25,6 +25,8 @@ const pixiRenderer = (() => {
   const particleSprites = new Map();
   const asteroidSpritePool = [];
   const particleSpritePool = [];
+  const _ufoGlowPool = [];
+  const _activeUfoGlows = new Map();
 
   const textures = {};
 
@@ -255,6 +257,80 @@ const pixiRenderer = (() => {
       sprite.width = a.r * 2;
       sprite.height = a.r * 2;
       sprite.visible = true;
+
+      if (a._ufoBlasted) {
+        const now = performance.now();
+        const age = now - a._ufoBlasted;
+        const duration = a._ufoBlastedDuration || 4000;
+        if (age > duration) {
+          delete a._ufoBlasted;
+          delete a._ufoBlastedDuration;
+          delete a._ufoBlastOriginX;
+          delete a._ufoBlastOriginY;
+          delete a._ufoBlastIntensity;
+        } else {
+          const progress = age / duration;
+          const pulseSpeed = 7 - progress * 4;
+          const pulse = (Math.sin(now * 0.001 * pulseSpeed) + 1) * 0.5;
+          const baseAlpha = progress < 0.25 ? 1 : 1 - ((progress - 0.25) / 0.75);
+          const intensity = a._ufoBlastIntensity || 1;
+          const glowAlpha = baseAlpha * intensity * (0.45 + pulse * 0.55);
+          let glowG = _activeUfoGlows.get(a);
+          if (!glowG) {
+            glowG = _ufoGlowPool.pop() || new PIXI.Graphics();
+            _activeUfoGlows.set(a, glowG);
+          }
+          if (!glowG.parent) {
+            asteroidContainer.addChild(glowG);
+          }
+          glowG.clear();
+          const dx = a.x - (a._ufoBlastOriginX || a.x);
+          const dy = a.y - (a._ufoBlastOriginY || a.y);
+          const splatAngle = Math.atan2(-dy, -dx);
+          const arcSpread = Math.PI * 0.65;
+          const arcStart = splatAngle - arcSpread / 2;
+          const arcEnd = splatAngle + arcSpread / 2;
+
+          glowG.lineStyle(8 + pulse * 5, 0x00ffd1, glowAlpha * 0.3);
+          glowG.arc(a.x, a.y, a.r + 10 + pulse * 3, arcStart, arcEnd);
+          glowG.lineStyle(4, 0x00ffdd, glowAlpha * 0.6);
+          glowG.arc(a.x, a.y, a.r + 5, arcStart, arcEnd);
+          glowG.lineStyle(1.5, 0xaaffee, glowAlpha * 0.95);
+          glowG.arc(a.x, a.y, a.r + 2, arcStart - 0.1, arcEnd + 0.1);
+
+          const splatCount = 4 + Math.floor(intensity * 2);
+          for (let si = 0; si < splatCount; si += 1) {
+            const splatT = splatCount > 1 ? si / (splatCount - 1) : 0;
+            const splatA = arcStart + splatT * (arcEnd - arcStart);
+            const jitterA = splatA + (Math.sin(si * 7.3 + a._ufoBlasted * 0.001) * 0.25);
+            const splatR = a.r + 1 + Math.sin(si * 3.7) * 4;
+            const splatX = a.x + Math.cos(jitterA) * splatR;
+            const splatY = a.y + Math.sin(jitterA) * splatR;
+            const blobSize = (1.5 + Math.sin(si * 5.1) * 1.2 + pulse * 1.5) * intensity;
+            glowG.beginFill(0x00ffd1, glowAlpha * (0.5 + pulse * 0.4));
+            glowG.drawCircle(splatX, splatY, blobSize);
+            glowG.endFill();
+            glowG.beginFill(0xccffee, glowAlpha * (0.6 + pulse * 0.3));
+            glowG.drawCircle(splatX, splatY, blobSize * 0.45);
+            glowG.endFill();
+          }
+
+          glowG.beginFill(0x00ffd1, glowAlpha * 0.06);
+          glowG.moveTo(a.x, a.y);
+          glowG.arc(a.x, a.y, a.r - 1, arcStart + 0.2, arcEnd - 0.2);
+          glowG.closePath();
+          glowG.endFill();
+        }
+      }
+    }
+
+    for (const [asteroid, g] of _activeUfoGlows) {
+      if (!asteroid._ufoBlasted || !seen.has(asteroid)) {
+        g.clear();
+        if (g.parent) g.parent.removeChild(g);
+        _ufoGlowPool.push(g);
+        _activeUfoGlows.delete(asteroid);
+      }
     }
 
     for (const [a, sprite] of asteroidSprites) {
@@ -1022,6 +1098,8 @@ const pixiRenderer = (() => {
     activeDebris.length = 0;
     asteroidSpritePool.length = 0;
     particleSpritePool.length = 0;
+    _ufoGlowPool.length = 0;
+    _activeUfoGlows.clear();
     laserPool.length = 0;
     warpRingPool.length = 0;
     lightningRingPool.length = 0;

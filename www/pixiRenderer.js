@@ -50,6 +50,27 @@ const pixiRenderer = (() => {
   let plasmaGraphics = null;
   let bombGraphics = null;
   let landmineGraphics = null;
+  let glowTexture = null;
+
+  function createGlowTexture(rendererApp, size = 32) {
+    const g = new PIXI.Graphics();
+    g.beginFill(0xffffff, 0.08);
+    g.drawCircle(size / 2, size / 2, size / 2);
+    g.endFill();
+    g.beginFill(0xffffff, 0.25);
+    g.drawCircle(size / 2, size / 2, (size / 2) * 0.65);
+    g.endFill();
+    g.beginFill(0xffffff, 0.9);
+    g.drawCircle(size / 2, size / 2, (size / 2) * 0.3);
+    g.endFill();
+    const rt = PIXI.RenderTexture.create({
+      width: size,
+      height: size,
+    });
+    rendererApp.renderer.render(g, { renderTexture: rt });
+    g.destroy();
+    return rt;
+  }
 
   async function init(mountEl, width, height, isNative) {
     if (app) return app;
@@ -93,6 +114,7 @@ const pixiRenderer = (() => {
       app.renderer.background.alpha = 0;
 
       app.ticker.stop();
+      glowTexture = createGlowTexture(app, 32);
 
       const spriteKeys = {
         roid01: 'astgfx/roid01.png',
@@ -116,13 +138,15 @@ const pixiRenderer = (() => {
       lightningRingContainer = new PIXI.Container();
       asteroidContainer = new PIXI.Container();
       ufoContainer = new PIXI.Container();
-      particleContainer = new PIXI.ParticleContainer(800, {
+      particleContainer = new PIXI.ParticleContainer(400, {
         position: true,
-        rotation: true,
+        rotation: false,
+        uvs: false,
         alpha: true,
         scale: true,
         tint: true,
       });
+      particleContainer.blendMode = PIXI.BLEND_MODES.ADD;
       laserContainer = new PIXI.Container();
       plasmaContainer = new PIXI.Container();
       bombContainer = new PIXI.Container();
@@ -253,28 +277,33 @@ const pixiRenderer = (() => {
 
       let sprite = particleSprites.get(p);
       if (!sprite) {
-        sprite = particleSpritePool.pop() || new PIXI.Sprite(PIXI.Texture.WHITE);
+        sprite = particleSpritePool.pop() || new PIXI.Sprite(glowTexture || PIXI.Texture.WHITE);
+        if (glowTexture) sprite.texture = glowTexture;
+        sprite.anchor.set(0.5);
         particleContainer.addChild(sprite);
         particleSprites.set(p, sprite);
       }
 
       const lifeRatio = 1 - p.life / p.ttl;
-      sprite.alpha = Math.max(0, lifeRatio * p.alpha);
-      sprite.x = p.x - p.size;
-      sprite.y = p.y - p.size;
-      sprite.width = p.size * 2;
-      sprite.height = p.size * 2;
+      const alpha = Math.max(0, (1 - lifeRatio * lifeRatio) * p.alpha);
+      sprite.alpha = alpha;
+      sprite.x = p.x;
+      sprite.y = p.y;
+
+      const scale = (p.size / 16) * (0.4 + lifeRatio * 0.6);
+      sprite.scale.set(scale);
 
       if (p._pixiTint == null) {
         p._pixiTint = parseRgbaTint(p.color) || 0x6fff80;
       }
       sprite.tint = p._pixiTint;
-      sprite.visible = true;
+      sprite.visible = alpha > 0.01;
     }
 
     for (const [p, sprite] of particleSprites) {
       if (!seen.has(p)) {
         sprite.visible = false;
+        sprite.alpha = 0;
         particleSpritePool.push(sprite);
         particleSprites.delete(p);
       }
@@ -290,19 +319,22 @@ const pixiRenderer = (() => {
       seen.add(beam);
 
       let g = activeLasers.get(beam);
-      if (!g) {
-        g = laserPool.pop() || new PIXI.Graphics();
-        laserContainer.addChild(g);
-        activeLasers.set(beam, g);
+      if (g) {
+        const t = Math.max(0, Math.min(1, (now - beam.startedAt) / 150));
+        g.alpha = 1 - t;
+        g.visible = true;
+        continue;
       }
 
-      const t = Math.max(0, Math.min(1, (now - beam.startedAt) / 150));
-      const alpha = 1 - t;
+      g = laserPool.pop() || new PIXI.Graphics();
+      laserContainer.addChild(g);
+      activeLasers.set(beam, g);
+      g.alpha = 1;
       g.clear();
-      g.lineStyle(2, 0x00ffd1, 0.92 * alpha);
+      g.lineStyle(2, 0x00ffd1, 0.92);
       g.moveTo(beam.x1, beam.y1);
       g.lineTo(beam.x2, beam.y2);
-      g.lineStyle(6, 0x00ffd1, 0.18 * alpha);
+      g.lineStyle(6, 0x00ffd1, 0.18);
       g.moveTo(beam.x1, beam.y1);
       g.lineTo(beam.x2, beam.y2);
       g.visible = true;
@@ -311,6 +343,7 @@ const pixiRenderer = (() => {
     for (const [beam, g] of activeLasers) {
       if (!seen.has(beam)) {
         g.clear();
+        g.alpha = 1;
         g.visible = false;
         laserPool.push(g);
         activeLasers.delete(beam);
@@ -357,6 +390,38 @@ const pixiRenderer = (() => {
         activeWarpRings.delete(ring);
       }
     }
+  }
+
+  function triggerShockwave(x, y, color, size) {
+    if (!app || !warpRingContainer) return;
+    const g = warpRingPool.pop() || new PIXI.Graphics();
+    warpRingContainer.addChild(g);
+
+    const startTime = performance.now();
+    const duration = 280;
+    const maxR = size || 40;
+    const tint = color || 0x00ffd1;
+
+    const tick = () => {
+      const age = performance.now() - startTime;
+      const t = Math.min(1, age / duration);
+      if (t >= 1) {
+        g.clear();
+        g.visible = false;
+        warpRingPool.push(g);
+        app.ticker.remove(tick);
+        return;
+      }
+      const r = maxR * t;
+      const alpha = (1 - t) * 0.85;
+      g.clear();
+      g.lineStyle(2.5, tint, alpha);
+      g.drawCircle(x, y, r);
+      g.lineStyle(1, 0xffffff, alpha * 0.5);
+      g.drawCircle(x, y, r * 0.7);
+      g.visible = true;
+    };
+    app.ticker.add(tick);
   }
 
   function syncLightningRings(lightningRings, frameBudgetExceeded) {
@@ -912,6 +977,7 @@ const pixiRenderer = (() => {
     updateBombEffects(now);
     updateFlash(canvasFlash);
 
+    app.ticker.update(now);
     app.renderer.render(app.stage);
     return true;
   }
@@ -920,6 +986,10 @@ const pixiRenderer = (() => {
     if (!app) return;
     if (legacyCanvas) {
       legacyCanvas.style.opacity = '';
+    }
+    if (glowTexture) {
+      glowTexture.destroy(true);
+      glowTexture = null;
     }
     app.destroy(true, { children: true, texture: false });
     app = null;
@@ -961,7 +1031,7 @@ const pixiRenderer = (() => {
     flashAlpha = 0;
   }
 
-  return { init, draw, resize, destroy, triggerBombDetonation };
+  return { init, draw, resize, destroy, triggerBombDetonation, triggerShockwave };
 })();
 
 window.pixiRenderer = pixiRenderer;

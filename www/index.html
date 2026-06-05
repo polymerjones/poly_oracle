@@ -231,8 +231,8 @@
 
     <section id="galaxyView" class="view galaxy-view" hidden aria-hidden="true">
       <div id="bgStack" class="bgStack" aria-hidden="true">
-        <video id="bgA" class="bgVideo" muted playsinline webkit-playsinline loop preload="auto"></video>
-        <video id="bgB" class="bgVideo" muted playsinline webkit-playsinline loop preload="auto"></video>
+        <video id="bgA" class="bgVideo" muted playsinline webkit-playsinline loop preload="auto" style="display:none"></video>
+        <video id="bgB" class="bgVideo" muted playsinline webkit-playsinline loop preload="auto" style="display:none"></video>
         <div id="bgTint" class="bgTint"></div>
       </div>
       <div id="galaxyModeSelect" class="galaxyModeSelect" aria-hidden="true">
@@ -364,13 +364,25 @@
               line-height:1.5;"></div>
         </div>
         <!-- Signal bars -->
-        <div style="flex-shrink:0;margin-left:6px;
-          display:flex;gap:2px;align-items:flex-end;">
-          <span style="background:#00d4d4;width:3px;height:4px;display:block;"></span>
-          <span style="background:#00d4d4;width:3px;height:6px;display:block;"></span>
-          <span style="background:#00d4d4;width:3px;height:9px;display:block;"></span>
-          <span style="background:#00d4d4;width:3px;height:12px;display:block;"></span>
-          <span style="background:#003333;width:3px;height:7px;display:block;"></span>
+        <div id="commanderSigBars"
+          style="flex-shrink:0;margin-left:6px;
+          display:flex;gap:2px;align-items:flex-end;
+          height:14px;">
+          <span class="sigbar" style="background:#00d4d4;
+            width:3px;height:4px;display:block;
+            transition:height 0.12s ease;"></span>
+          <span class="sigbar" style="background:#00d4d4;
+            width:3px;height:6px;display:block;
+            transition:height 0.12s ease;"></span>
+          <span class="sigbar" style="background:#00d4d4;
+            width:3px;height:9px;display:block;
+            transition:height 0.12s ease;"></span>
+          <span class="sigbar" style="background:#00d4d4;
+            width:3px;height:12px;display:block;
+            transition:height 0.12s ease;"></span>
+          <span class="sigbar" style="background:#00d4d4;
+            width:3px;height:7px;display:block;
+            transition:height 0.12s ease;"></span>
         </div>
       </div>
     </div>

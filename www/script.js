@@ -1,6 +1,7 @@
 let capacitorHaptics = null;
 let hapticImpactStyle = { Heavy: "HEAVY", Medium: "MEDIUM", Light: "LIGHT" };
 let hapticNotificationType = { Success: "SUCCESS" };
+const DISABLE_GAMEPLAY_HAPTICS = true; // perf test - re-enable after Release build comparison
 
 function loadCapacitorHaptics() {
   try {
@@ -30,6 +31,11 @@ function triggerHapticImpact(style) {
   }
 }
 
+function triggerGameplayHapticImpact(style) {
+  if (DISABLE_GAMEPLAY_HAPTICS) return;
+  triggerHapticImpact(style);
+}
+
 function triggerHapticNotification(type) {
   try {
     getCapacitorHaptics()?.notification?.({ type })?.catch?.(() => {});
@@ -47,6 +53,7 @@ const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
+const DISABLE_VIDEO_BG = true; // perf test - re-enable later
 const STORAGE = {
   arcadeLevel: "poly_oracle_arcade_level",
   arcadeSaved: "poly_oracle_arcade_saved",
@@ -117,7 +124,6 @@ const GAME_SFX = {
 const PRACTICE_MAX_ASTEROIDS = 40;
 const PRACTICE_SPAWN_COOLDOWN_MS = 1000;
 const PRACTICE_ENABLED = false;
-const MAX_EXPLOSION_PARTICLES = 120;
 const PLASMA_CAGE_CHARGE_MS = 1000;
 const PLASMA_CAGE_COOLDOWN_MS = 5000;
 const PLASMA_CAGE_DRAG_THRESHOLD = 20;
@@ -321,6 +327,7 @@ const prefersReducedMotion =
 const isIOSWebKit = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const isCapacitorNative = !!(globalThis.Capacitor?.isNativePlatform?.());
 const isIOSNative = isCapacitorNative && isIOSWebKit;
+const MAX_EXPLOSION_PARTICLES = isIOSNative ? 30 : 80;
 
 function nativeCanvasDpr() {
   return isIOSNative ? 1 : Math.max(1, Math.min(2, window.devicePixelRatio || 1));
@@ -679,8 +686,22 @@ const commBoxController = (() => {
 
     const seq = damageState === "heavy" ? IDLE_HEAVY
       : damageState === "light" ? IDLE_LIGHT : IDLE_NORMAL;
-    setFrame(seq[idleIndex % seq.length]);
+    const nextFrame = seq[idleIndex % seq.length];
+    const isBlink = nextFrame.includes("blink");
+    setFrame(nextFrame);
     idleIndex++;
+    if (isBlink) {
+      setTimeout(() => {
+        if (!mouthFlap) {
+          const baseFrame = damageState === "heavy"
+            ? "heavydamage"
+            : damageState === "light"
+              ? "lightdamage"
+              : "idle";
+          setFrame(baseFrame);
+        }
+      }, 120);
+    }
   }
 
   function startIdle() {
@@ -745,8 +766,11 @@ const commBoxController = (() => {
 
   function showTicker() {
     if (!ticker) return;
+    configureSignalBars();
     ticker.classList.add("ticker-visible");
     tickerVisible = true;
+    document.querySelectorAll(".sigbar")
+      .forEach((b) => b.classList.add("sigbar-active"));
   }
 
   function hideTicker() {
@@ -754,6 +778,31 @@ const commBoxController = (() => {
     ticker.classList.remove("ticker-visible");
     tickerVisible = false;
     if (tickerText) tickerText.innerHTML = "";
+    setTimeout(() => {
+      document.querySelectorAll(".sigbar")
+        .forEach((b) => b.classList.remove("sigbar-active"));
+      configureSignalBars();
+    }, 300);
+  }
+
+  function configureSignalBars() {
+    const bars = document.querySelectorAll(".sigbar");
+    const resting = [
+      { height: "4px", background: "#00d4d4" },
+      { height: "6px", background: "#00d4d4" },
+      { height: "9px", background: "#00d4d4" },
+      { height: "12px", background: "#00d4d4" },
+      { height: "5px", background: "#003333" },
+    ];
+    bars.forEach((bar, index) => {
+      const cfg = resting[index];
+      if (!cfg) return;
+      bar.style.transition = "height 0.4s ease";
+      if (!bar.classList.contains("sigbar-active")) {
+        bar.style.height = cfg.height;
+      }
+      bar.style.background = cfg.background;
+    });
   }
 
   function show() {
@@ -872,23 +921,38 @@ const commBoxController = (() => {
       }, 1200);
     };
 
-    if (audioSrc) {
-      let audioFallbackTimer = null;
-      const finishAudio = () => {
-        if (audioFallbackTimer) clearTimeout(audioFallbackTimer);
-        endTalking();
-      };
+    const radioSrc = commVoSrc("vo-interferenceambience.mp3");
+    const VO_RADIO_DELAY = 320;
+
+    if (radioSrc) {
       try {
-        voAudio = new Audio(audioSrc);
-        voAudio.volume = 0.9;
-        voAudio.play().catch(() => {
-          if (!audioFallbackTimer) audioFallbackTimer = setTimeout(endTalking, duration);
-        });
-        voAudio.addEventListener("ended", finishAudio);
-        audioFallbackTimer = setTimeout(endTalking, duration);
+        const radio = new Audio(radioSrc);
+        radio.volume = 0.35;
+        radio.play().catch(() => {});
       } catch {
-        tickerHideTimer = setTimeout(endTalking, duration);
+        // Radio click is optional.
       }
+    }
+
+    if (audioSrc) {
+      setTimeout(() => {
+        let audioFallbackTimer = null;
+        const finishAudio = () => {
+          if (audioFallbackTimer) clearTimeout(audioFallbackTimer);
+          endTalking();
+        };
+        try {
+          voAudio = new Audio(audioSrc);
+          voAudio.volume = 0.9;
+          voAudio.play().catch(() => {
+            if (!audioFallbackTimer) audioFallbackTimer = setTimeout(endTalking, duration);
+          });
+          voAudio.addEventListener("ended", finishAudio);
+          audioFallbackTimer = setTimeout(endTalking, duration);
+        } catch {
+          tickerHideTimer = setTimeout(endTalking, duration);
+        }
+      }, radioSrc ? VO_RADIO_DELAY : 0);
     } else {
       tickerHideTimer = setTimeout(endTalking, duration);
     }
@@ -896,6 +960,7 @@ const commBoxController = (() => {
 
   function init() {
     if (hud) hud.style.display = "none";
+    configureSignalBars();
     setFrame("idle");
   }
 
@@ -1295,6 +1360,10 @@ function mountRetryFuzzy() {
   retryFuzzyInstance = createFuzzyText(c, preset);
 }
 
+let _soundsLoading = false;
+let _soundsLoaded = false;
+let _soundsLoadPromise = null;
+
 const audioEngine = {
   ctx: null,
   masterGain: null,
@@ -1337,10 +1406,29 @@ const audioEngine = {
     if (this.buffers.has(name)) return this.buffers.get(name);
     const ctx = this.ensureContext();
     if (!ctx) return null;
+    let resolvedUrl;
     try {
-      const response = await fetch(url);
-      if (!response.ok) return null;
-      const arr = await response.arrayBuffer();
+      resolvedUrl = new URL(url, document.baseURI).href;
+    } catch {
+      resolvedUrl = url;
+    }
+    try {
+      const arr = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", resolvedUrl, true);
+        xhr.responseType = "arraybuffer";
+        xhr.timeout = 5000;
+        xhr.onload = () => {
+          if (xhr.status === 200 || xhr.status === 0) {
+            resolve(xhr.response);
+          } else {
+            reject(new Error(`XHR ${xhr.status}`));
+          }
+        };
+        xhr.onerror = () => reject(new Error("XHR network error"));
+        xhr.ontimeout = () => reject(new Error("XHR timeout"));
+        xhr.send();
+      });
       const decoded = await ctx.decodeAudioData(arr.slice(0));
       this.buffers.set(name, decoded);
       return decoded;
@@ -1349,8 +1437,38 @@ const audioEngine = {
     }
   },
   loadMany(mapNameToUrl) {
-    const entries = Object.entries(mapNameToUrl || {});
-    return Promise.all(entries.map(([name, url]) => this.loadSound(name, url)));
+    if (_soundsLoaded) return Promise.resolve();
+    if (_soundsLoading) return _soundsLoadPromise || Promise.resolve();
+    const soundMap = mapNameToUrl || {};
+    const priorityKeys = [
+      "explosion_med",
+      "explosion_big",
+      "advfire",
+      "ufo_destroy",
+      "landmine_boom",
+      "plasmarecharged",
+    ];
+    const orderedKeys = [
+      ...priorityKeys.filter((key) => soundMap[key]),
+      ...Object.keys(soundMap).filter((key) => !priorityKeys.includes(key)),
+    ];
+    _soundsLoading = true;
+    _soundsLoadPromise = (async () => {
+      try {
+        for (let i = 0; i < orderedKeys.length; i += 1) {
+          const name = orderedKeys[i];
+          try {
+            await this.loadSound(name, soundMap[name]);
+          } catch {
+            // Skip individual failed sounds and continue loading the rest.
+          }
+        }
+        _soundsLoaded = true;
+      } finally {
+        _soundsLoading = false;
+      }
+    })();
+    return _soundsLoadPromise;
   },
   enforcePolyphony(name, maxVoices = this.maxVoicesPerSound, mode = "drop_newest") {
     const voices = this.voices.get(name);
@@ -1470,10 +1588,16 @@ const audioEngine = {
   },
   playLoop(name, { volume = 1, rate = 1, detune = 0 } = {}) {
     const ctx = this.ensureContext();
-    if (!ctx || !this.unlocked) return this.playHtmlAudio(name, { volume, rate, loop: true });
+    if (!ctx || !this.unlocked) {
+      if (isIOSNative) return null;
+      return this.playHtmlAudio(name, { volume, rate, loop: true });
+    }
     if (this.loops.has(name)) return this.loops.get(name);
     const buffer = this.buffers.get(name);
-    if (!buffer) return this.playHtmlAudio(name, { volume, rate, loop: true });
+    if (!buffer) {
+      if (isIOSNative) return null;
+      return this.playHtmlAudio(name, { volume, rate, loop: true });
+    }
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
     source.buffer = buffer;
@@ -2226,7 +2350,9 @@ function openGalaxyView() {
   document.body.style.overflow = "hidden";
   if (!prefersReducedMotion) {
     if (oracleBgController) oracleBgController.stop();
-    initGalaxyBackgroundStack();
+    if (!DISABLE_VIDEO_BG) {
+      initGalaxyBackgroundStack();
+    }
   }
   if (galaxyCanvasController) {
     requestAnimationFrame(() => galaxyCanvasController.showModeSelect?.());
@@ -3885,7 +4011,9 @@ function makeId() {
 
 function initBackgroundVideos() {
   oracleBgController = createLoopVideoController(oracleBgVideo);
-  initGalaxyBackgroundStack();
+  if (!DISABLE_VIDEO_BG) {
+    initGalaxyBackgroundStack();
+  }
 
   if (prefersReducedMotion) {
     if (oracleBgVideo) oracleBgVideo.currentTime = 0;
@@ -3905,7 +4033,9 @@ function initBackgroundVideos() {
 
     if (!galaxyView.hidden) {
       // foreground gameplay start handles key selection and playback
-      initGalaxyBackgroundStack();
+      if (!DISABLE_VIDEO_BG) {
+        initGalaxyBackgroundStack();
+      }
     } else {
       if (oracleBgController) oracleBgController.start();
     }
@@ -3915,6 +4045,7 @@ function initBackgroundVideos() {
 function primeBackgroundMedia() {
   [oracleBgVideo, bgVideoA, bgVideoB].forEach((video) => {
     if (!video) return;
+    if (DISABLE_VIDEO_BG && (video === bgVideoA || video === bgVideoB)) return;
     video.play().then(() => {
       if (video !== oracleBgVideo || galaxyView.hidden) video.pause();
     }).catch(() => {});
@@ -3997,6 +4128,19 @@ function createLoopVideoController(video) {
 }
 
 function initGalaxyBackgroundStack() {
+  if (DISABLE_VIDEO_BG) {
+    [bgVideoA, bgVideoB].forEach((video) => {
+      if (!video) return;
+      video.pause();
+      video.removeAttribute("src");
+      video.style.display = "none";
+      video.style.opacity = "0";
+      video.classList.remove("isOn");
+    });
+    bgCtl.ready = false;
+    bgCtl.currentKey = null;
+    return;
+  }
   if (bgCtl.ready) return;
   if (!bgVideoA || !bgVideoB) return;
   bgCtl.a = bgVideoA;
@@ -4004,6 +4148,7 @@ function initGalaxyBackgroundStack() {
   bgCtl.front = bgVideoA;
   bgCtl.back = bgVideoB;
   [bgCtl.a, bgCtl.b].forEach((video) => {
+    video.style.display = "";
     video.muted = true;
     video.loop = true;
     video.playsInline = true;
@@ -4049,6 +4194,7 @@ function setGalaxyBackgroundDim(ratio = 0) {
 }
 
 async function setGalaxyBackgroundKey(key, opts = {}) {
+  if (DISABLE_VIDEO_BG) return;
   initGalaxyBackgroundStack();
   if (!bgCtl.ready) return;
   if (!key || !BG[key]) return;
@@ -4141,6 +4287,7 @@ async function setGalaxyBackgroundKey(key, opts = {}) {
 }
 
 function preloadGalaxyBackgroundKey(key) {
+  if (DISABLE_VIDEO_BG) return;
   initGalaxyBackgroundStack();
   if (!bgCtl.ready || !key || !BG[key]) return;
   const src = BG[key];
@@ -4239,6 +4386,12 @@ function initGalaxyCanvas() {
   };
   const laserBeams = [];
   const _bombDestroyQueue = [];
+  let _fpsOverlay = null;
+  let _fpsFrames = 0;
+  let _fpsLastTime = 0;
+  let _fpsAvg = 60;
+  let _fpsWorst = 60;
+  let _fpsWorstReset = 0;
   canvasFlash = { r: 0, g: 255, b: 255, peak: 0, alpha: 0, decayPerMs: 0 };
 
   const sim = {
@@ -4260,6 +4413,57 @@ function initGalaxyCanvas() {
     particlePool: [],
     ringPool: [],
   };
+
+  function ensureFpsOverlay() {
+    if (_fpsOverlay) return;
+    _fpsOverlay = document.createElement("div");
+    _fpsOverlay.style.cssText = `
+      position:fixed;top:8px;right:8px;
+      background:rgba(0,0,0,0.7);
+      color:#00ffee;font-family:monospace;
+      font-size:11px;padding:4px 8px;
+      border-radius:3px;z-index:99999;
+      pointer-events:none;line-height:1.6;
+    `;
+    document.body.appendChild(_fpsOverlay);
+  }
+
+  function showFpsOverlay() {
+    ensureFpsOverlay();
+    if (_fpsOverlay) _fpsOverlay.style.display = "block";
+  }
+
+  function hideFpsOverlay() {
+    if (_fpsOverlay) _fpsOverlay.style.display = "none";
+  }
+
+  function trackFpsOverlay() {
+    const _fpsNow = performance.now();
+    if (_fpsLastTime > 0) {
+      const _fpsDt = _fpsNow - _fpsLastTime;
+      const _fpsInstant = Math.round(1000 / _fpsDt);
+      _fpsAvg = _fpsAvg * 0.9 + _fpsInstant * 0.1;
+      if (_fpsDt > (1000 / _fpsWorst)) _fpsWorst = Math.round(1000 / _fpsDt);
+      if (_fpsNow - _fpsWorstReset > 3000) {
+        _fpsWorst = _fpsInstant;
+        _fpsWorstReset = _fpsNow;
+      }
+    }
+    _fpsLastTime = _fpsNow;
+    _fpsFrames++;
+
+    if (_fpsFrames % 30 === 0 && _fpsOverlay) {
+      const avg = Math.round(_fpsAvg);
+      const color = avg >= 50 ? "#00ffee" : avg >= 30 ? "#ffaa00" : "#ff4444";
+      _fpsOverlay.style.color = color;
+      _fpsOverlay.innerHTML =
+        `FPS: ${avg}<br>` +
+        `WORST: ${_fpsWorst}<br>` +
+        `PARTS: ${sim?.particles?.length || 0}<br>` +
+        `ROIDS: ${sim?.asteroids?.length || 0}<br>` +
+        `LASERS: ${laserBeams?.length || 0}`;
+    }
+  }
 
   const asteroidSpritePaths = {
     roid01: "astgfx/roid01.png",
@@ -4306,6 +4510,10 @@ function initGalaxyCanvas() {
   let _streakTimer = null;
   let _praiseCount = 0;
   let _lastPraiseAt = 0;
+  let _timerWarnedAt60 = false;
+  let _timerWarnedAt10 = false;
+  let _iosAudioFrameBudget = 0;
+  let _iosAudioLastFrame = 0;
   let lastAsteroidCollisionSfxAt = 0;
   let suppressAstCollisionSfxUntil = 0;
   let _lastExplosionSoundAt = 0;
@@ -4550,10 +4758,10 @@ function initGalaxyCanvas() {
         warningActive = true;
         galaxyView.classList.add("warning");
         warningLoopHandle = audioEngine.playLoop("warning10", { volume: state.whisper ? 0.28 : 0.6, rate: 1 });
-        triggerHapticImpact(hapticImpactStyle.Medium);
+        triggerGameplayHapticImpact(hapticImpactStyle.Medium);
         warningHapticInterval = setInterval(() => {
           if (!warningActive) return;
-          triggerHapticImpact(hapticImpactStyle.Medium);
+          triggerGameplayHapticImpact(hapticImpactStyle.Medium);
         }, 600);
       }
       if (!bgPreRolledForLevel) {
@@ -4914,7 +5122,17 @@ function initGalaxyCanvas() {
       }[name] || 1)
       : 1;
     const finalVolume = clamp(volume * (state.whisper ? 0.55 : 1) * iosBoost, 0, 1);
-    if (opts.forceHtmlOnIOS && isIOSWebKit) {
+    if (isIOSNative) {
+      const frameNow = performance.now();
+      if (frameNow - _iosAudioLastFrame < 16) {
+        if (_iosAudioFrameBudget >= 2) return;
+        _iosAudioFrameBudget++;
+      } else {
+        _iosAudioFrameBudget = 1;
+        _iosAudioLastFrame = frameNow;
+      }
+    }
+    if (opts.forceHtmlOnIOS && isIOSWebKit && !isIOSNative) {
       audioEngine.playHtmlAudio(name, {
         volume: finalVolume,
         rate: opts.rate || 1,
@@ -4982,7 +5200,11 @@ function initGalaxyCanvas() {
 
   function playBigBoomSound() {
     playGameSfx("landmine_boom", 1.0);
-    setTimeout(() => playGameSfx("explosion_big", 0.85), 80);
+    if (isIOSNative) {
+      setTimeout(() => playGameSfx("explosion_big", 0.7), 100);
+    } else {
+      setTimeout(() => playGameSfx("explosion_big", 0.85), 80);
+    }
   }
 
   function triggerLandmineScreenFlash() {
@@ -5017,6 +5239,9 @@ function initGalaxyCanvas() {
   }
 
   function addWarpRing(x, y, color = "rgba(112,255,178,1)") {
+    if (isIOSNative && sim.warpRings.length >= 3) {
+      sim.warpRings.shift();
+    }
     const ring = getRing();
     ring.x = x;
     ring.y = y;
@@ -5144,13 +5369,25 @@ function initGalaxyCanvas() {
       playGameSfx("ufo_hit1", 0.72);
       return;
     }
-    playGameSfx("ufo_destroy", 0.84);
-    playGameSfx("life_gain", 0.84);
-    effects.triggerUfoDeath(x, y);
-    spawnExplosion(x, y, 28, false, 1.25, 1.2);
+    if (isIOSNative) {
+      playGameSfx("ufo_destroy", 0.9);
+      spawnExplosion(x, y, 8, false, 1.0);
+      setTimeout(() => {
+        effects.triggerUfoDeath(x, y);
+      }, 32);
+    } else {
+      playGameSfx("ufo_destroy", 0.84);
+      playGameSfx("life_gain", 0.84);
+      effects.triggerUfoDeath(x, y);
+      spawnExplosion(x, y, 18, false, 1.4);
+    }
     addWarpRing(x, y, "rgba(172,255,214,1)");
     stopUfoDrone();
     ufo = null;
+    commBoxController.triggerVO({
+      audioSrc: commBoxController.commVoSrc("vo-quicklaugh.mp3"),
+      event: "levelcomplete",
+    });
     plasmaCage.cooldownUntil = 0;
     plasmaCage.rechargeSoundPlayed = true;
     addArcadeScore(100);
@@ -5159,14 +5396,14 @@ function initGalaxyCanvas() {
   }
 
   function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1, asteroidKind = 3) {
-    if (isIOSNative && sim.particles.length >= 60) return;
+    if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
     const isLarge = asteroidKind >= 2;
     const particleCount = isIOSNative
       ? (isLarge ? Math.ceil(count / 2) : Math.ceil(count / 3))
       : count;
     const emitCount = prefersReducedMotion ? Math.min(6, particleCount) : particleCount;
     for (let i = 0; i < emitCount; i += 1) {
-      if (isIOSNative && sim.particles.length >= 60) break;
+      if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
       if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
       const angle = Math.random() * Math.PI * 2;
       const speed = 30 + Math.random() * 110;
@@ -5407,6 +5644,7 @@ function initGalaxyCanvas() {
 
   function stopDangerLoop() {
     if (!_dangerLoopAudio) return;
+    _dangerLoopAudio.loop = false;
     _dangerLoopAudio.pause();
     _dangerLoopAudio.currentTime = 0;
     _dangerLoopAudio = null;
@@ -5490,19 +5728,8 @@ function initGalaxyCanvas() {
         child.vy += (child.vy / Math.max(1, Math.abs(child.vy))) * parentSpeed * 0.2 * boost;
         return true;
       };
-      if (isIOSNative) {
-        let spawnedChildren = 0;
-        const spawnNextChild = () => {
-          if (spawnedChildren >= childCount) return;
-          if (!spawnSplitChild()) return;
-          spawnedChildren += 1;
-          if (spawnedChildren < childCount) requestAnimationFrame(spawnNextChild);
-        };
-        spawnNextChild();
-      } else {
-        for (let i = 0; i < childCount; i += 1) {
-          if (!spawnSplitChild()) break;
-        }
+      for (let i = 0; i < childCount; i += 1) {
+        if (!spawnSplitChild()) break;
       }
     }
 
@@ -5519,7 +5746,7 @@ function initGalaxyCanvas() {
       boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }),
       0.92 + Math.random() * 0.16,
     );
-    triggerHapticImpact(destroyedRadius >= 30 ? hapticImpactStyle.Heavy : hapticImpactStyle.Light);
+    triggerGameplayHapticImpact(destroyedRadius >= 30 ? hapticImpactStyle.Heavy : hapticImpactStyle.Light);
     suppressAstCollisionSfxUntil = performance.now() + 180;
     if (isLevel10) {
       triggerLevel10AsteroidFlash(bigBlast);
@@ -5564,7 +5791,7 @@ function initGalaxyCanvas() {
       boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }),
       0.92 + Math.random() * 0.14,
     );
-    triggerHapticImpact(a.r >= 30 ? hapticImpactStyle.Heavy : hapticImpactStyle.Light);
+    triggerGameplayHapticImpact(a.r >= 30 ? hapticImpactStyle.Heavy : hapticImpactStyle.Light);
     if (isLevel10) {
       triggerLevel10AsteroidFlash(bigBlast);
       if (bigBlast) {
@@ -5640,7 +5867,7 @@ function initGalaxyCanvas() {
     }
     if (now - plasmaCage.lastPulseAt >= 250) {
       plasmaCage.lastPulseAt = now;
-      triggerHapticImpact(hapticImpactStyle.Light);
+      triggerGameplayHapticImpact(hapticImpactStyle.Light);
     }
   }
 
@@ -5673,12 +5900,21 @@ function initGalaxyCanvas() {
     if (plasmaCage.rechargeSoundPlayed) return;
     plasmaCage.rechargeSoundPlayed = true;
     playGameSfx("plasmarecharged", 1.0);
-    commBoxController.triggerVO({
-      lines: ["PLASMA RECHARGED. READY."],
-      audioSrc: commBoxController.commVoSrc("plasma_ready.mp3"),
-      duration: 2500,
-      event: "plasmacharged",
-    });
+    function fireRechargeComm() {
+      const ticker = document.getElementById("commanderTicker");
+      const isActive = ticker?.classList.contains("ticker-visible");
+      if (isActive) {
+        setTimeout(fireRechargeComm, 800);
+        return;
+      }
+      commBoxController.triggerVO({
+        lines: ["PLASMA RECHARGED. READY."],
+        audioSrc: commBoxController.commVoSrc("plasma_ready.mp3"),
+        duration: 2500,
+        event: "plasmacharged",
+      });
+    }
+    setTimeout(fireRechargeComm, 400);
   }
 
   function destroyAsteroidsInPlasmaCage(rect) {
@@ -5708,7 +5944,7 @@ function initGalaxyCanvas() {
       const destroyedCount = destroyAsteroidsInPlasmaCage(rect);
       const fireKey = destroyedCount > 0 ? resolveGameSfxKey("plasma_fire", "ufo_destroy") : "";
       if (fireKey) playGameSfx(fireKey, 0.92);
-      triggerHapticImpact(hapticImpactStyle.Heavy);
+      triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
       plasmaCage.cooldownStart = now;
       plasmaCage.cooldownUntil = now + PLASMA_CAGE_COOLDOWN_MS;
       plasmaCage.rechargeSoundPlayed = false;
@@ -5862,11 +6098,12 @@ function initGalaxyCanvas() {
     updatePlasmaChargeSound(now);
     for (let i = laserBeams.length - 1; i >= 0; i -= 1) {
       const beam = laserBeams[i];
-      const t = clamp((now - beam.startedAt) / 150, 0, 1);
-      if (t >= 1) {
+      const age = now - beam.startedAt;
+      if (age > 150) {
         laserBeams.splice(i, 1);
         continue;
       }
+      const t = clamp(age / 150, 0, 1);
       plasmaCtx.save();
       plasmaCtx.globalAlpha = 1 - t;
       plasmaCtx.strokeStyle = "#00FFD1";
@@ -5880,6 +6117,9 @@ function initGalaxyCanvas() {
       plasmaCtx.lineTo(beam.x2, beam.y2);
       plasmaCtx.stroke();
       plasmaCtx.restore();
+    }
+    if (laserBeams.length > 8) {
+      laserBeams.splice(0, laserBeams.length - 8);
     }
     if (plasmaCage.active) {
       const progress = clamp((now - plasmaCage.chargeStart) / PLASMA_CAGE_CHARGE_MS, 0, 1);
@@ -6071,6 +6311,8 @@ function initGalaxyCanvas() {
   }
 
   function startLevel(idx) {
+    audioEngine.unlock?.();
+    audioEngine.loadMany?.(GAME_SFX);
     const safeIdx = clamp(idx, 0, ARCADE_LEVELS.length - 1);
     currentLevelIndex = safeIdx;
     const cfg = ARCADE_LEVELS[safeIdx];
@@ -6080,6 +6322,7 @@ function initGalaxyCanvas() {
     clearGameplayEntities();
     commBoxController.show();
     commBoxController.setDamageState("normal");
+    showFpsOverlay();
     resetPraiseState();
     totalToSpawn = cfg.totalToClear;
     spawnedTotal = 0;
@@ -6100,8 +6343,9 @@ function initGalaxyCanvas() {
     pausedLandmineRemainingMs = 0;
     arcadeResumeAvailable = false;
     bgPreRolledForLevel = false;
+    _timerWarnedAt60 = false;
+    _timerWarnedAt10 = false;
     syncArcadeEntryLabel();
-
     setGalaxyBackgroundForLevel(cfg.level);
     playArcadeMusicForLevel(cfg.level);
     if (cfg.level === 10) {
@@ -6138,15 +6382,24 @@ function initGalaxyCanvas() {
     });
 
     if (levelNum === 1) {
-      setTimeout(() => {
+      function fireSecondVO() {
+        const ticker = document.getElementById("commanderTicker");
+        const isActive = ticker?.classList.contains("ticker-visible");
+        if (isActive) {
+          setTimeout(fireSecondVO, 400);
+          return;
+        }
         commBoxController.triggerVO({
           audioSrc: commBoxController.commVoSrc("vo-lets_blast_these_stroids.mp3"),
         });
-      }, 600);
+      }
+      setTimeout(fireSecondVO, 800);
     }
   }
 
   function startArcadeFromSave() {
+    audioEngine.unlock?.();
+    audioEngine.loadMany?.(GAME_SFX);
     hideArcadeOverlay();
     if (arcadeResumeAvailable && arcadeActive) {
       const now = performance.now();
@@ -6211,6 +6464,8 @@ function initGalaxyCanvas() {
   }
 
   function startArcadeAtLevel(levelNum) {
+    audioEngine.unlock?.();
+    audioEngine.loadMany?.(GAME_SFX);
     hideArcadeOverlay();
     arcadeScore = 0;
     renderScore();
@@ -6233,6 +6488,8 @@ function initGalaxyCanvas() {
 
   function startPracticeMode() {
     if (!PRACTICE_ENABLED) return;
+    audioEngine.unlock?.();
+    audioEngine.loadMany?.(GAME_SFX);
     hideArcadeOverlay();
     stopWarningState();
     engineMode = "practice";
@@ -6251,6 +6508,7 @@ function initGalaxyCanvas() {
     clearGameplayEntities();
     commBoxController.show();
     commBoxController.setDamageState("normal");
+    showFpsOverlay();
     updatePracticeDebug();
     audioEngine.stopMusic();
     audioEngine.playMusic("PRACTICE", MUSIC.PRACTICE || MUSIC.L1_3, { crossfadeMs: 200 });
@@ -6445,6 +6703,29 @@ function initGalaxyCanvas() {
         }
 
         const elapsedMs = Math.max(0, now - levelRunStartAt);
+        const levelRemainingMs = levelDurationMs - elapsedMs;
+        if (!_timerWarnedAt60 && levelRemainingMs <= 60000
+            && levelRemainingMs > 0 && engineMode === "arcade") {
+          _timerWarnedAt60 = true;
+          commBoxController.setDamageState("light");
+          commBoxController.triggerVO({
+            audioSrc: commBoxController.commVoSrc(
+              commBoxController.pickFromPool("lowlives", commBoxController.POOL_LOW_LIVES),
+            ),
+            event: "lowlives",
+          });
+        }
+
+        if (!_timerWarnedAt10 && levelRemainingMs <= 10000
+            && levelRemainingMs > 0 && engineMode === "arcade") {
+          _timerWarnedAt10 = true;
+          commBoxController.setDamageState("heavy");
+          commBoxController.triggerVO({
+            audioSrc: commBoxController.commVoSrc("vo-hairytakeemout.mp3"),
+            event: "chaos",
+          });
+        }
+
         if (!landmineSpawnedThisLevel && levelHasLandmine(cfg.level) && elapsedMs >= levelDurationMs / 2) {
           spawnLandmine();
           landmineSpawnedThisLevel = true;
@@ -6930,6 +7211,7 @@ function initGalaxyCanvas() {
 
   function frame(now) {
     if (!galaxyRunning) return;
+    trackFpsOverlay();
     if (now - sim.last < 16) {
       galaxyRaf = requestAnimationFrame(frame);
       return;
@@ -7155,6 +7437,7 @@ function initGalaxyCanvas() {
     galaxyRaf = 0;
     clearTimeout(sim.shootingTimer);
     sim.shootingTimer = null;
+    hideFpsOverlay();
     setPlasmaOverlayVisible(true);
     window.pixiRenderer?.destroy();
   }

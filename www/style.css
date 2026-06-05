@@ -2138,6 +2138,50 @@ select:focus-visible {
   transform: translateX(0) !important;
 }
 
+@keyframes sigbarWave {
+  0%, 100% {
+    height: var(--bar-base);
+  }
+
+  50% {
+    height: var(--bar-peak);
+  }
+}
+
+.sigbar-active {
+  animation: sigbarWave 0.35s ease-in-out infinite;
+}
+
+.sigbar-active:nth-child(1) {
+  animation-delay: 0.00s;
+  --bar-base: 3px;
+  --bar-peak: 12px;
+}
+
+.sigbar-active:nth-child(2) {
+  animation-delay: 0.07s;
+  --bar-base: 4px;
+  --bar-peak: 14px;
+}
+
+.sigbar-active:nth-child(3) {
+  animation-delay: 0.14s;
+  --bar-base: 5px;
+  --bar-peak: 11px;
+}
+
+.sigbar-active:nth-child(4) {
+  animation-delay: 0.05s;
+  --bar-base: 3px;
+  --bar-peak: 13px;
+}
+
+.sigbar-active:nth-child(5) {
+  animation-delay: 0.10s;
+  --bar-base: 4px;
+  --bar-peak: 10px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .bgVideo {
     transition: none !important;

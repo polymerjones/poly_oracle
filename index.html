@@ -302,7 +302,7 @@
 
       <!-- Portrait frame - always visible during gameplay -->
       <div id="commanderPortrait" style="
-        width:72px; height:72px;
+        width:120px; height:120px;
         border: 1.5px solid #00d4d4;
         border-radius: 3px;
         overflow: hidden;
@@ -334,7 +334,7 @@
       <!-- Ticker bar - slides in when speaking -->
       <div id="commanderTicker" style="
         position:absolute;
-        bottom:0; left:78px;
+        bottom:0; left:128px;
         width:260px; height:72px;
         background:rgba(2,13,13,0.94);
         border:1.5px solid #00d4d4;
@@ -390,6 +390,14 @@
     <script>
       window.POLY_CONTACT_FORM_ENDPOINT = "";
     </script>
+    <div id="screenFlashDiv" style="
+      position:fixed; inset:0;
+      pointer-events:none;
+      z-index:9990;
+      opacity:0;
+      background:white;
+      transition:opacity 0.12s ease-out;
+    "></div>
     <script src="firebase-config.js"></script>
     <script src="ufo-death-effect.js"></script>
     <script type="module" src="pixiRenderer.js"></script>

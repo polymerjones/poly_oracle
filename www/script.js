@@ -54,6 +54,39 @@ const galaxyToolKey = "poly_oracle_galaxy_tool";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const DISABLE_VIDEO_BG = true; // perf test - re-enable later
+
+const _flashDiv = document.getElementById("screenFlashDiv");
+let _flashTimer = null;
+
+function cssFlash(color = "#ffffff", opacity = 0.45, durationMs = 120) {
+  if (!_flashDiv) return;
+  if (_flashTimer) clearTimeout(_flashTimer);
+  _flashDiv.style.background = color;
+  _flashDiv.style.transition = "none";
+  _flashDiv.style.opacity = String(opacity);
+  _flashTimer = setTimeout(() => {
+    _flashDiv.style.transition = `opacity ${durationMs}ms ease-out`;
+    _flashDiv.style.opacity = "0";
+    _flashTimer = null;
+  }, 16);
+}
+
+const _shakeEl = document.getElementById("galaxyView")
+  || document.querySelector(".galaxy-view")
+  || document.body;
+let _shakeTimer = null;
+
+function cssShake(intensity = 1) {
+  if (!_shakeEl || _shakeTimer) return;
+  const x = (Math.random() - 0.5) * 8 * intensity;
+  const y = (Math.random() - 0.5) * 8 * intensity;
+  _shakeEl.style.transform = `translate(${x}px,${y}px)`;
+  _shakeTimer = setTimeout(() => {
+    _shakeEl.style.transform = "";
+    _shakeTimer = null;
+  }, 80);
+}
+
 const STORAGE = {
   arcadeLevel: "poly_oracle_arcade_level",
   arcadeSaved: "poly_oracle_arcade_saved",
@@ -108,7 +141,7 @@ const GAME_SFX = {
   reveal4_pool: "reveal4.mp3",
   warning10: "assets/newsfx/newnewwarningloop.mp3",
   plasma_charge: "assets/newsfx/newnewwarningloop.mp3",
-  advfire: "newsfx/advfire.mp3",
+  advfire: "newsfx/advfire_lighter.mp3",
   plasmarecharged: "newsfx/plasmarecharged.mp3",
   droneufo: "newsfx/droneufo.mp3",
   reveal4: "reveal4.mp3",
@@ -921,17 +954,12 @@ const commBoxController = (() => {
       }, 1200);
     };
 
-    const radioSrc = commVoSrc("vo-interferenceambience.mp3");
     const VO_RADIO_DELAY = 320;
 
-    if (radioSrc) {
-      try {
-        const radio = new Audio(radioSrc);
-        radio.volume = 0.35;
-        radio.play().catch(() => {});
-      } catch {
-        // Radio click is optional.
-      }
+    // Radio click: use the preloaded game audio buffer instead of creating Audio.
+    const radioDelay = typeof window.playGameSfx === "function" ? VO_RADIO_DELAY : 0;
+    if (radioDelay) {
+      window.playGameSfx("blip1", 0.25, { rate: 0.7 });
     }
 
     if (audioSrc) {
@@ -952,7 +980,7 @@ const commBoxController = (() => {
         } catch {
           tickerHideTimer = setTimeout(endTalking, duration);
         }
-      }, radioSrc ? VO_RADIO_DELAY : 0);
+      }, radioDelay);
     } else {
       tickerHideTimer = setTimeout(endTalking, duration);
     }
@@ -5146,6 +5174,7 @@ function initGalaxyCanvas() {
       detune: opts.detune || 0,
     });
   }
+  window.playGameSfx = playGameSfx;
 
   function resolveGameSfxKey(...keys) {
     for (let i = 0; i < keys.length; i += 1) {
@@ -5212,13 +5241,12 @@ function initGalaxyCanvas() {
   }
 
   function triggerAsteroidImpactFlash(intensity = 1) {
-    const safeIntensity = clamp(intensity, 0, 1);
-    const duration = safeIntensity <= 0.25 ? 80 : safeIntensity <= 0.55 ? 120 : (prefersReducedMotion ? 100 : 180);
-    flashScreen("rgba(255,245,220,1)", duration, Math.min(0.35, safeIntensity * 0.35));
+    if (intensity < 0.3) return;
+    cssFlash("#fff8e8", Math.min(0.15, intensity * 0.15), 100);
   }
 
   function triggerLevel10AsteroidFlash(big = false) {
-    flashScreen("#ff1b1b", big ? 180 : 140, big ? 0.55 : 0.35);
+    void big;
   }
 
   function addLightningRing(x, y, opts = {}) {
@@ -5381,6 +5409,8 @@ function initGalaxyCanvas() {
       effects.triggerUfoDeath(x, y);
       spawnExplosion(x, y, 18, false, 1.4);
     }
+    cssFlash("#00ffee", 0.25, 200);
+    cssShake(1.0);
     addWarpRing(x, y, "rgba(172,255,214,1)");
     stopUfoDrone();
     ufo = null;
@@ -5739,6 +5769,10 @@ function initGalaxyCanvas() {
     const mediumBlast = wasKind === 2;
     const ttlScale = bigBlast ? 1.4 : mediumBlast ? 1.18 : 1;
     spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale, wasKind);
+    if (wasKind === 3) {
+      cssFlash("#ff8800", 0.18, 150);
+      cssShake(0.6);
+    }
     const baseBoomVol = wasKind === 3 ? 0.9 : wasKind === 2 ? 0.92 : 0.78;
     const minBoomRatio = wasKind === 3 ? 0.62 : wasKind === 2 ? 0.8 : 0.9;
     playAsteroidExplosionBoom(
@@ -5944,6 +5978,10 @@ function initGalaxyCanvas() {
       const destroyedCount = destroyAsteroidsInPlasmaCage(rect);
       const fireKey = destroyedCount > 0 ? resolveGameSfxKey("plasma_fire", "ufo_destroy") : "";
       if (fireKey) playGameSfx(fireKey, 0.92);
+      if (destroyedCount >= 3) {
+        cssFlash("#00ffd1", Math.min(0.35, 0.1 + destroyedCount * 0.04), 200);
+        if (destroyedCount >= 5) cssShake(0.8);
+      }
       triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
       plasmaCage.cooldownStart = now;
       plasmaCage.cooldownUntil = now + PLASMA_CAGE_COOLDOWN_MS;
@@ -6181,6 +6219,9 @@ function initGalaxyCanvas() {
     addWarpRing(x, y, "rgba(255,90,90,1)");
     spawnExplosion(x, y, 80, true);
     triggerLandmineScreenFlash();
+    cssFlash("#ffffff", 0.55, 300);
+    cssShake(1.8);
+    setTimeout(() => cssShake(1.0), 120);
     playBigBoomSound();
   }
 

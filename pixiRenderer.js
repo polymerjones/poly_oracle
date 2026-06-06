@@ -19,6 +19,7 @@ const pixiRenderer = (() => {
   let bombContainer = null;
   let landmineContainer = null;
   let debrisContainer = null;
+  let shrapnelContainer = null;
   let flashContainer = null;
 
   const asteroidSprites = new Map();
@@ -32,6 +33,7 @@ const pixiRenderer = (() => {
 
   let flashFilter = null;
   let flashAlpha = 0;
+  let _plasmaBorderFlash = 0;
 
   let starGraphics = null;
   let starsSeeded = false;
@@ -160,6 +162,7 @@ const pixiRenderer = (() => {
         scale: true,
         tint: true,
       });
+      shrapnelContainer = new PIXI.Container();
       flashContainer = new PIXI.Container();
 
       app.stage.addChild(starContainer);
@@ -173,6 +176,7 @@ const pixiRenderer = (() => {
       app.stage.addChild(bombContainer);
       app.stage.addChild(landmineContainer);
       app.stage.addChild(debrisContainer);
+      app.stage.addChild(shrapnelContainer);
       app.stage.addChild(flashContainer);
       starGraphics = starContainer;
       plasmaGraphics = new PIXI.Graphics();
@@ -294,30 +298,35 @@ const pixiRenderer = (() => {
 
           const wobble = Math.sin(now * 0.003) * 1.5;
 
-          glowG.lineStyle(5 + pulse * 3, 0x00ffd1, glowAlpha * 0.25);
-          glowG.arc(a.x, a.y, a.r + 4 + wobble, arcStart, arcEnd);
+          glowG.lineStyle(12 + pulse * 8, 0x00ffd1, glowAlpha * 0.45);
+          glowG.arc(a.x, a.y, a.r + 8 + wobble, arcStart, arcEnd);
 
-          glowG.lineStyle(2, 0x00ffcc, glowAlpha * 0.8);
-          glowG.arc(a.x, a.y, a.r + 2, arcStart + 0.05, arcEnd - 0.05);
+          glowG.lineStyle(3.5, 0x00ffcc, glowAlpha * 0.95);
+          glowG.arc(a.x, a.y, a.r + 3, arcStart + 0.05, arcEnd - 0.05);
 
-          glowG.lineStyle(0.8, 0xaaffee, glowAlpha * 0.95);
-          glowG.arc(a.x, a.y, a.r + 1, arcStart + 0.1, arcEnd - 0.1);
+          glowG.lineStyle(1.2, 0xeeffff, glowAlpha * 1.0);
+          glowG.arc(a.x, a.y, a.r + 1.5, arcStart + 0.1, arcEnd - 0.1);
 
           [-1, 1].forEach((side) => {
             const blobAngle = side > 0 ? arcEnd : arcStart;
-            const blobX = a.x + Math.cos(blobAngle) * (a.r + 3);
-            const blobY = a.y + Math.sin(blobAngle) * (a.r + 3);
-            const blobSize = (1.5 + pulse * 2) * glowAlpha;
-            glowG.beginFill(0x00ffd1, glowAlpha * 0.7);
+            const blobX = a.x + Math.cos(blobAngle) * (a.r + 4);
+            const blobY = a.y + Math.sin(blobAngle) * (a.r + 4);
+            const blobSize = (3 + pulse * 4) * glowAlpha;
+            glowG.beginFill(0x00ffd1, glowAlpha * 0.8);
             glowG.drawCircle(blobX, blobY, blobSize);
+            glowG.endFill();
+            glowG.beginFill(0xeeffff, glowAlpha * 0.95);
+            glowG.drawCircle(blobX, blobY, blobSize * 0.5);
             glowG.endFill();
           });
 
-          const midAngle = splatAngle;
-          const midX = a.x + Math.cos(midAngle) * (a.r + 5 + pulse * 2);
-          const midY = a.y + Math.sin(midAngle) * (a.r + 5 + pulse * 2);
-          glowG.beginFill(0x00ffee, glowAlpha * (0.4 + pulse * 0.5));
-          glowG.drawCircle(midX, midY, 1 + pulse * 2.5);
+          const midX = a.x + Math.cos(splatAngle) * (a.r + 8 + pulse * 4);
+          const midY = a.y + Math.sin(splatAngle) * (a.r + 8 + pulse * 4);
+          glowG.beginFill(0x00ffee, glowAlpha * (0.6 + pulse * 0.4));
+          glowG.drawCircle(midX, midY, 2.5 + pulse * 4);
+          glowG.endFill();
+          glowG.beginFill(0xffffff, glowAlpha * (0.4 + pulse * 0.5));
+          glowG.drawCircle(midX, midY, 1.5 + pulse * 2);
           glowG.endFill();
         }
       }
@@ -696,8 +705,10 @@ const pixiRenderer = (() => {
   function drawPlasmaCageRectPixi(g, rect, now, progress, charged, alpha = 1) {
     if (!rect || rect.w < 2 || rect.h < 2) return;
     const { x, y, w, h } = rect;
-    const borderAlpha = Math.max(0.2, Math.min(1, alpha * (0.22 + progress * 0.78)));
-    const color = charged ? 0xdcfff0 : 0x00ffd1;
+    const flashBoost = _plasmaBorderFlash;
+    const borderAlpha = Math.max(0.2, Math.min(1, alpha * (0.22 + progress * 0.78) + flashBoost * 0.15));
+    const color = flashBoost > 0.1 ? 0xffffff : charged ? 0xdcfff0 : 0x00ffd1;
+    const borderWidth = charged ? 2.4 : 1.4 + progress * 1.2;
     const gridAlpha = (charged ? 0.18 : 0.08 + progress * 0.25) * alpha;
     drawPlasmaGridPixi(g, x, y, w, h, gridAlpha);
     drawDashedRect(
@@ -709,7 +720,7 @@ const pixiRenderer = (() => {
       10,
       8,
       -(now / 32) % 18,
-      charged ? 2.4 : 1.4 + progress * 1.2,
+      borderWidth + flashBoost * 4,
       color,
       borderAlpha,
     );
@@ -719,6 +730,9 @@ const pixiRenderer = (() => {
   function drawPlasmaLayer(plasmaCage, asteroids, now) {
     if (!plasmaGraphics) return;
     plasmaGraphics.clear();
+    if (_plasmaBorderFlash > 0) {
+      _plasmaBorderFlash = Math.max(0, _plasmaBorderFlash - 0.06);
+    }
 
     const fx = plasmaCage?.releaseFx;
     if (fx) {
@@ -844,6 +858,10 @@ const pixiRenderer = (() => {
       flashTriggered: false,
       debrisSpawned: false,
     });
+  }
+
+  function triggerPlasmaRectFlash() {
+    _plasmaBorderFlash = 1.0;
   }
 
   function spawnBombDebris(bomb, now) {
@@ -1044,7 +1062,50 @@ const pixiRenderer = (() => {
     starsSeeded = false;
   }
 
-  function draw(sim, laserBeams, canvasFlash, ufoState, plasmaCage, landmine, now) {
+  function syncShrapnel(shrapnel, now) {
+    if (!shrapnelContainer) return;
+    const oldChildren = shrapnelContainer.removeChildren();
+    for (let i = 0; i < oldChildren.length; i += 1) {
+      oldChildren[i].destroy();
+    }
+
+    for (let i = 0; i < shrapnel.length; i += 1) {
+      const sh = shrapnel[i];
+      const age = now - sh.startedAt;
+      const progress = age / sh.ttl;
+      const alpha = progress < 0.1
+        ? progress * 10
+        : progress > 0.7
+          ? (1 - progress) / 0.3
+          : 1;
+      if (alpha <= 0) continue;
+
+      const g = new PIXI.Graphics();
+      shrapnelContainer.addChild(g);
+
+      if (sh.isPulse) {
+        g.lineStyle(3, 0x00ffd1, alpha * 0.8);
+        g.drawCircle(sh.x, sh.y, sh.r + progress * 20);
+        g.lineStyle(1, 0xffffff, alpha * 0.5);
+        g.drawCircle(sh.x, sh.y, sh.r);
+        g.beginFill(0x00ffd1, alpha * 0.15);
+        g.drawCircle(sh.x, sh.y, sh.r);
+        g.endFill();
+      } else {
+        const size = sh.r * (1 - progress * 0.4);
+        g.beginFill(0xff6600, alpha * 0.9);
+        g.drawCircle(sh.x, sh.y, size);
+        g.endFill();
+        g.beginFill(0xffffff, alpha * 0.7);
+        g.drawCircle(sh.x, sh.y, size * 0.5);
+        g.endFill();
+        g.lineStyle(size * 2, 0xff4400, alpha * 0.25);
+        g.drawCircle(sh.x, sh.y, size);
+      }
+    }
+  }
+
+  function draw(sim, laserBeams, canvasFlash, ufoState, plasmaCage, landmine, bombShrapnel, now) {
     if (!app) return false;
     const frameBudgetExceeded = !!sim._frameBudgetExceeded;
     const prefersReducedMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -1059,6 +1120,7 @@ const pixiRenderer = (() => {
     drawPlasmaLayer(plasmaCage, sim.asteroids, now);
     drawLandmine(landmine, now);
     updateBombEffects(now);
+    syncShrapnel(bombShrapnel || [], now);
     updateFlash(canvasFlash);
 
     app.ticker.update(now);
@@ -1090,6 +1152,7 @@ const pixiRenderer = (() => {
     bombContainer = null;
     landmineContainer = null;
     debrisContainer = null;
+    shrapnelContainer = null;
     flashContainer = null;
     starGraphics = null;
     ufoDisplay = null;
@@ -1115,9 +1178,10 @@ const pixiRenderer = (() => {
     starsSeeded = false;
     flashFilter = null;
     flashAlpha = 0;
+    _plasmaBorderFlash = 0;
   }
 
-  return { init, draw, resize, destroy, triggerBombDetonation, triggerShockwave };
+  return { init, draw, resize, destroy, triggerBombDetonation, triggerShockwave, triggerPlasmaRectFlash };
 })();
 
 window.pixiRenderer = pixiRenderer;

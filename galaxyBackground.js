@@ -84,6 +84,7 @@ const galaxyBackground = (() => {
   let velY = 0.12;
   let tvX = 0.35;
   let tvY = 0.12;
+  let _levelSpeedMult = 1.0;
   let driftT = 0;
   let hectic = false;
   let t = 0;
@@ -274,12 +275,18 @@ const galaxyBackground = (() => {
 
     driftT += 0.004;
     if (!hectic) {
-      tvX = Math.cos(driftT) * 0.5 + Math.cos(driftT * 0.37) * 0.22;
-      tvY = Math.sin(driftT * 0.7) * 0.32 + Math.sin(driftT * 0.41) * 0.14;
+      tvX = (Math.cos(driftT) * 0.5 + Math.cos(driftT * 0.37) * 0.22) * _levelSpeedMult;
+      tvY = (Math.sin(driftT * 0.7) * 0.32 + Math.sin(driftT * 0.41) * 0.14) * _levelSpeedMult;
       const spd = Math.sqrt(tvX * tvX + tvY * tvY);
-      if (spd < 0.2) {
-        tvX *= 0.2 / spd;
-        tvY *= 0.2 / spd;
+      const minSpeed = 0.3 * _levelSpeedMult;
+      if (spd < minSpeed) {
+        if (spd > 0) {
+          tvX *= minSpeed / spd;
+          tvY *= minSpeed / spd;
+        } else {
+          tvX = minSpeed;
+          tvY = 0;
+        }
       }
     }
     velX += (tvX - velX) * 0.025;
@@ -496,6 +503,11 @@ const galaxyBackground = (() => {
     blend = 0;
   }
 
+  function setLevel(levelNum) {
+    const numericLevel = Math.max(1, Number(levelNum) || 1);
+    _levelSpeedMult = 1.0 + (numericLevel - 1) * 0.22;
+  }
+
   function triggerWarp() {
     if (warping) return;
     warping = true;
@@ -528,7 +540,7 @@ const galaxyBackground = (() => {
     shoots = [];
   }
 
-  return { init, show, hide, resize, setTheme, triggerWarp, setHectic, destroy };
+  return { init, show, hide, resize, setTheme, setLevel, triggerWarp, setHectic, destroy };
 })();
 
 window.galaxyBackground = galaxyBackground;

@@ -270,11 +270,18 @@ const pixiRenderer = (() => {
           delete a._ufoBlastIntensity;
         } else {
           const progress = age / duration;
-          const pulseSpeed = 7 - progress * 4;
+          const pulseSpeed = 6 - progress * 3;
           const pulse = (Math.sin(now * 0.001 * pulseSpeed) + 1) * 0.5;
-          const baseAlpha = progress < 0.25 ? 1 : 1 - ((progress - 0.25) / 0.75);
-          const intensity = a._ufoBlastIntensity || 1;
-          const glowAlpha = baseAlpha * intensity * (0.45 + pulse * 0.55);
+          const baseAlpha = progress < 0.2 ? 1 : 1 - ((progress - 0.2) / 0.8);
+          const glowAlpha = baseAlpha * (0.5 + pulse * 0.5);
+
+          const dx = a.x - (a._ufoBlastOriginX || a.x);
+          const dy = a.y - (a._ufoBlastOriginY || a.y);
+          const splatAngle = Math.atan2(-dy, -dx);
+          const spread = Math.PI * 0.7;
+          const arcStart = splatAngle - spread / 2;
+          const arcEnd = splatAngle + spread / 2;
+
           let glowG = _activeUfoGlows.get(a);
           if (!glowG) {
             glowG = _ufoGlowPool.pop() || new PIXI.Graphics();
@@ -284,41 +291,33 @@ const pixiRenderer = (() => {
             asteroidContainer.addChild(glowG);
           }
           glowG.clear();
-          const dx = a.x - (a._ufoBlastOriginX || a.x);
-          const dy = a.y - (a._ufoBlastOriginY || a.y);
-          const splatAngle = Math.atan2(-dy, -dx);
-          const arcSpread = Math.PI * 0.65;
-          const arcStart = splatAngle - arcSpread / 2;
-          const arcEnd = splatAngle + arcSpread / 2;
 
-          glowG.lineStyle(8 + pulse * 5, 0x00ffd1, glowAlpha * 0.3);
-          glowG.arc(a.x, a.y, a.r + 10 + pulse * 3, arcStart, arcEnd);
-          glowG.lineStyle(4, 0x00ffdd, glowAlpha * 0.6);
-          glowG.arc(a.x, a.y, a.r + 5, arcStart, arcEnd);
-          glowG.lineStyle(1.5, 0xaaffee, glowAlpha * 0.95);
-          glowG.arc(a.x, a.y, a.r + 2, arcStart - 0.1, arcEnd + 0.1);
+          const wobble = Math.sin(now * 0.003) * 1.5;
 
-          const splatCount = 4 + Math.floor(intensity * 2);
-          for (let si = 0; si < splatCount; si += 1) {
-            const splatT = splatCount > 1 ? si / (splatCount - 1) : 0;
-            const splatA = arcStart + splatT * (arcEnd - arcStart);
-            const jitterA = splatA + (Math.sin(si * 7.3 + a._ufoBlasted * 0.001) * 0.25);
-            const splatR = a.r + 1 + Math.sin(si * 3.7) * 4;
-            const splatX = a.x + Math.cos(jitterA) * splatR;
-            const splatY = a.y + Math.sin(jitterA) * splatR;
-            const blobSize = (1.5 + Math.sin(si * 5.1) * 1.2 + pulse * 1.5) * intensity;
-            glowG.beginFill(0x00ffd1, glowAlpha * (0.5 + pulse * 0.4));
-            glowG.drawCircle(splatX, splatY, blobSize);
+          glowG.lineStyle(5 + pulse * 3, 0x00ffd1, glowAlpha * 0.25);
+          glowG.arc(a.x, a.y, a.r + 4 + wobble, arcStart, arcEnd);
+
+          glowG.lineStyle(2, 0x00ffcc, glowAlpha * 0.8);
+          glowG.arc(a.x, a.y, a.r + 2, arcStart + 0.05, arcEnd - 0.05);
+
+          glowG.lineStyle(0.8, 0xaaffee, glowAlpha * 0.95);
+          glowG.arc(a.x, a.y, a.r + 1, arcStart + 0.1, arcEnd - 0.1);
+
+          [-1, 1].forEach((side) => {
+            const blobAngle = side > 0 ? arcEnd : arcStart;
+            const blobX = a.x + Math.cos(blobAngle) * (a.r + 3);
+            const blobY = a.y + Math.sin(blobAngle) * (a.r + 3);
+            const blobSize = (1.5 + pulse * 2) * glowAlpha;
+            glowG.beginFill(0x00ffd1, glowAlpha * 0.7);
+            glowG.drawCircle(blobX, blobY, blobSize);
             glowG.endFill();
-            glowG.beginFill(0xccffee, glowAlpha * (0.6 + pulse * 0.3));
-            glowG.drawCircle(splatX, splatY, blobSize * 0.45);
-            glowG.endFill();
-          }
+          });
 
-          glowG.beginFill(0x00ffd1, glowAlpha * 0.06);
-          glowG.moveTo(a.x, a.y);
-          glowG.arc(a.x, a.y, a.r - 1, arcStart + 0.2, arcEnd - 0.2);
-          glowG.closePath();
+          const midAngle = splatAngle;
+          const midX = a.x + Math.cos(midAngle) * (a.r + 5 + pulse * 2);
+          const midY = a.y + Math.sin(midAngle) * (a.r + 5 + pulse * 2);
+          glowG.beginFill(0x00ffee, glowAlpha * (0.4 + pulse * 0.5));
+          glowG.drawCircle(midX, midY, 1 + pulse * 2.5);
           glowG.endFill();
         }
       }
@@ -784,8 +783,11 @@ const pixiRenderer = (() => {
     const x = landmine.x;
     const y = landmine.y;
     const r = landmine.r || 14;
-    const armed = !!landmine.explodeAt;
-    const pulse = armed ? Math.abs(Math.sin(now / 120)) : Math.abs(Math.sin(now / 400)) * 0.4;
+    const armed = landmine.phase === 'armed' || landmine.phase === 'player_armed';
+    const playerArmed = landmine.phase === 'player_armed';
+    const pulseRate = playerArmed ? 80 : armed ? 120 : 400;
+    const pulse = Math.abs(Math.sin(now / pulseRate));
+    const ringColor = playerArmed ? 0xff0000 : armed ? 0xff4444 : 0x44ff88;
 
     landmineGraphics.beginFill(0x2a3a2a, 0.92);
     landmineGraphics.drawCircle(x, y, r);
@@ -794,10 +796,10 @@ const pixiRenderer = (() => {
     landmineGraphics.drawCircle(x - r * 0.35, y - r * 0.35, r * 0.7);
     landmineGraphics.endFill();
 
-    landmineGraphics.lineStyle(1.2, armed ? 0xff4444 : 0x44ff88, 0.55 + pulse * 0.3);
+    landmineGraphics.lineStyle(1.2, ringColor, 0.55 + pulse * 0.3);
     landmineGraphics.drawCircle(x, y, r);
 
-    landmineGraphics.lineStyle(1.5, armed ? 0xff6666 : 0x66ffaa, 0.7);
+    landmineGraphics.lineStyle(1.5, playerArmed ? 0xff6666 : armed ? 0xff4444 : 0x66ffaa, 0.7);
     for (let i = 0; i < 8; i += 1) {
       const angle = (i / 8) * Math.PI * 2;
       landmineGraphics.moveTo(
@@ -810,18 +812,24 @@ const pixiRenderer = (() => {
       );
     }
 
-    landmineGraphics.beginFill(armed ? 0xff2222 : 0x44ff88, 0.8 + pulse * 0.2);
+    landmineGraphics.beginFill(playerArmed ? 0xff0000 : armed ? 0xff2222 : 0x44ff88, 0.8 + pulse * 0.2);
     landmineGraphics.drawCircle(
       x + r * 0.35,
       y - r * 0.35,
-      armed ? 4 + pulse * 2 : 3,
+      armed ? 4 + pulse * 2 : 3 + pulse,
     );
     landmineGraphics.endFill();
 
-    if (armed && landmine.explodeAt) {
-      const t = Math.max(0, Math.min(1, (landmine.explodeAt - now) / 1000));
+    if (playerArmed && landmine.playerArmedAt) {
+      const countT = Math.max(0, Math.min(1, (now - landmine.playerArmedAt) / 6000));
       landmineGraphics.lineStyle(2, 0xff2222, 0.7);
-      landmineGraphics.arc(x, y, r + 10 + (1 - t) * 10, 0, Math.PI * 2);
+      landmineGraphics.arc(
+        x,
+        y,
+        r + 12,
+        -Math.PI / 2,
+        -Math.PI / 2 + Math.PI * 2 * countT,
+      );
     }
   }
 

@@ -154,6 +154,7 @@ const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
+const STORAGE_BEST_RUN = "poly-oracle-best-run";
 const DISABLE_VIDEO_BG = true; // perf test - re-enable later
 
 const _flashDiv = document.getElementById("screenFlashDiv");
@@ -372,6 +373,18 @@ const STROID_TOSS_TIMEOUT_MS = 8000;
 const STROID_TOSS_MIN_SPEED = 500;
 const STROID_TOSS_MAX_SPEED = 700;
 const CHAOS_THRESHOLD = 60;
+const LEVEL_THEMES = {
+  1:  { primary: "#00FFD1", name: "Deep Space" },
+  2:  { primary: "#7B4FFF", name: "Nebula" },
+  3:  { primary: "#4FC3F7", name: "Ice Field" },
+  4:  { primary: "#FF9800", name: "Asteroid Belt" },
+  5:  { primary: "#FFD700", name: "Solar Wind" },
+  6:  { primary: "#FF6B35", name: "Binary Star" },
+  7:  { primary: "#E040FB", name: "Dark Matter" },
+  8:  { primary: "#FF4444", name: "Supernova" },
+  9:  { primary: "#FFD700", name: "Golden Field" },
+  10: { primary: "#FF1500", name: "Hellfire" },
+};
 const IOS_NATIVE_MAX_ASTEROIDS = 55;
 const MAX_LIVES = 3;
 const MUSIC_MAX_GAIN = 0.85;
@@ -685,6 +698,12 @@ const hudLevel = document.getElementById("hudLevel");
 const hudTimer = document.getElementById("hudTimer");
 const hudLives = document.getElementById("hudLives");
 const hudScore = document.getElementById("hudScore");
+const hudGameTimer = document.getElementById("hudGameTimer");
+
+function formatRunTime(ms) {
+  const s = Math.floor(ms / 1000);
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
 let hudMultiplier = document.getElementById("hudMultiplier");
 const arcadeTimerBackdrop = document.getElementById("arcadeTimerBackdrop");
 const arcadeTimerGhost = document.getElementById("arcadeTimerGhost");
@@ -4464,11 +4483,11 @@ async function submitLeaderboardScore(initials, score) {
   return doc.id;
 }
 
-function showInitialsEntry(score) {
+function showInitialsEntry(score, runMsg = "") {
   const safeScore = Math.max(0, Math.floor(Number(score) || 0));
   const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
     <form id="initialsForm" class="initialsForm">
-      <p class="leaderboardSub">Score ${safeScore}. Enter initials.</p>
+      <p class="leaderboardSub">Score ${safeScore}. Enter initials.${runMsg ? ` ${runMsg}` : ""}</p>
       <input id="leaderboardInitials" class="initialsInput" maxlength="3" minlength="3" placeholder="AAA" inputmode="latin" autocomplete="off" aria-label="Three initials" />
       <button class="leaderboardBtn" type="submit">Submit Score</button>
       <button id="leaderboardSkip" class="leaderboardBtn" type="button">Skip</button>
@@ -4900,6 +4919,7 @@ function initGalaxyCanvas() {
     rechargeSoundPlayed: true,
     lastRectCx: 0,
     lastRectCy: 0,
+    lastRechargeVoAt: 0,
   };
   const laserBeams = [];
   const _bombShrapnel = [];
@@ -5058,6 +5078,7 @@ function initGalaxyCanvas() {
 
   let arcadeActive = false;
   let currentLevelIndex = 0;
+  let _levelPrimaryColor = "#00FFD1";
   let levelEndsAt = 0;
   let levelDurationMs = 0;
   let levelRunStartAt = 0;
@@ -5095,10 +5116,18 @@ function initGalaxyCanvas() {
   let warningHapticInterval = null;
   let arcadeLives = 0;
   let arcadeScore = 0;
+  let shotsFired = 0;
+  let shotsHit = 0;
+  let ufosKilledThisLevel = 0;
   let ufo = null;
   let ufoDroneLoopHandle = null;
   let arcadeUfoSpawnAt = 0;
   let retryPending = false;
+  const gameTimer = { startedAt: 0, elapsed: 0, running: false, bestTime: null, levelTimes: [] };
+  try {
+    const _raw = localStorage.getItem(STORAGE_BEST_RUN);
+    if (_raw) gameTimer.bestTime = Number(_raw) || null;
+  } catch {}
   let debugLevelUnlocked = false;
   let debugModeTapCount = 0;
   let debugModeTapLastAt = 0;
@@ -5332,11 +5361,20 @@ function initGalaxyCanvas() {
     hudTimer.style.top = `${rect.top + rect.height / 2}px`;
   }
 
+  function updateGameTimerHud(now) {
+    if (!hudGameTimer) return;
+    const elapsed = gameTimer.running
+      ? gameTimer.elapsed + (now - gameTimer.startedAt)
+      : gameTimer.elapsed;
+    hudGameTimer.textContent = `RUN ${formatRunTime(elapsed)}`;
+  }
+
   function updateArcadeHud(now) {
     const remainingMs = levelEndsAt - now;
     const safeRemaining = Math.max(0, remainingMs);
     _timerRemainingMs = safeRemaining;
     _timerRatio = levelDurationMs > 0 ? clamp(safeRemaining / levelDurationMs, 0, 1) : 0;
+    updateGameTimerHud(now);
     if (hudLevel) hudLevel.textContent = `LEVEL ${ARCADE_LEVELS[currentLevelIndex]?.level || 1}`;
     renderLives();
     renderScore();
@@ -5629,6 +5667,12 @@ function initGalaxyCanvas() {
     setGalaxyBackgroundKey(key, { fadeMs: 450, fadeInSeconds: 20 });
     const nextKey = bgKeyForLevel(levelNum + 1);
     if (nextKey && nextKey !== key) preloadGalaxyBackgroundKey(nextKey);
+  }
+
+  function applyLevelTheme(levelNum) {
+    const theme = LEVEL_THEMES[levelNum] ?? LEVEL_THEMES[1];
+    _levelPrimaryColor = theme.primary;
+    galaxyView?.style.setProperty("--level-primary", theme.primary);
   }
 
   function computePlayfield() {
@@ -5981,6 +6025,7 @@ function initGalaxyCanvas() {
     const x = ufo.x;
     const y = ufo.y;
     ufo.hitCount += 1;
+    shotsHit += 1;
     if (ufo.hitCount === 1) {
       ufo.damagedAt = performance.now();
       playGameSfx("ufo_hit1", 0.72);
@@ -6028,6 +6073,7 @@ function initGalaxyCanvas() {
     cssShake(1.0);
     addWarpRing(x, y, "rgba(172,255,214,1)");
     stopUfoDrone();
+    ufosKilledThisLevel += 1;
     ufo = null;
     commBoxController.queueVO({
       audioSrc: commBoxController.commVoSrc("vo-quicklaugh.mp3"),
@@ -6744,6 +6790,7 @@ function initGalaxyCanvas() {
   function splitAsteroidByIndex(targetIndex) {
     const a = removeAsteroidAt(targetIndex);
     if (!a) return;
+    if (engineMode === "arcade") shotsHit += 1;
 
     const wasKind = a.kind;
     const baseX = a.x;
@@ -6941,8 +6988,10 @@ function initGalaxyCanvas() {
     if (plasmaCage.cooldownUntil <= 0) return;
     if (now < plasmaCage.cooldownUntil) return;
     if (plasmaCage.rechargeSoundPlayed) return;
+    if (now - plasmaCage.lastRechargeVoAt < 2000) return;
     if (retryPending || !arcadeActive) return;
     plasmaCage.rechargeSoundPlayed = true;
+    plasmaCage.lastRechargeVoAt = now;
     playGameSfx("plasmarecharged", 1.0);
     commBoxController.reactTo("plasma_recharged");
     function fireRechargeComm() {
@@ -7121,7 +7170,7 @@ function initGalaxyCanvas() {
     timerPerimeterCtx.strokeStyle = "rgba(180,190,205,0.1)";
     timerPerimeterCtx.strokeRect(x, y, w, h);
 
-    const color = remaining <= 5000 ? "#ff4444" : remaining <= 10000 ? "#ffaa00" : "#00FFD1";
+    const color = remaining <= 5000 ? "#ff4444" : remaining <= 10000 ? "#ffaa00" : _levelPrimaryColor;
     timerPerimeterCtx.strokeStyle = color;
     if (!isIOSNative) {
       timerPerimeterCtx.shadowColor = color;
@@ -7319,10 +7368,10 @@ function initGalaxyCanvas() {
       const t = clamp(age / 150, 0, 1);
       plasmaCtx.save();
       plasmaCtx.globalAlpha = 1 - t;
-      plasmaCtx.strokeStyle = "#00FFD1";
+      plasmaCtx.strokeStyle = _levelPrimaryColor;
       plasmaCtx.lineWidth = 2;
       if (!isIOSNative) {
-        plasmaCtx.shadowColor = "#00FFD1";
+        plasmaCtx.shadowColor = _levelPrimaryColor;
         plasmaCtx.shadowBlur = 12;
       }
       plasmaCtx.beginPath();
@@ -7472,6 +7521,131 @@ function initGalaxyCanvas() {
     stopWarningState();
   }
 
+  let _lsrStylesInjected = false;
+  function ensureLsrStyles() {
+    if (_lsrStylesInjected) return;
+    _lsrStylesInjected = true;
+    const s = document.createElement("style");
+    s.id = "lsrStyles";
+    s.textContent = `
+      #levelScoreReport{position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;pointer-events:auto;}
+      .lsr-panel{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;color:#dff;background:linear-gradient(180deg,rgba(5,18,32,.96),rgba(2,8,18,.99));border:1px solid rgba(0,255,209,.42);border-radius:16px;padding:28px 36px;min-width:min(300px,88vw);box-shadow:0 0 48px rgba(0,255,209,.16),inset 0 0 24px rgba(0,255,209,.06);animation:lsrSlam 250ms cubic-bezier(.2,1.4,.4,1) both;}
+      @keyframes lsrSlam{from{transform:scale(2);opacity:0}to{transform:scale(1);opacity:1}}
+      .lsr-title{font-size:.9rem;letter-spacing:.18em;color:#00FFD1;text-align:center;margin-bottom:12px;text-shadow:0 0 10px rgba(0,255,209,.6);}
+      .lsr-div{color:rgba(0,255,209,.25);font-size:.7rem;margin:8px 0;text-align:center;letter-spacing:.04em;}
+      .lsr-row{display:flex;justify-content:space-between;align-items:baseline;gap:32px;margin:5px 0;font-size:.75rem;letter-spacing:.08em;}
+      .lsr-lbl{color:rgba(183,201,255,.65);}
+      .lsr-val{color:#fff;font-weight:700;}
+      .lsr-total .lsr-lbl{color:#b7c9ff;}
+      .lsr-total .lsr-val{color:#00FFD1;font-size:.9rem;}
+      .lsr-hint{text-align:center;margin-top:14px;font-size:.62rem;letter-spacing:.2em;color:rgba(183,201,255,.4);animation:lsrBlink 1.2s ease-in-out infinite;}
+      @keyframes lsrBlink{0%,100%{opacity:.4}50%{opacity:.85}}
+    `;
+    document.head.appendChild(s);
+  }
+
+  function showLevelScoreReport({ levelNum, levelTimeMs, timeBonus, accuracy, accuracyBonus, ufosKilled, scoreBefore, scoreAfter, onDismiss }) {
+    ensureLsrStyles();
+    document.getElementById("levelScoreReport")?.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "levelScoreReport";
+    overlay.setAttribute("aria-hidden", "true");
+
+    const acStr = accuracyBonus > 0 ? ` +${accuracyBonus}` : "";
+    const tbStr = timeBonus > 0 ? `+${timeBonus}` : "—";
+    const panel = document.createElement("div");
+    panel.className = "lsr-panel";
+    panel.innerHTML = `
+      <div class="lsr-title">LEVEL ${levelNum} COMPLETE</div>
+      <div class="lsr-div">─────────────────</div>
+      <div class="lsr-row"><span class="lsr-lbl">SCORE</span><span class="lsr-val" id="lsrScoreVal">${scoreBefore}</span></div>
+      <div class="lsr-row"><span class="lsr-lbl">LEVEL TIME</span><span class="lsr-val">${formatRunTime(levelTimeMs)}</span></div>
+      <div class="lsr-row"><span class="lsr-lbl">ACCURACY</span><span class="lsr-val">${accuracy}%${acStr}</span></div>
+      <div class="lsr-row"><span class="lsr-lbl">UFOs</span><span class="lsr-val">${ufosKilled}</span></div>
+      <div class="lsr-row"><span class="lsr-lbl">TIME BONUS</span><span class="lsr-val">${tbStr}</span></div>
+      <div class="lsr-div">─────────────────</div>
+      <div class="lsr-row lsr-total"><span class="lsr-lbl">TOTAL</span><span class="lsr-val">${scoreAfter}</span></div>
+      <div class="lsr-hint">TAP TO CONTINUE</div>
+    `;
+    overlay.appendChild(panel);
+    (galaxyView || document.body).appendChild(overlay);
+
+    const shownAt = performance.now();
+    let dismissed = false;
+    let lastTapAt = 0;
+    let autoTimer = null;
+    let countUpRaf = null;
+    let countUpDone = false;
+
+    function dismiss() {
+      if (dismissed) return;
+      dismissed = true;
+      if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+      if (countUpRaf) { cancelAnimationFrame(countUpRaf); countUpRaf = null; }
+      overlay.style.transition = "opacity 180ms ease";
+      overlay.style.opacity = "0";
+      setTimeout(() => { overlay.remove(); onDismiss?.(); }, 190);
+    }
+
+    overlay.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      const tapNow = performance.now();
+      const isDoubleTap = tapNow - lastTapAt < 350;
+      lastTapAt = tapNow;
+      if (isDoubleTap || tapNow - shownAt >= 2000) dismiss();
+    }, { passive: false });
+
+    autoTimer = setTimeout(dismiss, 4000);
+
+    const scoreEl = panel.querySelector("#lsrScoreVal");
+    const countStart = shownAt + 260;
+    const countDuration = 1500;
+    let lastBeepAt = countStart - 60;
+
+    function playTickBeep() {
+      try {
+        const ctx = audioEngine.ensureContext?.() || audioEngine.ctx;
+        if (!ctx || ctx.state === "suspended") return;
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = 660;
+        g.gain.setValueAtTime(0.08, ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
+        osc.connect(g);
+        g.connect(audioEngine.masterGain || ctx.destination);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.04);
+      } catch {}
+    }
+
+    function countStep(now) {
+      if (dismissed) return;
+      const elapsed = now - countStart;
+      if (elapsed < 0) { countUpRaf = requestAnimationFrame(countStep); return; }
+      const t = Math.min(1, elapsed / countDuration);
+      const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+      const current = Math.round(scoreBefore + (scoreAfter - scoreBefore) * eased);
+      if (scoreEl) scoreEl.textContent = String(current);
+      if (t < 1 && scoreAfter > scoreBefore && now - lastBeepAt >= 50) {
+        playTickBeep();
+        lastBeepAt = now;
+      }
+      if (t < 1) {
+        countUpRaf = requestAnimationFrame(countStep);
+      } else {
+        if (scoreEl) scoreEl.textContent = String(scoreAfter);
+        if (!countUpDone) {
+          countUpDone = true;
+          playGameSfx("level_up", 0.9);
+          cssFlash("#00FFD1", 0.3, 300);
+        }
+      }
+    }
+    countUpRaf = requestAnimationFrame(countStep);
+  }
+
   function levelComplete() {
     arcadeActive = false;
     retryPending = false;
@@ -7480,12 +7654,13 @@ function initGalaxyCanvas() {
     syncArcadeEntryLabel();
     const timeUsed = performance.now() - levelRunStartAt;
     const timeBonus = Math.max(0, Math.floor((levelDurationMs - timeUsed) / 1000) * 50);
-    if (timeBonus > 0) {
-      addArcadeScore(timeBonus);
-      showTimeBonusFlash(timeBonus);
-    }
+    const accuracy = Math.round(shotsHit / Math.max(1, shotsFired) * 100);
+    const accuracyBonus = accuracy >= 90 ? 500 : accuracy >= 75 ? 250 : accuracy >= 50 ? 100 : 0;
+    const scoreBefore = arcadeScore;
+    if (timeBonus > 0) addArcadeScore(timeBonus);
     addArcadeScore(500);
-    playGameSfx("level_up", 0.9);
+    if (accuracyBonus > 0) addArcadeScore(accuracyBonus);
+    const scoreAfter = arcadeScore;
     triggerHapticNotification(hapticNotificationType.Success);
     commBoxController.reactTo("levelcomplete");
     commBoxController.queueVO({
@@ -7497,10 +7672,43 @@ function initGalaxyCanvas() {
     const cfg = ARCADE_LEVELS[currentLevelIndex];
     const nextLevel = cfg.level + 1;
     if (nextLevel <= ARCADE_LEVELS.length) {
-      setSavedArcadeLevel(nextLevel);
-      showLevelIntro(nextLevel);
-      setTimeout(() => startLevel(currentLevelIndex + 1), 420);
+      const _lcNow = performance.now();
+      if (gameTimer.running) {
+        const _lvMs = _lcNow - gameTimer.startedAt;
+        gameTimer.elapsed += _lvMs;
+        gameTimer.levelTimes.push(_lvMs);
+        gameTimer.running = false;
+      }
+      showLevelScoreReport({
+        levelNum: cfg.level,
+        levelTimeMs: timeUsed,
+        timeBonus,
+        accuracy,
+        accuracyBonus,
+        ufosKilled: ufosKilledThisLevel,
+        scoreBefore,
+        scoreAfter,
+        onDismiss: () => {
+          setSavedArcadeLevel(nextLevel);
+          showLevelIntro(nextLevel);
+          setTimeout(() => startLevel(currentLevelIndex + 1), 420);
+        },
+      });
       return;
+    }
+    playGameSfx("level_up", 0.9);
+    const _winNow = performance.now();
+    if (gameTimer.running) {
+      const _lvMs = _winNow - gameTimer.startedAt;
+      gameTimer.elapsed += _lvMs;
+      gameTimer.levelTimes.push(_lvMs);
+      gameTimer.running = false;
+    }
+    let _runMsg = `Run: ${formatRunTime(gameTimer.elapsed)}`;
+    if (gameTimer.bestTime === null || gameTimer.elapsed < gameTimer.bestTime) {
+      gameTimer.bestTime = gameTimer.elapsed;
+      _runMsg += " — NEW RECORD!";
+      try { localStorage.setItem(STORAGE_BEST_RUN, String(gameTimer.elapsed)); } catch {}
     }
     galaxyView?.classList.remove("level-10");
     audioEngine.stopMusic();
@@ -7514,10 +7722,10 @@ function initGalaxyCanvas() {
       // ignore
     }
     if (arcadeScore > 0) {
-      showInitialsEntry(arcadeScore);
+      showInitialsEntry(arcadeScore, _runMsg);
       return;
     }
-    showArcadeOverlay("YOU WIN", "You Win Control of the Polyverse", 0, {
+    showArcadeOverlay("YOU WIN", `You Win Control of the Polyverse — ${_runMsg}`, 0, {
       buttonText: "Back to Modes",
       buttonAction: () => showModeSelect(),
     });
@@ -7559,6 +7767,10 @@ function initGalaxyCanvas() {
   function triggerGameOver() {
     arcadeActive = false;
     retryPending = false;
+    if (gameTimer.running) {
+      gameTimer.elapsed += performance.now() - gameTimer.startedAt;
+      gameTimer.running = false;
+    }
     commBoxController.stopVO();
     audioEngine.stopMusic();
     stopGalaxyBackground();
@@ -7588,8 +7800,12 @@ function initGalaxyCanvas() {
     setSavedArcadeLevel(cfg.level);
     initMediaSession().then(() => updateMediaSessionLevel(cfg.level));
     galaxyView?.classList.toggle("level-10", cfg.level === 10);
+    applyLevelTheme(cfg.level);
 
     clearGameplayEntities();
+    shotsFired = 0;
+    shotsHit = 0;
+    ufosKilledThisLevel = 0;
     commBoxController.show();
     commBoxController.setDamageState("normal");
     showFpsOverlay();
@@ -7636,6 +7852,15 @@ function initGalaxyCanvas() {
 
     arcadeActive = true;
     retryPending = false;
+    if (currentLevelIndex === 0 && !gameTimer.running) {
+      gameTimer.startedAt = now;
+      gameTimer.elapsed = 0;
+      gameTimer.running = true;
+      gameTimer.levelTimes = [];
+    } else if (!gameTimer.running) {
+      gameTimer.startedAt = now;
+      gameTimer.running = true;
+    }
     updateArcadeHud(now);
     showLevelIntro(cfg.level);
 
@@ -8615,6 +8840,7 @@ function initGalaxyCanvas() {
       y2: y,
       startedAt: now,
     });
+    shotsFired += 1;
     if (landmine && isPointOnLandmine(x, y)) {
       triggerCrosshairFire();
       armLandmine();

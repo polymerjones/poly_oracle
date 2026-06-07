@@ -2005,6 +2005,13 @@ select:focus-visible {
   min-width: 120px;
 }
 
+.hudGameTimer {
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  color: rgba(183, 201, 255, 0.65);
+  font-variant-numeric: tabular-nums;
+}
+
 .hudLevel {
   font-size: 0.82rem;
   letter-spacing: 0.08em;
@@ -2023,7 +2030,7 @@ select:focus-visible {
   font-weight: 800;
   line-height: 0.85;
   letter-spacing: 0;
-  color: #00FFD1;
+  color: var(--level-primary, #00FFD1);
   opacity: 0;
   transform: translate(-50%, -50%) scale(1);
   text-shadow: 0 0 10px rgba(0, 255, 209, 0.86), 0 0 28px rgba(0, 255, 209, 0.62);

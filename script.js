@@ -764,6 +764,39 @@ const commBoxController = (() => {
   let easterEggCooldown = 0;
 
   const GLITCH = "▓░█▒╬╫╪";
+  const VO3_FILES = new Set([
+    "blast_em_ha_ha.mp3",
+    "EHEHAHH.mp3",
+    "GET_EM_GET_EM_GET_EM.mp3",
+    "GET_EM_GET_EM.mp3",
+    "GET_EMMM.mp3",
+    "haha_yeah_cadet_thats_what_im_talking_about.mp3",
+    "HAHA_yeahh_hahaha.mp3",
+    "HAHAAAA_THATS_HOW_ITS_DONE.mp3",
+    "HAHAHA_OH_YOU_GOT_EM.mp3",
+    "HEHEH_YEAHHHH.mp3",
+    "id_be_lost_without_you_cadet_nice_work.mp3",
+    "if_these_stroids_were_alive_theyd_be_shook.mp3",
+    "MAKE_A_PLASMA_NET.mp3",
+    "MAKE_A_PLASMA_NET2.mp3",
+    "MAKE_A_PLASMA_NET3.mp3",
+    "PLASMA_IS_RECHARGED.mp3",
+    "PLASMA_RECHARGED_MAKE_A_PLASMA_NET.mp3",
+    "RIGHT_ON.mp3",
+    "RIGHT_ON2.mp3",
+    "TAP_AND_DRAG_TO_MAKE_A_PLASMA_NET.mp3",
+    "that_grinds_my_gears.mp3",
+    "THAT_IS_RIGHT.mp3",
+    "THATS_HOW_ITS_DONE.mp3",
+    "this_definitely_concerns_you_cadet.mp3",
+    "this_definitely_concerns_you_cadet2.mp3",
+    "way_to_go_man.mp3",
+    "WHOOPTHATCHICK_GETEM.mp3",
+    "YOU_SHOW_EM_WHOS_BOSS_hahah.mp3",
+    "YOU_SHOW_EM_WHOS_BOSSS.mp3",
+    "youre_not_doing_so_hot_cadet.mp3",
+    "youre_not_doing_so_well_cadet.mp3",
+  ]);
   const availableVoFiles = new Set([
     // dump1
     "vo-hairytakeemout.mp3",
@@ -801,6 +834,7 @@ const commBoxController = (() => {
     "vo-you_show_em_whos_boss.mp3",
     "vo-you_show_em_whos_boss2.mp3",
     "vo-you_show_em_whos_boss3.mp3",
+    ...VO3_FILES,
   ]);
 
   const _poolIndices = {};
@@ -821,6 +855,8 @@ const commBoxController = (() => {
     "vo-lets_show_up_and_show_em_whos_boss_kid.mp3",
     "vo-lets_show_the_polyverse_that_you_are_a_force_to_be_reckoned_with.mp3",
     "vo-lets_blast_these_stroids.mp3",
+    "this_definitely_concerns_you_cadet.mp3",
+    "this_definitely_concerns_you_cadet2.mp3",
   ];
 
   const POOL_LEVEL_COMPLETE = [
@@ -831,6 +867,16 @@ const commBoxController = (() => {
     "vo-you_show_em_whos_boss.mp3",
     "vo-you_show_em_whos_boss2.mp3",
     "vo-you_show_em_whos_boss3.mp3",
+    "HAHAAAA_THATS_HOW_ITS_DONE.mp3",
+    "THATS_HOW_ITS_DONE.mp3",
+    "THAT_IS_RIGHT.mp3",
+    "RIGHT_ON.mp3",
+    "RIGHT_ON2.mp3",
+    "haha_yeah_cadet_thats_what_im_talking_about.mp3",
+    "way_to_go_man.mp3",
+    "YOU_SHOW_EM_WHOS_BOSSS.mp3",
+    "id_be_lost_without_you_cadet_nice_work.mp3",
+    "if_these_stroids_were_alive_theyd_be_shook.mp3",
   ];
 
   const POOL_NICE_SHOT = [
@@ -842,6 +888,12 @@ const commBoxController = (() => {
     "vo-very_nice_shot_cadet.mp3",
     "vo-thats_right_cadet.mp3",
     "vo-YES.mp3",
+    "blast_em_ha_ha.mp3",
+    "GET_EM_GET_EM_GET_EM.mp3",
+    "GET_EM_GET_EM.mp3",
+    "GET_EMMM.mp3",
+    "WHOOPTHATCHICK_GETEM.mp3",
+    "HAHAHA_OH_YOU_GOT_EM.mp3",
   ];
 
   const POOL_HYPE = [
@@ -850,6 +902,10 @@ const commBoxController = (() => {
     "vo-you_show_em_whos_boss2.mp3",
     "vo-you_show_em_whos_boss3.mp3",
     "vo-lets_go_ahead_blast_em.mp3",
+    "HAHA_yeahh_hahaha.mp3",
+    "HEHEH_YEAHHHH.mp3",
+    "EHEHAHH.mp3",
+    "YOU_SHOW_EM_WHOS_BOSS_hahah.mp3",
   ];
 
   const POOL_BOMB = [
@@ -865,11 +921,35 @@ const commBoxController = (() => {
   const POOL_LOW_LIVES = [
     "vo-i_believe_in_you_cadet.mp3",
     "vo-i_believe_in_you_cadet2.mp3",
+    "youre_not_doing_so_hot_cadet.mp3",
+    "youre_not_doing_so_well_cadet.mp3",
+    "that_grinds_my_gears.mp3",
   ];
 
   const POOL_COCKY = [
     "vo-dont_get_cocky_on_me_kid.mp3",
     "vo-dont_get_cocky_on_me.mp3",
+  ];
+
+  const POOL_LANDMINE_ARMED = [
+    "EHEHAHH.mp3",
+    "HAHA_yeahh_hahaha.mp3",
+    "HAHAAAA_THATS_HOW_ITS_DONE.mp3",
+    "HAHAHA_OH_YOU_GOT_EM.mp3",
+    "HEHEH_YEAHHHH.mp3",
+    "YOU_SHOW_EM_WHOS_BOSS_hahah.mp3",
+  ];
+
+  const POOL_PLASMA_RECHARGED = [
+    "PLASMA_IS_RECHARGED.mp3",
+    "PLASMA_RECHARGED_MAKE_A_PLASMA_NET.mp3",
+  ];
+
+  const POOL_PLASMA_HINT = [
+    "TAP_AND_DRAG_TO_MAKE_A_PLASMA_NET.mp3",
+    "MAKE_A_PLASMA_NET.mp3",
+    "MAKE_A_PLASMA_NET2.mp3",
+    "MAKE_A_PLASMA_NET3.mp3",
   ];
 
   const VO_CAPTIONS = {
@@ -905,6 +985,37 @@ const commBoxController = (() => {
     "vo-you_show_em_whos_boss.mp3": "YOU SHOW 'EM WHO'S BOSS.",
     "vo-you_show_em_whos_boss2.mp3": "YOU SHOW 'EM WHO'S BOSS.",
     "vo-you_show_em_whos_boss3.mp3": "YOU SHOW 'EM WHO'S BOSS.",
+    "blast_em_ha_ha.mp3": "BLAST 'EM! HA HA!",
+    "EHEHAHH.mp3": "EHEHAHH.",
+    "GET_EM_GET_EM_GET_EM.mp3": "GET 'EM! GET 'EM! GET 'EM!",
+    "GET_EM_GET_EM.mp3": "GET 'EM! GET 'EM!",
+    "GET_EMMM.mp3": "GET 'EMMM!",
+    "haha_yeah_cadet_thats_what_im_talking_about.mp3": "HAHA YEAH CADET, THAT'S WHAT I'M TALKING ABOUT!",
+    "HAHA_yeahh_hahaha.mp3": "HAHA YEAHH HAHAHA!",
+    "HAHAAAA_THATS_HOW_ITS_DONE.mp3": "HAHAAAA THAT'S HOW IT'S DONE!",
+    "HAHAHA_OH_YOU_GOT_EM.mp3": "HAHAHA OH YOU GOT 'EM!",
+    "HEHEH_YEAHHHH.mp3": "HEHEH YEAHHHH!",
+    "id_be_lost_without_you_cadet_nice_work.mp3": "I'D BE LOST WITHOUT YOU, CADET. NICE WORK.",
+    "if_these_stroids_were_alive_theyd_be_shook.mp3": "IF THESE 'STROIDS WERE ALIVE, THEY'D BE SHOOK.",
+    "MAKE_A_PLASMA_NET.mp3": "MAKE A PLASMA NET!",
+    "MAKE_A_PLASMA_NET2.mp3": "MAKE A PLASMA NET!",
+    "MAKE_A_PLASMA_NET3.mp3": "MAKE A PLASMA NET!",
+    "PLASMA_IS_RECHARGED.mp3": "PLASMA IS RECHARGED.",
+    "PLASMA_RECHARGED_MAKE_A_PLASMA_NET.mp3": "PLASMA RECHARGED — MAKE A PLASMA NET!",
+    "RIGHT_ON.mp3": "RIGHT ON.",
+    "RIGHT_ON2.mp3": "RIGHT ON.",
+    "TAP_AND_DRAG_TO_MAKE_A_PLASMA_NET.mp3": "TAP AND DRAG TO MAKE A PLASMA NET.",
+    "that_grinds_my_gears.mp3": "THAT GRINDS MY GEARS.",
+    "THAT_IS_RIGHT.mp3": "THAT IS RIGHT.",
+    "THATS_HOW_ITS_DONE.mp3": "THAT'S HOW IT'S DONE!",
+    "this_definitely_concerns_you_cadet.mp3": "THIS DEFINITELY CONCERNS YOU, CADET.",
+    "this_definitely_concerns_you_cadet2.mp3": "THIS DEFINITELY CONCERNS YOU, CADET.",
+    "way_to_go_man.mp3": "WAY TO GO, MAN!",
+    "WHOOPTHATCHICK_GETEM.mp3": "WHOOP THAT CHICK — GET 'EM!",
+    "YOU_SHOW_EM_WHOS_BOSS_hahah.mp3": "YOU SHOW 'EM WHO'S BOSS! HAHAH!",
+    "YOU_SHOW_EM_WHOS_BOSSS.mp3": "YOU SHOW 'EM WHO'S BOSS!",
+    "youre_not_doing_so_hot_cadet.mp3": "YOU'RE NOT DOING SO HOT, CADET.",
+    "youre_not_doing_so_well_cadet.mp3": "YOU'RE NOT DOING SO WELL, CADET.",
   };
 
   function setFrame(key) {
@@ -1090,6 +1201,7 @@ const commBoxController = (() => {
     const reactions = {
       ufo: "shockd",
       landmine: "shockd",
+      landmine_armed: "laugh",
       chaos: "angry",
       commander: "commander",
       angry: "angry",
@@ -1097,6 +1209,7 @@ const commBoxController = (() => {
       levelcomplete: ["laugh", "laugh2"],
       lowlives: "exhausted",
       plasmacharged: "smirk",
+      plasma_recharged: "smirk",
       boss: "angry",
       thinking: "thinking",
     };
@@ -1113,7 +1226,11 @@ const commBoxController = (() => {
   }
 
   function commVoSrc(filename) {
-    return availableVoFiles.has(filename) ? `vo/${filename}` : null;
+    if (!availableVoFiles.has(filename)) return null;
+    if (VO3_FILES.has(filename) || /^[A-Z]/.test(filename)) {
+      return `assets/vo3/${filename}`;
+    }
+    return `vo/${filename}`;
   }
 
   function triggerVO({
@@ -1279,6 +1396,9 @@ const commBoxController = (() => {
     POOL_DETONATE,
     POOL_LOW_LIVES,
     POOL_COCKY,
+    POOL_LANDMINE_ARMED,
+    POOL_PLASMA_RECHARGED,
+    POOL_PLASMA_HINT,
   };
 })();
 
@@ -4700,6 +4820,12 @@ function initGalaxyCanvas() {
     desynchronized: true,
     willReadFrequently: false,
   });
+  const timerPerimeterCanvas = document.createElement("canvas");
+  const timerPerimeterCtx = timerPerimeterCanvas.getContext("2d", {
+    alpha: true,
+    desynchronized: true,
+    willReadFrequently: false,
+  });
   const ufoFxCanvas = document.createElement("canvas");
   const ufoFxCtx = ufoFxCanvas.getContext("2d", {
     alpha: true,
@@ -4712,6 +4838,12 @@ function initGalaxyCanvas() {
   plasmaOverlayCanvas.style.zIndex = "2";
   plasmaOverlayCanvas.style.inset = "auto";
   galaxyView.appendChild(plasmaOverlayCanvas);
+  timerPerimeterCanvas.setAttribute("aria-hidden", "true");
+  timerPerimeterCanvas.style.position = "absolute";
+  timerPerimeterCanvas.style.pointerEvents = "none";
+  timerPerimeterCanvas.style.zIndex = "2";
+  timerPerimeterCanvas.style.inset = "auto";
+  galaxyView.appendChild(timerPerimeterCanvas);
   ufoFxCanvas.setAttribute("aria-hidden", "true");
   ufoFxCanvas.style.position = "absolute";
   ufoFxCanvas.style.pointerEvents = "none";
@@ -4882,6 +5014,10 @@ function initGalaxyCanvas() {
   let _lastPraiseAt = 0;
   let _timerWarnedAt60 = false;
   let _timerWarnedAt10 = false;
+  let _timerNumberVisible = false;
+  let _timerSlammed = false;
+  let _timerRemainingMs = 0;
+  let _timerRatio = 1;
   let _iosAudioFrameBudget = 0;
   let _iosAudioLastFrame = 0;
   let lastAsteroidCollisionSfxAt = 0;
@@ -5104,23 +5240,65 @@ function initGalaxyCanvas() {
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
 
+  function resetArcadeTimerVisuals() {
+    _timerNumberVisible = false;
+    _timerSlammed = false;
+    _timerRemainingMs = levelDurationMs;
+    _timerRatio = 1;
+    if (hudTimer) {
+      hudTimer.textContent = "";
+      hudTimer.classList.remove("visible", "slam", "warning", "critical");
+      hudTimer.style.left = "";
+      hudTimer.style.top = "";
+    }
+    if (arcadeTimerGhost) arcadeTimerGhost.textContent = "";
+    if (arcadeTimerBackdrop) {
+      arcadeTimerBackdrop.style.opacity = "0";
+      arcadeTimerBackdrop.classList.remove("danger");
+    }
+    drawTimerPerimeterOverlay(performance.now());
+  }
+
+  function positionHudTimerOnCanvas() {
+    if (!hudTimer || !galaxyPlayCanvas) return;
+    const rect = galaxyPlayCanvas.getBoundingClientRect();
+    hudTimer.style.left = `${rect.left + rect.width / 2}px`;
+    hudTimer.style.top = `${rect.top + rect.height / 2}px`;
+  }
+
   function updateArcadeHud(now) {
     const remainingMs = levelEndsAt - now;
     const safeRemaining = Math.max(0, remainingMs);
+    _timerRemainingMs = safeRemaining;
+    _timerRatio = levelDurationMs > 0 ? clamp(safeRemaining / levelDurationMs, 0, 1) : 0;
     if (hudLevel) hudLevel.textContent = `LEVEL ${ARCADE_LEVELS[currentLevelIndex]?.level || 1}`;
     renderLives();
     renderScore();
     renderScoreMultiplier(now);
     if (hudTimer) {
-      hudTimer.textContent = formatMs(safeRemaining);
-      hudTimer.classList.toggle("danger", safeRemaining <= 10000 && safeRemaining > 0);
+      positionHudTimerOnCanvas();
+      const showNumber = engineMode === "arcade" && arcadeActive && safeRemaining <= 20000 && safeRemaining > 0;
+      hudTimer.textContent = showNumber ? String(Math.ceil(safeRemaining / 1000)) : "";
+      hudTimer.classList.toggle("visible", showNumber);
+      hudTimer.classList.toggle("warning", showNumber && safeRemaining <= 10000 && safeRemaining > 5000);
+      hudTimer.classList.toggle("critical", showNumber && safeRemaining <= 5000);
+      if (showNumber && !_timerSlammed) {
+        _timerSlammed = true;
+        _timerNumberVisible = true;
+        hudTimer.classList.remove("slam");
+        void hudTimer.offsetWidth;
+        hudTimer.classList.add("slam");
+      } else if (!showNumber) {
+        _timerNumberVisible = false;
+        _timerSlammed = false;
+        hudTimer.classList.remove("slam", "warning", "critical");
+      }
     }
-    if (arcadeTimerGhost) arcadeTimerGhost.textContent = formatMs(safeRemaining);
+    if (arcadeTimerGhost) arcadeTimerGhost.textContent = "";
     if (arcadeTimerBackdrop) {
       const ratio = levelDurationMs > 0 ? 1 - safeRemaining / levelDurationMs : 0;
-      const opacity = clamp(0.08 + ratio * 0.64, 0.08, 0.72);
-      arcadeTimerBackdrop.style.opacity = String(opacity);
-      arcadeTimerBackdrop.classList.toggle("danger", safeRemaining <= 10000 && safeRemaining > 0);
+      arcadeTimerBackdrop.style.opacity = "0";
+      arcadeTimerBackdrop.classList.remove("danger");
       setGalaxyBackgroundDim(ratio);
     }
     if (engineMode === "arcade" && arcadeActive && safeRemaining <= 10000 && safeRemaining > 0) {
@@ -6358,6 +6536,7 @@ function initGalaxyCanvas() {
     if (plasmaCage.rechargeSoundPlayed) return;
     plasmaCage.rechargeSoundPlayed = true;
     playGameSfx("plasmarecharged", 1.0);
+    commBoxController.reactTo("plasma_recharged");
     function fireRechargeComm() {
       const ticker = document.getElementById("commanderTicker");
       const isActive = ticker?.classList.contains("ticker-visible");
@@ -6366,10 +6545,11 @@ function initGalaxyCanvas() {
         return;
       }
       commBoxController.queueVO({
-        lines: ["PLASMA RECHARGED. READY."],
-        audioSrc: commBoxController.commVoSrc("plasma_ready.mp3"),
+        audioSrc: commBoxController.commVoSrc(
+          commBoxController.pickFromPool("plasmarecharged", commBoxController.POOL_PLASMA_RECHARGED),
+        ),
         duration: 2500,
-        event: "plasmacharged",
+        event: "plasma_recharged",
       });
     }
     setTimeout(fireRechargeComm, 400);
@@ -6453,6 +6633,18 @@ function initGalaxyCanvas() {
     plasmaCtx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
   }
 
+  function resizeTimerPerimeterCanvas() {
+    if (!timerPerimeterCtx) return;
+    timerPerimeterCanvas.style.left = galaxyPlayCanvas.style.left;
+    timerPerimeterCanvas.style.top = galaxyPlayCanvas.style.top;
+    timerPerimeterCanvas.style.width = galaxyPlayCanvas.style.width;
+    timerPerimeterCanvas.style.height = galaxyPlayCanvas.style.height;
+    timerPerimeterCanvas.width = galaxyPlayCanvas.width;
+    timerPerimeterCanvas.height = galaxyPlayCanvas.height;
+    timerPerimeterCtx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
+    positionHudTimerOnCanvas();
+  }
+
   function resizeUfoFxCanvas() {
     if (!ufoFxCtx) return;
     ufoFxCanvas.style.left = galaxyPlayCanvas.style.left;
@@ -6466,6 +6658,70 @@ function initGalaxyCanvas() {
 
   function setPlasmaOverlayVisible(visible) {
     plasmaOverlayCanvas.style.display = visible ? "" : "none";
+  }
+
+  function setTimerPerimeterVisible(visible) {
+    timerPerimeterCanvas.style.display = visible ? "" : "none";
+  }
+
+  function strokeTimerPerimeterPath(ctxToDraw, progress, x, y, w, h) {
+    const safeProgress = clamp(progress, 0, 1);
+    const perimeter = Math.max(1, 2 * (w + h));
+    let remaining = perimeter * safeProgress;
+    let cx = x;
+    let cy = y;
+    const drawSegment = (nextX, nextY, len) => {
+      if (remaining <= 0) return;
+      const use = Math.min(remaining, len);
+      const t = len > 0 ? use / len : 0;
+      const px = cx + (nextX - cx) * t;
+      const py = cy + (nextY - cy) * t;
+      ctxToDraw.lineTo(px, py);
+      cx = nextX;
+      cy = nextY;
+      remaining -= use;
+    };
+
+    ctxToDraw.beginPath();
+    ctxToDraw.moveTo(x, y);
+    drawSegment(x + w, y, w);
+    drawSegment(x + w, y + h, h);
+    drawSegment(x, y + h, w);
+    drawSegment(x, y, h);
+  }
+
+  function drawTimerPerimeterOverlay(now) {
+    if (!timerPerimeterCtx) return;
+    timerPerimeterCtx.clearRect(0, 0, sim.width, sim.height);
+    const showTimer = engineMode === "arcade" && arcadeActive && levelDurationMs > 0;
+    setTimerPerimeterVisible(showTimer);
+    if (!showTimer) return;
+
+    const remaining = Math.max(0, _timerRemainingMs || Math.max(0, levelEndsAt - now));
+    const progress = levelDurationMs > 0 ? clamp(remaining / levelDurationMs, 0, 1) : _timerRatio;
+    const inset = 2.5;
+    const x = inset;
+    const y = inset;
+    const w = Math.max(0, sim.width - inset * 2);
+    const h = Math.max(0, sim.height - inset * 2);
+    if (w <= 0 || h <= 0) return;
+
+    timerPerimeterCtx.save();
+    timerPerimeterCtx.lineWidth = 3;
+    timerPerimeterCtx.lineJoin = "round";
+    timerPerimeterCtx.lineCap = "round";
+    timerPerimeterCtx.strokeStyle = "rgba(180,190,205,0.1)";
+    timerPerimeterCtx.strokeRect(x, y, w, h);
+
+    const color = remaining <= 5000 ? "#ff4444" : remaining <= 10000 ? "#ffaa00" : "#00FFD1";
+    timerPerimeterCtx.strokeStyle = color;
+    if (!isIOSNative) {
+      timerPerimeterCtx.shadowColor = color;
+      timerPerimeterCtx.shadowBlur = 6;
+    }
+    strokeTimerPerimeterPath(timerPerimeterCtx, progress, x, y, w, h);
+    timerPerimeterCtx.stroke();
+    timerPerimeterCtx.restore();
   }
 
   function drawUfoFxOverlay(fallbackCtx) {
@@ -6876,6 +7132,7 @@ function initGalaxyCanvas() {
     bgPreRolledForLevel = false;
     _timerWarnedAt60 = false;
     _timerWarnedAt10 = false;
+    resetArcadeTimerVisuals();
     syncArcadeEntryLabel();
     setGalaxyBackgroundForLevel(cfg.level);
     window.galaxyBackground?.show();
@@ -7031,6 +7288,7 @@ function initGalaxyCanvas() {
     arcadeActive = false;
     arcadeResumeAvailable = false;
     retryPending = false;
+    resetArcadeTimerVisuals();
     setMenuOverlayOpen(false);
     syncArcadeEntryLabel();
     setGalaxyViewMode("practice");
@@ -7090,6 +7348,7 @@ function initGalaxyCanvas() {
       arcadeTimerBackdrop.style.opacity = "0";
       arcadeTimerBackdrop.classList.remove("danger");
     }
+    resetArcadeTimerVisuals();
     resizeGalaxyCanvas();
     computePlayfield();
     updateArcadeHud(performance.now());
@@ -7128,6 +7387,7 @@ function initGalaxyCanvas() {
     galaxyPlayCanvas.height = Math.floor(height * sim.dpr);
     ctx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
     resizePlasmaOverlayCanvas();
+    resizeTimerPerimeterCanvas();
     resizeUfoFxCanvas();
     window.galaxyBackground?.resize(sim.width, sim.height);
     sim.maxAsteroids = capIOSNativeAsteroids(
@@ -7363,12 +7623,12 @@ function initGalaxyCanvas() {
           landmine.phase = "armed";
           landmine.armedAt = now;
           playGameSfx("landmine_arm", 0.96);
-          commBoxController.reactTo("landmine");
+          commBoxController.reactTo("landmine_armed");
           commBoxController.queueVO({
             audioSrc: commBoxController.commVoSrc(
-              commBoxController.pickFromPool("bomb", commBoxController.POOL_BOMB),
+              commBoxController.pickFromPool("landminearmed", commBoxController.POOL_LANDMINE_ARMED),
             ),
-            event: "landmine",
+            event: "landmine_armed",
             priority: "high",
           });
           startDangerLoop();
@@ -7467,6 +7727,7 @@ function initGalaxyCanvas() {
   }
 
   function draw(now) {
+    drawTimerPerimeterOverlay(now);
     if ((engineMode === "arcade" || engineMode === "practice") && window.pixiRenderer?.draw(sim, laserBeams, canvasFlash, ufo, plasmaCage, landmine, _bombShrapnel, now)) {
       setPlasmaOverlayVisible(false);
       drawUfoFxOverlay(ctx);

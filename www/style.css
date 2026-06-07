@@ -1984,6 +1984,8 @@ select:focus-visible {
 .hudBtn {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.06);
+  position: relative;
+  z-index: 5;
 }
 
 .hudCenter {
@@ -2000,15 +2002,71 @@ select:focus-visible {
 }
 
 .hudTimer {
+  position: fixed;
+  z-index: 2;
+  left: 50%;
+  top: 50%;
+  display: block;
+  pointer-events: none;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 1rem;
-  font-weight: 700;
-  color: #dff8ff;
+  font-size: clamp(4.8rem, 18vw, 12rem);
+  font-weight: 800;
+  line-height: 0.85;
+  letter-spacing: 0;
+  color: #00FFD1;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(1);
+  text-shadow: 0 0 10px rgba(0, 255, 209, 0.86), 0 0 28px rgba(0, 255, 209, 0.62);
+  transition: color 120ms linear, text-shadow 120ms linear;
+  will-change: transform, opacity;
 }
 
-.hudTimer.danger {
-  color: rgba(255, 103, 103, 0.96);
-  text-shadow: 0 0 8px rgba(255, 57, 57, 0.7), 0 0 18px rgba(255, 34, 34, 0.5);
+.hudTimer.visible {
+  opacity: 1;
+}
+
+.hudTimer.slam {
+  animation: timerSlamIn 250ms cubic-bezier(.2,1.4,.4,1) both;
+}
+
+.hudTimer.warning {
+  color: #ffaa00;
+  text-shadow: 0 0 10px rgba(255, 170, 0, 0.86), 0 0 28px rgba(255, 170, 0, 0.62);
+}
+
+.hudTimer.critical {
+  color: #ff4444;
+  text-shadow: 0 0 10px rgba(255, 68, 68, 0.92), 0 0 30px rgba(255, 34, 34, 0.72);
+  animation: timerCriticalPulse 360ms ease-in-out infinite;
+}
+
+.hudTimer.slam.critical {
+  animation:
+    timerSlamIn 250ms cubic-bezier(.2,1.4,.4,1) both,
+    timerCriticalPulse 360ms ease-in-out 250ms infinite;
+}
+
+@keyframes timerSlamIn {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(2.5);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes timerCriticalPulse {
+  0%, 100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.12);
+  }
 }
 
 .hudLives {
@@ -2036,7 +2094,7 @@ select:focus-visible {
   inset: 0;
   z-index: 2;
   pointer-events: none;
-  display: none;
+  display: none !important;
   align-items: center;
   justify-content: center;
   opacity: 0;
@@ -2044,10 +2102,11 @@ select:focus-visible {
 }
 
 .galaxy-view.mode-arcade .arcadeTimerBackdrop {
-  display: flex;
+  display: none !important;
 }
 
 .arcadeTimerGhost {
+  display: none !important;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: clamp(3rem, 19vw, 9rem);
   font-weight: 700;

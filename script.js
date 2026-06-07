@@ -369,8 +369,8 @@ const PLASMA_CAGE_DRAG_THRESHOLD = 20;
 const PLASMA_CAGE_VOLUME_BOOST = Math.pow(10, 4 / 20);
 const STROID_TOSS_HOLD_MS = 500;
 const STROID_TOSS_TIMEOUT_MS = 8000;
-const STROID_TOSS_MIN_SPEED = 400;
-const STROID_TOSS_MAX_SPEED = 600;
+const STROID_TOSS_MIN_SPEED = 500;
+const STROID_TOSS_MAX_SPEED = 700;
 const CHAOS_THRESHOLD = 60;
 const IOS_NATIVE_MAX_ASTEROIDS = 55;
 const MAX_LIVES = 3;
@@ -4943,6 +4943,8 @@ function initGalaxyCanvas() {
     dragX: 0,
     dragY: 0,
     pointerId: null,
+    grabX: 0,
+    grabY: 0,
     startX: 0,
     startY: 0,
     lastHapticAt: 0,
@@ -4978,13 +4980,14 @@ function initGalaxyCanvas() {
       _timeBonusFlash = document.createElement("div");
       _timeBonusFlash.setAttribute("aria-hidden", "true");
       _timeBonusFlash.style.cssText = `
-        position:fixed;left:50%;top:50%;z-index:4;pointer-events:none;
+        position:fixed;left:50%;top:50%;z-index:4;pointer-events:none !important;
         transform:translate(-50%,-50%) scale(1);
         font:800 clamp(2.4rem,9vw,6rem) ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
         line-height:0.95;letter-spacing:0;color:#00FFD1;text-align:center;
         text-shadow:0 0 10px rgba(0,255,209,.86),0 0 28px rgba(0,255,209,.62);
         opacity:0;transition:opacity 260ms ease,transform 260ms cubic-bezier(.2,1.4,.4,1);
       `;
+      _timeBonusFlash.style.setProperty("pointer-events", "none", "important");
       galaxyView.appendChild(_timeBonusFlash);
     }
     _timeBonusFlash.textContent = `TIME BONUS +${points}`;
@@ -6325,6 +6328,8 @@ function initGalaxyCanvas() {
     stroidToss.dragX = 0;
     stroidToss.dragY = 0;
     stroidToss.pointerId = null;
+    stroidToss.grabX = 0;
+    stroidToss.grabY = 0;
     stroidToss.startX = 0;
     stroidToss.startY = 0;
     stroidToss.lastHapticAt = 0;
@@ -6343,6 +6348,8 @@ function initGalaxyCanvas() {
     stroidToss.dragX = point.x;
     stroidToss.dragY = point.y;
     stroidToss.pointerId = pointerId ?? null;
+    stroidToss.grabX = point.x;
+    stroidToss.grabY = point.y;
     stroidToss.startX = asteroid.x;
     stroidToss.startY = asteroid.y;
     stroidToss.lastHapticAt = now;
@@ -6350,6 +6357,7 @@ function initGalaxyCanvas() {
     asteroid._stroidHeld = true;
     asteroid.tossed = false;
     asteroid.tossedAt = 0;
+    delete asteroid.tossHealth;
     asteroid._preTossVx = asteroid.vx;
     asteroid._preTossVy = asteroid.vy;
     asteroid.vx = 0;
@@ -6419,8 +6427,8 @@ function initGalaxyCanvas() {
   function launchStroidToss(now) {
     const asteroid = getStroidTossAsteroid();
     if (!asteroid) return false;
-    const dx = stroidToss.dragX - stroidToss.startX;
-    const dy = stroidToss.dragY - stroidToss.startY;
+    const dx = stroidToss.dragX - stroidToss.grabX;
+    const dy = stroidToss.dragY - stroidToss.grabY;
     let len = Math.hypot(dx, dy);
     let nx = len > 0.1 ? dx / len : 1;
     let ny = len > 0.1 ? dy / len : 0;
@@ -6437,6 +6445,7 @@ function initGalaxyCanvas() {
     asteroid._stroidHeld = false;
     asteroid.tossed = true;
     asteroid.tossedAt = now;
+    asteroid.tossHealth = 3;
     delete asteroid._preTossVx;
     delete asteroid._preTossVy;
     sim.tossedAsteroid = asteroid;
@@ -6474,6 +6483,14 @@ function initGalaxyCanvas() {
     }
   }
 
+  function getAsteroidSpriteGlowColor(spriteKey, alpha = 0.82) {
+    const a = clamp(alpha, 0, 1).toFixed(3);
+    if (spriteKey === "roid02") return `rgba(120,80,255,${a})`;
+    if (spriteKey === "roid03") return `rgba(255,190,0,${a})`;
+    if (spriteKey === "hotroid01") return `rgba(255,70,20,${a})`;
+    return `rgba(0,255,209,${a})`;
+  }
+
   function removeAsteroidRef(asteroid) {
     const index = sim.asteroids.indexOf(asteroid);
     if (index < 0) return false;
@@ -6482,16 +6499,57 @@ function initGalaxyCanvas() {
     return true;
   }
 
-  function destroyTossedAsteroidPair(tossed, target) {
-    if (!tossed || !target || tossed === target) return;
-    spawnExplosion(tossed.x, tossed.y, 30, true, 2.0, 1, tossed.kind, tossed.spriteKey);
-    spawnExplosion(target.x, target.y, 30, true, 2.0, 1, target.kind, target.spriteKey);
+  function getStroidTossImpactCost(asteroid) {
+    if (!asteroid) return 1;
+    if (asteroid.kind <= 1) return 0.5;
+    if (asteroid.kind === 2) return 1;
+    return 1.5;
+  }
+
+  function destroyTossImpactTarget(target) {
+    if (!target) return false;
+    const kind = target.kind || 1;
+    const bigBlast = kind === 3;
+    const mediumBlast = kind === 2;
+    const x = target.x;
+    const y = target.y;
+    const spriteKey = target.spriteKey;
+    if (!removeAsteroidRef(target)) return false;
+    spawnExplosion(x, y, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, mediumBlast ? 1.18 : 1, kind, spriteKey);
+    triggerAsteroidSizeFeedback(kind);
+    playAsteroidExplosionBoom(kind, boomStackVolume(bigBlast ? 0.9 : mediumBlast ? 0.9 : 0.76), 0.92 + Math.random() * 0.14);
+    addArcadeScore(arcadeMultiplierPoints(kind >= 2 ? 25 : 10));
+    trackKillStreak();
+    return true;
+  }
+
+  function detonateTossedAsteroid(tossed) {
+    if (!tossed) return;
+    const x = tossed.x;
+    const y = tossed.y;
+    const kind = tossed.kind || 3;
+    const spriteKey = tossed.spriteKey;
+    spawnExplosion(x, y, 50, true, 3.0, 1, kind, spriteKey);
+    cssShake(1.0);
+    flashScreen("#ff2a1f", 320, 0.7);
     triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
-    playAsteroidExplosionBoom(3, 1.0, 0.92 + Math.random() * 0.12);
-    addArcadeScore(150);
+    playAsteroidExplosionBoom(3, 1.0, 0.88 + Math.random() * 0.12);
     removeAsteroidRef(tossed);
-    removeAsteroidRef(target);
     sim.tossedAsteroid = null;
+  }
+
+  function handleTossedAsteroidImpact(tossed, target) {
+    if (!tossed || !target || tossed === target) return;
+    const impactCost = getStroidTossImpactCost(target);
+    if (!Number.isFinite(tossed.tossHealth)) tossed.tossHealth = 3;
+    if (!destroyTossImpactTarget(target)) return;
+    tossed.tossHealth -= impactCost;
+    addArcadeScore(150);
+    triggerGameplayHapticImpact(tossed.tossHealth <= 0 ? hapticImpactStyle.Heavy : hapticImpactStyle.Medium);
+    if (tossed.tossHealth <= 0) {
+      detonateTossedAsteroid(tossed);
+      return;
+    }
     commBoxController.queueVO({
       audioSrc: commBoxController.commVoSrc(
         commBoxController.pickFromPool("hype", commBoxController.POOL_HYPE),
@@ -6510,6 +6568,7 @@ function initGalaxyCanvas() {
     if (now - tossed.tossedAt > STROID_TOSS_TIMEOUT_MS) {
       tossed.tossed = false;
       tossed.tossedAt = 0;
+      delete tossed.tossHealth;
       sim.tossedAsteroid = null;
       return;
     }
@@ -6518,7 +6577,7 @@ function initGalaxyCanvas() {
       if (!other || other === tossed) continue;
       const dist = Math.hypot(other.x - tossed.x, other.y - tossed.y);
       if (dist <= tossed.r + other.r) {
-        destroyTossedAsteroidPair(tossed, other);
+        handleTossedAsteroidImpact(tossed, other);
         return;
       }
     }
@@ -7205,19 +7264,38 @@ function initGalaxyCanvas() {
     plasmaCtx.stroke();
 
     if (stroidToss.grabbed) {
-      const dx = stroidToss.dragX - asteroid.x;
-      const dy = stroidToss.dragY - asteroid.y;
+      const dx = stroidToss.dragX - stroidToss.grabX;
+      const dy = stroidToss.dragY - stroidToss.grabY;
       const len = Math.hypot(dx, dy);
       if (len > 8) {
         const nx = dx / len;
         const ny = dy / len;
         const endLen = Math.min(220, Math.max(70, len));
-        plasmaCtx.globalAlpha = 0.78;
+        const arrowX = asteroid.x + nx * endLen;
+        const arrowY = asteroid.y + ny * endLen;
+        const tint = getAsteroidSpriteGlowColor(asteroid.spriteKey, 0.86);
+        plasmaCtx.globalAlpha = 0.9;
         plasmaCtx.setLineDash([5, 8]);
         plasmaCtx.lineDashOffset = -(now / 40) % 13;
+        plasmaCtx.lineWidth = 6;
+        plasmaCtx.strokeStyle = tint;
+        if (!isIOSNative) {
+          plasmaCtx.shadowColor = tint;
+          plasmaCtx.shadowBlur = 14;
+        }
         plasmaCtx.beginPath();
         plasmaCtx.moveTo(asteroid.x, asteroid.y);
-        plasmaCtx.lineTo(asteroid.x + nx * endLen, asteroid.y + ny * endLen);
+        plasmaCtx.lineTo(arrowX, arrowY);
+        plasmaCtx.stroke();
+        plasmaCtx.lineWidth = 3;
+        plasmaCtx.strokeStyle = "rgba(255,255,255,0.96)";
+        if (!isIOSNative) {
+          plasmaCtx.shadowColor = "#ffffff";
+          plasmaCtx.shadowBlur = 12;
+        }
+        plasmaCtx.beginPath();
+        plasmaCtx.moveTo(asteroid.x, asteroid.y);
+        plasmaCtx.lineTo(arrowX, arrowY);
         plasmaCtx.stroke();
         plasmaCtx.setLineDash([]);
       }

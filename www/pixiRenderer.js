@@ -51,6 +51,7 @@ const pixiRenderer = (() => {
   const activeDebris = [];
   let ufoDisplay = null;
   let ufoFallback = null;
+  let ufoGlowFallback = null;
   let plasmaGraphics = null;
   let bombGraphics = null;
   let landmineGraphics = null;
@@ -190,8 +191,10 @@ const pixiRenderer = (() => {
         ufoDisplay = new PIXI.Sprite(textures.ufo);
         ufoDisplay.anchor.set(0.5);
       } else {
+        ufoDisplay = new PIXI.Container();
+        ufoGlowFallback = new PIXI.Graphics();
         ufoFallback = new PIXI.Graphics();
-        ufoDisplay = ufoFallback;
+        ufoDisplay.addChild(ufoGlowFallback, ufoFallback);
       }
       ufoDisplay.visible = false;
       ufoContainer.addChild(ufoDisplay);
@@ -583,25 +586,33 @@ const pixiRenderer = (() => {
       ufoDisplay.width = r * 3.2;
       ufoDisplay.height = r * 1.8;
     } else if (ufoFallback) {
-      drawUFOGraphics(ufoFallback, ufoState.r || 24, damaged);
+      drawUFOGraphics(ufoFallback, ufoGlowFallback, ufoState.r || 24, damaged);
     }
   }
 
-  function drawUFOGraphics(g, r, damaged) {
+  function drawUFOGraphics(g, glowG, r, damaged) {
     g.clear();
+    if (glowG) glowG.clear();
     const glowColor = damaged ? 0xff6060 : 0x86ffb0;
     const strokeColor = damaged ? 0xff7c7c : 0x9cffc2;
     const bodyColor = damaged ? 0xff6060 : 0x9aebff;
 
-    g.beginFill(glowColor, damaged ? 0.16 : 0.18);
-    g.drawCircle(0, 0, r * 2.6);
-    g.endFill();
-    g.beginFill(glowColor, damaged ? 0.14 : 0.16);
-    g.drawCircle(0, 0, r * 1.8);
-    g.endFill();
-    g.beginFill(glowColor, damaged ? 0.2 : 0.22);
-    g.drawCircle(0, 0, r * 1.05);
-    g.endFill();
+    const BlurFilter = PIXI.filters?.BlurFilter || PIXI.BlurFilter;
+    if (glowG && BlurFilter) {
+      glowG.beginFill(glowColor, 0.12);
+      glowG.drawCircle(0, 0, r * 2.15);
+      glowG.endFill();
+      if (!glowG.filters || glowG.filters.length === 0) {
+        glowG.filters = [new BlurFilter(10)];
+      }
+    } else {
+      g.beginFill(glowColor, 0.08);
+      g.drawCircle(0, 0, r * 2.55);
+      g.endFill();
+      g.beginFill(glowColor, 0.14);
+      g.drawCircle(0, 0, r * 1.35);
+      g.endFill();
+    }
 
     g.lineStyle(1.4, strokeColor, damaged ? 0.55 : 0.58);
     g.drawEllipse(0, 0, r * 1.32, r * 0.72);
@@ -1157,6 +1168,7 @@ const pixiRenderer = (() => {
     starGraphics = null;
     ufoDisplay = null;
     ufoFallback = null;
+    ufoGlowFallback = null;
     plasmaGraphics = null;
     bombGraphics = null;
     landmineGraphics = null;

@@ -1541,6 +1541,16 @@ select:focus-visible {
   animation: warningStrobe 220ms infinite ease-in-out;
 }
 
+.galaxy-view.level-10 .bgStack::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(180,20,0,0.35), rgba(80,0,0,0.2), transparent);
+  mix-blend-mode: multiply;
+}
+
 @keyframes warningStrobe {
   0% { background: rgba(255, 60, 60, 0.1); }
   50% { background: rgba(255, 60, 60, 0.28); }

@@ -4342,7 +4342,8 @@ function ensureLeaderboardStyles() {
     .leaderboardTitle{position:relative;z-index:1;margin:0 0 18px;text-align:center;font-size:clamp(1.5rem,6vw,2.6rem);letter-spacing:.18em;color:#dffff8;text-shadow:0 0 10px #00FFD1,0 0 28px rgba(0,255,209,.5)}
     .leaderboardSub{position:relative;z-index:1;text-align:center;color:rgba(210,255,248,.76);margin:0 0 18px}
     .initialsForm{position:relative;z-index:1;display:grid;gap:14px;justify-items:center}
-    .initialsInput{width:8ch;text-align:center;text-transform:uppercase;font:700 2rem ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.24em;color:#fff;background:rgba(0,255,209,.08);border:1px solid rgba(0,255,209,.72);border-radius:12px;padding:10px 8px;box-shadow:0 0 18px rgba(0,255,209,.22)}
+    .initialsInput{width:8ch;text-align:center;text-transform:uppercase;font:700 2rem ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.24em;color:#fff;background:rgba(0,255,209,.08);border:1px solid rgba(0,255,209,.72);border-radius:12px;padding:10px 8px;box-shadow:0 0 18px rgba(0,255,209,.22);caret-color:#00FFD1;text-shadow:0 0 8px rgba(0,255,209,.6);animation:caretGlow 800ms ease-in-out infinite}
+    .initialsInput::placeholder{color:rgba(0,255,209,.4)}
     .leaderboardBtn{position:relative;z-index:1;border:1px solid rgba(0,255,209,.7);border-radius:999px;background:rgba(0,255,209,.1);color:#eafffb;padding:10px 18px;text-transform:uppercase;letter-spacing:.12em;box-shadow:0 0 16px rgba(0,255,209,.18);cursor:pointer}
     .leaderboardBtn:hover{background:rgba(0,255,209,.2)}
     .leaderboardRows{position:relative;z-index:1;display:grid;gap:8px;margin:18px 0}
@@ -4353,6 +4354,7 @@ function ensureLeaderboardStyles() {
     .leaderboardStatus{position:relative;z-index:1;text-align:center;color:rgba(220,255,248,.8);min-height:1.2em}
     @keyframes scoreRowIn{to{transform:translateY(0);opacity:1}}
     @keyframes scorePulse{0%,100%{text-shadow:0 0 8px rgba(0,255,209,.45)}50%{text-shadow:0 0 18px rgba(255,255,255,.95)}}
+    @keyframes caretGlow{0%,100%{caret-color:#00FFD1}50%{caret-color:rgba(0,255,209,.3)}}
   `;
   document.head.appendChild(style);
 }
@@ -4907,6 +4909,7 @@ function initGalaxyCanvas() {
   let _fpsAvg = 60;
   let _fpsWorst = 60;
   let _fpsWorstReset = 0;
+  let _timeBonusFlash = null;
   canvasFlash = { r: 0, g: 255, b: 255, peak: 0, alpha: 0, decayPerMs: 0 };
   window.galaxyBackground?.init(isIOSNative);
 
@@ -4967,6 +4970,36 @@ function initGalaxyCanvas() {
 
   function hideFpsOverlay() {
     if (_fpsOverlay) _fpsOverlay.style.display = "none";
+  }
+
+  function showTimeBonusFlash(points) {
+    if (!galaxyView || points <= 0) return;
+    if (!_timeBonusFlash) {
+      _timeBonusFlash = document.createElement("div");
+      _timeBonusFlash.setAttribute("aria-hidden", "true");
+      _timeBonusFlash.style.cssText = `
+        position:fixed;left:50%;top:50%;z-index:4;pointer-events:none;
+        transform:translate(-50%,-50%) scale(1);
+        font:800 clamp(2.4rem,9vw,6rem) ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+        line-height:0.95;letter-spacing:0;color:#00FFD1;text-align:center;
+        text-shadow:0 0 10px rgba(0,255,209,.86),0 0 28px rgba(0,255,209,.62);
+        opacity:0;transition:opacity 260ms ease,transform 260ms cubic-bezier(.2,1.4,.4,1);
+      `;
+      galaxyView.appendChild(_timeBonusFlash);
+    }
+    _timeBonusFlash.textContent = `TIME BONUS +${points}`;
+    _timeBonusFlash.style.opacity = "0";
+    _timeBonusFlash.style.transform = "translate(-50%,-50%) scale(1.35)";
+    requestAnimationFrame(() => {
+      if (!_timeBonusFlash) return;
+      _timeBonusFlash.style.opacity = "1";
+      _timeBonusFlash.style.transform = "translate(-50%,-50%) scale(1)";
+    });
+    setTimeout(() => {
+      if (!_timeBonusFlash) return;
+      _timeBonusFlash.style.opacity = "0";
+      _timeBonusFlash.style.transform = "translate(-50%,-50%) scale(0.96)";
+    }, 1500);
   }
 
   function trackFpsOverlay() {
@@ -7367,6 +7400,12 @@ function initGalaxyCanvas() {
     stopWarningState();
     arcadeResumeAvailable = false;
     syncArcadeEntryLabel();
+    const timeUsed = performance.now() - levelRunStartAt;
+    const timeBonus = Math.max(0, Math.floor((levelDurationMs - timeUsed) / 1000) * 50);
+    if (timeBonus > 0) {
+      addArcadeScore(timeBonus);
+      showTimeBonusFlash(timeBonus);
+    }
     addArcadeScore(500);
     playGameSfx("level_up", 0.9);
     triggerHapticNotification(hapticNotificationType.Success);
@@ -7385,6 +7424,7 @@ function initGalaxyCanvas() {
       setTimeout(() => startLevel(currentLevelIndex + 1), 420);
       return;
     }
+    galaxyView?.classList.remove("level-10");
     audioEngine.stopMusic();
     stopGalaxyBackground();
     setArcadeWon();
@@ -7469,6 +7509,7 @@ function initGalaxyCanvas() {
     const now = performance.now();
     setSavedArcadeLevel(cfg.level);
     initMediaSession().then(() => updateMediaSessionLevel(cfg.level));
+    galaxyView?.classList.toggle("level-10", cfg.level === 10);
 
     clearGameplayEntities();
     commBoxController.show();
@@ -7653,6 +7694,7 @@ function initGalaxyCanvas() {
     arcadeResumeAvailable = false;
     retryPending = false;
     resetArcadeTimerVisuals();
+    galaxyView?.classList.remove("level-10");
     setMenuOverlayOpen(false);
     syncArcadeEntryLabel();
     setGalaxyViewMode("practice");
@@ -7695,6 +7737,7 @@ function initGalaxyCanvas() {
       arcadeResumeAvailable = false;
       audioEngine.stopMusic();
       setGalaxyBackgroundDim(0);
+      galaxyView?.classList.remove("level-10");
     }
     engineMode = "menu";
     syncArcadeEntryLabel();
@@ -8292,9 +8335,17 @@ function initGalaxyCanvas() {
 
       // Restored UFO halo/glow pass for clearer presence on iOS and desktop.
       const glowGrad = ctx.createRadialGradient(0, 0, ufo.r * 0.2, 0, 0, ufo.r * (damaged ? 2.2 : 2.6));
-      glowGrad.addColorStop(0, damaged ? "rgba(255,96,96,0.34)" : "rgba(134,255,176,0.36)");
-      glowGrad.addColorStop(0.65, damaged ? "rgba(255,96,96,0.12)" : "rgba(94,235,148,0.16)");
-      glowGrad.addColorStop(1, "rgba(94,235,148,0)");
+      if (damaged) {
+        glowGrad.addColorStop(0, "rgba(255,96,96,0.34)");
+        glowGrad.addColorStop(0.65, "rgba(255,96,96,0.12)");
+        glowGrad.addColorStop(1, "rgba(255,96,96,0)");
+      } else {
+        glowGrad.addColorStop(0, "rgba(134,255,176,0.32)");
+        glowGrad.addColorStop(0.3, "rgba(114,245,166,0.22)");
+        glowGrad.addColorStop(0.55, "rgba(94,235,148,0.12)");
+        glowGrad.addColorStop(0.78, "rgba(94,235,148,0.04)");
+        glowGrad.addColorStop(1, "rgba(94,235,148,0)");
+      }
       ctx.globalCompositeOperation = "lighter";
       ctx.fillStyle = glowGrad;
       ctx.beginPath();

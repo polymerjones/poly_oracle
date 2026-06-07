@@ -367,6 +367,10 @@ const PLASMA_CAGE_CHARGE_MS = 1000;
 const PLASMA_CAGE_COOLDOWN_MS = 5000;
 const PLASMA_CAGE_DRAG_THRESHOLD = 20;
 const PLASMA_CAGE_VOLUME_BOOST = Math.pow(10, 4 / 20);
+const STROID_TOSS_HOLD_MS = 500;
+const STROID_TOSS_TIMEOUT_MS = 8000;
+const STROID_TOSS_MIN_SPEED = 400;
+const STROID_TOSS_MAX_SPEED = 600;
 const CHAOS_THRESHOLD = 60;
 const IOS_NATIVE_MAX_ASTEROIDS = 55;
 const MAX_LIVES = 3;
@@ -4917,6 +4921,7 @@ function initGalaxyCanvas() {
     warpRings: [],
     lightningRings: [],
     shooting: null,
+    tossedAsteroid: null,
     shootingTimer: null,
     maxAsteroids: 120,
     lastTapAt: 0,
@@ -4924,6 +4929,21 @@ function initGalaxyCanvas() {
     asteroidPool: [],
     particlePool: [],
     ringPool: [],
+  };
+
+  const stroidToss = {
+    active: false,
+    asteroidIndex: -1,
+    asteroid: null,
+    holdStart: 0,
+    grabbed: false,
+    dragX: 0,
+    dragY: 0,
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    lastHapticAt: 0,
+    lastSparkAt: 0,
   };
 
   function ensureFpsOverlay() {
@@ -5511,6 +5531,11 @@ function initGalaxyCanvas() {
 
   function releaseAsteroid(a) {
     a.shape = null;
+    a.tossed = false;
+    a.tossedAt = 0;
+    a._stroidHeld = false;
+    delete a._preTossVx;
+    delete a._preTossVy;
     sim.asteroidPool.push(a);
   }
 
@@ -5519,6 +5544,7 @@ function initGalaxyCanvas() {
   }
 
   function releaseParticle(p) {
+    p.flicker = false;
     sim.particlePool.push(p);
   }
 
@@ -5978,32 +6004,89 @@ function initGalaxyCanvas() {
     renderLives();
   }
 
-  function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1, asteroidKind = 3) {
+  function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1, asteroidKind = 3, spriteKey = "roid01") {
     if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
     const isLarge = asteroidKind >= 2;
+    const isSmallAsteroid = asteroidKind === 1 && !fire;
+    const isMediumAsteroid = asteroidKind === 2 && !fire;
     const particleCount = isIOSNative
       ? (isLarge ? Math.ceil(count / 2) : Math.ceil(count / 3))
       : count;
     const emitCount = prefersReducedMotion ? Math.min(6, particleCount) : particleCount;
-    for (let i = 0; i < emitCount; i += 1) {
-      if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
-      if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
+    function pushAsteroidChunk() {
+      if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
+      if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
       const angle = Math.random() * Math.PI * 2;
-      const speed = 30 + Math.random() * 110;
+      const speed = 40 + Math.random() * 80;
       const p = getParticle();
       p.x = x;
       p.y = y;
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
       p.life = 0;
-      p.ttl = (320 + Math.random() * 180) * ttlScale;
-      p.size = (1.7 + Math.random() * 2.4) * blastScale;
+      p.ttl = (600 + Math.random() * 200) * (isMediumAsteroid ? 1.2 : 1);
+      p.size = (5 + Math.random() * 4) * (isMediumAsteroid ? 1.3 : 1);
+      p.alpha = 0.8 + Math.random() * 0.2;
+      if (Math.random() < 0.72) {
+        p.color = `rgba(${245 + Math.floor(Math.random() * 10)},${238 + Math.floor(Math.random() * 14)},${210 + Math.floor(Math.random() * 24)},`;
+      } else {
+        p.color = `rgba(${242 + Math.floor(Math.random() * 13)},${188 + Math.floor(Math.random() * 44)},${70 + Math.floor(Math.random() * 50)},`;
+      }
+      sim.particles.push(p);
+    }
+    function sparkColorForSprite() {
+      if (spriteKey === "roid02") {
+        return Math.random() < 0.5 ? "rgba(120,80,255," : "rgba(60,140,255,";
+      }
+      if (spriteKey === "roid03") {
+        return Math.random() < 0.5 ? "rgba(255,200,0," : "rgba(255,140,0,";
+      }
+      if (spriteKey === "hotroid01") {
+        const roll = Math.random();
+        if (roll < 0.4) return "rgba(255,60,0,";
+        if (roll < 0.8) return "rgba(255,200,50,";
+        return "rgba(255,255,180,";
+      }
+      return "rgba(0,255,209,";
+    }
+    function pushSpriteSpark() {
+      if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
+      if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
+      const angle = Math.random() * Math.PI * 2;
+      const hot = spriteKey === "hotroid01";
+      const speed = hot ? 220 + Math.random() * 100 : 180 + Math.random() * 100;
+      const p = getParticle();
+      p.x = x;
+      p.y = y;
+      p.vx = Math.cos(angle) * speed;
+      p.vy = Math.sin(angle) * speed;
+      p.life = 0;
+      p.ttl = 120 + Math.random() * 80;
+      p.size = 1.0 + Math.random();
+      p.alpha = 0.9;
+      p.color = sparkColorForSprite();
+      p.flicker = true;
+      sim.particles.push(p);
+    }
+    for (let i = 0; i < emitCount; i += 1) {
+      if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
+      if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
+      const angle = Math.random() * Math.PI * 2;
+      const speed = isSmallAsteroid ? 60 + Math.random() * 140 : 30 + Math.random() * 110;
+      const p = getParticle();
+      p.x = x;
+      p.y = y;
+      p.vx = Math.cos(angle) * speed;
+      p.vy = Math.sin(angle) * speed;
+      p.life = 0;
+      p.ttl = (isSmallAsteroid ? 480 + Math.random() * 220 : 320 + Math.random() * 180) * ttlScale * (isMediumAsteroid ? 1.2 : 1);
+      p.size = (isSmallAsteroid ? 3.5 + Math.random() * 3.5 : 1.7 + Math.random() * 2.4) * blastScale * (isMediumAsteroid ? 1.3 : 1);
       p.alpha = 0.45 + Math.random() * 0.4;
       if (fire) {
         p.color = `rgba(${220 + Math.floor(Math.random() * 35)},${100 + Math.floor(Math.random() * 90)},${30 + Math.floor(Math.random() * 40)},`;
       } else {
         const tone = Math.random();
-        if (tone < 0.48) {
+        if (tone < (isSmallAsteroid ? 0.65 : 0.48)) {
           p.color = `rgba(${245 + Math.floor(Math.random() * 10)},${238 + Math.floor(Math.random() * 14)},${210 + Math.floor(Math.random() * 24)},`;
         } else if (tone < 0.84) {
           p.color = `rgba(${242 + Math.floor(Math.random() * 13)},${188 + Math.floor(Math.random() * 44)},${70 + Math.floor(Math.random() * 50)},`;
@@ -6017,6 +6100,16 @@ function initGalaxyCanvas() {
         }
       }
       sim.particles.push(p);
+    }
+    if (isSmallAsteroid || isMediumAsteroid) {
+      const chunkCount = isSmallAsteroid ? 2 : 3;
+      for (let i = 0; i < chunkCount; i += 1) {
+        pushAsteroidChunk();
+      }
+    }
+    const sparkCount = spriteKey === "hotroid01" ? 8 : 5 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < sparkCount; i += 1) {
+      pushSpriteSpark();
     }
   }
 
@@ -6149,6 +6242,7 @@ function initGalaxyCanvas() {
         if (checked.has(pairKey)) continue;
         checked.add(pairKey);
         const b = sim.asteroids[j];
+        if (a.tossed || b.tossed || a._stroidHeld || b._stroidHeld) continue;
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         if ((dx * dx) + (dy * dy) > 40000) continue;
@@ -6184,6 +6278,217 @@ function initGalaxyCanvas() {
       }
     }
     return best;
+  }
+
+  function resetStroidToss() {
+    if (stroidToss.asteroid) {
+      stroidToss.asteroid._stroidHeld = false;
+    }
+    stroidToss.active = false;
+    stroidToss.asteroidIndex = -1;
+    stroidToss.asteroid = null;
+    stroidToss.holdStart = 0;
+    stroidToss.grabbed = false;
+    stroidToss.dragX = 0;
+    stroidToss.dragY = 0;
+    stroidToss.pointerId = null;
+    stroidToss.startX = 0;
+    stroidToss.startY = 0;
+    stroidToss.lastHapticAt = 0;
+    stroidToss.lastSparkAt = 0;
+  }
+
+  function startStroidToss(index, point, pointerId, now) {
+    const asteroid = sim.asteroids[index];
+    if (!asteroid || asteroid.kind < 2) return false;
+    resetStroidToss();
+    stroidToss.active = true;
+    stroidToss.asteroidIndex = index;
+    stroidToss.asteroid = asteroid;
+    stroidToss.holdStart = now;
+    stroidToss.grabbed = false;
+    stroidToss.dragX = point.x;
+    stroidToss.dragY = point.y;
+    stroidToss.pointerId = pointerId ?? null;
+    stroidToss.startX = asteroid.x;
+    stroidToss.startY = asteroid.y;
+    stroidToss.lastHapticAt = now;
+    stroidToss.lastSparkAt = 0;
+    asteroid._stroidHeld = true;
+    asteroid.tossed = false;
+    asteroid.tossedAt = 0;
+    asteroid._preTossVx = asteroid.vx;
+    asteroid._preTossVy = asteroid.vy;
+    asteroid.vx = 0;
+    asteroid.vy = 0;
+    triggerGameplayHapticImpact(hapticImpactStyle.Light);
+    return true;
+  }
+
+  function getStroidTossAsteroid() {
+    if (!stroidToss.active || !stroidToss.asteroid) return null;
+    if (!sim.asteroids.includes(stroidToss.asteroid)) {
+      resetStroidToss();
+      return null;
+    }
+    return stroidToss.asteroid;
+  }
+
+  function updateStroidTossDrag(point) {
+    const asteroid = getStroidTossAsteroid();
+    if (!asteroid) return;
+    stroidToss.dragX = point.x;
+    stroidToss.dragY = point.y;
+    asteroid.vx = 0;
+    asteroid.vy = 0;
+    const dx = point.x - stroidToss.startX;
+    const dy = point.y - stroidToss.startY;
+    const len = Math.hypot(dx, dy);
+    if (len > 0.1) {
+      asteroid.x = point.x - (dx / len) * asteroid.r;
+      asteroid.y = point.y - (dy / len) * asteroid.r;
+    } else {
+      asteroid.x = stroidToss.startX;
+      asteroid.y = stroidToss.startY;
+    }
+  }
+
+  function updateStroidTossHold(now) {
+    const asteroid = getStroidTossAsteroid();
+    if (!asteroid) return;
+    if (!stroidToss.grabbed) {
+      asteroid.vx = 0;
+      asteroid.vy = 0;
+      if (now - stroidToss.lastHapticAt >= 200) {
+        stroidToss.lastHapticAt = now;
+        triggerGameplayHapticImpact(hapticImpactStyle.Light);
+      }
+      if (now - stroidToss.holdStart >= STROID_TOSS_HOLD_MS) {
+        stroidToss.grabbed = true;
+        stroidToss.lastSparkAt = 0;
+        triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
+      }
+    }
+  }
+
+  function cancelStroidToss() {
+    const asteroid = stroidToss.asteroid;
+    if (asteroid) {
+      asteroid._stroidHeld = false;
+      asteroid.vx = asteroid._preTossVx ?? asteroid.vx;
+      asteroid.vy = asteroid._preTossVy ?? asteroid.vy;
+      delete asteroid._preTossVx;
+      delete asteroid._preTossVy;
+    }
+    resetStroidToss();
+  }
+
+  function launchStroidToss(now) {
+    const asteroid = getStroidTossAsteroid();
+    if (!asteroid) return false;
+    const dx = stroidToss.dragX - stroidToss.startX;
+    const dy = stroidToss.dragY - stroidToss.startY;
+    let len = Math.hypot(dx, dy);
+    let nx = len > 0.1 ? dx / len : 1;
+    let ny = len > 0.1 ? dy / len : 0;
+    if (len < 12) {
+      const fallback = Math.hypot(asteroid._preTossVx || 0, asteroid._preTossVy || 0);
+      if (fallback > 0.1) {
+        nx = asteroid._preTossVx / fallback;
+        ny = asteroid._preTossVy / fallback;
+      }
+    }
+    const speed = STROID_TOSS_MIN_SPEED + Math.random() * (STROID_TOSS_MAX_SPEED - STROID_TOSS_MIN_SPEED);
+    asteroid.vx = nx * speed;
+    asteroid.vy = ny * speed;
+    asteroid._stroidHeld = false;
+    asteroid.tossed = true;
+    asteroid.tossedAt = now;
+    delete asteroid._preTossVx;
+    delete asteroid._preTossVy;
+    sim.tossedAsteroid = asteroid;
+    resetStroidToss();
+    return true;
+  }
+
+  function pushStroidChargeSpark(asteroid) {
+    if (!asteroid) return;
+    if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
+    if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 150 + Math.random() * 180;
+    const p = getParticle();
+    p.x = asteroid.x + Math.cos(angle) * asteroid.r;
+    p.y = asteroid.y + Math.sin(angle) * asteroid.r;
+    p.vx = Math.cos(angle) * speed;
+    p.vy = Math.sin(angle) * speed;
+    p.life = 0;
+    p.ttl = 120 + Math.random() * 90;
+    p.size = 0.9 + Math.random() * 1.3;
+    p.alpha = 0.9;
+    p.color = "rgba(255,255,255,";
+    p.flicker = true;
+    sim.particles.push(p);
+  }
+
+  function emitStroidChargeSparks(now) {
+    const asteroid = getStroidTossAsteroid();
+    if (!asteroid || !stroidToss.grabbed || now - stroidToss.lastSparkAt < 70) return;
+    stroidToss.lastSparkAt = now;
+    const count = 6 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < count; i += 1) {
+      pushStroidChargeSpark(asteroid);
+    }
+  }
+
+  function removeAsteroidRef(asteroid) {
+    const index = sim.asteroids.indexOf(asteroid);
+    if (index < 0) return false;
+    const removed = removeAsteroidAt(index);
+    if (removed) releaseAsteroid(removed);
+    return true;
+  }
+
+  function destroyTossedAsteroidPair(tossed, target) {
+    if (!tossed || !target || tossed === target) return;
+    spawnExplosion(tossed.x, tossed.y, 30, true, 2.0, 1, tossed.kind, tossed.spriteKey);
+    spawnExplosion(target.x, target.y, 30, true, 2.0, 1, target.kind, target.spriteKey);
+    triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
+    playAsteroidExplosionBoom(3, 1.0, 0.92 + Math.random() * 0.12);
+    addArcadeScore(150);
+    removeAsteroidRef(tossed);
+    removeAsteroidRef(target);
+    sim.tossedAsteroid = null;
+    commBoxController.queueVO({
+      audioSrc: commBoxController.commVoSrc(
+        commBoxController.pickFromPool("hype", commBoxController.POOL_HYPE),
+      ),
+      event: "smirk",
+    });
+  }
+
+  function updateTossedAsteroidCollision(now) {
+    const tossed = sim.tossedAsteroid;
+    if (!tossed) return;
+    if (!sim.asteroids.includes(tossed)) {
+      sim.tossedAsteroid = null;
+      return;
+    }
+    if (now - tossed.tossedAt > STROID_TOSS_TIMEOUT_MS) {
+      tossed.tossed = false;
+      tossed.tossedAt = 0;
+      sim.tossedAsteroid = null;
+      return;
+    }
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const other = sim.asteroids[i];
+      if (!other || other === tossed) continue;
+      const dist = Math.hypot(other.x - tossed.x, other.y - tossed.y);
+      if (dist <= tossed.r + other.r) {
+        destroyTossedAsteroidPair(tossed, other);
+        return;
+      }
+    }
   }
 
   function findAsteroidAt(x, y, hit = 26) {
@@ -6377,7 +6682,7 @@ function initGalaxyCanvas() {
     const bigBlast = wasKind === 3;
     const mediumBlast = wasKind === 2;
     const ttlScale = bigBlast ? 1.4 : mediumBlast ? 1.18 : 1;
-    spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale, wasKind);
+    spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale, wasKind, a.spriteKey);
     triggerAsteroidSizeFeedback(wasKind);
     const baseBoomVol = wasKind === 3 ? 0.9 : wasKind === 2 ? 0.92 : 0.78;
     const minBoomRatio = wasKind === 3 ? 0.62 : wasKind === 2 ? 0.8 : 0.9;
@@ -6422,7 +6727,7 @@ function initGalaxyCanvas() {
     const mediumBlast = a.kind === 2;
     addArcadeScore(arcadeMultiplierPoints(a.kind >= 2 ? 25 : 10));
     trackKillStreak();
-    spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1, 1, a.kind);
+    spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1, 1, a.kind, a.spriteKey);
     triggerAsteroidSizeFeedback(a.kind);
     const baseBoomVol = bigBlast ? 0.9 : mediumBlast ? 0.9 : 0.76;
     const minBoomRatio = bigBlast ? 0.62 : mediumBlast ? 0.82 : 0.9;
@@ -6544,6 +6849,7 @@ function initGalaxyCanvas() {
     if (plasmaCage.cooldownUntil <= 0) return;
     if (now < plasmaCage.cooldownUntil) return;
     if (plasmaCage.rechargeSoundPlayed) return;
+    if (retryPending || !arcadeActive) return;
     plasmaCage.rechargeSoundPlayed = true;
     playGameSfx("plasmarecharged", 1.0);
     commBoxController.reactTo("plasma_recharged");
@@ -6844,6 +7150,49 @@ function initGalaxyCanvas() {
     plasmaCtx.restore();
   }
 
+  function drawStroidTossOverlay(now) {
+    if (!plasmaCtx || !stroidToss.active) return;
+    const asteroid = getStroidTossAsteroid();
+    if (!asteroid) return;
+    const holdProgress = clamp((now - stroidToss.holdStart) / STROID_TOSS_HOLD_MS, 0, 1);
+    const pulse = Math.abs(Math.sin(now / (stroidToss.grabbed ? 62 : 140)));
+    const ringRadius = asteroid.r * (stroidToss.grabbed ? 1.45 + pulse * 0.16 : 0.35 + holdProgress * 1.1);
+    const alpha = stroidToss.grabbed ? 0.65 + pulse * 0.28 : holdProgress * 0.8;
+
+    plasmaCtx.save();
+    plasmaCtx.globalCompositeOperation = "lighter";
+    plasmaCtx.strokeStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+    plasmaCtx.lineWidth = stroidToss.grabbed ? 3 : 2;
+    if (!isIOSNative) {
+      plasmaCtx.shadowColor = "#ffffff";
+      plasmaCtx.shadowBlur = stroidToss.grabbed ? 16 : 8;
+    }
+    plasmaCtx.beginPath();
+    plasmaCtx.arc(asteroid.x, asteroid.y, ringRadius, 0, Math.PI * 2);
+    plasmaCtx.stroke();
+
+    if (stroidToss.grabbed) {
+      const dx = stroidToss.dragX - asteroid.x;
+      const dy = stroidToss.dragY - asteroid.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 8) {
+        const nx = dx / len;
+        const ny = dy / len;
+        const endLen = Math.min(220, Math.max(70, len));
+        plasmaCtx.globalAlpha = 0.78;
+        plasmaCtx.setLineDash([5, 8]);
+        plasmaCtx.lineDashOffset = -(now / 40) % 13;
+        plasmaCtx.beginPath();
+        plasmaCtx.moveTo(asteroid.x, asteroid.y);
+        plasmaCtx.lineTo(asteroid.x + nx * endLen, asteroid.y + ny * endLen);
+        plasmaCtx.stroke();
+        plasmaCtx.setLineDash([]);
+      }
+      emitStroidChargeSparks(now);
+    }
+    plasmaCtx.restore();
+  }
+
   function drawPlasmaOverlay(now) {
     if (!plasmaCtx) return;
     plasmaCtx.clearRect(0, 0, sim.width, sim.height);
@@ -6896,6 +7245,7 @@ function initGalaxyCanvas() {
       }
     }
     drawPlasmaCooldown(now);
+    drawStroidTossOverlay(now);
   }
 
   function armLandmine() {
@@ -6989,6 +7339,8 @@ function initGalaxyCanvas() {
   }
 
   function clearGameplayEntities() {
+    resetStroidToss();
+    sim.tossedAsteroid = null;
     while (sim.asteroids.length) releaseAsteroid(sim.asteroids.pop());
     while (sim.particles.length) releaseParticle(sim.particles.pop());
     while (sim.warpRings.length) releaseRing(sim.warpRings.pop());
@@ -7595,7 +7947,7 @@ function initGalaxyCanvas() {
               } else {
                 sh.hit = true;
               }
-              spawnExplosion(a.x, a.y, a.kind === 3 ? 16 : 10, false, 1.2);
+              spawnExplosion(a.x, a.y, a.kind === 3 ? 16 : 10, false, 1.2, 1, a.kind, a.spriteKey);
               cssShake(0.4);
               playAsteroidExplosionBoom(a.kind, 0.7, 1.0);
               const idx = sim.asteroids.indexOf(a);
@@ -7614,14 +7966,21 @@ function initGalaxyCanvas() {
 
       for (let i = 0; i < sim.asteroids.length; i += 1) {
         const a = sim.asteroids[i];
+        if (a._stroidHeld) {
+          a.vx = 0;
+          a.vy = 0;
+          continue;
+        }
         a.x += a.vx * (dt / 1000);
         a.y += a.vy * (dt / 1000);
         a.rot += a.spin * (dt / 16);
         if (engineMode === "practice") wrapEntityToCanvas(a);
         else wrapEntity(a);
-        clampSpeed(a);
+        if (!a.tossed) clampSpeed(a);
         applyMotionHealth(a, now);
       }
+      updateStroidTossHold(now);
+      updateTossedAsteroidCollision(now);
       resolveAsteroidCollisions();
 
       if (landmine) {
@@ -7741,7 +8100,8 @@ function initGalaxyCanvas() {
   function draw(now) {
     drawTimerPerimeterOverlay(now);
     if ((engineMode === "arcade" || engineMode === "practice") && window.pixiRenderer?.draw(sim, laserBeams, canvasFlash, ufo, plasmaCage, landmine, _bombShrapnel, now)) {
-      setPlasmaOverlayVisible(false);
+      setPlasmaOverlayVisible(stroidToss.active);
+      if (stroidToss.active) drawPlasmaOverlay(now);
       drawUfoFxOverlay(ctx);
       return;
     }
@@ -8043,7 +8403,10 @@ function initGalaxyCanvas() {
     const particleLimit = _frameBudgetExceeded ? Math.min(40, sim.particles.length) : sim.particles.length;
     for (let i = 0; i < particleLimit; i += 1) {
       const p = sim.particles[i];
-      const alpha = (1 - p.life / p.ttl) * p.alpha;
+      let alpha = (1 - p.life / p.ttl) * p.alpha;
+      if (p.flicker) {
+        alpha *= 0.4 + 0.6 * Math.abs(Math.sin(p.life * 0.08));
+      }
       if (alpha <= 0) continue;
       ctx.fillStyle = `${p.color || "rgba(111,255,128,"}${alpha.toFixed(3)})`;
       if (p.size <= 2.5) {
@@ -8196,10 +8559,18 @@ function initGalaxyCanvas() {
       updatePracticeDebug();
       return;
     }
+    let mode = "tap";
+    if (engineMode === "arcade" && arcadeActive) {
+      const hitIndex = findHitAsteroidIndex(point.x, point.y);
+      const hitAsteroid = hitIndex >= 0 ? sim.asteroids[hitIndex] : null;
+      if (hitAsteroid && hitAsteroid.kind >= 2 && startStroidToss(hitIndex, point, event.pointerId, now)) {
+        mode = "stroidToss";
+      }
+    }
     galaxyGesture = {
       start: point,
       current: point,
-      mode: "tap",
+      mode,
       canceled: false,
       pointerId: event.pointerId ?? null,
     };
@@ -8220,6 +8591,11 @@ function initGalaxyCanvas() {
     if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
     galaxyGesture.current = point;
     if (event.cancelable) event.preventDefault();
+    if (galaxyGesture.mode === "stroidToss") {
+      updateStroidTossDrag(point);
+      updateStroidTossHold(now);
+      return;
+    }
     const dx = point.x - galaxyGesture.start.x;
     const dy = point.y - galaxyGesture.start.y;
     const dragged = Math.hypot(dx, dy) > PLASMA_CAGE_DRAG_THRESHOLD;
@@ -8257,6 +8633,25 @@ function initGalaxyCanvas() {
       releasePlasmaCage(now);
       galaxyGesture = null;
       draw(now);
+      return;
+    }
+    if (galaxyGesture.mode === "stroidToss") {
+      const tapPoint = galaxyGesture.start;
+      updateStroidTossDrag(galaxyGesture.current);
+      updateStroidTossHold(now);
+      const didLaunch = stroidToss.active && (stroidToss.grabbed || now - stroidToss.holdStart >= STROID_TOSS_HOLD_MS)
+        ? launchStroidToss(now)
+        : false;
+      if (!didLaunch) {
+        cancelStroidToss();
+      }
+      galaxyGesture = null;
+      if (!didLaunch && now - sim.lastTapAt >= 55) {
+        sim.lastTapAt = now;
+        handleArcadeTap(tapPoint.x, tapPoint.y, now);
+      } else {
+        draw(now);
+      }
       return;
     }
     const shouldTap = !galaxyGesture.canceled && galaxyGesture.mode === "tap" && now - sim.lastTapAt >= 55;

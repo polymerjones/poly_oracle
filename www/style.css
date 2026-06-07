@@ -2153,6 +2153,14 @@ select:focus-visible {
   display: grid;
 }
 
+@keyframes arcadeTextSlam {
+  from { transform: scale(2); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+@keyframes arcadeTextOut {
+  to { opacity: 0; transform: translateY(-4px); }
+}
+
 .arcadeOverlayText {
   font-size: clamp(1.6rem, 5.8vw, 2.4rem);
   letter-spacing: 0.1em;
@@ -2160,18 +2168,14 @@ select:focus-visible {
   color: #9af8c4;
   text-shadow: 0 0 14px rgba(100, 255, 171, 0.45);
   opacity: 0;
-  transform: translateY(4px);
-  transition: opacity 500ms ease, transform 500ms ease;
 }
 
 .arcadeOverlayText.show {
-  opacity: 1;
-  transform: translateY(0);
+  animation: arcadeTextSlam 250ms cubic-bezier(.2,1.4,.4,1) both;
 }
 
-.arcadeOverlayText.fadeOut {
-  opacity: 0;
-  transform: translateY(-4px);
+.arcadeOverlayText.show.fadeOut {
+  animation: arcadeTextOut 500ms ease forwards;
 }
 
 .arcadeOverlaySub {

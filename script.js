@@ -359,6 +359,7 @@ const GAME_SFX = {
   life_gain: "gamesfx/popandsparkle.mp3",
   tryagain: "assets/newsfx/tryagain.mp3",
   retry_appear: "assets/newsfx/appear.mp3",
+  scorecount: "gamesfx/new game sounds/scorecount2.mp3",
 };
 
 const PRACTICE_MAX_ASTEROIDS = 40;
@@ -6371,6 +6372,7 @@ function initGalaxyCanvas() {
     stroidToss.asteroid = null;
     stroidToss.holdStart = 0;
     stroidToss.grabbed = false;
+    galaxyPlayCanvas.style.cursor = "";
     stroidToss.dragX = 0;
     stroidToss.dragY = 0;
     stroidToss.pointerId = null;
@@ -6452,6 +6454,7 @@ function initGalaxyCanvas() {
       }
       if (now - stroidToss.holdStart >= STROID_TOSS_HOLD_MS) {
         stroidToss.grabbed = true;
+        galaxyPlayCanvas.style.cursor = "grabbing";
         stroidToss.lastSparkAt = 0;
         triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
       }
@@ -7531,15 +7534,18 @@ function initGalaxyCanvas() {
       #levelScoreReport{position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;pointer-events:auto;}
       .lsr-panel{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;color:#dff;background:linear-gradient(180deg,rgba(5,18,32,.96),rgba(2,8,18,.99));border:1px solid rgba(0,255,209,.42);border-radius:16px;padding:28px 36px;min-width:min(300px,88vw);box-shadow:0 0 48px rgba(0,255,209,.16),inset 0 0 24px rgba(0,255,209,.06);animation:lsrSlam 250ms cubic-bezier(.2,1.4,.4,1) both;}
       @keyframes lsrSlam{from{transform:scale(2);opacity:0}to{transform:scale(1);opacity:1}}
+      @keyframes lsrRowIn{from{opacity:0;transform:translateX(-16px)}to{opacity:1;transform:none}}
+      @keyframes lsrBlink{0%,100%{opacity:.4}50%{opacity:.85}}
       .lsr-title{font-size:.9rem;letter-spacing:.18em;color:#00FFD1;text-align:center;margin-bottom:12px;text-shadow:0 0 10px rgba(0,255,209,.6);}
-      .lsr-div{color:rgba(0,255,209,.25);font-size:.7rem;margin:8px 0;text-align:center;letter-spacing:.04em;}
-      .lsr-row{display:flex;justify-content:space-between;align-items:baseline;gap:32px;margin:5px 0;font-size:.75rem;letter-spacing:.08em;}
+      .lsr-div{color:rgba(0,255,209,.25);font-size:.7rem;margin:8px 0;text-align:center;letter-spacing:.04em;opacity:0;transform:translateX(-16px);}
+      .lsr-row{display:flex;justify-content:space-between;align-items:baseline;gap:32px;margin:5px 0;font-size:.75rem;letter-spacing:.08em;opacity:0;transform:translateX(-16px);}
+      .lsr-div.in,.lsr-row.in{animation:lsrRowIn 250ms ease forwards;}
       .lsr-lbl{color:rgba(183,201,255,.65);}
       .lsr-val{color:#fff;font-weight:700;}
       .lsr-total .lsr-lbl{color:#b7c9ff;}
       .lsr-total .lsr-val{color:#00FFD1;font-size:.9rem;}
-      .lsr-hint{text-align:center;margin-top:14px;font-size:.62rem;letter-spacing:.2em;color:rgba(183,201,255,.4);animation:lsrBlink 1.2s ease-in-out infinite;}
-      @keyframes lsrBlink{0%,100%{opacity:.4}50%{opacity:.85}}
+      .lsr-hint{text-align:center;margin-top:14px;font-size:.62rem;letter-spacing:.2em;color:rgba(183,201,255,.4);opacity:0;transform:translateX(-16px);}
+      .lsr-hint.in{animation:lsrRowIn 250ms ease forwards,lsrBlink 1.2s 250ms ease-in-out infinite;}
     `;
     document.head.appendChild(s);
   }
@@ -7575,14 +7581,15 @@ function initGalaxyCanvas() {
     let dismissed = false;
     let lastTapAt = 0;
     let autoTimer = null;
-    let countUpRaf = null;
-    let countUpDone = false;
+    const tallyTimers = [];
+    let tallyDone = false;
 
     function dismiss() {
       if (dismissed) return;
       dismissed = true;
       if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
-      if (countUpRaf) { cancelAnimationFrame(countUpRaf); countUpRaf = null; }
+      tallyTimers.forEach(t => clearTimeout(t));
+      tallyTimers.length = 0;
       overlay.style.transition = "opacity 180ms ease";
       overlay.style.opacity = "0";
       setTimeout(() => { overlay.remove(); onDismiss?.(); }, 190);
@@ -7596,54 +7603,27 @@ function initGalaxyCanvas() {
       if (isDoubleTap || tapNow - shownAt >= 2000) dismiss();
     }, { passive: false });
 
-    autoTimer = setTimeout(dismiss, 4000);
+    autoTimer = setTimeout(dismiss, 7000);
 
-    const scoreEl = panel.querySelector("#lsrScoreVal");
-    const countStart = shownAt + 260;
-    const countDuration = 1500;
-    let lastBeepAt = countStart - 60;
-
-    function playTickBeep() {
-      try {
-        const ctx = audioEngine.ensureContext?.() || audioEngine.ctx;
-        if (!ctx || ctx.state === "suspended") return;
-        const osc = ctx.createOscillator();
-        const g = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.value = 660;
-        g.gain.setValueAtTime(0.08, ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
-        osc.connect(g);
-        g.connect(audioEngine.masterGain || ctx.destination);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.04);
-      } catch {}
-    }
-
-    function countStep(now) {
-      if (dismissed) return;
-      const elapsed = now - countStart;
-      if (elapsed < 0) { countUpRaf = requestAnimationFrame(countStep); return; }
-      const t = Math.min(1, elapsed / countDuration);
-      const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-      const current = Math.round(scoreBefore + (scoreAfter - scoreBefore) * eased);
-      if (scoreEl) scoreEl.textContent = String(current);
-      if (t < 1 && scoreAfter > scoreBefore && now - lastBeepAt >= 50) {
-        playTickBeep();
-        lastBeepAt = now;
-      }
-      if (t < 1) {
-        countUpRaf = requestAnimationFrame(countStep);
-      } else {
-        if (scoreEl) scoreEl.textContent = String(scoreAfter);
-        if (!countUpDone) {
-          countUpDone = true;
-          playGameSfx("level_up", 0.9);
-          cssFlash("#00FFD1", 0.3, 300);
+    // Row-by-row tally reveal: dividers + rows appear one at a time, 400ms apart
+    const revealEls = Array.from(panel.querySelectorAll(".lsr-div, .lsr-row"));
+    revealEls.forEach((el, i) => {
+      tallyTimers.push(setTimeout(() => {
+        if (dismissed) return;
+        el.classList.add("in");
+        if (el.classList.contains("lsr-row")) playGameSfx("scorecount", 0.3);
+        if (i === revealEls.length - 1) {
+          if (!tallyDone) {
+            tallyDone = true;
+            playGameSfx("level_up", 0.9);
+            cssFlash("#00FFD1", 0.3, 300);
+          }
+          tallyTimers.push(setTimeout(() => {
+            if (!dismissed) panel.querySelector(".lsr-hint")?.classList.add("in");
+          }, 400));
         }
-      }
-    }
-    countUpRaf = requestAnimationFrame(countStep);
+      }, 260 + i * 400));
+    });
   }
 
   function levelComplete() {

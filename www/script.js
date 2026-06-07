@@ -1172,6 +1172,13 @@ const commBoxController = (() => {
     if (!hud) return;
     hud.style.display = "none";
     hudVisible = false;
+    stopVO();
+    stopIdle();
+    stopMouthFlap();
+    hideTicker();
+  }
+
+  function stopVO() {
     typingToken += 1;
     _voQueue.length = 0;
     _voPlaying = false;
@@ -1382,6 +1389,7 @@ const commBoxController = (() => {
     init,
     show,
     hide,
+    stopVO,
     triggerVO,
     queueVO,
     commVoSrc,
@@ -4426,11 +4434,13 @@ async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubm
     overlay.querySelector("#leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
   } catch (error) {
     const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
-      <p class="leaderboardSub">Could not load scores.</p>
+      <p class="leaderboardSub">Scores unavailable offline. Connect to the internet to view the Polyverse Scoreboard.</p>
       <div class="leaderboardActions">
+        <button id="leaderboardRetry" class="leaderboardBtn" type="button">Retry</button>
         <button id="leaderboardClose" class="leaderboardBtn" type="button">${closeText}</button>
       </div>
     `, error.message || "Offline");
+    overlay.querySelector("#leaderboardRetry")?.addEventListener("click", () => showLeaderboard({ highlightId, afterSubmit }));
     overlay.querySelector("#leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
   }
 }
@@ -7045,6 +7055,7 @@ function initGalaxyCanvas() {
 
   function promptRetryOrGameOver() {
     retryPending = true;
+    commBoxController.stopVO();
     setMenuOverlayOpen(true);
     showArcadeOverlay("TIME'S UP", "Use 1 life to retry this level?", 0, {
       buttonText: "Retry (1 Life)",
@@ -7078,6 +7089,7 @@ function initGalaxyCanvas() {
   function triggerGameOver() {
     arcadeActive = false;
     retryPending = false;
+    commBoxController.stopVO();
     audioEngine.stopMusic();
     stopGalaxyBackground();
     stopWarningState();

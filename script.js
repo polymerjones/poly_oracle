@@ -155,7 +155,7 @@ const galaxyToolKey = "poly_oracle_galaxy_tool";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
-const DISABLE_VIDEO_BG = true; // perf test - re-enable later
+const DISABLE_VIDEO_BG = false;
 
 const _flashDiv = document.getElementById("screenFlashDiv");
 let _flashTimer = null;
@@ -6108,7 +6108,7 @@ function initGalaxyCanvas() {
       p.vy = Math.sin(angle) * speed;
       p.life = 0;
       p.ttl = (600 + Math.random() * 200) * (isMediumAsteroid ? 1.2 : 1);
-      p.size = (5 + Math.random() * 4) * (isMediumAsteroid ? 1.3 : 1);
+      p.size = (2.5 + Math.random() * 2) * (isMediumAsteroid ? 1.3 : 1);
       p.alpha = 0.8 + Math.random() * 0.2;
       if (Math.random() < 0.72) {
         p.color = `rgba(${245 + Math.floor(Math.random() * 10)},${238 + Math.floor(Math.random() * 14)},${210 + Math.floor(Math.random() * 24)},`;
@@ -6163,7 +6163,7 @@ function initGalaxyCanvas() {
       p.vy = Math.sin(angle) * speed;
       p.life = 0;
       p.ttl = (isSmallAsteroid ? 480 + Math.random() * 220 : 320 + Math.random() * 180) * ttlScale * (isMediumAsteroid ? 1.2 : 1);
-      p.size = (isSmallAsteroid ? 3.5 + Math.random() * 3.5 : 1.7 + Math.random() * 2.4) * blastScale * (isMediumAsteroid ? 1.3 : 1);
+      p.size = (isSmallAsteroid ? 1.7 + Math.random() * 2.4 : 1.7 + Math.random() * 2.4) * blastScale * (isMediumAsteroid ? 1.3 : 1);
       p.alpha = 0.45 + Math.random() * 0.4;
       if (fire) {
         p.color = `rgba(${220 + Math.floor(Math.random() * 35)},${100 + Math.floor(Math.random() * 90)},${30 + Math.floor(Math.random() * 40)},`;

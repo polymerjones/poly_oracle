@@ -155,6 +155,7 @@ const galaxyToolKey = "poly_oracle_galaxy_tool";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
+const STORAGE_GAME_BEATEN = "poly-oracle-game-beaten";
 const DISABLE_VIDEO_BG = false;
 
 const _flashDiv = document.getElementById("screenFlashDiv");
@@ -360,6 +361,20 @@ const GAME_SFX = {
   tryagain: "assets/newsfx/tryagain.mp3",
   retry_appear: "assets/newsfx/appear.mp3",
   scorecount: "gamesfx/new game sounds/scorecount2.mp3",
+  crack: "gamesfx/crack.mp3",
+  crush: "gamesfx/crush.mp3",
+  bigbang: "gamesfx/bigbang.mp3",
+  distantexplode: "gamesfx/distantexplode.mp3",
+  basicb_explo: "gamesfx/basicb_explo.mp3",
+  stroidthrow1: "gamesfx/stroidthrow1.mp3",
+  stroidthrow2: "gamesfx/stroidthrow2.mp3",
+  arm_bomb: "gamesfx/arm_bomb.mp3",
+  particle_crackle1: "gamesfx/particle_crackle1.mp3",
+  printtext: "gamesfx/printtext.mp3",
+  write_on_text_loop: "gamesfx/write_on_text_loop.mp3",
+  powexplode: "gamesfx/powexplode.mp3",
+  smallblast: "gamesfx/smallblast.mp3",
+  plasmarecharged1: "gamesfx/plasmarecharged1.mp3",
 };
 
 const PRACTICE_MAX_ASTEROIDS = 40;
@@ -509,6 +524,12 @@ function hasArcadeWon() {
   } catch {
     return false;
   }
+}
+
+function hasBeatenGame() {
+  return true; // TODO: remove debug override before release
+  try { return localStorage.getItem(STORAGE_GAME_BEATEN) === "true"; }
+  catch { return false; }
 }
 
 const revealModes = [
@@ -1138,6 +1159,7 @@ const commBoxController = (() => {
         setTimeout(step, 22 + Math.random() * 18);
       } else {
         tickerText.innerHTML = `<span style="color:#00cccc">${text}</span>`;
+        try { window.playGameSfx?.("printtext", 0.5); } catch {}
       }
     }
     step();
@@ -4987,6 +5009,7 @@ function initGalaxyCanvas() {
   }
 
   function showFpsOverlay() {
+    return; // hidden permanently
     ensureFpsOverlay();
     if (_fpsOverlay) _fpsOverlay.style.display = "block";
   }
@@ -5475,7 +5498,10 @@ function initGalaxyCanvas() {
 
   function syncArcadeMenuButtons() {
     if (btnArcadeResume) btnArcadeResume.disabled = !(arcadeResumeAvailable || hasArcadeSave());
-    if (btnArcadeLevelSelect) btnArcadeLevelSelect.disabled = !(DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon());
+    if (btnArcadeLevelSelect) {
+      btnArcadeLevelSelect.disabled = !(DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon());
+      btnArcadeLevelSelect.classList.toggle("locked", !hasBeatenGame());
+    }
   }
 
   function syncDebugLevelPanel() {
@@ -5871,6 +5897,24 @@ function initGalaxyCanvas() {
     } else {
       setTimeout(() => playGameSfx("explosion_big", 0.85), 80);
     }
+  }
+
+  function playParticleCrackle() {
+    try {
+      const ctx = audioEngine.ensureContext?.() || audioEngine.ctx;
+      if (!ctx || ctx.state === "suspended") return;
+      const buffer = audioEngine.buffers.get("particle_crackle1");
+      if (!buffer) return;
+      const maxOffset = Math.max(0, buffer.duration - 0.5);
+      const offset = Math.random() * Math.min(maxOffset, 1.5);
+      const source = ctx.createBufferSource();
+      const gain = ctx.createGain();
+      source.buffer = buffer;
+      gain.gain.value = clamp(0.4 * (state.whisper ? 0.55 : 1), 0, 1);
+      source.connect(gain);
+      gain.connect(audioEngine.masterGain || ctx.destination);
+      source.start(0, offset, 0.5);
+    } catch {}
   }
 
   function triggerLandmineScreenFlash() {
@@ -6498,6 +6542,7 @@ function initGalaxyCanvas() {
     delete asteroid._preTossVx;
     delete asteroid._preTossVy;
     sim.tossedAsteroid = asteroid;
+    playGameSfx(Math.random() < 0.5 ? "stroidthrow1" : "stroidthrow2", 0.85);
     resetStroidToss();
     return true;
   }
@@ -6583,6 +6628,7 @@ function initGalaxyCanvas() {
     flashScreen("#ff2a1f", 320, 0.7);
     triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
     playAsteroidExplosionBoom(3, 1.0, 0.88 + Math.random() * 0.12);
+    playGameSfx("distantexplode", 1.0);
     removeAsteroidRef(tossed);
     sim.tossedAsteroid = null;
   }
@@ -6833,6 +6879,9 @@ function initGalaxyCanvas() {
       boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }),
       0.92 + Math.random() * 0.16,
     );
+    if (wasKind === 1) playGameSfx("crack", 0.6);
+    else if (wasKind === 2) playGameSfx("crush", 0.6);
+    playParticleCrackle();
     suppressAstCollisionSfxUntil = performance.now() + 180;
     if (isLevel10) {
       triggerLevel10AsteroidFlash(bigBlast);
@@ -6995,7 +7044,7 @@ function initGalaxyCanvas() {
     if (retryPending || !arcadeActive) return;
     plasmaCage.rechargeSoundPlayed = true;
     plasmaCage.lastRechargeVoAt = now;
-    playGameSfx("plasmarecharged", 1.0);
+    playGameSfx(Math.random() < 0.5 ? "plasmarecharged" : "plasmarecharged1", 1.0);
     commBoxController.reactTo("plasma_recharged");
     function fireRechargeComm() {
       const ticker = document.getElementById("commanderTicker");
@@ -7064,6 +7113,7 @@ function initGalaxyCanvas() {
       window.pixiRenderer?.triggerPlasmaRectFlash?.();
       const fireKey = destroyedCount > 0 ? resolveGameSfxKey("plasma_fire", "ufo_destroy") : "";
       if (fireKey) playGameSfx(fireKey, 0.92);
+      playGameSfx("basicb_explo", 0.9);
       if (destroyedCount >= 3) {
         cssFlash("#00ffd1", Math.min(0.35, 0.1 + destroyedCount * 0.04), 200);
         if (destroyedCount >= 5) cssShake(0.8);
@@ -7419,6 +7469,7 @@ function initGalaxyCanvas() {
       landmine.phase = "player_armed";
       landmine.playerArmedAt = now;
       playGameSfx("landmine_arm", 1.0);
+      playGameSfx("arm_bomb", 0.8);
       startDangerLoop();
       commBoxController.queueVO({
         audioSrc: commBoxController.commVoSrc(
@@ -7457,6 +7508,7 @@ function initGalaxyCanvas() {
     window.galaxyBackground?.setHectic(true);
     setTimeout(() => window.galaxyBackground?.setHectic(false), 3000);
     playBigBoomSound();
+    playGameSfx("bigbang", 0.9);
   }
 
   function spawnBombShrapnel(x, y) {
@@ -7583,10 +7635,19 @@ function initGalaxyCanvas() {
     let autoTimer = null;
     const tallyTimers = [];
     let tallyDone = false;
+    let writeLoopHandle = null;
+
+    function stopWriteLoop() {
+      if (writeLoopHandle) {
+        try { audioEngine.stopLoop?.(writeLoopHandle); } catch {}
+        writeLoopHandle = null;
+      }
+    }
 
     function dismiss() {
       if (dismissed) return;
       dismissed = true;
+      stopWriteLoop();
       if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
       tallyTimers.forEach(t => clearTimeout(t));
       tallyTimers.length = 0;
@@ -7607,12 +7668,14 @@ function initGalaxyCanvas() {
 
     // Row-by-row tally reveal: dividers + rows appear one at a time, 400ms apart
     const revealEls = Array.from(panel.querySelectorAll(".lsr-div, .lsr-row"));
+    writeLoopHandle = audioEngine.playLoop("write_on_text_loop", { volume: state.whisper ? 0.2 : 0.38 });
     revealEls.forEach((el, i) => {
       tallyTimers.push(setTimeout(() => {
         if (dismissed) return;
         el.classList.add("in");
         if (el.classList.contains("lsr-row")) playGameSfx("scorecount", 0.3);
         if (i === revealEls.length - 1) {
+          stopWriteLoop();
           if (!tallyDone) {
             tallyDone = true;
             playGameSfx("level_up", 0.9);
@@ -7694,6 +7757,7 @@ function initGalaxyCanvas() {
     audioEngine.stopMusic();
     stopGalaxyBackground();
     setArcadeWon();
+    try { localStorage.setItem(STORAGE_GAME_BEATEN, "true"); } catch {}
     clearArcadeProgress();
     syncArcadeMenuButtons();
     try {

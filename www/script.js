@@ -119,6 +119,12 @@ function loadCapacitorHaptics() {
   }
 }
 document.addEventListener("DOMContentLoaded", loadCapacitorHaptics);
+document.addEventListener("DOMContentLoaded", () => {
+  const _bel = document.createElement("div");
+  _bel.textContent = "BUILD " + BUILD_TS;
+  _bel.style.cssText = "position:fixed;bottom:6px;left:8px;font-family:monospace;font-size:10px;color:rgba(0,255,180,0.55);pointer-events:none;z-index:99999;";
+  document.body.appendChild(_bel);
+});
 
 function getCapacitorHaptics() {
   return capacitorHaptics || globalThis.Capacitor?.Plugins?.Haptics || null;
@@ -152,6 +158,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
+const BUILD_TS = "2026-06-07 21:35";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -360,7 +367,7 @@ const GAME_SFX = {
   life_gain: "gamesfx/popandsparkle.mp3",
   tryagain: "assets/newsfx/tryagain.mp3",
   retry_appear: "assets/newsfx/appear.mp3",
-  scorecount: "gamesfx/new game sounds/scorecount2.mp3",
+  scorecount: "gamesfx/scorecount2.mp3",
   crack: "gamesfx/crack.mp3",
   crush: "gamesfx/crush.mp3",
   bigbang: "gamesfx/bigbang.mp3",
@@ -391,19 +398,19 @@ const STROID_TOSS_MAX_SPEED = 700;
 const CHAOS_THRESHOLD = 60;
 const LEVEL_THEMES = {
   1:  { primary: "#00FFD1", name: "Deep Space" },
-  2:  { primary: "#7B4FFF", name: "Nebula" },
-  3:  { primary: "#4FC3F7", name: "Ice Field" },
-  4:  { primary: "#FF9800", name: "Asteroid Belt" },
-  5:  { primary: "#FFD700", name: "Solar Wind" },
-  6:  { primary: "#FF6B35", name: "Binary Star" },
-  7:  { primary: "#E040FB", name: "Dark Matter" },
-  8:  { primary: "#FF4444", name: "Supernova" },
-  9:  { primary: "#FFD700", name: "Golden Field" },
+  2:  { primary: "#9B59FF", name: "Nebula" },
+  3:  { primary: "#00E5FF", name: "Ice Field" },
+  4:  { primary: "#4B0082", name: "Void" },
+  5:  { primary: "#FF8C00", name: "Ember" },
+  6:  { primary: "#00C853", name: "Jungle" },
+  7:  { primary: "#00BFFF", name: "Storm" },
+  8:  { primary: "#FF1744", name: "Blood" },
+  9:  { primary: "#AAFF00", name: "Toxic" },
   10: { primary: "#FF1500", name: "Hellfire" },
 };
 const IOS_NATIVE_MAX_ASTEROIDS = 55;
 const MAX_LIVES = 3;
-const MUSIC_MAX_GAIN = 0.85;
+const MUSIC_MAX_GAIN = 0.9;
 const MUSIC = {
   L1_3: "assets/music/E1L1-3.mp3",
   L4_7: "assets/music/E1L4-7.mp3",
@@ -5123,6 +5130,10 @@ function initGalaxyCanvas() {
   let _streakTimer = null;
   let _praiseCount = 0;
   let _lastPraiseAt = 0;
+  let lastNiceShotVoAt = 0;
+  let lastHypeVoAt = 0;
+  let lastPlasmaRechargedVoAt = 0;
+  let lastKillStreakVoAt = 0;
   let _timerWarnedAt60 = false;
   let _timerWarnedAt10 = false;
   let _timerNumberVisible = false;
@@ -5700,6 +5711,7 @@ function initGalaxyCanvas() {
     const theme = LEVEL_THEMES[levelNum] ?? LEVEL_THEMES[1];
     _levelPrimaryColor = theme.primary;
     galaxyView?.style.setProperty("--level-primary", theme.primary);
+    window.galaxyBackground?.setTheme(levelNum);
   }
 
   function computePlayfield() {
@@ -5877,7 +5889,7 @@ function initGalaxyCanvas() {
     const mediumKeys = ["explosion_med", "explosion_med_alt"];
     const smallKeys = ["explosion_small", "explosion_small_alt"];
     const key = kind >= 3 ? "explosion_big" : kind === 2 ? pick(mediumKeys) : pick(smallKeys);
-    playGameSfx(key, volume, { rate, forceHtmlOnIOS: true });
+    playGameSfx(key, volume * 1.8, { rate, forceHtmlOnIOS: true });
   }
 
   // === Warp Spawns ===
@@ -5891,11 +5903,11 @@ function initGalaxyCanvas() {
   }
 
   function playBigBoomSound() {
-    playGameSfx("landmine_boom", 1.0);
+    playGameSfx("landmine_boom", 1.8);
     if (isIOSNative) {
-      setTimeout(() => playGameSfx("explosion_big", 0.7), 100);
+      setTimeout(() => playGameSfx("explosion_big", 1.26), 100);
     } else {
-      setTimeout(() => playGameSfx("explosion_big", 0.85), 80);
+      setTimeout(() => playGameSfx("explosion_big", 1.53), 80);
     }
   }
 
@@ -6628,7 +6640,7 @@ function initGalaxyCanvas() {
     flashScreen("#ff2a1f", 320, 0.7);
     triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
     playAsteroidExplosionBoom(3, 1.0, 0.88 + Math.random() * 0.12);
-    playGameSfx("distantexplode", 1.0);
+    playGameSfx("distantexplode", 1.8);
     removeAsteroidRef(tossed);
     sim.tossedAsteroid = null;
   }
@@ -6645,12 +6657,16 @@ function initGalaxyCanvas() {
       detonateTossedAsteroid(tossed);
       return;
     }
-    commBoxController.queueVO({
-      audioSrc: commBoxController.commVoSrc(
-        commBoxController.pickFromPool("hype", commBoxController.POOL_HYPE),
-      ),
-      event: "smirk",
-    });
+    const _now = performance.now();
+    if (_now - lastHypeVoAt > 15000) {
+      lastHypeVoAt = _now;
+      commBoxController.queueVO({
+        audioSrc: commBoxController.commVoSrc(
+          commBoxController.pickFromPool("hype", commBoxController.POOL_HYPE),
+        ),
+        event: "smirk",
+      });
+    }
   }
 
   function updateTossedAsteroidCollision(now) {
@@ -6775,6 +6791,10 @@ function initGalaxyCanvas() {
     resetKillStreak();
     _praiseCount = 0;
     _lastPraiseAt = 0;
+    lastNiceShotVoAt = 0;
+    lastHypeVoAt = 0;
+    lastPlasmaRechargedVoAt = 0;
+    lastKillStreakVoAt = 0;
   }
 
   function trackKillStreak() {
@@ -6790,21 +6810,27 @@ function initGalaxyCanvas() {
       _praiseCount++;
 
       if (_praiseCount % 3 === 0) {
-        setTimeout(() => {
+        if (now2 - lastKillStreakVoAt > 15000) {
+          lastKillStreakVoAt = now2;
+          setTimeout(() => {
+            commBoxController.queueVO({
+              audioSrc: commBoxController.commVoSrc(
+                commBoxController.pickFromPool("cocky", commBoxController.POOL_COCKY),
+              ),
+              event: "angry",
+            });
+          }, 1200);
+        }
+      } else {
+        if (now2 - lastNiceShotVoAt > 12000) {
+          lastNiceShotVoAt = now2;
           commBoxController.queueVO({
             audioSrc: commBoxController.commVoSrc(
-              commBoxController.pickFromPool("cocky", commBoxController.POOL_COCKY),
+              commBoxController.pickFromPool("niceshot", commBoxController.POOL_NICE_SHOT),
             ),
-            event: "angry",
+            event: "smirk",
           });
-        }, 1200);
-      } else {
-        commBoxController.queueVO({
-          audioSrc: commBoxController.commVoSrc(
-            commBoxController.pickFromPool("niceshot", commBoxController.POOL_NICE_SHOT),
-          ),
-          event: "smirk",
-        });
+        }
       }
       _streakCount = 0;
     }
@@ -6879,9 +6905,14 @@ function initGalaxyCanvas() {
       boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }),
       0.92 + Math.random() * 0.16,
     );
-    if (wasKind === 1) playGameSfx("crack", 0.6);
-    else if (wasKind === 2) playGameSfx("crush", 0.6);
-    playParticleCrackle();
+    if (wasKind === 1) {
+      cssFlash(_levelPrimaryColor, 0.09, 55);
+      playGameSfx("smallblast", 1.0);
+      setTimeout(() => { playGameSfx("crack", 1.0); playParticleCrackle(); }, 50);
+    } else {
+      if (wasKind === 2) playGameSfx("crush", 1.08);
+      playParticleCrackle();
+    }
     suppressAstCollisionSfxUntil = performance.now() + 180;
     if (isLevel10) {
       triggerLevel10AsteroidFlash(bigBlast);
@@ -7046,22 +7077,25 @@ function initGalaxyCanvas() {
     plasmaCage.lastRechargeVoAt = now;
     playGameSfx(Math.random() < 0.5 ? "plasmarecharged" : "plasmarecharged1", 1.0);
     commBoxController.reactTo("plasma_recharged");
-    function fireRechargeComm() {
-      const ticker = document.getElementById("commanderTicker");
-      const isActive = ticker?.classList.contains("ticker-visible");
-      if (isActive) {
-        setTimeout(fireRechargeComm, 800);
-        return;
+    if (now - lastPlasmaRechargedVoAt > 20000) {
+      lastPlasmaRechargedVoAt = now;
+      function fireRechargeComm() {
+        const ticker = document.getElementById("commanderTicker");
+        const isActive = ticker?.classList.contains("ticker-visible");
+        if (isActive) {
+          setTimeout(fireRechargeComm, 800);
+          return;
+        }
+        commBoxController.queueVO({
+          audioSrc: commBoxController.commVoSrc(
+            commBoxController.pickFromPool("plasmarecharged", commBoxController.POOL_PLASMA_RECHARGED),
+          ),
+          duration: 2500,
+          event: "plasma_recharged",
+        });
       }
-      commBoxController.queueVO({
-        audioSrc: commBoxController.commVoSrc(
-          commBoxController.pickFromPool("plasmarecharged", commBoxController.POOL_PLASMA_RECHARGED),
-        ),
-        duration: 2500,
-        event: "plasma_recharged",
-      });
+      setTimeout(fireRechargeComm, 400);
     }
-    setTimeout(fireRechargeComm, 400);
   }
 
   function destroyAsteroidsInPlasmaCage(rect) {
@@ -7113,7 +7147,7 @@ function initGalaxyCanvas() {
       window.pixiRenderer?.triggerPlasmaRectFlash?.();
       const fireKey = destroyedCount > 0 ? resolveGameSfxKey("plasma_fire", "ufo_destroy") : "";
       if (fireKey) playGameSfx(fireKey, 0.92);
-      playGameSfx("basicb_explo", 0.9);
+      playGameSfx("basicb_explo", 1.62);
       if (destroyedCount >= 3) {
         cssFlash("#00ffd1", Math.min(0.35, 0.1 + destroyedCount * 0.04), 200);
         if (destroyedCount >= 5) cssShake(0.8);
@@ -7508,7 +7542,7 @@ function initGalaxyCanvas() {
     window.galaxyBackground?.setHectic(true);
     setTimeout(() => window.galaxyBackground?.setHectic(false), 3000);
     playBigBoomSound();
-    playGameSfx("bigbang", 0.9);
+    playGameSfx("bigbang", 1.62);
   }
 
   function spawnBombShrapnel(x, y) {
@@ -7584,19 +7618,19 @@ function initGalaxyCanvas() {
     s.id = "lsrStyles";
     s.textContent = `
       #levelScoreReport{position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;pointer-events:auto;}
-      .lsr-panel{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;color:#dff;background:linear-gradient(180deg,rgba(5,18,32,.96),rgba(2,8,18,.99));border:1px solid rgba(0,255,209,.42);border-radius:16px;padding:28px 36px;min-width:min(300px,88vw);box-shadow:0 0 48px rgba(0,255,209,.16),inset 0 0 24px rgba(0,255,209,.06);animation:lsrSlam 250ms cubic-bezier(.2,1.4,.4,1) both;}
+      .lsr-panel{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;color:#dff;background:linear-gradient(180deg,rgba(5,18,32,.96),rgba(2,8,18,.99));border:1px solid rgba(0,255,209,.42);border-radius:16px;padding:36px 48px;min-width:min(420px,92vw);box-shadow:0 0 48px rgba(0,255,209,.16),inset 0 0 24px rgba(0,255,209,.06);animation:lsrSlam 250ms cubic-bezier(.2,1.4,.4,1) both;}
       @keyframes lsrSlam{from{transform:scale(2);opacity:0}to{transform:scale(1);opacity:1}}
       @keyframes lsrRowIn{from{opacity:0;transform:translateX(-16px)}to{opacity:1;transform:none}}
       @keyframes lsrBlink{0%,100%{opacity:.4}50%{opacity:.85}}
-      .lsr-title{font-size:.9rem;letter-spacing:.18em;color:#00FFD1;text-align:center;margin-bottom:12px;text-shadow:0 0 10px rgba(0,255,209,.6);}
-      .lsr-div{color:rgba(0,255,209,.25);font-size:.7rem;margin:8px 0;text-align:center;letter-spacing:.04em;opacity:0;transform:translateX(-16px);}
-      .lsr-row{display:flex;justify-content:space-between;align-items:baseline;gap:32px;margin:5px 0;font-size:.75rem;letter-spacing:.08em;opacity:0;transform:translateX(-16px);}
+      .lsr-title{font-size:1.4rem;letter-spacing:.18em;color:#00FFD1;text-align:center;margin-bottom:12px;text-shadow:0 0 10px rgba(0,255,209,.6);}
+      .lsr-div{color:rgba(0,255,209,.25);font-size:1.1rem;margin:8px 0;text-align:center;letter-spacing:.04em;opacity:0;transform:translateX(-16px);}
+      .lsr-row{display:flex;justify-content:space-between;align-items:baseline;gap:32px;margin:5px 0;font-size:1.2rem;letter-spacing:.08em;opacity:0;transform:translateX(-16px);}
       .lsr-div.in,.lsr-row.in{animation:lsrRowIn 250ms ease forwards;}
       .lsr-lbl{color:rgba(183,201,255,.65);}
       .lsr-val{color:#fff;font-weight:700;}
       .lsr-total .lsr-lbl{color:#b7c9ff;}
-      .lsr-total .lsr-val{color:#00FFD1;font-size:.9rem;}
-      .lsr-hint{text-align:center;margin-top:14px;font-size:.62rem;letter-spacing:.2em;color:rgba(183,201,255,.4);opacity:0;transform:translateX(-16px);}
+      .lsr-total .lsr-val{color:#00FFD1;font-size:1.4rem;}
+      .lsr-hint{text-align:center;margin-top:14px;font-size:1rem;letter-spacing:.2em;color:rgba(183,201,255,.4);opacity:0;transform:translateX(-16px);}
       .lsr-hint.in{animation:lsrRowIn 250ms ease forwards,lsrBlink 1.2s 250ms ease-in-out infinite;}
     `;
     document.head.appendChild(s);
@@ -7639,7 +7673,7 @@ function initGalaxyCanvas() {
 
     function stopWriteLoop() {
       if (writeLoopHandle) {
-        try { audioEngine.stopLoop?.(writeLoopHandle); } catch {}
+        try { audioEngine.stopLoop("write_on_text_loop"); } catch {}
         writeLoopHandle = null;
       }
     }
@@ -8048,7 +8082,7 @@ function initGalaxyCanvas() {
     sim.maxAsteroids = capIOSNativeAsteroids(PRACTICE_MAX_ASTEROIDS);
     setGalaxyBackgroundForLevel(1);
     window.galaxyBackground?.show();
-    window.galaxyBackground?.setTheme(1);
+    if (engineMode !== "arcade") window.galaxyBackground?.setTheme(1);
     window.galaxyBackground?.setLevel(1);
     setGalaxyTool("draw");
     state.practiceTool = "pencil";

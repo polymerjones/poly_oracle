@@ -1,10 +1,25 @@
 const galaxyBackground = (() => {
   const THEMES = [
+    // L1 — Deep Space (teal)
     { sky: "#020408", neb: [[0, 40, 90], [55, 0, 100], [0, 65, 85]], star: [220, 230, 255], gas: [[0, 140, 160], [0, 80, 120], [20, 60, 100]] },
+    // L2 — Nebula (purple)
     { sky: "#040208", neb: [[80, 0, 120], [50, 0, 100], [100, 20, 80]], star: [220, 200, 255], gas: [[80, 0, 140], [120, 20, 160], [60, 0, 100]] },
+    // L3 — Ice Field (cyan)
     { sky: "#020608", neb: [[0, 80, 100], [0, 60, 120], [20, 80, 90]], star: [200, 240, 255], gas: [[0, 160, 180], [0, 120, 160], [20, 140, 160]] },
+    // L4 — Void (dark indigo)
     { sky: "#010104", neb: [[20, 0, 40], [10, 0, 30], [30, 5, 50]], star: [180, 180, 220], gas: [[30, 0, 60], [20, 0, 50], [40, 10, 70]] },
-    { sky: "#080200", neb: [[120, 20, 0], [160, 40, 0], [100, 10, 10]], star: [255, 180, 100], gas: [[180, 60, 0], [220, 100, 10], [160, 40, 0]] },
+    // L5 — Ember (amber/orange)
+    { sky: "#060200", neb: [[140, 60, 0], [180, 90, 10], [120, 40, 0]], star: [255, 210, 140], gas: [[200, 100, 0], [240, 140, 20], [160, 70, 0]] },
+    // L6 — Jungle (deep green)
+    { sky: "#010804", neb: [[0, 80, 30], [10, 100, 40], [0, 60, 20]], star: [180, 255, 200], gas: [[0, 140, 60], [20, 180, 80], [0, 100, 40]] },
+    // L7 — Storm (electric blue)
+    { sky: "#020318", neb: [[20, 60, 220], [40, 100, 255], [10, 40, 180]], star: [220, 240, 255], gas: [[60, 120, 255], [100, 160, 255], [40, 80, 220]] },
+    // L8 — Blood (crimson)
+    { sky: "#080002", neb: [[160, 0, 20], [200, 10, 30], [120, 0, 10]], star: [255, 160, 170], gas: [[180, 0, 30], [220, 20, 40], [140, 0, 20]] },
+    // L9 — Toxic (acid green)
+    { sky: "#030800", neb: [[60, 160, 0], [100, 200, 10], [40, 120, 0]], star: [220, 255, 160], gas: [[80, 200, 0], [120, 240, 20], [60, 160, 0]] },
+    // L10 — Hellfire (red/orange)
+    { sky: "#1E0200", neb: [[200, 30, 0], [240, 80, 0], [160, 15, 0]], star: [255, 160, 60], gas: [[220, 70, 0], [255, 110, 10], [180, 45, 0]] },
   ];
 
   const PDEFS = [
@@ -389,11 +404,6 @@ const galaxyBackground = (() => {
         if (warpT > 0.85) {
           warpPhase = 2;
           warpT = 0;
-          const next = (themeIdx + 1) % THEMES.length;
-          themeIdx = next;
-          tgtTheme = THEMES[next];
-          curTheme = THEMES[next];
-          blend = 1;
         }
       } else if (warpPhase === 2) {
         warpMult = Math.max(1, (1 - warpT) * 38);
@@ -506,7 +516,7 @@ const galaxyBackground = (() => {
       const ty = s.y - s.vy * 10;
       const g = cx.createLinearGradient(tx, ty, s.x, s.y);
       g.addColorStop(0, "transparent");
-      g.addColorStop(1, `rgba(255,255,255,${a})`);
+      g.addColorStop(1, ra(curTheme.star, a));
       cx.strokeStyle = g;
       cx.lineWidth = 1.5;
       cx.beginPath();
@@ -621,15 +631,12 @@ const galaxyBackground = (() => {
   }
 
   function setTheme(levelNum) {
-    let idx = 0;
-    if (levelNum >= 10) idx = 4;
-    else if (levelNum >= 7) idx = 3;
-    else if (levelNum >= 5) idx = 2;
-    else if (levelNum >= 3) idx = 1;
-    if (idx === themeIdx) return;
+    const idx = Math.min(9, Math.max(0, levelNum - 1));
+    if (idx === themeIdx && blend >= 1) return;
+    curTheme = THEMES[idx];
     tgtTheme = THEMES[idx];
     themeIdx = idx;
-    blend = 0;
+    blend = 1;
   }
 
   function setLevel(levelNum) {

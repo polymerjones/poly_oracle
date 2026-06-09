@@ -180,7 +180,7 @@ const galaxyBackground = (() => {
     if (level <= 2)  return { main: [74, 63, 107],  atmosphere: [107, 90, 158] }; // #4a3f6b / #6b5a9e purple
     if (level <= 4)  return { main: [107, 42, 26],  atmosphere: [160, 64, 48] };  // #6b2a1a / #a04030 rust red
     if (level <= 6)  return { main: [26, 90, 74],   atmosphere: [32, 137, 122] }; // #1a5a4a / #20897a deep teal
-    if (level <= 8)  return { main: [58, 26, 107],  atmosphere: [96, 48, 160] };  // #3a1a6b / #6030a0 deep purple
+    if (level <= 8)  return { main: [107, 37, 0],   atmosphere: [196, 64, 0] };   // #6b2500 / #c44000 fire orange (2026-06-09)
     if (level === 9) return { main: [107, 74, 0],   atmosphere: [160, 112, 16] }; // #6b4a00 / #a07010 gold/amber
     return { main: [107, 26, 0], atmosphere: [160, 32, 0] };                      // #6b1a00 / #a02000 boss red-orange
   }

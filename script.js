@@ -119,6 +119,15 @@ function loadCapacitorHaptics() {
   }
 }
 document.addEventListener("DOMContentLoaded", loadCapacitorHaptics);
+// 2026-06-09: lock the whole app to portrait permanently — landscape breaks the game.
+function lockPortraitOrientation() {
+  try {
+    const SO = globalThis.Capacitor?.Plugins?.ScreenOrientation;
+    if (SO) { SO.lock({ orientation: "portrait" }).catch(() => {}); }
+    else { screen.orientation?.lock?.("portrait")?.catch?.(() => {}); }
+  } catch { /* orientation lock is optional outside native */ }
+}
+document.addEventListener("DOMContentLoaded", lockPortraitOrientation);
 document.addEventListener("DOMContentLoaded", () => {
   const _bel = document.createElement("div");
   _bel.textContent = "BUILD " + BUILD_TS;
@@ -158,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-09 16:42";
+const BUILD_TS = "2026-06-09 17:25";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -413,6 +422,7 @@ const IOS_NATIVE_MAX_ASTEROIDS = 55;
 const MAX_LIVES = 3;
 const MAX_BOMB_INVENTORY = 3;
 const BOMB_PICKUP_RADIUS = 42;
+const LANDMINE_FUSE_MS = 8000; // 2026-06-09: auto-armed ("armed" phase) countdown duration
 // 2026-06-09: bomb powerup collectible (separate system from landmines)
 const BOMB_POWERUP_INTERVAL_MIN = 25000;
 const BOMB_POWERUP_INTERVAL_MAX = 35000;
@@ -424,11 +434,11 @@ const MUSIC = {
   // L8_9: "assets/music/E1L8-9.mp3",          // retired - replaced by phonk series
   L10:     "assets/music/E1L10BOSS.mp3",        // level 10 boss
   PRACTICE: "assets/music/PRACTICE.mp3",
-  TUTORIAL: "assets/music/Stroids tutorial instrumental.mp3",
-  L3_4:    "assets/music/Stroids phonk loop.mp3",
-  L5_6:    "assets/music/Stroids BASS Phonk.mp3",
-  L7_8:    "assets/music/Stroids Phonk  2.mp3",
-  L9:      "assets/music/Stroids metal Loop.mp3",
+  TUTORIAL: "assets/music/Stroids_tutorial_instrumental.mp3",
+  L3_4:    "assets/music/Stroids_phonk_loop.mp3",
+  L5_6:    "assets/music/Stroids_BASS_Phonk.mp3",
+  L7_8:    "assets/music/Stroids_Phonk_2.mp3",
+  L9:      "assets/music/Stroids_metal_Loop.mp3",
 };
 
 function musicKeyForLevel(levelNum) {
@@ -2939,14 +2949,8 @@ function openGalaxyView() {
   if (galaxyCanvasController) {
     requestAnimationFrame(() => galaxyCanvasController.showModeSelect?.());
   }
-  // FIXED 2026-06-08: unlock orientation for landscape gameplay
-  if (isCapacitorNative) {
-    try {
-      const SO = window.Capacitor?.Plugins?.ScreenOrientation;
-      if (SO) { SO.unlock().catch(() => {}); }
-      else { screen.orientation?.unlock?.(); }
-    } catch { /* orientation unlock is optional */ }
-  }
+  // 2026-06-09: orientation stays locked to portrait globally (see lockPortraitOrientation);
+  // no per-view unlock — landscape gameplay broke the game.
 }
 
 function closeGalaxyView() {
@@ -2963,14 +2967,7 @@ function closeGalaxyView() {
   }
   if (galaxyCanvasController) galaxyCanvasController.stop?.();
   commBoxController.hide(); // FIXED 2026-06-08: clear comm popup when returning to Oracle
-  // FIXED 2026-06-08: lock to portrait on Oracle view
-  if (isCapacitorNative) {
-    try {
-      const SO = window.Capacitor?.Plugins?.ScreenOrientation;
-      if (SO) { SO.lock({ orientation: "portrait" }).catch(() => {}); }
-      else { screen.orientation?.lock?.("portrait").catch(() => {}); }
-    } catch { /* orientation lock is optional */ }
-  }
+  // 2026-06-09: portrait lock is now global (lockPortraitOrientation on startup); no per-view lock.
 }
 
 function initTitleSparkles() {
@@ -5368,13 +5365,14 @@ function initGalaxyCanvas() {
 
   function updateHudBombInventory() {
     if (!hudBombBtn) return;
-    if (playerBombInventory > 0) {
-      hudBombBtn.style.display = "";
-      hudBombBtn.textContent = `\u{1F4A3} \xD7${playerBombInventory}`;
-      hudBombBtn.disabled = false;
-    } else {
-      hudBombBtn.style.display = "none";
-    }
+    // 2026-06-09: always visible — grayed-out empty slot at 0, full + count when stocked.
+    const hasBombs = playerBombInventory > 0;
+    hudBombBtn.style.display = "";
+    hudBombBtn.textContent = `\u{1F4A3} \xD7${playerBombInventory}`;
+    hudBombBtn.disabled = !hasBombs;
+    hudBombBtn.classList.toggle("has-bombs", hasBombs);
+    // pulse for attention only when bombs are available and not currently aiming
+    hudBombBtn.classList.toggle("bomb-attention", hasBombs && !bombAimMode);
   }
 
   function getArcadeScoreMultiplier(now = performance.now()) {
@@ -5439,6 +5437,7 @@ function initGalaxyCanvas() {
   function playArcadeMusicForLevel(levelNum) {
     audioEngine.unlock();
     const url = getMusicForLevel(levelNum);
+    console.warn("[MUSIC]", url); // 2026-06-09: level-3 hang tracing
     audioEngine.playMusic(url, url, { crossfadeMs: 250 });
     const nextUrl = getMusicForLevel(levelNum + 1);
     if (nextUrl && nextUrl !== url) {
@@ -7640,7 +7639,14 @@ function initGalaxyCanvas() {
     if (!landmine) return false;
     const now = performance.now();
 
-    if (landmine.phase === "spawned" || landmine.phase === "armed") {
+    // 2026-06-09: tapping an already-armed mine (auto-armed red countdown, or player-armed)
+    // detonates it immediately rather than re-arming. Only a freshly "spawned" mine arms.
+    if (landmine.phase === "armed" || landmine.phase === "player_armed") {
+      explodeLandmine({ halfRadius: false });
+      return true;
+    }
+
+    if (landmine.phase === "spawned") {
       landmine.phase = "player_armed";
       landmine.playerArmedAt = now;
       playGameSfx("landmine_arm", 1.0);
@@ -7653,11 +7659,6 @@ function initGalaxyCanvas() {
         event: "landmine",
         priority: "high",
       });
-      return true;
-    }
-
-    if (landmine.phase === "player_armed") {
-      explodeLandmine({ halfRadius: false });
       return true;
     }
 
@@ -8108,9 +8109,10 @@ function initGalaxyCanvas() {
   }
 
   function startLevel(idx) {
+    const safeIdx = clamp(idx, 0, ARCADE_LEVELS.length - 1);
+    console.warn("[LEVEL]", ARCADE_LEVELS[safeIdx]?.level); // 2026-06-09: level-3 hang tracing
     audioEngine.unlock?.();
     audioEngine.loadMany?.(GAME_SFX);
-    const safeIdx = clamp(idx, 0, ARCADE_LEVELS.length - 1);
     currentLevelIndex = safeIdx;
     const cfg = ARCADE_LEVELS[safeIdx];
     const now = performance.now();
@@ -8153,7 +8155,9 @@ function initGalaxyCanvas() {
     setGalaxyBackgroundForLevel(cfg.level);
     window.galaxyBackground?.show();
     window.galaxyBackground?.setTheme(cfg.level);
+    console.warn("[GALAXY]", "setLevel start"); // 2026-06-09: level-3 hang tracing
     window.galaxyBackground?.setLevel(cfg.level);
+    console.warn("[GALAXY]", "setLevel done");
     if (currentLevelIndex > 0) {
       window.galaxyBackground?.triggerWarp();
     }
@@ -8900,6 +8904,21 @@ function initGalaxyCanvas() {
     tctx.restore();
   }
 
+  // 2026-06-09: red depleting countdown ring around an auto-armed landmine. Drawn on the
+  // ufoFx overlay so it shows over the PIXI layer (PIXI only draws the player_armed ring).
+  function drawLandmineCountdownOverlay(tctx) {
+    if (!tctx || !landmine || landmine.phase !== "armed" || !landmine.armedAt) return;
+    const now = performance.now();
+    const progress = Math.max(0, 1 - (now - landmine.armedAt) / LANDMINE_FUSE_MS);
+    tctx.save();
+    tctx.beginPath();
+    tctx.arc(landmine.x, landmine.y, (landmine.r || 14) + 5, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+    tctx.strokeStyle = "#ff2222";
+    tctx.lineWidth = 2.5;
+    tctx.stroke();
+    tctx.restore();
+  }
+
   function draw(now) {
     drawTimerPerimeterOverlay(now);
     if ((engineMode === "arcade" || engineMode === "practice") && window.pixiRenderer?.draw(sim, laserBeams, canvasFlash, ufo, plasmaCage, landmine, _bombShrapnel, now)) {
@@ -8907,6 +8926,7 @@ function initGalaxyCanvas() {
       if (stroidToss.active) drawPlasmaOverlay(now);
       drawUfoFxOverlay(ctx);
       drawBombPowerup(ufoFxCtx || ctx);
+      drawLandmineCountdownOverlay(ufoFxCtx || ctx);
       drawAndStepTapBlasts(ufoFxCtx || ctx);
       return;
     }
@@ -9223,6 +9243,7 @@ function initGalaxyCanvas() {
     }
     drawUfoFxOverlay(ctx);
     drawBombPowerup(ufoFxCtx || ctx);
+    drawLandmineCountdownOverlay(ufoFxCtx || ctx);
     drawAndStepTapBlasts(ufoFxCtx || ctx);
 
     const particleLimit = _frameBudgetExceeded ? Math.min(40, sim.particles.length) : sim.particles.length;
@@ -9308,6 +9329,7 @@ function initGalaxyCanvas() {
       detonateInventoryBomb(x, y); // decrements inventory + updates HUD internally
       bombAimMode = false;
       hudBombBtn?.classList.remove("hudBombBtn--aiming");
+      updateHudBombInventory(); // refresh count + restore attention pulse if bombs remain
       return;
     }
     // 2026-06-09: tap to collect the bomb powerup — also consumes the tap.
@@ -9670,6 +9692,13 @@ function initGalaxyCanvas() {
         cancelStroidToss();
         galaxyGesture = null;
         if (_wasLoopRunningOnHide && !galaxyRunning) startGalaxyLoop();
+        // 2026-06-09: stopGalaxyLoop() hid the canvas background and iOS may have paused the
+        // bg video — restart both AFTER the loop is running so the background reappears.
+        window.galaxyBackground?.show();
+        try {
+          const frontVid = bgCtl?.front;
+          if (frontVid && frontVid.paused) frontVid.play().catch(() => {});
+        } catch { /* bg video resume is best-effort */ }
       }
     }
   });
@@ -9740,6 +9769,7 @@ function initGalaxyCanvas() {
       }
       bombAimMode = !bombAimMode;
       hudBombBtn?.classList.toggle("hudBombBtn--aiming", bombAimMode);
+      updateHudBombInventory(); // suppress/restore the attention pulse based on aim state
       if (bombAimMode) playGameSfx("blip", 0.6);
     },
     isArcade() {

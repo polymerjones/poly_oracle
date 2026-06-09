@@ -335,9 +335,10 @@ const GAME_SFX = {
   reveal_magic: "reveal1.mp3",
   reveal_flash: "reveal4.mp3",
   reveal2: "reveal2.mp3",
-  landmine_arm: "gamesfx/minepreexplode.mp3",
+  landmine_arm: "gamesfx/arm_bomb1.mp3",
   landmine_boom: "gamesfx/minefinalexplo.mp3",
   blip1: "gamesfx/blip1.mp3",
+  blip: "gamesfx/blip.mp3",
   gameover: "gamesfx/gameover.mp3",
   level_up: "gamesfx/level-up-191997.mp3",
   lastlevelstart: "gamesfx/lastlevelstart.mp3",
@@ -410,13 +411,20 @@ const LEVEL_THEMES = {
 };
 const IOS_NATIVE_MAX_ASTEROIDS = 55;
 const MAX_LIVES = 3;
+const MAX_BOMB_INVENTORY = 3;
+const BOMB_PICKUP_RADIUS = 42;
 const MUSIC_MAX_GAIN = 0.9;
 const MUSIC = {
-  L1_3: "assets/music/E1L1-3.mp3",
-  L4_7: "assets/music/E1L4-7.mp3",
-  L8_9: "assets/music/E1L8-9.mp3",
-  L10: "assets/music/E1L10BOSS.mp3",
+  L1_3:    "assets/music/E1L1-3.mp3",          // levels 1-2
+  // L4_7: "assets/music/E1L4-7.mp3",          // retired - replaced by phonk series
+  // L8_9: "assets/music/E1L8-9.mp3",          // retired - replaced by phonk series
+  L10:     "assets/music/E1L10BOSS.mp3",        // level 10 boss
   PRACTICE: "assets/music/PRACTICE.mp3",
+  TUTORIAL: "assets/music/Stroids tutorial instrumental.mp3",
+  L3_4:    "assets/music/Stroids phonk loop.mp3",
+  L5_6:    "assets/music/Stroids BASS Phonk.mp3",
+  L7_8:    "assets/music/Stroids Phonk  2.mp3",
+  L9:      "assets/music/Stroids metal Loop.mp3",
 };
 
 function musicKeyForLevel(levelNum) {
@@ -434,7 +442,18 @@ function nextMusicKeyForLevel(levelNum) {
   return null;
 }
 
-const DEBUG_FORCE_LEVEL_SELECT = true;
+function getMusicForLevel(level) {
+  if (level === 0)    return MUSIC.TUTORIAL;
+  if (level <= 2)     return MUSIC.L1_3;
+  if (level <= 4)     return MUSIC.L3_4;
+  if (level <= 6)     return MUSIC.L5_6;
+  if (level <= 8)     return MUSIC.L7_8;
+  if (level === 9)    return MUSIC.L9;
+  if (level >= 10)    return MUSIC.L10;
+  return MUSIC.L1_3;
+}
+
+const DEBUG_FORCE_LEVEL_SELECT = false; // FIXED 2026-06-08
 const DEBUG_SHOW_LEVEL_DROPDOWN = false;
 let canvasFlash = null;
 const REVEAL_VARIANT_SFX = [
@@ -534,7 +553,7 @@ function hasArcadeWon() {
 }
 
 function hasBeatenGame() {
-  return true; // TODO: remove debug override before release
+  // FIXED 2026-06-08
   try { return localStorage.getItem(STORAGE_GAME_BEATEN) === "true"; }
   catch { return false; }
 }
@@ -612,6 +631,8 @@ const prefersReducedMotion =
 const isIOSWebKit = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const isCapacitorNative = !!(globalThis.Capacitor?.isNativePlatform?.());
 const isIOSNative = isCapacitorNative && isIOSWebKit;
+// FIXED 2026-06-08: Safari desktop blocks AudioContext resume on rapid fire events
+const isSafariDesktop = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) && !navigator.userAgent.includes("Mobile");
 const MAX_EXPLOSION_PARTICLES = isIOSNative ? 30 : 80;
 
 function nativeCanvasDpr() {
@@ -728,6 +749,7 @@ const hudTimer = document.getElementById("hudTimer");
 const hudLives = document.getElementById("hudLives");
 const hudScore = document.getElementById("hudScore");
 const hudGameTimer = document.getElementById("hudGameTimer");
+const hudBombBtn = document.getElementById("hudBombBtn");
 
 function formatRunTime(ms) {
   const s = Math.floor(ms / 1000);
@@ -2539,6 +2561,11 @@ function addListeners() {
       galaxyCanvasController?.showModeSelect?.({ preserveArcade: true, openArcadeMenu: true });
     });
   }
+  if (hudBombBtn) {
+    hudBombBtn.addEventListener("click", () => {
+      galaxyCanvasController?.detonateInventoryBomb?.();
+    });
+  }
   if (btnArcadeNew) {
     btnArcadeNew.addEventListener("click", () => galaxyCanvasController?.startArcadeNew?.());
   }
@@ -2906,6 +2933,14 @@ function openGalaxyView() {
   if (galaxyCanvasController) {
     requestAnimationFrame(() => galaxyCanvasController.showModeSelect?.());
   }
+  // FIXED 2026-06-08: unlock orientation for landscape gameplay
+  if (isCapacitorNative) {
+    try {
+      const SO = window.Capacitor?.Plugins?.ScreenOrientation;
+      if (SO) { SO.unlock().catch(() => {}); }
+      else { screen.orientation?.unlock?.(); }
+    } catch { /* orientation unlock is optional */ }
+  }
 }
 
 function closeGalaxyView() {
@@ -2921,6 +2956,15 @@ function closeGalaxyView() {
     if (oracleBgController) oracleBgController.start();
   }
   if (galaxyCanvasController) galaxyCanvasController.stop?.();
+  commBoxController.hide(); // FIXED 2026-06-08: clear comm popup when returning to Oracle
+  // FIXED 2026-06-08: lock to portrait on Oracle view
+  if (isCapacitorNative) {
+    try {
+      const SO = window.Capacitor?.Plugins?.ScreenOrientation;
+      if (SO) { SO.lock({ orientation: "portrait" }).catch(() => {}); }
+      else { screen.orientation?.lock?.("portrait").catch(() => {}); }
+    } catch { /* orientation lock is optional */ }
+  }
 }
 
 function initTitleSparkles() {
@@ -3397,7 +3441,7 @@ async function revealAnswer() {
     }
 
     fadeInAnswerBar();
-    const barRevealHandle = audioEngine.play(SFX.PRE_A, { volume: 0.95, rate: 1.0 });
+    const barRevealHandle = audioEngine.play(SFX.PRE_B, { volume: 0.95, rate: 1.0 }); // FIXED 2026-06-08: was PRE_A (duplicate)
     const postSpark = setInterval(() => triggerOrbSparkle(0.7), 140);
     await Promise.race([barRevealHandle?.ended || Promise.resolve(), delay(2000)]);
     clearInterval(postSpark);
@@ -3409,7 +3453,7 @@ async function revealAnswer() {
       microLine,
       revealVoice,
     });
-    setTimeout(() => stopCrystalOverlay(), 180);
+    // FIXED 2026-06-08: early stopCrystalOverlay() removed — finally block handles it
     await stopOrbStrobeCadence(false);
     await delay(420);
     setAnswerTextVisible(true);
@@ -4544,8 +4588,14 @@ function showInitialsEntry(score, runMsg = "") {
       const id = await submitLeaderboardScore(initials, safeScore);
       await showLeaderboard({ highlightId: id, afterSubmit: true });
     } catch (error) {
+      // FIXED 2026-06-08: distinguish network/unavailable errors with a clear user message
+      const isNetworkError = !navigator.onLine
+        || /unavailable|network|offline|failed to fetch|firebaseerror/i.test(error?.message || "");
+      const subMsg = isNetworkError
+        ? "Score saved locally — could not connect to leaderboard."
+        : "Score saved locally could not be sent.";
       renderLeaderboardShell("POLYVERSE SCOREBOARD", `
-        <p class="leaderboardSub">Score saved locally could not be sent.</p>
+        <p class="leaderboardSub">${subMsg}</p>
         <div class="leaderboardActions">
           <button id="leaderboardRetry" class="leaderboardBtn" type="button">Try Again</button>
           <button id="leaderboardClose" class="leaderboardBtn" type="button">Back</button>
@@ -4564,6 +4614,16 @@ function makeId() {
 
 function initBackgroundVideos() {
   oracleBgController = createLoopVideoController(oracleBgVideo);
+
+  // FIXED 2026-06-08: fade in oracle bg video after first frame to prevent black flash
+  if (oracleBgVideo) {
+    const onVideoReady = () => {
+      oracleBgVideo.style.opacity = "";
+    };
+    oracleBgVideo.addEventListener("canplay", onVideoReady, { once: true });
+    oracleBgVideo.addEventListener("loadeddata", onVideoReady, { once: true });
+  }
+
   if (!DISABLE_VIDEO_BG) {
     initGalaxyBackgroundStack();
   }
@@ -5121,6 +5181,7 @@ function initGalaxyCanvas() {
   let maxOnScreen = 12;
   let landmine = null;
   let landmineSpawnedThisLevel = false;
+  let playerBombInventory = 0;
   let arcadeResumeAvailable = false;
   let pausedLevelRemainingMs = 0;
   let pausedLandmineRemainingMs = 0;
@@ -5292,6 +5353,17 @@ function initGalaxyCanvas() {
     hudScore.textContent = `Score: ${arcadeScore}`;
   }
 
+  function updateHudBombInventory() {
+    if (!hudBombBtn) return;
+    if (playerBombInventory > 0) {
+      hudBombBtn.style.display = "";
+      hudBombBtn.textContent = `\u{1F4A3} \xD7${playerBombInventory}`;
+      hudBombBtn.disabled = false;
+    } else {
+      hudBombBtn.style.display = "none";
+    }
+  }
+
   function getArcadeScoreMultiplier(now = performance.now()) {
     if (engineMode !== "arcade" || !levelDurationMs) return 1;
     const elapsed = clamp(now - levelRunStartAt, 0, levelDurationMs);
@@ -5353,12 +5425,10 @@ function initGalaxyCanvas() {
 
   function playArcadeMusicForLevel(levelNum) {
     audioEngine.unlock();
-    const key = musicKeyForLevel(levelNum);
-    const url = MUSIC[key];
-    audioEngine.playMusic(key, url, { crossfadeMs: 250 });
-    const nextKey = nextMusicKeyForLevel(levelNum);
-    if (nextKey) {
-      const nextUrl = MUSIC[nextKey];
+    const url = getMusicForLevel(levelNum);
+    audioEngine.playMusic(url, url, { crossfadeMs: 250 });
+    const nextUrl = getMusicForLevel(levelNum + 1);
+    if (nextUrl && nextUrl !== url) {
       audioEngine.loadMusicBuffer(nextUrl).catch(() => {});
     }
   }
@@ -5692,6 +5762,15 @@ function initGalaxyCanvas() {
     return asteroidSprites.roid01;
   }
 
+  function getAsteroidTintForLevel(level) {
+    if (level <= 2)  return null;
+    if (level <= 4)  return "rgba(200,80,40,0.18)";
+    if (level <= 6)  return "rgba(0,180,160,0.18)";
+    if (level <= 8)  return "rgba(140,60,200,0.18)";
+    if (level === 9) return "rgba(200,160,0,0.18)";
+    return null;
+  }
+
   function getAsteroidSpriteKeyForLevel(levelNum) {
     if (levelNum >= 10) return "hotroid01";
     if (levelNum >= 7) return "roid03";
@@ -5860,6 +5939,11 @@ function initGalaxyCanvas() {
   }
 
   function playPlayerFireSound() {
+    // FIXED 2026-06-08: Safari desktop needs HTML Audio path — WebAudio context stalls on rapid fire
+    if (isSafariDesktop) {
+      audioEngine.playHtmlAudio("advfire", { volume: clamp(0.86 * (state.whisper ? 0.55 : 1), 0, 1), rate: 1 });
+      return;
+    }
     playGameSfx("advfire", 0.86);
   }
 
@@ -6064,10 +6148,10 @@ function initGalaxyCanvas() {
     playGameSfx("ufo_spawn", 0.6);
     startUfoDrone();
     commBoxController.reactTo("ufo");
+    // FIXED 2026-06-08: removed priority:"high" so UFO comm queues rather than cutting current comm
     commBoxController.queueVO({
       audioSrc: commBoxController.commVoSrc("vo-ufo_spotted_takeemout.mp3"),
       event: "ufo",
-      priority: "high",
     });
     addWarpRing(x, y, "rgba(160,255,255,1)");
   }
@@ -6129,6 +6213,7 @@ function initGalaxyCanvas() {
     cssFlash("#00ffee", 0.3, 250);
     cssShake(1.0);
     addWarpRing(x, y, "rgba(172,255,214,1)");
+    playGameSfx("blip", 0.65);
     stopUfoDrone();
     ufosKilledThisLevel += 1;
     ufo = null;
@@ -7076,10 +7161,13 @@ function initGalaxyCanvas() {
     plasmaCage.rechargeSoundPlayed = true;
     plasmaCage.lastRechargeVoAt = now;
     playGameSfx(Math.random() < 0.5 ? "plasmarecharged" : "plasmarecharged1", 1.0);
+    playGameSfx("blip", 0.6);
     commBoxController.reactTo("plasma_recharged");
     if (now - lastPlasmaRechargedVoAt > 20000) {
       lastPlasmaRechargedVoAt = now;
       function fireRechargeComm() {
+        // FIXED 2026-06-08: bail if UFO kill reset cooldownUntil to 0 after this was scheduled
+        if (plasmaCage.cooldownUntil <= 0) return;
         const ticker = document.getElementById("commanderTicker");
         const isActive = ticker?.classList.contains("ticker-visible");
         if (isActive) {
@@ -7545,6 +7633,26 @@ function initGalaxyCanvas() {
     playGameSfx("bigbang", 1.62);
   }
 
+  function detonateInventoryBomb() {
+    if (playerBombInventory <= 0) return;
+    playerBombInventory--;
+    updateHudBombInventory();
+    const x = sim.width / 2;
+    const y = sim.height / 2;
+    spawnBombShrapnel(x, y);
+    window.pixiRenderer?.triggerBombDetonation?.(x, y, 1050);
+    addWarpRing(x, y, "rgba(255,90,90,1)");
+    spawnExplosion(x, y, 80, true);
+    triggerLandmineScreenFlash();
+    cssFlash("#ffffff", 0.55, 300);
+    cssShake(1.8);
+    setTimeout(() => cssShake(1.0), 120);
+    window.galaxyBackground?.setHectic(true);
+    setTimeout(() => window.galaxyBackground?.setHectic(false), 3000);
+    playBigBoomSound();
+    playGameSfx("bigbang", 1.62);
+  }
+
   function spawnBombShrapnel(x, y) {
     const count = 24;
     for (let i = 0; i < count; i += 1) {
@@ -7632,6 +7740,8 @@ function initGalaxyCanvas() {
       .lsr-total .lsr-val{color:#00FFD1;font-size:1.4rem;}
       .lsr-hint{text-align:center;margin-top:14px;font-size:1rem;letter-spacing:.2em;color:rgba(183,201,255,.4);opacity:0;transform:translateX(-16px);}
       .lsr-hint.in{animation:lsrRowIn 250ms ease forwards,lsrBlink 1.2s 250ms ease-in-out infinite;}
+      .score-tick-flash{text-shadow:0 0 12px #00ffcc,0 0 24px #00ffcc;transition:text-shadow 80ms ease;}
+      .score-final-flash{text-shadow:0 0 30px #ffffff,0 0 60px #00ffcc;transition:text-shadow 300ms ease;}
     `;
     document.head.appendChild(s);
   }
@@ -7657,7 +7767,7 @@ function initGalaxyCanvas() {
       <div class="lsr-row"><span class="lsr-lbl">UFOs</span><span class="lsr-val">${ufosKilled}</span></div>
       <div class="lsr-row"><span class="lsr-lbl">TIME BONUS</span><span class="lsr-val">${tbStr}</span></div>
       <div class="lsr-div">─────────────────</div>
-      <div class="lsr-row lsr-total"><span class="lsr-lbl">TOTAL</span><span class="lsr-val">${scoreAfter}</span></div>
+      <div class="lsr-row lsr-total"><span class="lsr-lbl">TOTAL</span><span class="lsr-val" id="lsrTotalVal">${scoreBefore}</span></div>
       <div class="lsr-hint">TAP TO CONTINUE</div>
     `;
     overlay.appendChild(panel);
@@ -7670,6 +7780,7 @@ function initGalaxyCanvas() {
     const tallyTimers = [];
     let tallyDone = false;
     let writeLoopHandle = null;
+    let countupRaf = 0;
 
     function stopWriteLoop() {
       if (writeLoopHandle) {
@@ -7685,6 +7796,7 @@ function initGalaxyCanvas() {
       if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
       tallyTimers.forEach(t => clearTimeout(t));
       tallyTimers.length = 0;
+      if (countupRaf) { cancelAnimationFrame(countupRaf); countupRaf = 0; }
       overlay.style.transition = "opacity 180ms ease";
       overlay.style.opacity = "0";
       setTimeout(() => { overlay.remove(); onDismiss?.(); }, 190);
@@ -7710,14 +7822,56 @@ function initGalaxyCanvas() {
         if (el.classList.contains("lsr-row")) playGameSfx("scorecount", 0.3);
         if (i === revealEls.length - 1) {
           stopWriteLoop();
-          if (!tallyDone) {
-            tallyDone = true;
-            playGameSfx("level_up", 0.9);
-            cssFlash("#00FFD1", 0.3, 300);
-          }
+          // Hint appears concurrently while countup is still running
           tallyTimers.push(setTimeout(() => {
             if (!dismissed) panel.querySelector(".lsr-hint")?.classList.add("in");
           }, 400));
+          // Score countup from scoreBefore → scoreAfter over ~1500ms
+          const totalEl = panel.querySelector("#lsrTotalVal");
+          if (totalEl && scoreAfter > scoreBefore) {
+            const countupDuration = 1500;
+            const countupStart = performance.now();
+            let display = scoreBefore;
+            let lastBlipAt = 0;
+            function countupTick(now) {
+              if (dismissed) { countupRaf = 0; return; }
+              const elapsed = now - countupStart;
+              const framesLeft = Math.max(1, Math.round((1 - Math.min(1, elapsed / countupDuration)) * 90));
+              const step = Math.max(1, Math.ceil((scoreAfter - display) / framesLeft));
+              display = Math.min(scoreAfter, display + step);
+              totalEl.textContent = display;
+              totalEl.classList.add("score-tick-flash");
+              setTimeout(() => totalEl.classList.remove("score-tick-flash"), 80);
+              if (now - lastBlipAt >= 40) {
+                lastBlipAt = now;
+                playGameSfx("scorecount", 0.18);
+              }
+              if (display < scoreAfter) {
+                countupRaf = requestAnimationFrame(countupTick);
+              } else {
+                countupRaf = 0;
+                totalEl.classList.remove("score-tick-flash");
+                totalEl.classList.add("score-final-flash");
+                setTimeout(() => totalEl.classList.remove("score-final-flash"), 300);
+                if (!tallyDone) { tallyDone = true; }
+                playGameSfx("level_up", 0.9);
+                cssFlash("#00FFD1", 0.3, 300);
+              }
+            }
+            countupRaf = requestAnimationFrame(countupTick);
+          } else {
+            // No score gain — set total immediately and flash
+            if (totalEl) {
+              totalEl.textContent = scoreAfter;
+              totalEl.classList.add("score-final-flash");
+              setTimeout(() => totalEl.classList.remove("score-final-flash"), 300);
+            }
+            if (!tallyDone) {
+              tallyDone = true;
+              playGameSfx("level_up", 0.9);
+              cssFlash("#00FFD1", 0.3, 300);
+            }
+          }
         }
       }, 260 + i * 400));
     });
@@ -8021,8 +8175,10 @@ function initGalaxyCanvas() {
     setSavedArcadeLevel(1);
     arcadeLives = 0;
     arcadeScore = 0;
+    playerBombInventory = 0;
     renderLives();
     renderScore();
+    updateHudBombInventory();
     startArcadeAtLevel(1);
   }
 
@@ -8094,7 +8250,7 @@ function initGalaxyCanvas() {
     showFpsOverlay();
     updatePracticeDebug();
     audioEngine.stopMusic();
-    audioEngine.playMusic("PRACTICE", MUSIC.PRACTICE || MUSIC.L1_3, { crossfadeMs: 200 });
+    audioEngine.playMusic(MUSIC.TUTORIAL, getMusicForLevel(0), { crossfadeMs: 200 });
     resizeGalaxyCanvas();
     computePlayfield();
     setTimeout(computePlayfield, 50);
@@ -8414,7 +8570,23 @@ function initGalaxyCanvas() {
         clampSpeed(landmine);
         applyMotionHealth(landmine, now);
         collideLandmineWithAsteroids();
-        if (landmine.phase === "spawned" && now - landmine.spawnedAt >= 10000) {
+
+        // Pickup: player ship flies over a spawned mine with room in inventory
+        if (landmine && landmine.phase === "spawned" && playerBombInventory < MAX_BOMB_INVENTORY) {
+          const shipX = sim.width / 2;
+          const shipY = sim.height / 2;
+          if (Math.hypot(landmine.x - shipX, landmine.y - shipY) <= landmine.r + BOMB_PICKUP_RADIUS) {
+            playerBombInventory++;
+            landmine = null;
+            stopDangerLoop();
+            updateHudBombInventory();
+            playGameSfx("life_gain", 0.72);
+            playGameSfx("blip", 0.7);
+            addWarpRing(shipX, shipY, "rgba(124,255,91,1)");
+          }
+        }
+
+        if (landmine && landmine.phase === "spawned" && now - landmine.spawnedAt >= 10000) {
           landmine.phase = "armed";
           landmine.armedAt = now;
           playGameSfx("landmine_arm", 0.96);
@@ -8428,11 +8600,11 @@ function initGalaxyCanvas() {
           });
           startDangerLoop();
         }
-        if (landmine.phase === "armed" && now - landmine.armedAt >= 8000) {
+        if (landmine && landmine.phase === "armed" && now - landmine.armedAt >= 8000) {
           explodeLandmine({ halfRadius: true });
           return;
         }
-        if (landmine.phase === "player_armed" && now - landmine.playerArmedAt >= 6000) {
+        if (landmine && landmine.phase === "player_armed" && now - landmine.playerArmedAt >= 6000) {
           explodeLandmine({ halfRadius: false });
           return;
         }
@@ -8598,6 +8770,16 @@ function initGalaxyCanvas() {
         ctx.rotate(a.rot);
         ctx.drawImage(sprite, -a.r, -a.r, d, d);
         ctx.restore();
+        const _tint = getAsteroidTintForLevel(_levelNum);
+        if (_tint) {
+          ctx.save();
+          ctx.globalCompositeOperation = "multiply";
+          ctx.fillStyle = _tint;
+          ctx.beginPath();
+          ctx.arc(a.x, a.y, a.r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
       } else {
         ctx.beginPath();
         for (let j = 0; j < a.shape.length; j += 1) {
@@ -9186,13 +9368,35 @@ function initGalaxyCanvas() {
   if (window.visualViewport) {
     window.visualViewport.addEventListener("resize", delayedRelayout, { passive: true });
   }
+  // FIXED 2026-06-08: auto-pause on app switch; music to 10%; do not auto-resume
+  let _bgMusicGainBeforePause = MUSIC_MAX_GAIN;
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopGalaxyLoop();
+      // Dim music to 10% so audio doesn't blare in background
+      _bgMusicGainBeforePause = audioEngine.musicGain?.gain?.value ?? MUSIC_MAX_GAIN;
+      if (audioEngine.musicGain && audioEngine.ctx) {
+        const now = audioEngine.ctx.currentTime;
+        audioEngine.musicGain.gain.cancelScheduledValues(now);
+        audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, now);
+        audioEngine.musicGain.gain.linearRampToValueAtTime(0.1, now + 0.25);
+      }
+      if (audioEngine.currentMusicHtml?.node) {
+        audioEngine.currentMusicHtml.node.volume = 0.1;
+      }
     } else if (!galaxyView.hidden) {
       resizeGalaxyCanvas();
       computePlayfield();
-      startGalaxyLoop();
+      // Restore music volume — game loop remains stopped; user must resume manually
+      if (audioEngine.musicGain && audioEngine.ctx) {
+        const now = audioEngine.ctx.currentTime;
+        audioEngine.musicGain.gain.cancelScheduledValues(now);
+        audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, now);
+        audioEngine.musicGain.gain.linearRampToValueAtTime(_bgMusicGainBeforePause, now + 0.25);
+      }
+      if (audioEngine.currentMusicHtml?.node) {
+        audioEngine.currentMusicHtml.node.volume = _bgMusicGainBeforePause;
+      }
       resumeBackgroundMusic();
     }
   });
@@ -9247,6 +9451,10 @@ function initGalaxyCanvas() {
     },
     triggerBoom() {
       // no-op in current arcade interaction model
+    },
+    detonateInventoryBomb() {
+      if (!arcadeActive || engineMode !== "arcade") return;
+      detonateInventoryBomb();
     },
     isArcade() {
       return engineMode === "arcade";

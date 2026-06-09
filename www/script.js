@@ -335,10 +335,10 @@ const GAME_SFX = {
   reveal_magic: "reveal1.mp3",
   reveal_flash: "reveal4.mp3",
   reveal2: "reveal2.mp3",
-  // TODO: replace minepreexplode.mp3 with new landmine sound — Poly to supply filename
-  landmine_arm: "gamesfx/minepreexplode.mp3",
+  landmine_arm: "gamesfx/arm_bomb1.mp3",
   landmine_boom: "gamesfx/minefinalexplo.mp3",
   blip1: "gamesfx/blip1.mp3",
+  blip: "gamesfx/blip.mp3",
   gameover: "gamesfx/gameover.mp3",
   level_up: "gamesfx/level-up-191997.mp3",
   lastlevelstart: "gamesfx/lastlevelstart.mp3",
@@ -5762,6 +5762,15 @@ function initGalaxyCanvas() {
     return asteroidSprites.roid01;
   }
 
+  function getAsteroidTintForLevel(level) {
+    if (level <= 2)  return null;
+    if (level <= 4)  return "rgba(200,80,40,0.18)";
+    if (level <= 6)  return "rgba(0,180,160,0.18)";
+    if (level <= 8)  return "rgba(140,60,200,0.18)";
+    if (level === 9) return "rgba(200,160,0,0.18)";
+    return null;
+  }
+
   function getAsteroidSpriteKeyForLevel(levelNum) {
     if (levelNum >= 10) return "hotroid01";
     if (levelNum >= 7) return "roid03";
@@ -6204,6 +6213,7 @@ function initGalaxyCanvas() {
     cssFlash("#00ffee", 0.3, 250);
     cssShake(1.0);
     addWarpRing(x, y, "rgba(172,255,214,1)");
+    playGameSfx("blip", 0.65);
     stopUfoDrone();
     ufosKilledThisLevel += 1;
     ufo = null;
@@ -7151,6 +7161,7 @@ function initGalaxyCanvas() {
     plasmaCage.rechargeSoundPlayed = true;
     plasmaCage.lastRechargeVoAt = now;
     playGameSfx(Math.random() < 0.5 ? "plasmarecharged" : "plasmarecharged1", 1.0);
+    playGameSfx("blip", 0.6);
     commBoxController.reactTo("plasma_recharged");
     if (now - lastPlasmaRechargedVoAt > 20000) {
       lastPlasmaRechargedVoAt = now;
@@ -8570,6 +8581,7 @@ function initGalaxyCanvas() {
             stopDangerLoop();
             updateHudBombInventory();
             playGameSfx("life_gain", 0.72);
+            playGameSfx("blip", 0.7);
             addWarpRing(shipX, shipY, "rgba(124,255,91,1)");
           }
         }
@@ -8758,6 +8770,16 @@ function initGalaxyCanvas() {
         ctx.rotate(a.rot);
         ctx.drawImage(sprite, -a.r, -a.r, d, d);
         ctx.restore();
+        const _tint = getAsteroidTintForLevel(_levelNum);
+        if (_tint) {
+          ctx.save();
+          ctx.globalCompositeOperation = "multiply";
+          ctx.fillStyle = _tint;
+          ctx.beginPath();
+          ctx.arc(a.x, a.y, a.r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
       } else {
         ctx.beginPath();
         for (let j = 0; j < a.shape.length; j += 1) {

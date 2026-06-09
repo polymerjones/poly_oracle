@@ -2099,18 +2099,6 @@ select:focus-visible {
   color: rgba(220, 234, 255, 0.9);
 }
 
-.hudBombBtn {
-  margin-left: auto;
-  font-size: 0.82rem;
-  color: rgba(220, 234, 255, 0.9);
-  min-width: 64px;
-}
-
-.hudBombBtn:disabled {
-  opacity: 0.35;
-  pointer-events: none;
-}
-
 .practiceDebug {
   font-size: 12px;
   opacity: 0.85;

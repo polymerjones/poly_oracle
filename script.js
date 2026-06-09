@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-09 17:25";
+const BUILD_TS = "2026-06-09 17:38";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -5437,7 +5437,6 @@ function initGalaxyCanvas() {
   function playArcadeMusicForLevel(levelNum) {
     audioEngine.unlock();
     const url = getMusicForLevel(levelNum);
-    console.warn("[MUSIC]", url); // 2026-06-09: level-3 hang tracing
     audioEngine.playMusic(url, url, { crossfadeMs: 250 });
     const nextUrl = getMusicForLevel(levelNum + 1);
     if (nextUrl && nextUrl !== url) {
@@ -8110,7 +8109,6 @@ function initGalaxyCanvas() {
 
   function startLevel(idx) {
     const safeIdx = clamp(idx, 0, ARCADE_LEVELS.length - 1);
-    console.warn("[LEVEL]", ARCADE_LEVELS[safeIdx]?.level); // 2026-06-09: level-3 hang tracing
     audioEngine.unlock?.();
     audioEngine.loadMany?.(GAME_SFX);
     currentLevelIndex = safeIdx;
@@ -8155,9 +8153,7 @@ function initGalaxyCanvas() {
     setGalaxyBackgroundForLevel(cfg.level);
     window.galaxyBackground?.show();
     window.galaxyBackground?.setTheme(cfg.level);
-    console.warn("[GALAXY]", "setLevel start"); // 2026-06-09: level-3 hang tracing
     window.galaxyBackground?.setLevel(cfg.level);
-    console.warn("[GALAXY]", "setLevel done");
     if (currentLevelIndex > 0) {
       window.galaxyBackground?.triggerWarp();
     }

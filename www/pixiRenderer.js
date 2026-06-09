@@ -569,7 +569,6 @@ const pixiRenderer = (() => {
   }
 
   function syncUFO(ufoState) {
-    console.warn("[PIXI]", "syncUFO start"); // 2026-06-09: level-3 hang tracing
     if (!ufoDisplay) return;
     if (!ufoState || !ufoState.alive) {
       ufoDisplay.visible = false;

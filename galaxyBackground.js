@@ -57,6 +57,7 @@ const galaxyBackground = (() => {
   let curTheme = THEMES[0];
   let tgtTheme = THEMES[0];
   let blend = 1;
+  let _planetLevel = 1; // 2026-06-09: current level, drives per-level planet color
   let scrollX = 0;
   let scrollY = 0;
   let velX = 0.6;
@@ -173,10 +174,23 @@ const galaxyBackground = (() => {
     cx.restore();
   }
 
+  // 2026-06-09: per-level planet palette, mirrors getAsteroidTintForLevel() bands in script.js.
+  // Returns RGB arrays (the task's hex equivalents) so they plug into ra()/the col gradient.
+  function getPlanetColorForLevel(level) {
+    if (level <= 2)  return { main: [74, 63, 107],  atmosphere: [107, 90, 158] }; // #4a3f6b / #6b5a9e purple
+    if (level <= 4)  return { main: [107, 42, 26],  atmosphere: [160, 64, 48] };  // #6b2a1a / #a04030 rust red
+    if (level <= 6)  return { main: [26, 90, 74],   atmosphere: [32, 137, 122] }; // #1a5a4a / #20897a deep teal
+    if (level <= 8)  return { main: [58, 26, 107],  atmosphere: [96, 48, 160] };  // #3a1a6b / #6030a0 deep purple
+    if (level === 9) return { main: [107, 74, 0],   atmosphere: [160, 112, 16] }; // #6b4a00 / #a07010 gold/amber
+    return { main: [107, 26, 0], atmosphere: [160, 32, 0] };                      // #6b1a00 / #a02000 boss red-orange
+  }
+
   function drawPlanet(def, px, py) {
     const r = def.r;
-    const col = def.col;
-    const atm = def.atmo;
+    // 2026-06-09: tint planets to match the current level theme (was fixed def.col/def.atmo)
+    const planetTheme = getPlanetColorForLevel(_planetLevel);
+    const col = planetTheme.main;
+    const atm = planetTheme.atmosphere;
     const ag = cx.createRadialGradient(px, py, r * 0.7, px, py, r * 2.4);
     ag.addColorStop(0, ra(atm, 0.18));
     ag.addColorStop(1, "transparent");
@@ -631,6 +645,7 @@ const galaxyBackground = (() => {
   }
 
   function setTheme(levelNum) {
+    _planetLevel = levelNum; // 2026-06-09: keep planet color in sync with the level
     const idx = Math.min(9, Math.max(0, levelNum - 1));
     if (idx === themeIdx && blend >= 1) return;
     curTheme = THEMES[idx];
@@ -640,6 +655,7 @@ const galaxyBackground = (() => {
   }
 
   function setLevel(levelNum) {
+    _planetLevel = levelNum; // 2026-06-09: keep planet color in sync with the level
     _levelSpeedMult = Math.min(4, 1.0 + (levelNum - 1) * 0.33);
   }
 

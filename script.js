@@ -158,7 +158,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-07 21:35";
+const BUILD_TS = "2026-06-09 16:42";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -413,6 +413,10 @@ const IOS_NATIVE_MAX_ASTEROIDS = 55;
 const MAX_LIVES = 3;
 const MAX_BOMB_INVENTORY = 3;
 const BOMB_PICKUP_RADIUS = 42;
+// 2026-06-09: bomb powerup collectible (separate system from landmines)
+const BOMB_POWERUP_INTERVAL_MIN = 25000;
+const BOMB_POWERUP_INTERVAL_MAX = 35000;
+const BOMB_POWERUP_LIFETIME_MS = 10000;
 const MUSIC_MAX_GAIN = 0.9;
 const MUSIC = {
   L1_3:    "assets/music/E1L1-3.mp3",          // levels 1-2
@@ -453,7 +457,7 @@ function getMusicForLevel(level) {
   return MUSIC.L1_3;
 }
 
-const DEBUG_FORCE_LEVEL_SELECT = false; // FIXED 2026-06-08
+const DEBUG_FORCE_LEVEL_SELECT = true; // 2026-06-09: re-enabled for debugging
 const DEBUG_SHOW_LEVEL_DROPDOWN = false;
 let canvasFlash = null;
 const REVEAL_VARIANT_SFX = [
@@ -878,7 +882,8 @@ const commBoxController = (() => {
     "vo-welcometothepolyverse.mp3",
     "vo-ufo_spotted_takeemout.mp3",
     // dump2
-    "danger_loop.mp3",
+    // 2026-06-09: danger_loop unregistered (silenced)
+    // "danger_loop.mp3",
     "vo-cadet_theres_a_bomb.mp3",
     "vo-detonate_the_bomb.mp3",
     "vo-detonate_the_bomb2.mp3",
@@ -2563,7 +2568,8 @@ function addListeners() {
   }
   if (hudBombBtn) {
     hudBombBtn.addEventListener("click", () => {
-      galaxyCanvasController?.detonateInventoryBomb?.();
+      // 2026-06-09: arm aim mode; the next tap on the play area deploys the bomb there
+      galaxyCanvasController?.toggleBombAim?.();
     });
   }
   if (btnArcadeNew) {
@@ -5012,6 +5018,7 @@ function initGalaxyCanvas() {
     lastRechargeVoAt: 0,
   };
   const laserBeams = [];
+  let tapBlasts = []; // 2026-06-09: localized X blast for iOS touch taps (replaces laser)
   const _bombShrapnel = [];
   let _fpsOverlay = null;
   let _fpsFrames = 0;
@@ -5182,6 +5189,12 @@ function initGalaxyCanvas() {
   let landmine = null;
   let landmineSpawnedThisLevel = false;
   let playerBombInventory = 0;
+  // 2026-06-09: bomb powerup — tap to collect, two-tap (aim) to deploy
+  let bombPowerup = null;
+  let bombAimMode = false;
+  let nextBombPowerupAt = performance.now()
+    + BOMB_POWERUP_INTERVAL_MIN
+    + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
   let arcadeResumeAvailable = false;
   let pausedLevelRemainingMs = 0;
   let pausedLandmineRemainingMs = 0;
@@ -5580,8 +5593,11 @@ function initGalaxyCanvas() {
   function syncArcadeMenuButtons() {
     if (btnArcadeResume) btnArcadeResume.disabled = !(arcadeResumeAvailable || hasArcadeSave());
     if (btnArcadeLevelSelect) {
+      const levelSelectUnlocked = DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon() || hasBeatenGame();
       btnArcadeLevelSelect.disabled = !(DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon());
-      btnArcadeLevelSelect.classList.toggle("locked", !hasBeatenGame());
+      // 2026-06-09: .locked sets pointer-events:none, which blocked the button even when
+      // debug-unlocked. Keep it locked only when there's genuinely no access.
+      btnArcadeLevelSelect.classList.toggle("locked", !levelSelectUnlocked);
     }
   }
 
@@ -5904,7 +5920,10 @@ function initGalaxyCanvas() {
       }[name] || 1)
       : 1;
     const finalVolume = clamp(volume * (state.whisper ? 0.55 : 1) * iosBoost, 0, 1);
-    if (isIOSNative) {
+    // 2026-06-09: `important` one-shots (e.g. the plasma net blast) bypass the per-frame
+    // budget — otherwise the asteroid-vaporize booms fired in the same frame exhaust the
+    // 2-sounds/16ms cap and the plasma blast gets silently dropped on the native app.
+    if (isIOSNative && !opts.important) {
       const frameNow = performance.now();
       if (frameNow - _iosAudioLastFrame < 16) {
         if (_iosAudioFrameBudget >= 2) return;
@@ -5944,6 +5963,8 @@ function initGalaxyCanvas() {
       audioEngine.playHtmlAudio("advfire", { volume: clamp(0.86 * (state.whisper ? 0.55 : 1), 0, 1), rate: 1 });
       return;
     }
+    // 2026-06-09: ensure the AudioContext is resumed (Chrome desktop can stay suspended until a gesture)
+    if (!audioEngine.unlocked) audioEngine.unlock();
     playGameSfx("advfire", 0.86);
   }
 
@@ -6089,9 +6110,24 @@ function initGalaxyCanvas() {
   }
 
   function spawnLandmine() {
-    const x = playfield.x + playfield.w * (0.25 + Math.random() * 0.5);
-    const y = playfield.y + playfield.h * (0.25 + Math.random() * 0.5);
+    let x = playfield.x + playfield.w * (0.25 + Math.random() * 0.5);
+    let y = playfield.y + playfield.h * (0.25 + Math.random() * 0.5);
     const r = 14;
+    // 2026-06-09: keep the mine clear of the ship (screen center). The 25–75% spawn band
+    // includes the center, so it could land inside the pickup radius and be auto-collected
+    // the instant it appeared (wrong "pickup" blip, then vanishes). Push it outward to a
+    // safe distance, clamped to the playfield.
+    const shipX = sim.width / 2;
+    const shipY = sim.height / 2;
+    const minDist = r + BOMB_PICKUP_RADIUS + 90;
+    let dx = x - shipX;
+    let dy = y - shipY;
+    let dist = Math.hypot(dx, dy);
+    if (dist < minDist) {
+      if (dist < 1) { dx = 1; dy = 0; dist = 1; }
+      x = clamp(shipX + (dx / dist) * minDist, playfield.x + r, playfield.x + playfield.w - r);
+      y = clamp(shipY + (dy / dist) * minDist, playfield.y + r, playfield.y + playfield.h - r);
+    }
     landmine = {
       x,
       y,
@@ -6737,6 +6773,8 @@ function initGalaxyCanvas() {
     if (!destroyTossImpactTarget(target)) return;
     tossed.tossHealth -= impactCost;
     addArcadeScore(150);
+    // 2026-06-09: every thrown-stroid impact rumbles like a big hit, regardless of what it hit
+    cssShake(1.1);
     triggerGameplayHapticImpact(tossed.tossHealth <= 0 ? hapticImpactStyle.Heavy : hapticImpactStyle.Medium);
     if (tossed.tossHealth <= 0) {
       detonateTossedAsteroid(tossed);
@@ -6937,11 +6975,11 @@ function initGalaxyCanvas() {
       triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
       setTimeout(() => triggerGameplayHapticImpact(hapticImpactStyle.Medium), 80);
     } else if (kind === 2) {
-      cssShake(0.55);
+      cssShake(0.9); // 2026-06-09: bumped so every destruction has a visible rumble
       cssFlash("#ffaa44", 0.12, 100);
       triggerGameplayHapticImpact(hapticImpactStyle.Medium);
     } else if (kind === 1) {
-      cssShake(0.2);
+      cssShake(0.6); // 2026-06-09: was 0.2 (≈0.8px, invisible); now a noticeable pop
       cssFlash("#ffffff", 0.05, 60);
       triggerGameplayHapticImpact(hapticImpactStyle.Light);
     }
@@ -6992,8 +7030,9 @@ function initGalaxyCanvas() {
     );
     if (wasKind === 1) {
       cssFlash(_levelPrimaryColor, 0.09, 55);
-      playGameSfx("smallblast", 1.0);
-      setTimeout(() => { playGameSfx("crack", 1.0); playParticleCrackle(); }, 50);
+      // FIXED 2026-06-09: route through HTML Audio on iOS WebKit — WebAudio buffers can fail silently
+      playGameSfx("smallblast", 1.0, { forceHtmlOnIOS: true });
+      setTimeout(() => { playGameSfx("crack", 1.0, { forceHtmlOnIOS: true }); playParticleCrackle(); }, 50);
     } else {
       if (wasKind === 2) playGameSfx("crush", 1.08);
       playParticleCrackle();
@@ -7025,7 +7064,7 @@ function initGalaxyCanvas() {
     }
   }
 
-  function vaporizeAsteroidByIndex(targetIndex) {
+  function vaporizeAsteroidByIndex(targetIndex, suppressBoom = false) {
     const a = removeAsteroidAt(targetIndex);
     if (!a) return;
     const levelNum = ARCADE_LEVELS[currentLevelIndex]?.level || 1;
@@ -7036,13 +7075,17 @@ function initGalaxyCanvas() {
     trackKillStreak();
     spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1, 1, a.kind, a.spriteKey);
     triggerAsteroidSizeFeedback(a.kind);
-    const baseBoomVol = bigBlast ? 0.9 : mediumBlast ? 0.9 : 0.76;
-    const minBoomRatio = bigBlast ? 0.62 : mediumBlast ? 0.82 : 0.9;
-    playAsteroidExplosionBoom(
-      a.kind,
-      boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }),
-      0.92 + Math.random() * 0.14,
-    );
+    // 2026-06-09: plasma net suppresses per-asteroid booms so the single basicb_explo blast
+    // isn't drowned out / dropped by the native frame-budget behind a wall of explosion sounds.
+    if (!suppressBoom) {
+      const baseBoomVol = bigBlast ? 0.9 : mediumBlast ? 0.9 : 0.76;
+      const minBoomRatio = bigBlast ? 0.62 : mediumBlast ? 0.82 : 0.9;
+      playAsteroidExplosionBoom(
+        a.kind,
+        boomStackVolume(baseBoomVol, { minRatio: minBoomRatio }),
+        0.92 + Math.random() * 0.14,
+      );
+    }
     if (isLevel10) {
       triggerLevel10AsteroidFlash(bigBlast);
       if (bigBlast) {
@@ -7168,6 +7211,9 @@ function initGalaxyCanvas() {
       function fireRechargeComm() {
         // FIXED 2026-06-08: bail if UFO kill reset cooldownUntil to 0 after this was scheduled
         if (plasmaCage.cooldownUntil <= 0) return;
+        // FIX 2026-06-09: bail if the cage is mid-gesture or was re-depleted by a new
+        // plasma net blast after this callback was scheduled — avoids a false "recharged" VO.
+        if (plasmaCage.active || performance.now() < plasmaCage.cooldownUntil) return;
         const ticker = document.getElementById("commanderTicker");
         const isActive = ticker?.classList.contains("ticker-visible");
         if (isActive) {
@@ -7197,7 +7243,7 @@ function initGalaxyCanvas() {
       }
     }
     for (let i = toDestroy.length - 1; i >= 0; i -= 1) {
-      vaporizeAsteroidByIndex(toDestroy[i]);
+      vaporizeAsteroidByIndex(toDestroy[i], true); // suppressBoom: plasma uses one basicb_explo blast
     }
     plasmaKillPositions.forEach((pos) => {
       for (let p = 0; p < 12; p += 1) {
@@ -7234,11 +7280,18 @@ function initGalaxyCanvas() {
       const destroyedCount = destroyAsteroidsInPlasmaCage(rect);
       window.pixiRenderer?.triggerPlasmaRectFlash?.();
       const fireKey = destroyedCount > 0 ? resolveGameSfxKey("plasma_fire", "ufo_destroy") : "";
-      if (fireKey) playGameSfx(fireKey, 0.92);
-      playGameSfx("basicb_explo", 1.62);
+      // FIXED 2026-06-09: forceHtmlOnIOS covers iOS Safari; `important` bypasses the native
+      // frame-budget so the blast isn't dropped behind the asteroid booms on the native app.
+      // The blast only fires when asteroids were actually caught (otherwise a charged release
+      // over empty space stays silent).
+      if (destroyedCount > 0) {
+        if (fireKey) playGameSfx(fireKey, 0.92, { forceHtmlOnIOS: true, important: true });
+        playGameSfx("basicb_explo", 1.62, { forceHtmlOnIOS: true, important: true });
+      }
+      // 2026-06-09: any plasma kill rumbles; bigger nets shake harder
+      if (destroyedCount >= 1) cssShake(Math.min(1.3, 0.7 + destroyedCount * 0.12));
       if (destroyedCount >= 3) {
         cssFlash("#00ffd1", Math.min(0.35, 0.1 + destroyedCount * 0.04), 200);
-        if (destroyedCount >= 5) cssShake(0.8);
       }
       if (destroyedCount >= 2) {
         cssStatic(450);
@@ -7592,7 +7645,7 @@ function initGalaxyCanvas() {
       landmine.playerArmedAt = now;
       playGameSfx("landmine_arm", 1.0);
       playGameSfx("arm_bomb", 0.8);
-      startDangerLoop();
+      // startDangerLoop(); // 2026-06-09: danger_loop silenced
       commBoxController.queueVO({
         audioSrc: commBoxController.commVoSrc(
           commBoxController.pickFromPool("detonate", commBoxController.POOL_DETONATE),
@@ -7633,12 +7686,13 @@ function initGalaxyCanvas() {
     playGameSfx("bigbang", 1.62);
   }
 
-  function detonateInventoryBomb() {
+  function detonateInventoryBomb(aimX, aimY) {
     if (playerBombInventory <= 0) return;
     playerBombInventory--;
     updateHudBombInventory();
-    const x = sim.width / 2;
-    const y = sim.height / 2;
+    // 2026-06-09: deploy at the aimed tap point (falls back to center if none given)
+    const x = Number.isFinite(aimX) ? aimX : sim.width / 2;
+    const y = Number.isFinite(aimY) ? aimY : sim.height / 2;
     spawnBombShrapnel(x, y);
     window.pixiRenderer?.triggerBombDetonation?.(x, y, 1050);
     addWarpRing(x, y, "rgba(255,90,90,1)");
@@ -7706,6 +7760,10 @@ function initGalaxyCanvas() {
     landmine = null;
     stopDangerLoop();
     landmineSpawnedThisLevel = false;
+    // 2026-06-09: clear bomb powerup + aim state on level transitions / menu exit
+    bombPowerup = null;
+    bombAimMode = false;
+    hudBombBtn?.classList.remove("hudBombBtn--aiming");
     stopUfoDrone();
     ufo = null;
     arcadeUfoSpawnAt = 0;
@@ -7713,6 +7771,7 @@ function initGalaxyCanvas() {
     plasmaCage.releaseFx = null;
     plasmaCage.rechargeSoundPlayed = true;
     laserBeams.length = 0;
+    tapBlasts.length = 0;
     _bombShrapnel.length = 0;
     stopPlasmaChargeSound();
     stopWarningState();
@@ -7742,6 +7801,8 @@ function initGalaxyCanvas() {
       .lsr-hint.in{animation:lsrRowIn 250ms ease forwards,lsrBlink 1.2s 250ms ease-in-out infinite;}
       .score-tick-flash{text-shadow:0 0 12px #00ffcc,0 0 24px #00ffcc;transition:text-shadow 80ms ease;}
       .score-final-flash{text-shadow:0 0 30px #ffffff,0 0 60px #00ffcc;transition:text-shadow 300ms ease;}
+      .hudBombBtn--aiming{box-shadow:0 0 12px #00ffcc,0 0 24px #00ffcc;border-color:#00ffcc;animation:pulse-aim 0.6s ease-in-out infinite alternate;}
+      @keyframes pulse-aim{from{box-shadow:0 0 8px #00ffcc;}to{box-shadow:0 0 20px #00ffcc,0 0 40px #00ffaa;}}
     `;
     document.head.appendChild(s);
   }
@@ -7773,6 +7834,28 @@ function initGalaxyCanvas() {
     overlay.appendChild(panel);
     (galaxyView || document.body).appendChild(overlay);
 
+    // FIX 2026-06-09: make sure a UFO doesn't linger behind the scorecard
+    if (ufo) {
+      stopUfoDrone();
+      ufo = null;
+    }
+
+    // FIX 2026-06-09: duck music to 0.75 while the scorecard is up, restore on dismiss
+    const scorecardMusicGainBefore = audioEngine.musicGain?.gain?.value ?? MUSIC_MAX_GAIN;
+    const scorecardMusicHtmlVolBefore = audioEngine.currentMusicHtml?.node?.volume ?? MUSIC_MAX_GAIN;
+    function rampScorecardMusic(gainTarget, htmlVol) {
+      if (audioEngine.musicGain && audioEngine.ctx) {
+        const t = audioEngine.ctx.currentTime;
+        audioEngine.musicGain.gain.cancelScheduledValues(t);
+        audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, t);
+        audioEngine.musicGain.gain.linearRampToValueAtTime(gainTarget, t + 0.25);
+      }
+      if (audioEngine.currentMusicHtml?.node) {
+        audioEngine.currentMusicHtml.node.volume = htmlVol;
+      }
+    }
+    rampScorecardMusic(0.75, 0.75);
+
     const shownAt = performance.now();
     let dismissed = false;
     let lastTapAt = 0;
@@ -7792,6 +7875,8 @@ function initGalaxyCanvas() {
     function dismiss() {
       if (dismissed) return;
       dismissed = true;
+      // FIX 2026-06-09: restore music to its pre-scorecard level as gameplay resumes
+      rampScorecardMusic(scorecardMusicGainBefore, scorecardMusicHtmlVolBefore);
       stopWriteLoop();
       if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
       tallyTimers.forEach(t => clearTimeout(t));
@@ -8171,11 +8256,18 @@ function initGalaxyCanvas() {
   }
 
   function startArcadeNew() {
+    tapBlasts = [];
     clearArcadeProgress();
     setSavedArcadeLevel(1);
     arcadeLives = 0;
     arcadeScore = 0;
     playerBombInventory = 0;
+    // 2026-06-09: reset bomb powerup state
+    bombPowerup = null;
+    bombAimMode = false;
+    hudBombBtn?.classList.remove("hudBombBtn--aiming");
+    nextBombPowerupAt = performance.now() + BOMB_POWERUP_INTERVAL_MIN
+      + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
     renderLives();
     renderScore();
     updateHudBombInventory();
@@ -8474,6 +8566,23 @@ function initGalaxyCanvas() {
           spawnLandmine();
           landmineSpawnedThisLevel = true;
         }
+
+        // 2026-06-09: periodically spawn a collectible bomb powerup
+        if (!bombPowerup && now >= nextBombPowerupAt) {
+          bombPowerup = {
+            x: 80 + Math.random() * Math.max(1, sim.width - 160),
+            y: 80 + Math.random() * Math.max(1, sim.height - 160),
+            r: 22,
+            spawnedAt: now,
+          };
+          playGameSfx("blip", 0.8);
+          nextBombPowerupAt = now + BOMB_POWERUP_INTERVAL_MIN
+            + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
+        }
+        // expire after its lifetime
+        if (bombPowerup && now - bombPowerup.spawnedAt > BOMB_POWERUP_LIFETIME_MS) {
+          bombPowerup = null;
+        }
       }
 
       if (!ufo && arcadeUfoSpawnAt && now >= arcadeUfoSpawnAt && now >= arcadePausedUntil) {
@@ -8571,21 +8680,6 @@ function initGalaxyCanvas() {
         applyMotionHealth(landmine, now);
         collideLandmineWithAsteroids();
 
-        // Pickup: player ship flies over a spawned mine with room in inventory
-        if (landmine && landmine.phase === "spawned" && playerBombInventory < MAX_BOMB_INVENTORY) {
-          const shipX = sim.width / 2;
-          const shipY = sim.height / 2;
-          if (Math.hypot(landmine.x - shipX, landmine.y - shipY) <= landmine.r + BOMB_PICKUP_RADIUS) {
-            playerBombInventory++;
-            landmine = null;
-            stopDangerLoop();
-            updateHudBombInventory();
-            playGameSfx("life_gain", 0.72);
-            playGameSfx("blip", 0.7);
-            addWarpRing(shipX, shipY, "rgba(124,255,91,1)");
-          }
-        }
-
         if (landmine && landmine.phase === "spawned" && now - landmine.spawnedAt >= 10000) {
           landmine.phase = "armed";
           landmine.armedAt = now;
@@ -8598,7 +8692,7 @@ function initGalaxyCanvas() {
             event: "landmine_armed",
             priority: "high",
           });
-          startDangerLoop();
+          // startDangerLoop(); // 2026-06-09: danger_loop silenced
         }
         if (landmine && landmine.phase === "armed" && now - landmine.armedAt >= 8000) {
           explodeLandmine({ halfRadius: true });
@@ -8693,12 +8787,127 @@ function initGalaxyCanvas() {
     draw(now);
   }
 
+  // 2026-06-09: localized X blast that replaces the laser on iOS touch taps.
+  function drawTapBlast(tctx, x, y, life) {
+    // Layer 1 — radial flash (only while bright)
+    if (life > 0.6) {
+      const flashAlpha = (life - 0.6) / 0.4;
+      const flashR = (1 - life) * 40 + 6;
+      const grad = tctx.createRadialGradient(x, y, 0, x, y, flashR);
+      grad.addColorStop(0, `rgba(160,255,230,${(flashAlpha * 0.9).toFixed(3)})`);
+      grad.addColorStop(0.5, `rgba(0,255,200,${(flashAlpha * 0.4).toFixed(3)})`);
+      grad.addColorStop(1, "rgba(0,200,160,0)");
+      tctx.save();
+      tctx.fillStyle = grad;
+      tctx.beginPath();
+      tctx.arc(x, y, flashR, 0, Math.PI * 2);
+      tctx.fill();
+      tctx.restore();
+    }
+
+    // Layer 2 — ghost X (outer, expands, low opacity)
+    const ghostSize = 10 + (1 - life) * 14;
+    tctx.save();
+    tctx.globalAlpha = life * 0.18;
+    tctx.strokeStyle = "#00ffcc";
+    tctx.lineWidth = 6;
+    tctx.beginPath();
+    tctx.moveTo(x - ghostSize, y - ghostSize);
+    tctx.lineTo(x + ghostSize, y + ghostSize);
+    tctx.moveTo(x + ghostSize, y - ghostSize);
+    tctx.lineTo(x - ghostSize, y + ghostSize);
+    tctx.stroke();
+    tctx.restore();
+
+    // Layer 3 — main X (crisp teal)
+    const size = 8 + (1 - life) * 5;
+    tctx.save();
+    tctx.globalAlpha = life * 0.95;
+    tctx.strokeStyle = "#00ffcc";
+    tctx.lineWidth = 2.5;
+    tctx.lineCap = "round";
+    tctx.beginPath();
+    tctx.moveTo(x - size, y - size);
+    tctx.lineTo(x + size, y + size);
+    tctx.moveTo(x + size, y - size);
+    tctx.lineTo(x - size, y + size);
+    tctx.stroke();
+    tctx.restore();
+
+    // Layer 4 — tip sparks at the 4 arm tips of the main X
+    const sparkR = Math.max(0, 1.8 * life);
+    tctx.save();
+    tctx.globalAlpha = life * 0.9;
+    tctx.fillStyle = "#ffffff";
+    const tips = [
+      [x - size, y - size],
+      [x + size, y - size],
+      [x - size, y + size],
+      [x + size, y + size],
+    ];
+    for (let i = 0; i < tips.length; i += 1) {
+      tctx.beginPath();
+      tctx.arc(tips[i][0], tips[i][1], sparkR, 0, Math.PI * 2);
+      tctx.fill();
+    }
+    tctx.restore();
+  }
+
+  // Renders + advances active tap blasts. Called once per frame (only one render
+  // path runs per frame). Targets the ufoFx overlay so it shows above the PIXI layer.
+  function drawAndStepTapBlasts(tctx) {
+    if (!tctx || tapBlasts.length === 0) return;
+    for (let i = tapBlasts.length - 1; i >= 0; i -= 1) {
+      const b = tapBlasts[i];
+      drawTapBlast(tctx, b.x, b.y, b.life);
+      b.life -= 0.055;
+      if (b.life <= 0) tapBlasts.splice(i, 1);
+    }
+  }
+
+  // 2026-06-09: draw the collectible bomb powerup. Rendered on the ufoFx overlay (like the
+  // tap blasts) so it shows above the PIXI layer during gameplay. Expiry is handled in update().
+  function drawBombPowerup(tctx) {
+    if (!tctx || !bombPowerup) return;
+    const nowP = performance.now();
+    const remaining = BOMB_POWERUP_LIFETIME_MS - (nowP - bombPowerup.spawnedAt);
+    const opacity = remaining < 500 ? Math.max(0, remaining / 500) : 1.0;
+    const pulse = 0.95 + 0.05 * Math.sin(nowP / 300);
+    tctx.save();
+    tctx.globalAlpha = opacity;
+    tctx.translate(bombPowerup.x, bombPowerup.y);
+    tctx.scale(pulse, pulse);
+    // outer glow ring
+    tctx.beginPath();
+    tctx.arc(0, 0, bombPowerup.r, 0, Math.PI * 2);
+    tctx.strokeStyle = "#00ffcc";
+    tctx.lineWidth = 2;
+    tctx.shadowColor = "#00ffcc";
+    tctx.shadowBlur = 12;
+    tctx.stroke();
+    // inner fill
+    tctx.beginPath();
+    tctx.arc(0, 0, bombPowerup.r - 3, 0, Math.PI * 2);
+    tctx.fillStyle = "rgba(0,30,30,0.7)";
+    tctx.fill();
+    // bomb glyph
+    tctx.shadowBlur = 0;
+    tctx.font = "18px sans-serif";
+    tctx.textAlign = "center";
+    tctx.textBaseline = "middle";
+    tctx.fillStyle = "#ffffff";
+    tctx.fillText("\u{1F4A3}", 0, 0);
+    tctx.restore();
+  }
+
   function draw(now) {
     drawTimerPerimeterOverlay(now);
     if ((engineMode === "arcade" || engineMode === "practice") && window.pixiRenderer?.draw(sim, laserBeams, canvasFlash, ufo, plasmaCage, landmine, _bombShrapnel, now)) {
       setPlasmaOverlayVisible(stroidToss.active);
       if (stroidToss.active) drawPlasmaOverlay(now);
       drawUfoFxOverlay(ctx);
+      drawBombPowerup(ufoFxCtx || ctx);
+      drawAndStepTapBlasts(ufoFxCtx || ctx);
       return;
     }
     setPlasmaOverlayVisible(true);
@@ -9013,6 +9222,8 @@ function initGalaxyCanvas() {
       ctx.restore();
     }
     drawUfoFxOverlay(ctx);
+    drawBombPowerup(ufoFxCtx || ctx);
+    drawAndStepTapBlasts(ufoFxCtx || ctx);
 
     const particleLimit = _frameBudgetExceeded ? Math.min(40, sim.particles.length) : sim.particles.length;
     for (let i = 0; i < particleLimit; i += 1) {
@@ -9091,15 +9302,44 @@ function initGalaxyCanvas() {
     practiceTapMarker = { x, y, t: performance.now() };
   }
 
-  function handleArcadeTap(x, y, now) {
+  function handleArcadeTap(x, y, now, isTouch = false) {
+    // 2026-06-09: bomb deployment (two-tap aim) consumes the tap — no laser/fire.
+    if (bombAimMode) {
+      detonateInventoryBomb(x, y); // decrements inventory + updates HUD internally
+      bombAimMode = false;
+      hudBombBtn?.classList.remove("hudBombBtn--aiming");
+      return;
+    }
+    // 2026-06-09: tap to collect the bomb powerup — also consumes the tap.
+    if (bombPowerup) {
+      const dx = x - bombPowerup.x;
+      const dy = y - bombPowerup.y;
+      if (Math.hypot(dx, dy) <= bombPowerup.r * 1.8) {
+        bombPowerup = null;
+        if (playerBombInventory < MAX_BOMB_INVENTORY) {
+          playerBombInventory++;
+          updateHudBombInventory();
+          playGameSfx("blip", 0.9);
+          playGameSfx("life_gain", 0.7);
+          cssFlash("#00ffcc", 0.15, 200);
+        }
+        return;
+      }
+    }
     playPlayerFireSound();
-    laserBeams.push({
-      x1: sim.width / 2,
-      y1: sim.height / 2,
-      x2: x,
-      y2: y,
-      startedAt: now,
-    });
+    // 2026-06-09: iOS touch fires a localized X blast instead of the teal laser.
+    // Desktop/mouse keeps the laser. Hit detection below is unchanged either way.
+    if (isIOSWebKit && isTouch) {
+      tapBlasts.push({ x, y, life: 1.0 });
+    } else {
+      laserBeams.push({
+        x1: sim.width / 2,
+        y1: sim.height / 2,
+        x2: x,
+        y2: y,
+        startedAt: now,
+      });
+    }
     shotsFired += 1;
     if (landmine && isPointOnLandmine(x, y)) {
       triggerCrosshairFire();
@@ -9188,6 +9428,8 @@ function initGalaxyCanvas() {
       mode,
       canceled: false,
       pointerId: event.pointerId ?? null,
+      // 2026-06-09: track touch vs mouse so iOS taps can use the X blast
+      isTouch: event.pointerType === "touch" || event.type === "touchstart",
     };
     if (typeof galaxyPlayCanvas.setPointerCapture === "function" && event.pointerId != null) {
       try {
@@ -9228,6 +9470,8 @@ function initGalaxyCanvas() {
   function onGalaxyPointerUp(event) {
     if (!galaxyGesture) return;
     const now = performance.now();
+    // 2026-06-09: capture before the gesture is cleared so taps know the input type
+    const gestureIsTouch = galaxyGesture.isTouch === true;
     const point = getPointerWorld(event);
     if (Number.isFinite(point.x) && Number.isFinite(point.y)) {
       galaxyGesture.current = point;
@@ -9263,7 +9507,7 @@ function initGalaxyCanvas() {
       galaxyGesture = null;
       if (!didLaunch && now - sim.lastTapAt >= 55) {
         sim.lastTapAt = now;
-        handleArcadeTap(tapPoint.x, tapPoint.y, now);
+        handleArcadeTap(tapPoint.x, tapPoint.y, now, gestureIsTouch);
       } else {
         draw(now);
       }
@@ -9278,7 +9522,7 @@ function initGalaxyCanvas() {
     if (engineMode === "practice") {
       handlePracticeTap(tapPoint.x, tapPoint.y, now);
     } else if (engineMode === "arcade") {
-      handleArcadeTap(tapPoint.x, tapPoint.y, now);
+      handleArcadeTap(tapPoint.x, tapPoint.y, now, gestureIsTouch);
     }
   }
 
@@ -9370,8 +9614,21 @@ function initGalaxyCanvas() {
   }
   // FIXED 2026-06-08: auto-pause on app switch; music to 10%; do not auto-resume
   let _bgMusicGainBeforePause = MUSIC_MAX_GAIN;
+  let _wasLoopRunningOnHide = false;
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
+      // 2026-06-09: clear any in-progress plasma net (a mid-drag gesture left a stuck cage
+      // on screen on return) and remember whether the loop was actually running.
+      if (plasmaCage.active) releasePlasmaCage(performance.now());
+      setPlasmaOverlayVisible(false);
+      _wasLoopRunningOnHide = galaxyRunning;
+      // 2026-06-09: freeze the level/landmine countdowns while backgrounded so they
+      // don't drain in real time and desync the game on return.
+      if (engineMode === "arcade" && arcadeActive) {
+        const nowP = performance.now();
+        pausedLevelRemainingMs = Math.max(0, levelEndsAt - nowP);
+        pausedLandmineRemainingMs = getLandmineRemainingMs(nowP);
+      }
       stopGalaxyLoop();
       // Dim music to 10% so audio doesn't blare in background
       _bgMusicGainBeforePause = audioEngine.musicGain?.gain?.value ?? MUSIC_MAX_GAIN;
@@ -9385,9 +9642,10 @@ function initGalaxyCanvas() {
         audioEngine.currentMusicHtml.node.volume = 0.1;
       }
     } else if (!galaxyView.hidden) {
+      setPlasmaOverlayVisible(false); // safety: never return with a stuck cage overlay
       resizeGalaxyCanvas();
       computePlayfield();
-      // Restore music volume — game loop remains stopped; user must resume manually
+      // Restore music volume
       if (audioEngine.musicGain && audioEngine.ctx) {
         const now = audioEngine.ctx.currentTime;
         audioEngine.musicGain.gain.cancelScheduledValues(now);
@@ -9398,6 +9656,21 @@ function initGalaxyCanvas() {
         audioEngine.currentMusicHtml.node.volume = _bgMusicGainBeforePause;
       }
       resumeBackgroundMusic();
+      // 2026-06-09: cleanly resume gameplay. stopGalaxyLoop() destroyed PIXI and froze the
+      // loop; resizeGalaxyCanvas() above re-inits PIXI. Restore timers, drop any leftover
+      // gesture, and restart the loop — but only if it was running and the user hadn't
+      // already paused to the menu (engineMode would be "menu" in that case).
+      if (engineMode === "arcade" && arcadeActive) {
+        const nowP = performance.now();
+        levelEndsAt = nowP + pausedLevelRemainingMs;
+        restoreLandmineTimer(pausedLandmineRemainingMs, nowP);
+        stopPlasmaChargeSound();
+        resetPlasmaCageGesture();
+        plasmaCage.releaseFx = null;
+        cancelStroidToss();
+        galaxyGesture = null;
+        if (_wasLoopRunningOnHide && !galaxyRunning) startGalaxyLoop();
+      }
     }
   });
 
@@ -9455,6 +9728,19 @@ function initGalaxyCanvas() {
     detonateInventoryBomb() {
       if (!arcadeActive || engineMode !== "arcade") return;
       detonateInventoryBomb();
+    },
+    // 2026-06-09: HUD bomb button toggles aim mode; the next canvas tap deploys at that point.
+    toggleBombAim() {
+      if (!arcadeActive || engineMode !== "arcade") return;
+      ensureLsrStyles(); // guarantees the .hudBombBtn--aiming glow CSS is present
+      if (playerBombInventory <= 0) {
+        bombAimMode = false;
+        hudBombBtn?.classList.remove("hudBombBtn--aiming");
+        return;
+      }
+      bombAimMode = !bombAimMode;
+      hudBombBtn?.classList.toggle("hudBombBtn--aiming", bombAimMode);
+      if (bombAimMode) playGameSfx("blip", 0.6);
     },
     isArcade() {
       return engineMode === "arcade";

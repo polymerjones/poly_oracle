@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-09 17:38";
+const BUILD_TS = "2026-06-10 10:03";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -427,7 +427,7 @@ const LANDMINE_FUSE_MS = 8000; // 2026-06-09: auto-armed ("armed" phase) countdo
 const BOMB_POWERUP_INTERVAL_MIN = 25000;
 const BOMB_POWERUP_INTERVAL_MAX = 35000;
 const BOMB_POWERUP_LIFETIME_MS = 10000;
-const MUSIC_MAX_GAIN = 0.9;
+const MUSIC_MAX_GAIN = 1.0; // 2026-06-10: was 0.9, bumped to full
 const MUSIC = {
   L1_3:    "assets/music/E1L1-3.mp3",          // levels 1-2
   // L4_7: "assets/music/E1L4-7.mp3",          // retired - replaced by phonk series
@@ -5063,6 +5063,7 @@ function initGalaxyCanvas() {
     startY: 0,
     lastHapticAt: 0,
     lastSparkAt: 0,
+    samples: [], // 2026-06-10: recent pointer positions {x,y,t} — throw follows the flick
   };
 
   function ensureFpsOverlay() {
@@ -5184,6 +5185,9 @@ function initGalaxyCanvas() {
   let spawnedTotal = 0;
   let maxOnScreen = 12;
   let landmine = null;
+  // 2026-06-10: player-placed bombs — separate from the single level-scheduled landmine so
+  // both can coexist. Same entity shape/phases; updated/drawn/exploded by the shared helpers.
+  let placedBombs = [];
   let landmineSpawnedThisLevel = false;
   let playerBombInventory = 0;
   // 2026-06-09: bomb powerup — tap to collect, two-tap (aim) to deploy
@@ -5200,6 +5204,7 @@ function initGalaxyCanvas() {
   let _streakCount = 0;
   let _streakTimer = null;
   let _praiseCount = 0;
+  let _level1ChatterToggle = false; // 2026-06-10: halves praise VO frequency on level 1
   let _lastPraiseAt = 0;
   let lastNiceShotVoAt = 0;
   let lastHypeVoAt = 0;
@@ -6099,6 +6104,9 @@ function initGalaxyCanvas() {
     a.lastX = x;
     a.lastY = y;
     a.lastMoveAt = performance.now();
+    // 2026-06-10: spawn stamp — bomb shrapnel only damages asteroids that existed when the
+    // blast detonated (shrapnel pieces linger ~2s and were killing later spawns).
+    a.spawnedAtMs = performance.now();
     sim.asteroids.push(a);
     if (warp) {
       playWarpSound();
@@ -6126,7 +6134,16 @@ function initGalaxyCanvas() {
       x = clamp(shipX + (dx / dist) * minDist, playfield.x + r, playfield.x + playfield.w - r);
       y = clamp(shipY + (dy / dist) * minDist, playfield.y + r, playfield.y + playfield.h - r);
     }
-    landmine = {
+    landmine = createMineEntity(x, y);
+    commBoxController.reactTo("landmine");
+    playGameSfx("blip1", 0.8, { rate: 1.05 });
+    addWarpRing(x, y, "rgba(124,255,91,1)");
+  }
+
+  // 2026-06-10: shared landmine entity shape — used by level mines and player-placed bombs.
+  function createMineEntity(x, y) {
+    const r = 14;
+    return {
       x,
       y,
       r,
@@ -6141,13 +6158,27 @@ function initGalaxyCanvas() {
       lastY: y,
       lastMoveAt: performance.now(),
     };
-    commBoxController.reactTo("landmine");
-    playGameSfx("blip1", 0.8, { rate: 1.05 });
-    addWarpRing(x, y, "rgba(124,255,91,1)");
+  }
+
+  // 2026-06-10: bomb deploy places an unarmed landmine at the tap point (was an instant blast).
+  function placeBombFromInventory(x, y) {
+    if (playerBombInventory <= 0) return false;
+    if (placedBombs.length >= MAX_BOMB_INVENTORY) return false;
+    const r = 14;
+    const px = clamp(x, playfield.x + r, playfield.x + playfield.w - r);
+    const py = clamp(y, playfield.y + r, playfield.y + playfield.h - r);
+    placedBombs.push(createMineEntity(px, py));
+    playerBombInventory--;
+    updateHudBombInventory();
+    playGameSfx("blip1", 0.85);
+    addWarpRing(px, py, "rgba(124,255,91,1)");
+    return true;
   }
 
   function levelHasLandmine(levelNum) {
-    return levelNum === 1 || levelNum === 3 || levelNum === 5 || levelNum === 8;
+    // 2026-06-10: progressive introduction — L1 clean, L2 first landmine, L3 UFOs, L4 powerups.
+    if (levelNum < 2) return false;
+    return levelNum === 2 || levelNum === 3 || levelNum === 5 || levelNum === 8;
   }
 
   function setupUfoSpawnForLevel(cfg) {
@@ -6155,7 +6186,9 @@ function initGalaxyCanvas() {
     stopUfoDrone();
     ufo = null;
     if (engineMode !== "arcade") return;
-    // Spawn one UFO 10s into every arcade level.
+    // 2026-06-10: progressive introduction — no UFOs before level 3.
+    if ((cfg?.level || 1) < 3) return;
+    // Spawn one UFO 10s into the level.
     arcadeUfoSpawnAt = performance.now() + 10000;
   }
 
@@ -6513,13 +6546,17 @@ function initGalaxyCanvas() {
     }
   }
 
-  function collideLandmineWithAsteroids() {
-    if (!landmine) return;
+  function collideMineWithAsteroids(mine) {
+    if (!mine) return;
     for (let i = 0; i < sim.asteroids.length; i += 1) {
-      resolveCircleCollision(landmine, sim.asteroids[i], 0.9, false);
+      resolveCircleCollision(mine, sim.asteroids[i], 0.9, false);
     }
-    wrapEntity(landmine);
-    clampSpeed(landmine);
+    wrapEntity(mine);
+    clampSpeed(mine);
+  }
+
+  function collideLandmineWithAsteroids() {
+    collideMineWithAsteroids(landmine);
   }
 
   function findHitAsteroidIndex(x, y) {
@@ -6557,6 +6594,7 @@ function initGalaxyCanvas() {
     stroidToss.startY = 0;
     stroidToss.lastHapticAt = 0;
     stroidToss.lastSparkAt = 0;
+    stroidToss.samples.length = 0;
   }
 
   function startStroidToss(index, point, pointerId, now) {
@@ -6577,6 +6615,8 @@ function initGalaxyCanvas() {
     stroidToss.startY = asteroid.y;
     stroidToss.lastHapticAt = now;
     stroidToss.lastSparkAt = 0;
+    stroidToss.samples.length = 0;
+    stroidToss.samples.push({ x: point.x, y: point.y, t: performance.now() });
     asteroid._stroidHeld = true;
     asteroid.tossed = false;
     asteroid.tossedAt = 0;
@@ -6603,6 +6643,9 @@ function initGalaxyCanvas() {
     if (!asteroid) return;
     stroidToss.dragX = point.x;
     stroidToss.dragY = point.y;
+    // 2026-06-10: ring buffer of recent pointer samples for flick-direction throws
+    stroidToss.samples.push({ x: point.x, y: point.y, t: performance.now() });
+    if (stroidToss.samples.length > 8) stroidToss.samples.shift();
     asteroid.vx = 0;
     asteroid.vy = 0;
     const dx = point.x - stroidToss.startX;
@@ -6651,18 +6694,24 @@ function initGalaxyCanvas() {
   function launchStroidToss(now) {
     const asteroid = getStroidTossAsteroid();
     if (!asteroid) return false;
-    const dx = stroidToss.dragX - stroidToss.grabX;
-    const dy = stroidToss.dragY - stroidToss.grabY;
-    let len = Math.hypot(dx, dy);
-    let nx = len > 0.1 ? dx / len : 1;
-    let ny = len > 0.1 ? dy / len : 0;
-    if (len < 12) {
-      const fallback = Math.hypot(asteroid._preTossVx || 0, asteroid._preTossVy || 0);
-      if (fallback > 0.1) {
-        nx = asteroid._preTossVx / fallback;
-        ny = asteroid._preTossVy / fallback;
+    // 2026-06-10: throw direction comes from the LAST ≤120ms of pointer movement, not the
+    // total drag delta — a fast flick that curved or ended near the grab point used to throw
+    // backwards (the old <12px fallback even reused the asteroid's random pre-grab drift).
+    const releaseT = performance.now();
+    let ref = null;
+    for (let i = 0; i < stroidToss.samples.length; i += 1) {
+      if (releaseT - stroidToss.samples[i].t <= 120) {
+        ref = stroidToss.samples[i]; // oldest sample within the window
+        break;
       }
     }
+    if (!ref) return false; // no recent movement — drop the stroid in place
+    const dx = stroidToss.dragX - ref.x;
+    const dy = stroidToss.dragY - ref.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 10) return false; // insufficient flick — drop in place, don't guess a direction
+    const nx = dx / len;
+    const ny = dy / len;
     const speed = STROID_TOSS_MIN_SPEED + Math.random() * (STROID_TOSS_MAX_SPEED - STROID_TOSS_MIN_SPEED);
     asteroid.vx = nx * speed;
     asteroid.vy = ny * speed;
@@ -6768,7 +6817,17 @@ function initGalaxyCanvas() {
     if (!tossed || !target || tossed === target) return;
     const impactCost = getStroidTossImpactCost(target);
     if (!Number.isFinite(tossed.tossHealth)) tossed.tossHealth = 3;
-    if (!destroyTossImpactTarget(target)) return;
+    // 2026-06-10: big/medium targets split into children like a normal blast (kind 3 → kind 2s,
+    // kind 2 → kind 1s) instead of being fully destroyed; only small (kind 1) targets vaporize.
+    if ((target.kind || 1) >= 2) {
+      const idx = sim.asteroids.indexOf(target);
+      if (idx < 0) return;
+      splitAsteroidByIndex(idx);
+      // splitAsteroidByIndex counts an aimed-shot hit; a toss impact isn't one — keep accuracy honest
+      if (engineMode === "arcade") shotsHit = Math.max(0, shotsHit - 1);
+    } else if (!destroyTossImpactTarget(target)) {
+      return;
+    }
     tossed.tossHealth -= impactCost;
     addArcadeScore(150);
     // 2026-06-09: every thrown-stroid impact rumbles like a big hit, regardless of what it hit
@@ -6807,6 +6866,9 @@ function initGalaxyCanvas() {
     for (let i = 0; i < sim.asteroids.length; i += 1) {
       const other = sim.asteroids[i];
       if (!other || other === tossed) continue;
+      // 2026-06-10: 250ms spawn grace — split children appear at the impact point and would
+      // otherwise be re-hit on the next frame, chain-splitting everything instantly.
+      if (other.spawnedAtMs && now - other.spawnedAtMs < 250) continue;
       const dist = Math.hypot(other.x - tossed.x, other.y - tossed.y);
       if (dist <= tossed.r + other.r) {
         handleTossedAsteroidImpact(tossed, other);
@@ -6848,10 +6910,14 @@ function initGalaxyCanvas() {
     updatePracticeDebug();
   }
 
+  function isPointOnMine(mine, x, y) {
+    if (!mine) return false;
+    const d = Math.hypot(mine.x - x, mine.y - y);
+    return d <= mine.r + 10;
+  }
+
   function isPointOnLandmine(x, y) {
-    if (!landmine) return false;
-    const d = Math.hypot(landmine.x - x, landmine.y - y);
-    return d <= landmine.r + 10;
+    return isPointOnMine(landmine, x, y);
   }
 
   function stopDangerLoop() {
@@ -6927,6 +6993,15 @@ function initGalaxyCanvas() {
 
     const now2 = performance.now();
     if (_streakCount >= 4 && now2 - _lastPraiseAt > 6000) {
+      // 2026-06-10: level 1 stays quieter — skip every other praise trigger (~50% less chatter)
+      const _curLevel = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
+      if (_curLevel === 1) {
+        _level1ChatterToggle = !_level1ChatterToggle;
+        if (!_level1ChatterToggle) {
+          _streakCount = 0;
+          return;
+        }
+      }
       _lastPraiseAt = now2;
       _praiseCount++;
 
@@ -7634,20 +7709,21 @@ function initGalaxyCanvas() {
     drawStroidTossOverlay(now);
   }
 
-  function armLandmine() {
-    if (!landmine) return false;
+  // 2026-06-10: shared tap behavior for any mine entity. explodeFn handles removal.
+  function armMineEntity(mine, explodeFn) {
+    if (!mine) return false;
     const now = performance.now();
 
     // 2026-06-09: tapping an already-armed mine (auto-armed red countdown, or player-armed)
     // detonates it immediately rather than re-arming. Only a freshly "spawned" mine arms.
-    if (landmine.phase === "armed" || landmine.phase === "player_armed") {
-      explodeLandmine({ halfRadius: false });
+    if (mine.phase === "armed" || mine.phase === "player_armed") {
+      explodeFn({ halfRadius: false });
       return true;
     }
 
-    if (landmine.phase === "spawned") {
-      landmine.phase = "player_armed";
-      landmine.playerArmedAt = now;
+    if (mine.phase === "spawned") {
+      mine.phase = "player_armed";
+      mine.playerArmedAt = now;
       playGameSfx("landmine_arm", 1.0);
       playGameSfx("arm_bomb", 0.8);
       // startDangerLoop(); // 2026-06-09: danger_loop silenced
@@ -7664,14 +7740,54 @@ function initGalaxyCanvas() {
     return false;
   }
 
-  function explodeLandmine({ halfRadius = false } = {}) {
-    if (!landmine) return;
-    const x = landmine.x;
-    const y = landmine.y;
-    const radius = halfRadius ? 350 : 700;
-    landmine = null;
-    stopDangerLoop();
+  function armLandmine() {
+    return armMineEntity(landmine, (opts) => explodeLandmine(opts));
+  }
 
+  // 2026-06-10: per-frame physics + phase transitions for any mine entity.
+  // Returns true if the mine exploded this frame. explodeFn handles removal.
+  function updateMineEntity(mine, dt, now, explodeFn, { quietArm = false } = {}) {
+    mine.x += mine.vx * (dt / 1000);
+    mine.y += mine.vy * (dt / 1000);
+    wrapEntity(mine);
+    clampSpeed(mine);
+    applyMotionHealth(mine, now);
+    collideMineWithAsteroids(mine);
+
+    if (mine.phase === "spawned" && now - mine.spawnedAt >= 10000) {
+      mine.phase = "armed";
+      mine.armedAt = now;
+      playGameSfx("landmine_arm", 0.96);
+      if (!quietArm) {
+        commBoxController.reactTo("landmine_armed");
+        commBoxController.queueVO({
+          audioSrc: commBoxController.commVoSrc(
+            commBoxController.pickFromPool("landminearmed", commBoxController.POOL_LANDMINE_ARMED),
+          ),
+          event: "landmine_armed",
+          priority: "high",
+        });
+      }
+      // startDangerLoop(); // 2026-06-09: danger_loop silenced
+    }
+    if (mine.phase === "armed" && now - mine.armedAt >= 8000) {
+      explodeFn({ halfRadius: true });
+      return true;
+    }
+    if (mine.phase === "player_armed" && now - mine.playerArmedAt >= 6000) {
+      explodeFn({ halfRadius: false });
+      return true;
+    }
+    return false;
+  }
+
+  // 2026-06-10: shared explosion effects for any mine entity (level landmine or placed bomb).
+  // Removal from its container is the caller's job.
+  function explodeMineEntity(mine, { halfRadius = false } = {}) {
+    if (!mine) return;
+    const x = mine.x;
+    const y = mine.y;
+    const radius = halfRadius ? 350 : 700;
     spawnBombShrapnel(x, y);
     window.pixiRenderer?.triggerBombDetonation?.(x, y, radius);
     addWarpRing(x, y, "rgba(255,90,90,1)");
@@ -7684,6 +7800,20 @@ function initGalaxyCanvas() {
     setTimeout(() => window.galaxyBackground?.setHectic(false), 3000);
     playBigBoomSound();
     playGameSfx("bigbang", 1.62);
+  }
+
+  function explodeLandmine(opts = {}) {
+    if (!landmine) return;
+    const mine = landmine;
+    landmine = null;
+    stopDangerLoop();
+    explodeMineEntity(mine, opts);
+  }
+
+  function explodePlacedBomb(mine, opts = {}) {
+    const i = placedBombs.indexOf(mine);
+    if (i >= 0) placedBombs.splice(i, 1);
+    explodeMineEntity(mine, opts);
   }
 
   function detonateInventoryBomb(aimX, aimY) {
@@ -7758,6 +7888,7 @@ function initGalaxyCanvas() {
     sim.lightningRings.length = 0;
     sim.shooting = null;
     landmine = null;
+    placedBombs.length = 0; // 2026-06-10: placed bombs don't carry across levels/menu
     stopDangerLoop();
     landmineSpawnedThisLevel = false;
     // 2026-06-09: clear bomb powerup + aim state on level transitions / menu exit
@@ -8138,6 +8269,7 @@ function initGalaxyCanvas() {
     levelEndsAt = levelRunStartAt + levelDurationMs;
     nextSpawnAt = cfg.spawnEveryMs > 0 ? levelRunStartAt + cfg.spawnEveryMs : Infinity;
     landmine = null;
+    placedBombs.length = 0; // 2026-06-10: placed bombs don't carry across levels
     stopDangerLoop();
     landmineSpawnedThisLevel = false;
     ufo = null;
@@ -8568,10 +8700,12 @@ function initGalaxyCanvas() {
         }
 
         // 2026-06-09: periodically spawn a collectible bomb powerup
-        if (!bombPowerup && now >= nextBombPowerupAt) {
+        // 2026-06-10: progressive introduction — no powerups before level 4. Spawn zone
+        // keeps clear of the top HUD (140px) and the commander portrait/comm box (160px).
+        if (!bombPowerup && cfg.level >= 4 && now >= nextBombPowerupAt) {
           bombPowerup = {
             x: 80 + Math.random() * Math.max(1, sim.width - 160),
-            y: 80 + Math.random() * Math.max(1, sim.height - 160),
+            y: 140 + Math.random() * Math.max(1, sim.height - 300),
             r: 22,
             spawnedAt: now,
           };
@@ -8622,7 +8756,12 @@ function initGalaxyCanvas() {
         if (!sh.hit || sh.isPulse) {
           for (let ai = sim.asteroids.length - 1; ai >= 0; ai -= 1) {
             const a = sim.asteroids[ai];
-            if (sh.hitIds && sh.hitIds.has(ai)) continue;
+            // 2026-06-10: only damage asteroids that existed at the detonation moment —
+            // shrapnel lingers ~2s and was destroying asteroids spawned after the blast.
+            if ((a.spawnedAtMs || 0) > sh.startedAt) continue;
+            // 2026-06-10: track already-hit asteroids by object ref, not array index
+            // (indices shift as asteroids are removed, so index tracking hit wrong ones).
+            if (sh.hitSet && sh.hitSet.has(a)) continue;
             const dx = a.x - sh.x;
             const dy = a.y - sh.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -8631,8 +8770,8 @@ function initGalaxyCanvas() {
               : a.r + sh.r * 1.8;
             if (dist < hitRadius) {
               if (sh.isPulse) {
-                if (!sh.hitIds) sh.hitIds = new Set();
-                sh.hitIds.add(ai);
+                if (!sh.hitSet) sh.hitSet = new Set();
+                sh.hitSet.add(a);
               } else {
                 sh.hit = true;
               }
@@ -8673,35 +8812,16 @@ function initGalaxyCanvas() {
       resolveAsteroidCollisions();
 
       if (landmine) {
-        landmine.x += landmine.vx * (dt / 1000);
-        landmine.y += landmine.vy * (dt / 1000);
-        wrapEntity(landmine);
-        clampSpeed(landmine);
-        applyMotionHealth(landmine, now);
-        collideLandmineWithAsteroids();
-
-        if (landmine && landmine.phase === "spawned" && now - landmine.spawnedAt >= 10000) {
-          landmine.phase = "armed";
-          landmine.armedAt = now;
-          playGameSfx("landmine_arm", 0.96);
-          commBoxController.reactTo("landmine_armed");
-          commBoxController.queueVO({
-            audioSrc: commBoxController.commVoSrc(
-              commBoxController.pickFromPool("landminearmed", commBoxController.POOL_LANDMINE_ARMED),
-            ),
-            event: "landmine_armed",
-            priority: "high",
-          });
-          // startDangerLoop(); // 2026-06-09: danger_loop silenced
-        }
-        if (landmine && landmine.phase === "armed" && now - landmine.armedAt >= 8000) {
-          explodeLandmine({ halfRadius: true });
+        if (updateMineEntity(landmine, dt, now, (opts) => explodeLandmine(opts), { quietArm: false })) {
           return;
         }
-        if (landmine && landmine.phase === "player_armed" && now - landmine.playerArmedAt >= 6000) {
-          explodeLandmine({ halfRadius: false });
-          return;
-        }
+      }
+      // 2026-06-10: player-placed bombs run the exact same physics/phase logic; iterate
+      // backwards because an explosion splices the array. quietArm skips the commander VO
+      // (three placed bombs auto-arming would spam it) — the arm sfx still plays.
+      for (let bi = placedBombs.length - 1; bi >= 0; bi -= 1) {
+        const bomb = placedBombs[bi];
+        updateMineEntity(bomb, dt, now, (opts) => explodePlacedBomb(bomb, opts), { quietArm: true });
       }
 
       if (ufo && ufo.alive) {
@@ -8915,6 +9035,70 @@ function initGalaxyCanvas() {
     tctx.restore();
   }
 
+  // 2026-06-10: player-placed bombs are drawn on the ufoFx overlay (PIXI only knows the
+  // single level landmine). Same visual language: hull, phase-colored pulsing ring, blink
+  // light, and the armed/player_armed countdown rings.
+  function drawPlacedBombsOverlay(tctx) {
+    if (!tctx || placedBombs.length === 0) return;
+    const now = performance.now();
+    for (let i = 0; i < placedBombs.length; i += 1) {
+      const mine = placedBombs[i];
+      const r = mine.r || 14;
+      const armed = mine.phase === "armed" || mine.phase === "player_armed";
+      const playerArmed = mine.phase === "player_armed";
+      const pulseRate = playerArmed ? 80 : armed ? 120 : 400;
+      const pulse = Math.abs(Math.sin(now / pulseRate));
+      tctx.save();
+      tctx.translate(mine.x, mine.y);
+      // hull
+      const hull = tctx.createRadialGradient(-r * 0.35, -r * 0.35, 2, 0, 0, r * 1.15);
+      hull.addColorStop(0, armed ? "rgba(92,44,44,0.98)" : "rgba(56,58,66,0.98)");
+      hull.addColorStop(0.6, armed ? "rgba(38,28,28,0.98)" : "rgba(26,30,40,0.98)");
+      hull.addColorStop(1, "rgba(12,16,24,0.98)");
+      tctx.beginPath();
+      tctx.arc(0, 0, r, 0, Math.PI * 2);
+      tctx.fillStyle = hull;
+      tctx.fill();
+      // phase ring
+      tctx.strokeStyle = playerArmed
+        ? `rgba(255,0,0,${(0.55 + pulse * 0.3).toFixed(3)})`
+        : armed
+          ? `rgba(255,68,68,${(0.55 + pulse * 0.3).toFixed(3)})`
+          : `rgba(68,255,136,${(0.55 + pulse * 0.3).toFixed(3)})`;
+      tctx.lineWidth = 1.4;
+      tctx.stroke();
+      // blink light
+      const blink = Math.sin(now / 120) > 0 ? 1 : 0;
+      tctx.beginPath();
+      tctx.arc(r * 0.35, -r * 0.35, (armed ? 4 + pulse * 2 : 3 + pulse), 0, Math.PI * 2);
+      tctx.fillStyle = armed
+        ? `rgba(255,80,80,${(0.6 + 0.4 * blink).toFixed(3)})`
+        : `rgba(124,255,91,${(0.5 + 0.5 * blink).toFixed(3)})`;
+      tctx.fill();
+      tctx.restore();
+      // countdown rings (drawn unrotated/untranslated like the landmine's)
+      if (mine.phase === "armed" && mine.armedAt) {
+        const progress = Math.max(0, 1 - (now - mine.armedAt) / LANDMINE_FUSE_MS);
+        tctx.save();
+        tctx.beginPath();
+        tctx.arc(mine.x, mine.y, r + 5, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+        tctx.strokeStyle = "#ff2222";
+        tctx.lineWidth = 2.5;
+        tctx.stroke();
+        tctx.restore();
+      } else if (playerArmed && mine.playerArmedAt) {
+        const countT = Math.max(0, Math.min(1, (now - mine.playerArmedAt) / 6000));
+        tctx.save();
+        tctx.beginPath();
+        tctx.arc(mine.x, mine.y, r + 12, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * countT);
+        tctx.strokeStyle = "rgba(255,34,34,0.8)";
+        tctx.lineWidth = 2;
+        tctx.stroke();
+        tctx.restore();
+      }
+    }
+  }
+
   function draw(now) {
     drawTimerPerimeterOverlay(now);
     if ((engineMode === "arcade" || engineMode === "practice") && window.pixiRenderer?.draw(sim, laserBeams, canvasFlash, ufo, plasmaCage, landmine, _bombShrapnel, now)) {
@@ -8923,6 +9107,7 @@ function initGalaxyCanvas() {
       drawUfoFxOverlay(ctx);
       drawBombPowerup(ufoFxCtx || ctx);
       drawLandmineCountdownOverlay(ufoFxCtx || ctx);
+      drawPlacedBombsOverlay(ufoFxCtx || ctx);
       drawAndStepTapBlasts(ufoFxCtx || ctx);
       return;
     }
@@ -9240,6 +9425,7 @@ function initGalaxyCanvas() {
     drawUfoFxOverlay(ctx);
     drawBombPowerup(ufoFxCtx || ctx);
     drawLandmineCountdownOverlay(ufoFxCtx || ctx);
+    drawPlacedBombsOverlay(ufoFxCtx || ctx);
     drawAndStepTapBlasts(ufoFxCtx || ctx);
 
     const particleLimit = _frameBudgetExceeded ? Math.min(40, sim.particles.length) : sim.particles.length;
@@ -9322,7 +9508,9 @@ function initGalaxyCanvas() {
   function handleArcadeTap(x, y, now, isTouch = false) {
     // 2026-06-09: bomb deployment (two-tap aim) consumes the tap — no laser/fire.
     if (bombAimMode) {
-      detonateInventoryBomb(x, y); // decrements inventory + updates HUD internally
+      // 2026-06-10: deploy now PLACES an unarmed landmine at the tap point (tap it to arm,
+      // tap again to detonate) instead of exploding instantly.
+      placeBombFromInventory(x, y); // decrements inventory + updates HUD internally
       bombAimMode = false;
       hudBombBtn?.classList.remove("hudBombBtn--aiming");
       updateHudBombInventory(); // refresh count + restore attention pulse if bombs remain
@@ -9362,6 +9550,13 @@ function initGalaxyCanvas() {
     if (landmine && isPointOnLandmine(x, y)) {
       triggerCrosshairFire();
       armLandmine();
+      return;
+    }
+    // 2026-06-10: placed bombs use the same tap behavior (spawned → arm, armed → detonate)
+    const tappedBomb = placedBombs.find((b) => isPointOnMine(b, x, y));
+    if (tappedBomb) {
+      triggerCrosshairFire();
+      armMineEntity(tappedBomb, (opts) => explodePlacedBomb(tappedBomb, opts));
       return;
     }
     if (ufo && isPointOnUfo(x, y)) {

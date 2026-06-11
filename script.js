@@ -764,6 +764,7 @@ const hudLives = document.getElementById("hudLives");
 const hudScore = document.getElementById("hudScore");
 const hudGameTimer = document.getElementById("hudGameTimer");
 const hudBombBtn = document.getElementById("hudBombBtn");
+const hudQuadBadge = document.getElementById("hudQuadBadge");
 
 function formatRunTime(ms) {
   const s = Math.floor(ms / 1000);
@@ -5190,12 +5191,40 @@ function initGalaxyCanvas() {
   let placedBombs = [];
   let landmineSpawnedThisLevel = false;
   let playerBombInventory = 0;
-  // 2026-06-09: bomb powerup — tap to collect, two-tap (aim) to deploy
-  let bombPowerup = null;
+  // 2026-06-10: multi-type powerup system (generalized from the single bomb powerup).
+  // Types: timer (+30s), goldbars (+1000), quadshot (cluster fire), snowflake (freeze), bomb.
+  let powerups = [];
+  const POWERUP_MAX_ONSCREEN = 2;
+  const POWERUP_WEIGHTS = [
+    { type: "goldbars", weight: 30 },
+    { type: "timer", weight: 25 },
+    { type: "quadshot", weight: 25 },
+    { type: "snowflake", weight: 10 },
+    { type: "bomb", weight: 10 },
+  ];
+  const POWERUP_COLORS = {
+    bomb: "#00ffcc",
+    timer: "#ffaa00",
+    goldbars: "#ffd700",
+    quadshot: "#cc66ff",
+    snowflake: "#88ddff",
+  };
+  let quadShotUntil = 0;
+  let freezeUntil = 0;
   let bombAimMode = false;
   let nextBombPowerupAt = performance.now()
     + BOMB_POWERUP_INTERVAL_MIN
     + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
+
+  function pickPowerupType() {
+    const total = POWERUP_WEIGHTS.reduce((s, w) => s + w.weight, 0);
+    let roll = Math.random() * total;
+    for (let i = 0; i < POWERUP_WEIGHTS.length; i += 1) {
+      roll -= POWERUP_WEIGHTS[i].weight;
+      if (roll <= 0) return POWERUP_WEIGHTS[i].type;
+    }
+    return "bomb";
+  }
   let arcadeResumeAvailable = false;
   let pausedLevelRemainingMs = 0;
   let pausedLandmineRemainingMs = 0;
@@ -5378,6 +5407,19 @@ function initGalaxyCanvas() {
     hudBombBtn.classList.toggle("has-bombs", hasBombs);
     // pulse for attention only when bombs are available and not currently aiming
     hudBombBtn.classList.toggle("bomb-attention", hasBombs && !bombAimMode);
+  }
+
+  // 2026-06-10: quadshot HUD badge — violet Q with seconds remaining while the effect runs.
+  // Called every update frame; only touches the DOM when the displayed second changes.
+  function updateHudQuadBadge() {
+    if (!hudQuadBadge) return;
+    const remaining = quadShotUntil - performance.now();
+    const active = remaining > 0;
+    hudQuadBadge.classList.toggle("active", active);
+    if (active) {
+      const label = `Q ${Math.ceil(remaining / 1000)}s`;
+      if (hudQuadBadge.textContent !== label) hudQuadBadge.textContent = label;
+    }
   }
 
   function getArcadeScoreMultiplier(now = performance.now()) {
@@ -7746,13 +7788,16 @@ function initGalaxyCanvas() {
 
   // 2026-06-10: per-frame physics + phase transitions for any mine entity.
   // Returns true if the mine exploded this frame. explodeFn handles removal.
-  function updateMineEntity(mine, dt, now, explodeFn, { quietArm = false } = {}) {
-    mine.x += mine.vx * (dt / 1000);
-    mine.y += mine.vy * (dt / 1000);
-    wrapEntity(mine);
-    clampSpeed(mine);
-    applyMotionHealth(mine, now);
-    collideMineWithAsteroids(mine);
+  function updateMineEntity(mine, dt, now, explodeFn, { quietArm = false, frozen = false } = {}) {
+    // 2026-06-10: snowflake freeze skips position physics; arm/detonate timers keep running
+    if (!frozen) {
+      mine.x += mine.vx * (dt / 1000);
+      mine.y += mine.vy * (dt / 1000);
+      wrapEntity(mine);
+      clampSpeed(mine);
+      applyMotionHealth(mine, now);
+      collideMineWithAsteroids(mine);
+    }
 
     if (mine.phase === "spawned" && now - mine.spawnedAt >= 10000) {
       mine.phase = "armed";
@@ -7891,8 +7936,11 @@ function initGalaxyCanvas() {
     placedBombs.length = 0; // 2026-06-10: placed bombs don't carry across levels/menu
     stopDangerLoop();
     landmineSpawnedThisLevel = false;
-    // 2026-06-09: clear bomb powerup + aim state on level transitions / menu exit
-    bombPowerup = null;
+    // 2026-06-10: clear powerups, active effects, and aim state on level transitions / menu exit
+    powerups.length = 0;
+    quadShotUntil = 0;
+    freezeUntil = 0;
+    updateHudQuadBadge();
     bombAimMode = false;
     hudBombBtn?.classList.remove("hudBombBtn--aiming");
     stopUfoDrone();
@@ -8394,8 +8442,11 @@ function initGalaxyCanvas() {
     arcadeLives = 0;
     arcadeScore = 0;
     playerBombInventory = 0;
-    // 2026-06-09: reset bomb powerup state
-    bombPowerup = null;
+    // 2026-06-10: reset powerup + active effect state
+    powerups.length = 0;
+    quadShotUntil = 0;
+    freezeUntil = 0;
+    updateHudQuadBadge();
     bombAimMode = false;
     hudBombBtn?.classList.remove("hudBombBtn--aiming");
     nextBombPowerupAt = performance.now() + BOMB_POWERUP_INTERVAL_MIN
@@ -8699,24 +8750,27 @@ function initGalaxyCanvas() {
           landmineSpawnedThisLevel = true;
         }
 
-        // 2026-06-09: periodically spawn a collectible bomb powerup
-        // 2026-06-10: progressive introduction — no powerups before level 4. Spawn zone
-        // keeps clear of the top HUD (140px) and the commander portrait/comm box (160px).
-        if (!bombPowerup && cfg.level >= 4 && now >= nextBombPowerupAt) {
-          bombPowerup = {
+        // 2026-06-10: periodically spawn a collectible powerup (weighted random type).
+        // Progressive introduction — no powerups before level 4. Spawn zone keeps clear of
+        // the top HUD (140px) and the commander portrait/comm box (160px).
+        if (powerups.length < POWERUP_MAX_ONSCREEN && cfg.level >= 4 && now >= nextBombPowerupAt) {
+          powerups.push({
+            type: pickPowerupType(),
             x: 80 + Math.random() * Math.max(1, sim.width - 160),
             y: 140 + Math.random() * Math.max(1, sim.height - 300),
             r: 22,
             spawnedAt: now,
-          };
+            opacity: 1.0,
+          });
           playGameSfx("blip", 0.8);
           nextBombPowerupAt = now + BOMB_POWERUP_INTERVAL_MIN
             + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
         }
-        // expire after its lifetime
-        if (bombPowerup && now - bombPowerup.spawnedAt > BOMB_POWERUP_LIFETIME_MS) {
-          bombPowerup = null;
+        // expire after lifetime (powerup expiry keeps running even during a snowflake freeze)
+        for (let pi = powerups.length - 1; pi >= 0; pi -= 1) {
+          if (now - powerups[pi].spawnedAt > BOMB_POWERUP_LIFETIME_MS) powerups.splice(pi, 1);
         }
+        updateHudQuadBadge();
       }
 
       if (!ufo && arcadeUfoSpawnAt && now >= arcadeUfoSpawnAt && now >= arcadePausedUntil) {
@@ -8792,6 +8846,9 @@ function initGalaxyCanvas() {
         }
       }
 
+      // 2026-06-10: snowflake freeze — entity positions hold but rotation keeps running.
+      // Firing, the level timer, and powerup expiry are deliberately not frozen.
+      const simFrozen = now < freezeUntil;
       for (let i = 0; i < sim.asteroids.length; i += 1) {
         const a = sim.asteroids[i];
         if (a._stroidHeld) {
@@ -8799,9 +8856,10 @@ function initGalaxyCanvas() {
           a.vy = 0;
           continue;
         }
+        a.rot += a.spin * (dt / 16);
+        if (simFrozen) continue;
         a.x += a.vx * (dt / 1000);
         a.y += a.vy * (dt / 1000);
-        a.rot += a.spin * (dt / 16);
         if (engineMode === "practice") wrapEntityToCanvas(a);
         else wrapEntity(a);
         if (!a.tossed) clampSpeed(a);
@@ -8809,10 +8867,10 @@ function initGalaxyCanvas() {
       }
       updateStroidTossHold(now);
       updateTossedAsteroidCollision(now);
-      resolveAsteroidCollisions();
+      if (!simFrozen) resolveAsteroidCollisions();
 
       if (landmine) {
-        if (updateMineEntity(landmine, dt, now, (opts) => explodeLandmine(opts), { quietArm: false })) {
+        if (updateMineEntity(landmine, dt, now, (opts) => explodeLandmine(opts), { quietArm: false, frozen: simFrozen })) {
           return;
         }
       }
@@ -8821,7 +8879,7 @@ function initGalaxyCanvas() {
       // (three placed bombs auto-arming would spam it) — the arm sfx still plays.
       for (let bi = placedBombs.length - 1; bi >= 0; bi -= 1) {
         const bomb = placedBombs[bi];
-        updateMineEntity(bomb, dt, now, (opts) => explodePlacedBomb(bomb, opts), { quietArm: true });
+        updateMineEntity(bomb, dt, now, (opts) => explodePlacedBomb(bomb, opts), { quietArm: true, frozen: simFrozen });
       }
 
       if (ufo && ufo.alive) {
@@ -8829,20 +8887,24 @@ function initGalaxyCanvas() {
           stopUfoDrone();
           ufo = null;
         } else {
-          ufo.x += ufo.vx * (dt / 1000);
-          ufo.y += ufo.vy * (dt / 1000);
-          wrapEntity(ufo);
-          clampSpeed(ufo);
-          applyMotionHealth(ufo, now);
-          if (now >= ufo.teleportAt) {
-            ufo.x = playfield.x + playfield.w * (0.1 + Math.random() * 0.8);
-            ufo.y = playfield.y + playfield.h * (0.1 + Math.random() * 0.8);
-            ufo.teleportAt = now + (900 + Math.random() * 500);
-            playGameSfx("ufo_teleport", 0.62);
-            addWarpRing(ufo.x, ufo.y, "rgba(160,255,255,0.9)");
-          }
-          for (let i = 0; i < sim.asteroids.length; i += 1) {
-            resolveCircleCollision(ufo, sim.asteroids[i], 0.92, false);
+          // 2026-06-10: snowflake freeze holds the UFO too (movement, teleport, shoves);
+          // the despawn timer above keeps running.
+          if (!simFrozen) {
+            ufo.x += ufo.vx * (dt / 1000);
+            ufo.y += ufo.vy * (dt / 1000);
+            wrapEntity(ufo);
+            clampSpeed(ufo);
+            applyMotionHealth(ufo, now);
+            if (now >= ufo.teleportAt) {
+              ufo.x = playfield.x + playfield.w * (0.1 + Math.random() * 0.8);
+              ufo.y = playfield.y + playfield.h * (0.1 + Math.random() * 0.8);
+              ufo.teleportAt = now + (900 + Math.random() * 500);
+              playGameSfx("ufo_teleport", 0.62);
+              addWarpRing(ufo.x, ufo.y, "rgba(160,255,255,0.9)");
+            }
+            for (let i = 0; i < sim.asteroids.length; i += 1) {
+              resolveCircleCollision(ufo, sim.asteroids[i], 0.92, false);
+            }
           }
           if (ufo.hitCount >= 1 && !prefersReducedMotion && now - ufo.damagedAt < 20000 && Math.random() < 0.2) {
             const p = getParticle();
@@ -8985,38 +9047,78 @@ function initGalaxyCanvas() {
     }
   }
 
-  // 2026-06-09: draw the collectible bomb powerup. Rendered on the ufoFx overlay (like the
-  // tap blasts) so it shows above the PIXI layer during gameplay. Expiry is handled in update().
-  function drawBombPowerup(tctx) {
-    if (!tctx || !bombPowerup) return;
+  // 2026-06-10: draw all collectible powerups (multi-type). Rendered on the ufoFx overlay
+  // (like the tap blasts) so they show above the PIXI layer. Expiry is handled in update().
+  // In the final 3s the glow blinks red (~3 blinks/sec) to warn the player.
+  function drawPowerups(tctx) {
+    if (!tctx || powerups.length === 0) return;
     const nowP = performance.now();
-    const remaining = BOMB_POWERUP_LIFETIME_MS - (nowP - bombPowerup.spawnedAt);
-    const opacity = remaining < 500 ? Math.max(0, remaining / 500) : 1.0;
-    const pulse = 0.95 + 0.05 * Math.sin(nowP / 300);
+    for (let i = 0; i < powerups.length; i += 1) {
+      const pu = powerups[i];
+      const remaining = BOMB_POWERUP_LIFETIME_MS - (nowP - pu.spawnedAt);
+      const opacity = remaining < 500 ? Math.max(0, remaining / 500) : 1.0;
+      const pulse = 0.95 + 0.05 * Math.sin(nowP / 300);
+      const baseColor = POWERUP_COLORS[pu.type] || "#00ffcc";
+      const blinkRed = remaining < 3000 && Math.floor(nowP / 167) % 2 === 0;
+      const ringColor = blinkRed ? "#ff3333" : baseColor;
+      tctx.save();
+      tctx.globalAlpha = opacity;
+      tctx.translate(pu.x, pu.y);
+      tctx.scale(pulse, pulse);
+      // outer glow ring
+      tctx.beginPath();
+      tctx.arc(0, 0, pu.r, 0, Math.PI * 2);
+      tctx.strokeStyle = ringColor;
+      tctx.lineWidth = 2;
+      tctx.shadowColor = ringColor;
+      tctx.shadowBlur = 12;
+      tctx.stroke();
+      // inner fill
+      tctx.beginPath();
+      tctx.arc(0, 0, pu.r - 3, 0, Math.PI * 2);
+      tctx.fillStyle = "rgba(0,30,30,0.7)";
+      tctx.fill();
+      // type-specific content
+      tctx.shadowBlur = 0;
+      tctx.textAlign = "center";
+      tctx.textBaseline = "middle";
+      if (pu.type === "bomb") {
+        tctx.font = "18px sans-serif";
+        tctx.fillStyle = "#ffffff";
+        tctx.fillText("\u{1F4A3}", 0, 0);
+      } else if (pu.type === "timer") {
+        tctx.font = "bold 14px sans-serif";
+        tctx.fillStyle = "#ffaa00";
+        tctx.fillText("+30", 0, 0);
+      } else if (pu.type === "goldbars") {
+        tctx.font = "18px sans-serif";
+        tctx.fillStyle = "#ffffff";
+        tctx.fillText("\u{1FA99}", 0, 0);
+      } else if (pu.type === "quadshot") {
+        // spinning Q, full rotation every 2s, with a brief shine each rotation
+        const phase = (nowP % 2000) / 2000;
+        const shine = phase < 0.15;
+        tctx.rotate(phase * Math.PI * 2);
+        tctx.font = "bold 18px sans-serif";
+        tctx.fillStyle = shine ? "#ffffff" : "#cc66ff";
+        tctx.fillText("Q", 0, 0);
+      } else if (pu.type === "snowflake") {
+        tctx.font = "18px sans-serif";
+        tctx.fillStyle = "#88ddff";
+        tctx.fillText("❄", 0, 0);
+      }
+      tctx.restore();
+    }
+  }
+
+  // 2026-06-10: snowflake freeze visual — translucent ice tint over the playfield. Drawn on
+  // the overlay because asteroids render through PIXI on device (the 2D multiply-tint path
+  // never runs there), so tinting individual asteroids isn't reliable.
+  function drawFreezeOverlay(tctx) {
+    if (!tctx || performance.now() >= freezeUntil) return;
     tctx.save();
-    tctx.globalAlpha = opacity;
-    tctx.translate(bombPowerup.x, bombPowerup.y);
-    tctx.scale(pulse, pulse);
-    // outer glow ring
-    tctx.beginPath();
-    tctx.arc(0, 0, bombPowerup.r, 0, Math.PI * 2);
-    tctx.strokeStyle = "#00ffcc";
-    tctx.lineWidth = 2;
-    tctx.shadowColor = "#00ffcc";
-    tctx.shadowBlur = 12;
-    tctx.stroke();
-    // inner fill
-    tctx.beginPath();
-    tctx.arc(0, 0, bombPowerup.r - 3, 0, Math.PI * 2);
-    tctx.fillStyle = "rgba(0,30,30,0.7)";
-    tctx.fill();
-    // bomb glyph
-    tctx.shadowBlur = 0;
-    tctx.font = "18px sans-serif";
-    tctx.textAlign = "center";
-    tctx.textBaseline = "middle";
-    tctx.fillStyle = "#ffffff";
-    tctx.fillText("\u{1F4A3}", 0, 0);
+    tctx.fillStyle = "rgba(136,221,255,0.12)";
+    tctx.fillRect(0, 0, sim.width, sim.height);
     tctx.restore();
   }
 
@@ -9105,9 +9207,10 @@ function initGalaxyCanvas() {
       setPlasmaOverlayVisible(stroidToss.active);
       if (stroidToss.active) drawPlasmaOverlay(now);
       drawUfoFxOverlay(ctx);
-      drawBombPowerup(ufoFxCtx || ctx);
+      drawPowerups(ufoFxCtx || ctx);
       drawLandmineCountdownOverlay(ufoFxCtx || ctx);
       drawPlacedBombsOverlay(ufoFxCtx || ctx);
+      drawFreezeOverlay(ufoFxCtx || ctx);
       drawAndStepTapBlasts(ufoFxCtx || ctx);
       return;
     }
@@ -9423,9 +9526,10 @@ function initGalaxyCanvas() {
       ctx.restore();
     }
     drawUfoFxOverlay(ctx);
-    drawBombPowerup(ufoFxCtx || ctx);
+    drawPowerups(ufoFxCtx || ctx);
     drawLandmineCountdownOverlay(ufoFxCtx || ctx);
     drawPlacedBombsOverlay(ufoFxCtx || ctx);
+    drawFreezeOverlay(ufoFxCtx || ctx);
     drawAndStepTapBlasts(ufoFxCtx || ctx);
 
     const particleLimit = _frameBudgetExceeded ? Math.min(40, sim.particles.length) : sim.particles.length;
@@ -9516,60 +9620,108 @@ function initGalaxyCanvas() {
       updateHudBombInventory(); // refresh count + restore attention pulse if bombs remain
       return;
     }
-    // 2026-06-09: tap to collect the bomb powerup — also consumes the tap.
-    if (bombPowerup) {
-      const dx = x - bombPowerup.x;
-      const dy = y - bombPowerup.y;
-      if (Math.hypot(dx, dy) <= bombPowerup.r * 1.8) {
-        bombPowerup = null;
-        if (playerBombInventory < MAX_BOMB_INVENTORY) {
-          playerBombInventory++;
-          updateHudBombInventory();
-          playGameSfx("blip", 0.9);
-          playGameSfx("life_gain", 0.7);
-          cssFlash("#00ffcc", 0.15, 200);
-        }
+    // 2026-06-10: tap to collect a powerup — consumes the tap (bomb aim mode above wins).
+    for (let pi = 0; pi < powerups.length; pi += 1) {
+      const pu = powerups[pi];
+      if (Math.hypot(x - pu.x, y - pu.y) <= pu.r * 1.8) {
+        powerups.splice(pi, 1);
+        collectPowerup(pu);
         return;
       }
     }
     playPlayerFireSound();
-    // 2026-06-09: iOS touch fires a localized X blast instead of the teal laser.
-    // Desktop/mouse keeps the laser. Hit detection below is unchanged either way.
+    const hitSomething = resolveShotAt(x, y, now, isTouch);
+    // 2026-06-10: quadshot — 3 extra shots clustered around the tap point while active
+    let extraHit = false;
+    if (performance.now() < quadShotUntil) {
+      for (let i = 0; i < 3; i += 1) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = 30 + Math.random() * 50;
+        const ex = clamp(x + Math.cos(ang) * dist, 0, sim.width);
+        const ey = clamp(y + Math.sin(ang) * dist, 0, sim.height);
+        if (resolveShotAt(ex, ey, now, isTouch)) extraHit = true;
+      }
+    }
+    if (hitSomething || extraHit) draw(now);
+  }
+
+  // 2026-06-10: resolves one shot at (sx, sy) — visual (X-blast on iOS touch, laser on
+  // desktop) plus the standard hit checks. Extracted from handleArcadeTap so quadshot can
+  // fire extra cluster shots through the identical path. Returns true if it hit anything.
+  function resolveShotAt(sx, sy, now, isTouch) {
     if (isIOSWebKit && isTouch) {
-      tapBlasts.push({ x, y, life: 1.0 });
+      tapBlasts.push({ x: sx, y: sy, life: 1.0 });
     } else {
       laserBeams.push({
         x1: sim.width / 2,
         y1: sim.height / 2,
-        x2: x,
-        y2: y,
+        x2: sx,
+        y2: sy,
         startedAt: now,
       });
     }
     shotsFired += 1;
-    if (landmine && isPointOnLandmine(x, y)) {
+    if (landmine && isPointOnMine(landmine, sx, sy)) {
       triggerCrosshairFire();
       armLandmine();
-      return;
+      return true;
     }
     // 2026-06-10: placed bombs use the same tap behavior (spawned → arm, armed → detonate)
-    const tappedBomb = placedBombs.find((b) => isPointOnMine(b, x, y));
+    const tappedBomb = placedBombs.find((b) => isPointOnMine(b, sx, sy));
     if (tappedBomb) {
       triggerCrosshairFire();
       armMineEntity(tappedBomb, (opts) => explodePlacedBomb(tappedBomb, opts));
-      return;
+      return true;
     }
-    if (ufo && isPointOnUfo(x, y)) {
+    if (ufo && isPointOnUfo(sx, sy)) {
       triggerCrosshairFire();
       hitUfo();
-      draw(now);
-      return;
+      return true;
     }
-    const hitIndex = findHitAsteroidIndex(x, y);
+    const hitIndex = findHitAsteroidIndex(sx, sy);
     if (hitIndex >= 0) {
       triggerCrosshairFire();
       splitAsteroidByIndex(hitIndex);
-      draw(now);
+      return true;
+    }
+    return false;
+  }
+
+  // 2026-06-10: per-type powerup collection effects.
+  function collectPowerup(pu) {
+    playGameSfx("blip", 0.9);
+    if (pu.type === "bomb") {
+      if (playerBombInventory < MAX_BOMB_INVENTORY) {
+        playerBombInventory++;
+        updateHudBombInventory();
+        playGameSfx("life_gain", 0.7);
+        cssFlash("#00ffcc", 0.15, 200);
+      }
+      return;
+    }
+    if (pu.type === "timer") {
+      // +30s, capped at the level's full duration so the perimeter never over-fills.
+      // The perimeter derives from (levelEndsAt - now) / levelDurationMs each frame,
+      // so it reflects the new remaining time automatically.
+      const nowP = performance.now();
+      levelEndsAt = Math.min(levelEndsAt + 30000, nowP + levelDurationMs);
+      playGameSfx("life_gain", 0.7); // chime
+      cssFlash("#ffaa00", 0.18, 250);
+      return;
+    }
+    if (pu.type === "goldbars") {
+      addArcadeScore(1000);
+      cssFlash("#ffd700", 0.18, 250);
+      return;
+    }
+    if (pu.type === "quadshot") {
+      quadShotUntil = performance.now() + 12000;
+      cssFlash("#cc66ff", 0.18, 250);
+      return;
+    }
+    if (pu.type === "snowflake") {
+      freezeUntil = performance.now() + 6000;
+      cssFlash("#88ddff", 0.2, 300);
     }
   }
 

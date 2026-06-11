@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-10 10:03";
+const BUILD_TS = "2026-06-10 17:58";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -764,6 +764,7 @@ const hudLives = document.getElementById("hudLives");
 const hudScore = document.getElementById("hudScore");
 const hudGameTimer = document.getElementById("hudGameTimer");
 const hudBombBtn = document.getElementById("hudBombBtn");
+const hudFreezeBtn = document.getElementById("hudFreezeBtn");
 const hudQuadBadge = document.getElementById("hudQuadBadge");
 
 function formatRunTime(ms) {
@@ -2581,6 +2582,11 @@ function addListeners() {
     hudBombBtn.addEventListener("click", () => {
       // 2026-06-09: arm aim mode; the next tap on the play area deploys the bomb there
       galaxyCanvasController?.toggleBombAim?.();
+    });
+  }
+  if (hudFreezeBtn) {
+    hudFreezeBtn.addEventListener("click", () => {
+      galaxyCanvasController?.activateFreeze?.();
     });
   }
   if (btnArcadeNew) {
@@ -5164,6 +5170,23 @@ function initGalaxyCanvas() {
     asteroidSprites[key] = img;
   });
 
+  // 2026-06-10: powerup sprites (256px source, transparent bg, baked-in glow) — drawn ~56px.
+  // The bomb powerup keeps its canvas-drawn ring + glyph for now.
+  const POWERUP_SPRITE_SIZE = 56;
+  const powerupSpritePaths = {
+    goldbars: "powerups/powerup_goldbars.png",
+    quadshot: "powerups/powerup_quadshot.png",
+    timer: "powerups/powerup_timer.png",
+    snowflake: "powerups/powerup_freeze.png",
+  };
+  const powerupSprites = {};
+  Object.keys(powerupSpritePaths).forEach((key) => {
+    const img = new Image();
+    img.decoding = "async";
+    img.src = powerupSpritePaths[key];
+    powerupSprites[key] = img;
+  });
+
   let galaxyRaf = 0;
   let galaxyRunning = false;
   let engineMode = "menu"; // menu | practice | arcade
@@ -5196,10 +5219,10 @@ function initGalaxyCanvas() {
   let powerups = [];
   const POWERUP_MAX_ONSCREEN = 2;
   const POWERUP_WEIGHTS = [
-    { type: "goldbars", weight: 30 },
+    { type: "goldbars", weight: 15 }, // DEBUG: revert before release (normally 30)
     { type: "timer", weight: 25 },
     { type: "quadshot", weight: 25 },
-    { type: "snowflake", weight: 10 },
+    { type: "snowflake", weight: 40 }, // DEBUG: revert before release (normally 10)
     { type: "bomb", weight: 10 },
   ];
   const POWERUP_COLORS = {
@@ -5211,6 +5234,11 @@ function initGalaxyCanvas() {
   };
   let quadShotUntil = 0;
   let freezeUntil = 0;
+  const QUADSHOT_SEEK_RADIUS = 120;
+  // 2026-06-10: freeze is now a collectible inventory item activated from the HUD (like bombs)
+  let playerFreezeInventory = 0;
+  const MAX_FREEZE_INVENTORY = 3;
+  const FREEZE_DURATION_MS = 6000;
   let bombAimMode = false;
   let nextBombPowerupAt = performance.now()
     + BOMB_POWERUP_INTERVAL_MIN
@@ -5407,6 +5435,16 @@ function initGalaxyCanvas() {
     hudBombBtn.classList.toggle("has-bombs", hasBombs);
     // pulse for attention only when bombs are available and not currently aiming
     hudBombBtn.classList.toggle("bomb-attention", hasBombs && !bombAimMode);
+  }
+
+  // 2026-06-10: freeze inventory button — ice-blue twin of the bomb button.
+  function updateHudFreezeInventory() {
+    if (!hudFreezeBtn) return;
+    const hasFreezes = playerFreezeInventory > 0;
+    hudFreezeBtn.style.display = "";
+    hudFreezeBtn.textContent = `❄ \xD7${playerFreezeInventory}`;
+    hudFreezeBtn.disabled = !hasFreezes;
+    hudFreezeBtn.classList.toggle("has-freezes", hasFreezes);
   }
 
   // 2026-06-10: quadshot HUD badge — violet Q with seconds remaining while the effect runs.
@@ -6617,6 +6655,20 @@ function initGalaxyCanvas() {
     return best;
   }
 
+  // 2026-06-10: nearest asteroid center within maxDist of (x, y), or -1 — quadshot target seek.
+  function findNearestAsteroidIndex(x, y, maxDist) {
+    let best = -1;
+    let bestDist = maxDist;
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const d = Math.hypot(sim.asteroids[i].x - x, sim.asteroids[i].y - y);
+      if (d <= bestDist) {
+        best = i;
+        bestDist = d;
+      }
+    }
+    return best;
+  }
+
   function resetStroidToss() {
     if (stroidToss.asteroid) {
       stroidToss.asteroid._stroidHeld = false;
@@ -6736,13 +6788,14 @@ function initGalaxyCanvas() {
   function launchStroidToss(now) {
     const asteroid = getStroidTossAsteroid();
     if (!asteroid) return false;
-    // 2026-06-10: throw direction comes from the LAST ≤120ms of pointer movement, not the
+    // 2026-06-10: throw direction comes from the LAST ≤200ms of pointer movement, not the
     // total drag delta — a fast flick that curved or ended near the grab point used to throw
     // backwards (the old <12px fallback even reused the asteroid's random pre-grab drift).
+    // 200ms (was 120) keeps the grab-time seed sample in range for sub-200ms flicks.
     const releaseT = performance.now();
     let ref = null;
     for (let i = 0; i < stroidToss.samples.length; i += 1) {
-      if (releaseT - stroidToss.samples[i].t <= 120) {
+      if (releaseT - stroidToss.samples[i].t <= 200) {
         ref = stroidToss.samples[i]; // oldest sample within the window
         break;
       }
@@ -7135,6 +7188,7 @@ function initGalaxyCanvas() {
     const mediumBlast = wasKind === 2;
     const ttlScale = bigBlast ? 1.4 : mediumBlast ? 1.18 : 1;
     spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale, wasKind, a.spriteKey);
+    addFrozenShatterFx(baseX, baseY);
     triggerAsteroidSizeFeedback(wasKind);
     const baseBoomVol = wasKind === 3 ? 0.9 : wasKind === 2 ? 0.92 : 0.78;
     const minBoomRatio = wasKind === 3 ? 0.62 : wasKind === 2 ? 0.8 : 0.9;
@@ -7189,6 +7243,7 @@ function initGalaxyCanvas() {
     addArcadeScore(arcadeMultiplierPoints(a.kind >= 2 ? 25 : 10));
     trackKillStreak();
     spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1, 1, a.kind, a.spriteKey);
+    addFrozenShatterFx(a.x, a.y);
     triggerAsteroidSizeFeedback(a.kind);
     // 2026-06-09: plasma net suppresses per-asteroid booms so the single basicb_explo blast
     // isn't drowned out / dropped by the native frame-budget behind a wall of explosion sounds.
@@ -7513,7 +7568,10 @@ function initGalaxyCanvas() {
     timerPerimeterCtx.strokeStyle = "rgba(180,190,205,0.1)";
     timerPerimeterCtx.strokeRect(x, y, w, h);
 
-    const color = remaining <= 5000 ? "#ff4444" : remaining <= 10000 ? "#ffaa00" : _levelPrimaryColor;
+    let color = remaining <= 5000 ? "#ff4444" : remaining <= 10000 ? "#ffaa00" : _levelPrimaryColor;
+    // 2026-06-10: freeze strobe — alternate white at ~3Hz while frozen, theme color returns
+    // automatically when freezeUntil lapses.
+    if (now < freezeUntil && Math.floor(now / 167) % 2 === 0) color = "#ffffff";
     timerPerimeterCtx.strokeStyle = color;
     if (!isIOSNative) {
       timerPerimeterCtx.shadowColor = color;
@@ -7940,6 +7998,8 @@ function initGalaxyCanvas() {
     powerups.length = 0;
     quadShotUntil = 0;
     freezeUntil = 0;
+    playerFreezeInventory = 0;
+    updateHudFreezeInventory();
     updateHudQuadBadge();
     bombAimMode = false;
     hudBombBtn?.classList.remove("hudBombBtn--aiming");
@@ -8446,6 +8506,8 @@ function initGalaxyCanvas() {
     powerups.length = 0;
     quadShotUntil = 0;
     freezeUntil = 0;
+    playerFreezeInventory = 0;
+    updateHudFreezeInventory();
     updateHudQuadBadge();
     bombAimMode = false;
     hudBombBtn?.classList.remove("hudBombBtn--aiming");
@@ -8685,6 +8747,13 @@ function initGalaxyCanvas() {
 
     if (engineMode === "arcade" && arcadeActive) {
       const cfg = ARCADE_LEVELS[currentLevelIndex];
+      // 2026-06-10: an active freeze pauses the level clock — shift every time anchor by dt
+      // each frozen frame so remaining/elapsed (and the perimeter line) hold their position.
+      if (now < freezeUntil) {
+        levelEndsAt += dt;
+        levelRunStartAt += dt;
+        if (Number.isFinite(nextSpawnAt)) nextSpawnAt += dt;
+      }
       const remainingMs = levelEndsAt - now;
       updateArcadeHud(now);
 
@@ -8753,7 +8822,8 @@ function initGalaxyCanvas() {
         // 2026-06-10: periodically spawn a collectible powerup (weighted random type).
         // Progressive introduction — no powerups before level 4. Spawn zone keeps clear of
         // the top HUD (140px) and the commander portrait/comm box (160px).
-        if (powerups.length < POWERUP_MAX_ONSCREEN && cfg.level >= 4 && now >= nextBombPowerupAt) {
+        // DEBUG: revert before release — gate is normally cfg.level >= 4
+        if (powerups.length < POWERUP_MAX_ONSCREEN && cfg.level >= 1 && now >= nextBombPowerupAt) {
           powerups.push({
             type: pickPowerupType(),
             x: 80 + Math.random() * Math.max(1, sim.width - 160),
@@ -9047,9 +9117,10 @@ function initGalaxyCanvas() {
     }
   }
 
-  // 2026-06-10: draw all collectible powerups (multi-type). Rendered on the ufoFx overlay
-  // (like the tap blasts) so they show above the PIXI layer. Expiry is handled in update().
-  // In the final 3s the glow blinks red (~3 blinks/sec) to warn the player.
+  // 2026-06-10: draw all collectible powerups. Timer/goldbars/quadshot/snowflake render
+  // their sprite (baked-in glow); bomb keeps the canvas-drawn ring + glyph. Rendered on the
+  // ufoFx overlay (like the tap blasts) so they show above the PIXI layer. Expiry is handled
+  // in update(). In the final 3s the powerup blinks red (~3 blinks/sec) to warn the player.
   function drawPowerups(tctx) {
     if (!tctx || powerups.length === 0) return;
     const nowP = performance.now();
@@ -9058,13 +9129,38 @@ function initGalaxyCanvas() {
       const remaining = BOMB_POWERUP_LIFETIME_MS - (nowP - pu.spawnedAt);
       const opacity = remaining < 500 ? Math.max(0, remaining / 500) : 1.0;
       const pulse = 0.95 + 0.05 * Math.sin(nowP / 300);
-      const baseColor = POWERUP_COLORS[pu.type] || "#00ffcc";
       const blinkRed = remaining < 3000 && Math.floor(nowP / 167) % 2 === 0;
-      const ringColor = blinkRed ? "#ff3333" : baseColor;
       tctx.save();
       tctx.globalAlpha = opacity;
       tctx.translate(pu.x, pu.y);
       tctx.scale(pulse, pulse);
+      const sprite = powerupSprites[pu.type];
+      if (pu.type !== "bomb" && sprite && sprite.complete && sprite.naturalWidth > 0) {
+        if (pu.type === "quadshot") {
+          // slow spin — one full rotation every 6s (replaces the old spinning Q)
+          tctx.rotate(((nowP % 6000) / 6000) * Math.PI * 2);
+        }
+        tctx.drawImage(
+          sprite,
+          -POWERUP_SPRITE_SIZE / 2,
+          -POWERUP_SPRITE_SIZE / 2,
+          POWERUP_SPRITE_SIZE,
+          POWERUP_SPRITE_SIZE,
+        );
+        if (blinkRed) {
+          // red warning tint over the sprite — normal compositing; multiply would also
+          // darken whatever the overlay already drew underneath the circle
+          tctx.fillStyle = "rgba(255,51,51,0.38)";
+          tctx.beginPath();
+          tctx.arc(0, 0, POWERUP_SPRITE_SIZE / 2, 0, Math.PI * 2);
+          tctx.fill();
+        }
+        tctx.restore();
+        continue;
+      }
+      // bomb look — also the fallback ring for the first frames while a sprite decodes
+      const baseColor = POWERUP_COLORS[pu.type] || "#00ffcc";
+      const ringColor = blinkRed ? "#ff3333" : baseColor;
       // outer glow ring
       tctx.beginPath();
       tctx.arc(0, 0, pu.r, 0, Math.PI * 2);
@@ -9078,34 +9174,13 @@ function initGalaxyCanvas() {
       tctx.arc(0, 0, pu.r - 3, 0, Math.PI * 2);
       tctx.fillStyle = "rgba(0,30,30,0.7)";
       tctx.fill();
-      // type-specific content
-      tctx.shadowBlur = 0;
-      tctx.textAlign = "center";
-      tctx.textBaseline = "middle";
       if (pu.type === "bomb") {
+        tctx.shadowBlur = 0;
+        tctx.textAlign = "center";
+        tctx.textBaseline = "middle";
         tctx.font = "18px sans-serif";
         tctx.fillStyle = "#ffffff";
         tctx.fillText("\u{1F4A3}", 0, 0);
-      } else if (pu.type === "timer") {
-        tctx.font = "bold 14px sans-serif";
-        tctx.fillStyle = "#ffaa00";
-        tctx.fillText("+30", 0, 0);
-      } else if (pu.type === "goldbars") {
-        tctx.font = "18px sans-serif";
-        tctx.fillStyle = "#ffffff";
-        tctx.fillText("\u{1FA99}", 0, 0);
-      } else if (pu.type === "quadshot") {
-        // spinning Q, full rotation every 2s, with a brief shine each rotation
-        const phase = (nowP % 2000) / 2000;
-        const shine = phase < 0.15;
-        tctx.rotate(phase * Math.PI * 2);
-        tctx.font = "bold 18px sans-serif";
-        tctx.fillStyle = shine ? "#ffffff" : "#cc66ff";
-        tctx.fillText("Q", 0, 0);
-      } else if (pu.type === "snowflake") {
-        tctx.font = "18px sans-serif";
-        tctx.fillStyle = "#88ddff";
-        tctx.fillText("❄", 0, 0);
       }
       tctx.restore();
     }
@@ -9119,6 +9194,15 @@ function initGalaxyCanvas() {
     tctx.save();
     tctx.fillStyle = "rgba(136,221,255,0.12)";
     tctx.fillRect(0, 0, sim.width, sim.height);
+    // ice casing per asteroid — drawn here (not via PIXI tint) for the same reason as the
+    // playfield tint above: the 2D multiply-tint path never runs on device.
+    tctx.fillStyle = "rgba(136,221,255,0.35)";
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const a = sim.asteroids[i];
+      tctx.beginPath();
+      tctx.arc(a.x, a.y, a.r, 0, Math.PI * 2);
+      tctx.fill();
+    }
     tctx.restore();
   }
 
@@ -9631,14 +9715,28 @@ function initGalaxyCanvas() {
     }
     playPlayerFireSound();
     const hitSomething = resolveShotAt(x, y, now, isTouch);
-    // 2026-06-10: quadshot — 3 extra shots clustered around the tap point while active
+    // 2026-06-10: quadshot — 3 extra shots clustered around the tap point while active.
+    // Each extra shot seeks the nearest live asteroid within QUADSHOT_SEEK_RADIUS and fires
+    // at its center through the same hit pipeline. Pure random 30-80px offsets almost never
+    // landed inside an asteroid's collision radius (r 10-38 + 10 slop), so the cluster
+    // visuals overlapped asteroids without ever destroying them.
     let extraHit = false;
     if (performance.now() < quadShotUntil) {
       for (let i = 0; i < 3; i += 1) {
-        const ang = Math.random() * Math.PI * 2;
-        const dist = 30 + Math.random() * 50;
-        const ex = clamp(x + Math.cos(ang) * dist, 0, sim.width);
-        const ey = clamp(y + Math.sin(ang) * dist, 0, sim.height);
+        let ex;
+        let ey;
+        // re-seek every shot: earlier extra shots splice destroyed asteroids, and split
+        // children spawned this same instant become valid targets for the next shot
+        const ti = findNearestAsteroidIndex(x, y, QUADSHOT_SEEK_RADIUS);
+        if (ti >= 0) {
+          ex = sim.asteroids[ti].x;
+          ey = sim.asteroids[ti].y;
+        } else {
+          const ang = Math.random() * Math.PI * 2;
+          const dist = 30 + Math.random() * 50;
+          ex = clamp(x + Math.cos(ang) * dist, 0, sim.width);
+          ey = clamp(y + Math.sin(ang) * dist, 0, sim.height);
+        }
         if (resolveShotAt(ex, ey, now, isTouch)) extraHit = true;
       }
     }
@@ -9720,8 +9818,51 @@ function initGalaxyCanvas() {
       return;
     }
     if (pu.type === "snowflake") {
-      freezeUntil = performance.now() + 6000;
-      cssFlash("#88ddff", 0.2, 300);
+      // 2026-06-10: snowflake now stocks the freeze inventory; the HUD button activates it
+      if (playerFreezeInventory < MAX_FREEZE_INVENTORY) {
+        playerFreezeInventory++;
+        updateHudFreezeInventory();
+        cssFlash("#88ddff", 0.15, 200);
+      }
+    }
+  }
+
+  // 2026-06-10: player-activated freeze (HUD ❄ button) — flash + shake, then 6s of frozen
+  // positions via the existing freezeUntil logic. Ignored while a freeze is already running.
+  function activateFreezeFromInventory() {
+    const nowF = performance.now();
+    if (playerFreezeInventory <= 0 || nowF < freezeUntil) return;
+    playerFreezeInventory--;
+    updateHudFreezeInventory();
+    cssFlash("#88ddff", 0.25, 300);
+    cssShake(0.8);
+    freezeUntil = nowF + FREEZE_DURATION_MS;
+    playGameSfx("blip", 0.9);
+  }
+
+  // 2026-06-10: frozen-asteroid destruction — glass-break layer over the normal boom plus
+  // ice debris. Runs for any destruction path while a freeze is active.
+  function addFrozenShatterFx(x, y) {
+    if (performance.now() >= freezeUntil) return;
+    // TODO: add shatter.mp3 — Poly to supply ice shatter sound
+    playGameSfx("crack", 0.9, { rate: 1.4 });
+    const count = 8 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < count; i += 1) {
+      if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
+      const ang = Math.random() * Math.PI * 2;
+      const speed = 60 + Math.random() * 160;
+      const p = getParticle();
+      p.x = x;
+      p.y = y;
+      p.vx = Math.cos(ang) * speed;
+      p.vy = Math.sin(ang) * speed;
+      p.life = 0;
+      p.ttl = 380 + Math.random() * 280;
+      p.size = 1.2 + Math.random() * 2.2;
+      p.alpha = 0.85;
+      p.color = "rgba(170,238,255,";
+      p.flicker = true;
+      sim.particles.push(p);
     }
   }
 
@@ -9863,9 +10004,10 @@ function initGalaxyCanvas() {
       const tapPoint = galaxyGesture.start;
       updateStroidTossDrag(galaxyGesture.current);
       updateStroidTossHold(now);
-      const didLaunch = stroidToss.active && (stroidToss.grabbed || now - stroidToss.holdStart >= STROID_TOSS_HOLD_MS)
-        ? launchStroidToss(now)
-        : false;
+      // 2026-06-10: no minimum hold before a toss — a quick flick released in <500ms used to
+      // fail the grabbed/hold-time gate and drop the stroid. launchStroidToss's own guards
+      // (recent sample + ≥10px movement) already separate a flick from a static tap.
+      const didLaunch = stroidToss.active ? launchStroidToss(now) : false;
       if (!didLaunch) {
         cancelStroidToss();
       }
@@ -10114,6 +10256,11 @@ function initGalaxyCanvas() {
       hudBombBtn?.classList.toggle("hudBombBtn--aiming", bombAimMode);
       updateHudBombInventory(); // suppress/restore the attention pulse based on aim state
       if (bombAimMode) playGameSfx("blip", 0.6);
+    },
+    // 2026-06-10: HUD freeze button — activate a stocked freeze
+    activateFreeze() {
+      if (!arcadeActive || engineMode !== "arcade") return;
+      activateFreezeFromInventory();
     },
     isArcade() {
       return engineMode === "arcade";

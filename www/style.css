@@ -1956,6 +1956,27 @@ select:focus-visible {
 .hudBombBtn.bomb-attention {
   animation: bombAttention 1.2s ease-in-out infinite;
 }
+/* 2026-06-10: freeze inventory button — ice-blue twin of the bomb button */
+.hudFreezeBtn {
+  margin-left: 8px;
+  min-height: 40px;
+  min-width: 60px;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  border: 1.5px solid rgba(136, 221, 255, 0.7);
+  background: rgba(8, 28, 40, 0.85);
+  opacity: 0.35; /* grayed-out empty slot by default */
+  transition: opacity 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+.hudFreezeBtn.has-freezes {
+  opacity: 1;
+  box-shadow: 0 0 10px rgba(136, 221, 255, 0.55);
+}
+
 /* 2026-06-10: quadshot powerup badge — violet Q with seconds remaining while active */
 .hudQuadBadge {
   display: none;

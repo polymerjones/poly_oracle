@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-11 22:37";
+const BUILD_TS = "2026-06-11 22:53";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -411,6 +411,7 @@ const PLASMA_CAGE_VOLUME_BOOST = Math.pow(10, 4 / 20);
 const STROID_TOSS_HOLD_MS = 500;
 const STROID_TOSS_TIMEOUT_MS = 15000; // 2026-06-11: a toss that never connects self-destructs at 15s
 const STROID_TOSS_MIN_SHRINK = 0.4; // 2026-06-11: a tossed stroid dwindles to 40% of its size over the flight
+const STROID_TOSS_FLOOR_SPEED = 180; // 2026-06-11: a tossed stroid never crawls below this (can't stall/stick)
 const STROID_TOSS_MIN_SPEED = 500;
 const STROID_TOSS_MAX_SPEED = 700;
 // 2026-06-11: tossable mines (placed bombs + landmine) — heavy lob physics
@@ -6726,7 +6727,9 @@ function initGalaxyCanvas() {
 
   function startStroidToss(index, point, pointerId, now) {
     const asteroid = sim.asteroids[index];
-    if (!asteroid || asteroid.kind < 2) return false;
+    // 2026-06-11: an in-flight (flaming) tossed stroid can't be grabbed again — re-grabbing
+    // pinned it in place (grab zeroes velocity), which is what stalled upward tosses.
+    if (!asteroid || asteroid.kind < 2 || asteroid.tossed) return false;
     resetStroidToss();
     stroidToss.active = true;
     stroidToss.asteroidIndex = index;
@@ -9168,9 +9171,15 @@ function initGalaxyCanvas() {
       for (let i = 0; i < sim.asteroids.length; i += 1) {
         const a = sim.asteroids[i];
         if (a._stroidHeld) {
-          a.vx = 0;
-          a.vy = 0;
-          continue;
+          // 2026-06-11: only the asteroid actually in the grab gesture stays pinned. A stray
+          // held flag (e.g. a canceled gesture) would otherwise freeze a stroid in place
+          // forever — clear it so the stroid resumes motion.
+          if (a === stroidToss.asteroid) {
+            a.vx = 0;
+            a.vy = 0;
+            continue;
+          }
+          a._stroidHeld = false;
         }
         a.rot += a.spin * (dt / 16);
         // 2026-06-11: a tossed stroid keeps flying during a freeze (player action) — you can
@@ -9180,7 +9189,19 @@ function initGalaxyCanvas() {
         a.y += a.vy * (dt / 1000);
         if (engineMode === "practice") wrapEntityToCanvas(a);
         else wrapEntity(a);
-        if (!a.tossed) clampSpeed(a);
+        if (a.tossed) {
+          // tossed stroids skip clampSpeed, so a shove (UFO blast clamp, grazing collision)
+          // could otherwise drop one near zero with nothing to re-energize it — keep a floor
+          // so a tossed stroid can never stall and stick. It still self-destructs at the timeout.
+          const sp = Math.hypot(a.vx, a.vy);
+          if (sp < STROID_TOSS_FLOOR_SPEED) {
+            const ang = sp > 0.01 ? Math.atan2(a.vy, a.vx) : Math.random() * Math.PI * 2;
+            a.vx = Math.cos(ang) * STROID_TOSS_FLOOR_SPEED;
+            a.vy = Math.sin(ang) * STROID_TOSS_FLOOR_SPEED;
+          }
+        } else {
+          clampSpeed(a);
+        }
         applyMotionHealth(a, now);
       }
       updateStroidTossHold(now);
@@ -10363,6 +10384,14 @@ function initGalaxyCanvas() {
     }
   }
 
+  // 2026-06-11: a canceled pointer/touch (iOS edge gestures, system interruptions) must release
+  // any in-progress grab and clear the gesture, or the grabbed stroid stays pinned in place.
+  function onGalaxyPointerCancel() {
+    if (stroidToss.active) cancelStroidToss();
+    if (plasmaCage.active) resetPlasmaCageGesture();
+    galaxyGesture = null;
+  }
+
   function onGalaxyPointerUp(event) {
     if (!galaxyGesture) return;
     const now = performance.now();
@@ -10483,11 +10512,15 @@ function initGalaxyCanvas() {
       galaxyPlayCanvas.addEventListener("pointerdown", onGalaxyPointerDown, { passive: false });
       galaxyPlayCanvas.addEventListener("pointermove", onGalaxyPointerMove, { passive: false });
       galaxyPlayCanvas.addEventListener("pointerup", onGalaxyPointerUp, { passive: false });
+      // 2026-06-11: iOS cancels touches near screen edges (e.g. an upward flick to the top) —
+      // without this the grab orphaned and the stroid stayed pinned. Release the grab on cancel.
+      galaxyPlayCanvas.addEventListener("pointercancel", onGalaxyPointerCancel, { passive: false });
       galaxyPlayCanvas.addEventListener("click", onGalaxyPointerDown, { passive: false });
     } else {
       galaxyPlayCanvas.addEventListener("touchstart", onGalaxyPointerDown, { passive: false });
       galaxyPlayCanvas.addEventListener("touchmove", onGalaxyPointerMove, { passive: false });
       galaxyPlayCanvas.addEventListener("touchend", onGalaxyPointerUp, { passive: false });
+      galaxyPlayCanvas.addEventListener("touchcancel", onGalaxyPointerCancel, { passive: false });
       galaxyPlayCanvas.addEventListener("mousedown", onGalaxyPointerDown, { passive: false });
       galaxyPlayCanvas.addEventListener("mousemove", onGalaxyPointerMove, { passive: false });
       galaxyPlayCanvas.addEventListener("mouseup", onGalaxyPointerUp, { passive: false });

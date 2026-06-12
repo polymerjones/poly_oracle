@@ -12,6 +12,21 @@ node --check script.js && npm run prepare:web
 Bump `BUILD_TS` in `script.js` whenever shipping a build — the in-game bottom-left
 stamp is how deploys are verified.
 
+## Session hygiene (cost control)
+
+Every turn re-bills the whole accumulated context, so long mixed sessions get expensive
+(caching helps but isn't free). Keep sessions tight:
+
+- **`/clear` between unrelated tasks** — e.g. finishing a deploy fix before starting a new
+  feature. This is the biggest saver; don't drag one task's context into the next.
+- **`/compact` within a long single task** when context balloons but you need continuity.
+- **Reserve Opus for hard reasoning** (gnarly bug diagnosis, design). For mechanical work —
+  git commits, `.gitignore`/config edits, asset wrangling, file scaffolding — `/model sonnet`
+  is plenty and far cheaper.
+- Claude: proactively suggest `/compact` or `/clear` when a session's context is clearly large
+  or the user pivots to an unrelated task, and flag when a task is mechanical enough to drop to
+  Sonnet.
+
 ## PRE-RELEASE CHECKLIST
 
 Every item below must be resolved before App Store submission:

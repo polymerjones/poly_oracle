@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-11 21:31";
+const BUILD_TS = "2026-06-11 22:05";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -412,6 +412,10 @@ const STROID_TOSS_HOLD_MS = 500;
 const STROID_TOSS_TIMEOUT_MS = 8000;
 const STROID_TOSS_MIN_SPEED = 500;
 const STROID_TOSS_MAX_SPEED = 700;
+// 2026-06-11: tossable mines (placed bombs + landmine) — heavy lob physics
+const MINE_TOSS_SPEED_FACTOR = 0.45; // bombs launch at 0.45x a stroid's speed
+const MINE_TOSS_DECEL = 240; // px/s^2 friction — decelerates a lobbed mine to rest in ~1-1.5s
+const MINE_TOSS_REST_SPEED = 40; // below this the toss settles back to normal drift
 const CHAOS_THRESHOLD = 60;
 const LEVEL_THEMES = {
   1:  { primary: "#00FFD1", name: "Deep Space" },
@@ -5031,6 +5035,11 @@ function initGalaxyCanvas() {
   const laserBeams = [];
   let tapBlasts = []; // 2026-06-09: localized X blast for iOS touch taps (replaces laser)
   const _bombShrapnel = [];
+  // 2026-06-11: fire trail behind in-flight tossed asteroids — dedicated overlay array
+  // (the sim.particles pool renders through PIXI on device; this draws on the ufoFx overlay).
+  const flameTrail = [];
+  const FLAME_TRAIL_MAX = 60;
+  const FLAME_COLORS = ["255,102,0", "255,170,0", "255,51,0"]; // #ff6600 / #ffaa00 / #ff3300
   let _fpsOverlay = null;
   let _fpsFrames = 0;
   let _fpsLastTime = 0;
@@ -5066,6 +5075,7 @@ function initGalaxyCanvas() {
     active: false,
     asteroidIndex: -1,
     asteroid: null,
+    mine: null, // 2026-06-11: grab state is shared with tossable mines (placed bombs + landmine)
     holdStart: 0,
     grabbed: false,
     dragX: 0,
@@ -6686,9 +6696,13 @@ function initGalaxyCanvas() {
     if (stroidToss.asteroid) {
       stroidToss.asteroid._stroidHeld = false;
     }
+    if (stroidToss.mine) {
+      stroidToss.mine._stroidHeld = false;
+    }
     stroidToss.active = false;
     stroidToss.asteroidIndex = -1;
     stroidToss.asteroid = null;
+    stroidToss.mine = null;
     stroidToss.holdStart = 0;
     stroidToss.grabbed = false;
     galaxyPlayCanvas.style.cursor = "";
@@ -6736,6 +6750,55 @@ function initGalaxyCanvas() {
     return true;
   }
 
+  // 2026-06-11: nearest grabbable mine (placed bomb or level landmine) under (x, y), or null.
+  // Any phase is grabbable. Mines take grab priority over stroids at an overlapping point.
+  function findGrabbableMineAt(x, y) {
+    let best = null;
+    let bestDist = Infinity;
+    const consider = (mine) => {
+      if (!mine) return;
+      const d = Math.hypot(mine.x - x, mine.y - y);
+      if (d <= mine.r + 12 && d < bestDist) {
+        best = mine;
+        bestDist = d;
+      }
+    };
+    consider(landmine);
+    for (let i = 0; i < placedBombs.length; i += 1) consider(placedBombs[i]);
+    return best;
+  }
+
+  // 2026-06-11: begin a grab on a mine — mirrors startStroidToss but the mine keeps its fuse
+  // running (no kind gate; grabbable mid-countdown). Reuses the shared stroidToss state so the
+  // drag/hold/launch path is identical.
+  function startMineToss(mine, point, pointerId, now) {
+    if (!mine) return false;
+    resetStroidToss();
+    stroidToss.active = true;
+    stroidToss.mine = mine;
+    stroidToss.holdStart = now;
+    stroidToss.grabbed = false;
+    stroidToss.dragX = point.x;
+    stroidToss.dragY = point.y;
+    stroidToss.pointerId = pointerId ?? null;
+    stroidToss.grabX = point.x;
+    stroidToss.grabY = point.y;
+    stroidToss.startX = mine.x;
+    stroidToss.startY = mine.y;
+    stroidToss.lastHapticAt = now;
+    stroidToss.lastSparkAt = 0;
+    stroidToss.samples.length = 0;
+    stroidToss.samples.push({ x: point.x, y: point.y, t: performance.now() });
+    mine._stroidHeld = true;
+    mine._tossActive = false;
+    mine._preTossVx = mine.vx;
+    mine._preTossVy = mine.vy;
+    mine.vx = 0;
+    mine.vy = 0;
+    triggerGameplayHapticImpact(hapticImpactStyle.Light);
+    return true;
+  }
+
   function getStroidTossAsteroid() {
     if (!stroidToss.active || !stroidToss.asteroid) return null;
     if (!sim.asteroids.includes(stroidToss.asteroid)) {
@@ -6745,8 +6808,24 @@ function initGalaxyCanvas() {
     return stroidToss.asteroid;
   }
 
+  // 2026-06-11: the grabbed entity for the shared drag/hold/launch path — an asteroid OR a
+  // mine. Mines live in placedBombs / landmine (not sim.asteroids); a held mine that detonates
+  // in-hand (fuse expiry) vanishes from its container, so self-heal the grab when that happens.
+  function getGrabbedEntity() {
+    if (!stroidToss.active) return null;
+    if (stroidToss.mine) {
+      const m = stroidToss.mine;
+      if (m !== landmine && !placedBombs.includes(m)) {
+        resetStroidToss();
+        return null;
+      }
+      return m;
+    }
+    return getStroidTossAsteroid();
+  }
+
   function updateStroidTossDrag(point) {
-    const asteroid = getStroidTossAsteroid();
+    const asteroid = getGrabbedEntity();
     if (!asteroid) return;
     stroidToss.dragX = point.x;
     stroidToss.dragY = point.y;
@@ -6768,7 +6847,7 @@ function initGalaxyCanvas() {
   }
 
   function updateStroidTossHold(now) {
-    const asteroid = getStroidTossAsteroid();
+    const asteroid = getGrabbedEntity();
     if (!asteroid) return;
     if (!stroidToss.grabbed) {
       asteroid.vx = 0;
@@ -6790,20 +6869,24 @@ function initGalaxyCanvas() {
   }
 
   function cancelStroidToss() {
-    const asteroid = stroidToss.asteroid;
-    if (asteroid) {
-      asteroid._stroidHeld = false;
-      asteroid.vx = asteroid._preTossVx ?? asteroid.vx;
-      asteroid.vy = asteroid._preTossVy ?? asteroid.vy;
-      delete asteroid._preTossVx;
-      delete asteroid._preTossVy;
+    // restore the pre-grab drift on whichever entity was held (asteroid or mine)
+    const entity = stroidToss.asteroid || stroidToss.mine;
+    if (entity) {
+      entity._stroidHeld = false;
+      entity.vx = entity._preTossVx ?? entity.vx;
+      entity.vy = entity._preTossVy ?? entity.vy;
+      delete entity._preTossVx;
+      delete entity._preTossVy;
     }
     resetStroidToss();
   }
 
   function launchStroidToss(now) {
-    const asteroid = getStroidTossAsteroid();
-    if (!asteroid) return false;
+    // 2026-06-11: shared launch for stroids AND mines. The flick sampling / guards are
+    // identical; only the launch speed scale and the per-entity finalization differ.
+    const entity = getGrabbedEntity();
+    if (!entity) return false;
+    const isMine = !!stroidToss.mine;
     // 2026-06-10: throw direction comes from the LAST ≤200ms of pointer movement, not the
     // total drag delta — a fast flick that curved or ended near the grab point used to throw
     // backwards (the old <12px fallback even reused the asteroid's random pre-grab drift).
@@ -6816,24 +6899,34 @@ function initGalaxyCanvas() {
         break;
       }
     }
-    if (!ref) return false; // no recent movement — drop the stroid in place
+    if (!ref) return false; // no recent movement — drop in place
     const dx = stroidToss.dragX - ref.x;
     const dy = stroidToss.dragY - ref.y;
     const len = Math.hypot(dx, dy);
     if (len < 10) return false; // insufficient flick — drop in place, don't guess a direction
     const nx = dx / len;
     const ny = dy / len;
-    const speed = STROID_TOSS_MIN_SPEED + Math.random() * (STROID_TOSS_MAX_SPEED - STROID_TOSS_MIN_SPEED);
-    asteroid.vx = nx * speed;
-    asteroid.vy = ny * speed;
-    asteroid._stroidHeld = false;
-    asteroid.tossed = true;
-    asteroid.tossedAt = now;
-    asteroid.tossHealth = 3;
-    delete asteroid._preTossVx;
-    delete asteroid._preTossVy;
-    sim.tossedAsteroid = asteroid;
-    playGameSfx(Math.random() < 0.5 ? "stroidthrow1" : "stroidthrow2", 0.85);
+    // bombs are heavy: launch at 0.45x a stroid's speed so they lob rather than zoom
+    const baseSpeed = STROID_TOSS_MIN_SPEED + Math.random() * (STROID_TOSS_MAX_SPEED - STROID_TOSS_MIN_SPEED);
+    const speed = isMine ? baseSpeed * MINE_TOSS_SPEED_FACTOR : baseSpeed;
+    entity.vx = nx * speed;
+    entity.vy = ny * speed;
+    entity._stroidHeld = false;
+    delete entity._preTossVx;
+    delete entity._preTossVy;
+    if (isMine) {
+      // heavy lob: friction in updateMineEntity decelerates it to a stop in ~1-1.5s
+      entity._tossActive = true;
+      entity.lastMoveAt = now; // don't let applyMotionHealth nudge it mid-flight
+      playGameSfx("crunch", 0.7);
+      playGameSfx(Math.random() < 0.5 ? "stroidthrow1" : "stroidthrow2", 0.6);
+    } else {
+      entity.tossed = true;
+      entity.tossedAt = now;
+      entity.tossHealth = 3;
+      sim.tossedAsteroid = entity;
+      playGameSfx(Math.random() < 0.5 ? "stroidthrow1" : "stroidthrow2", 0.85);
+    }
     resetStroidToss();
     return true;
   }
@@ -7710,7 +7803,8 @@ function initGalaxyCanvas() {
 
   function drawStroidTossOverlay(now) {
     if (!plasmaCtx || !stroidToss.active) return;
-    const asteroid = getStroidTossAsteroid();
+    // 2026-06-11: aim reticle + throw arrow for the grabbed entity, stroid or mine
+    const asteroid = getGrabbedEntity();
     if (!asteroid) return;
     const holdProgress = clamp((now - stroidToss.holdStart) / STROID_TOSS_HOLD_MS, 0, 1);
     const pulse = Math.abs(Math.sin(now / (stroidToss.grabbed ? 62 : 140)));
@@ -7860,17 +7954,55 @@ function initGalaxyCanvas() {
     return armMineEntity(landmine, (opts) => explodeLandmine(opts));
   }
 
+  // 2026-06-11: true if an armed mine overlaps an asteroid, the UFO, or another mine — the
+  // trigger for collision detonation. Spawned (unarmed) mines never call this; they bounce.
+  function armedMineHitsSomething(mine) {
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const a = sim.asteroids[i];
+      if (a.spawnedAtMs && performance.now() - a.spawnedAtMs < 250) continue; // split-child grace
+      if (Math.hypot(a.x - mine.x, a.y - mine.y) <= mine.r + a.r) return true;
+    }
+    if (ufo && ufo.alive && Math.hypot(ufo.x - mine.x, ufo.y - mine.y) <= mine.r + (ufo.r || 24)) return true;
+    if (mine !== landmine && landmine && Math.hypot(landmine.x - mine.x, landmine.y - mine.y) <= mine.r + landmine.r) return true;
+    for (let i = 0; i < placedBombs.length; i += 1) {
+      const b = placedBombs[i];
+      if (b !== mine && Math.hypot(b.x - mine.x, b.y - mine.y) <= mine.r + b.r) return true;
+    }
+    return false;
+  }
+
   // 2026-06-10: per-frame physics + phase transitions for any mine entity.
   // Returns true if the mine exploded this frame. explodeFn handles removal.
   function updateMineEntity(mine, dt, now, explodeFn, { quietArm = false, frozen = false } = {}) {
-    // 2026-06-10: snowflake freeze skips position physics; arm/detonate timers keep running
-    if (!frozen) {
+    // 2026-06-10: snowflake freeze skips position physics; arm/detonate timers keep running.
+    // 2026-06-11: a held (grabbed) mine is positioned by the drag — skip physics, fuse runs on.
+    const held = mine._stroidHeld === true;
+    const armed = mine.phase === "armed" || mine.phase === "player_armed";
+    if (!frozen && !held) {
+      // heavy-toss friction: decelerate a lobbed mine to rest, then hand back to normal drift
+      if (mine._tossActive) {
+        const sp = Math.hypot(mine.vx, mine.vy);
+        const nsp = Math.max(0, sp - MINE_TOSS_DECEL * (dt / 1000));
+        if (sp > 0) { mine.vx = (mine.vx / sp) * nsp; mine.vy = (mine.vy / sp) * nsp; }
+        if (nsp <= MINE_TOSS_REST_SPEED) { mine._tossActive = false; mine.lastMoveAt = now; }
+      }
       mine.x += mine.vx * (dt / 1000);
       mine.y += mine.vy * (dt / 1000);
       wrapEntity(mine);
-      clampSpeed(mine);
-      applyMotionHealth(mine, now);
-      collideMineWithAsteroids(mine);
+      if (armed) {
+        // armed mines (tossed OR drifting) detonate on contact; chains via explodeMineEntity
+        if (armedMineHitsSomething(mine)) {
+          explodeFn({ halfRadius: mine.phase === "armed" });
+          return true;
+        }
+      } else {
+        // spawned (unarmed): physical object — bounce off asteroids, keep drifting
+        if (!mine._tossActive) {
+          clampSpeed(mine);
+          applyMotionHealth(mine, now);
+        }
+        collideMineWithAsteroids(mine);
+      }
     }
 
     if (mine.phase === "spawned" && now - mine.spawnedAt >= 10000) {
@@ -7900,6 +8032,26 @@ function initGalaxyCanvas() {
     return false;
   }
 
+  // 2026-06-11: an exploding armed mine triggers any other armed mine within range (recursion
+  // bounded by depth). Each victim removes itself from its container via its own explode path.
+  let _mineChainDepth = 0;
+  function chainDetonateMines(x, y, radius) {
+    if (_mineChainDepth > 6) return;
+    const victims = [];
+    const inRange = (m) => m
+      && (m.phase === "armed" || m.phase === "player_armed")
+      && Math.hypot(m.x - x, m.y - y) <= radius;
+    if (inRange(landmine)) victims.push(landmine);
+    for (let i = 0; i < placedBombs.length; i += 1) {
+      if (inRange(placedBombs[i])) victims.push(placedBombs[i]);
+    }
+    for (let i = 0; i < victims.length; i += 1) {
+      const m = victims[i];
+      if (m === landmine) explodeLandmine({ halfRadius: true });
+      else explodePlacedBomb(m, { halfRadius: true });
+    }
+  }
+
   // 2026-06-10: shared explosion effects for any mine entity (level landmine or placed bomb).
   // Removal from its container is the caller's job.
   function explodeMineEntity(mine, { halfRadius = false } = {}) {
@@ -7919,6 +8071,11 @@ function initGalaxyCanvas() {
     setTimeout(() => window.galaxyBackground?.setHectic(false), 3000);
     playBigBoomSound();
     playGameSfx("bigbang", 1.62);
+    // chain: detonate other armed mines caught in the blast (the just-exploded mine is already
+    // removed from its container by the caller, so it can't re-trigger itself)
+    _mineChainDepth += 1;
+    chainDetonateMines(x, y, radius * 0.6);
+    _mineChainDepth -= 1;
   }
 
   function explodeLandmine(opts = {}) {
@@ -8030,6 +8187,7 @@ function initGalaxyCanvas() {
     laserBeams.length = 0;
     tapBlasts.length = 0;
     _bombShrapnel.length = 0;
+    flameTrail.length = 0;
     stopPlasmaChargeSound();
     stopWarningState();
   }
@@ -8974,6 +9132,7 @@ function initGalaxyCanvas() {
       }
       updateStroidTossHold(now);
       updateTossedAsteroidCollision(now);
+      stepFlameTrail(dt, now);
       if (!simFrozen) resolveAsteroidCollisions();
 
       if (landmine) {
@@ -9154,6 +9313,58 @@ function initGalaxyCanvas() {
     }
   }
 
+  // 2026-06-11: spawn + advance the fire trail behind an in-flight tossed asteroid. Stepped
+  // from update() (dt-based) so it never double-advances when draw() runs more than once.
+  function stepFlameTrail(dt, now) {
+    const tossed = sim.tossedAsteroid;
+    if (tossed && tossed.tossed && sim.asteroids.includes(tossed)) {
+      const speed = Math.hypot(tossed.vx, tossed.vy);
+      if (speed > 1) {
+        const nx = tossed.vx / speed;
+        const ny = tossed.vy / speed;
+        const count = 2 + (Math.random() < 0.5 ? 1 : 0); // 2-3 per frame
+        for (let i = 0; i < count && flameTrail.length < FLAME_TRAIL_MAX; i += 1) {
+          // emit at the trailing edge (opposite the velocity direction)
+          const tx = tossed.x - nx * tossed.r;
+          const ty = tossed.y - ny * tossed.r;
+          flameTrail.push({
+            x: tx + (Math.random() - 0.5) * tossed.r * 0.6,
+            y: ty + (Math.random() - 0.5) * tossed.r * 0.6,
+            vx: -nx * 24 + (Math.random() - 0.5) * 44, // drift back + slight scatter
+            vy: -ny * 24 + (Math.random() - 0.5) * 44,
+            life: 0,
+            ttl: 240 + Math.random() * 140, // ~300ms
+            r: 2 + Math.random() * 3,
+            color: FLAME_COLORS[(Math.random() * FLAME_COLORS.length) | 0],
+          });
+        }
+      }
+    }
+    for (let i = flameTrail.length - 1; i >= 0; i -= 1) {
+      const f = flameTrail[i];
+      f.life += dt;
+      f.x += f.vx * (dt / 1000);
+      f.y += f.vy * (dt / 1000);
+      if (f.life >= f.ttl) flameTrail.splice(i, 1);
+    }
+  }
+
+  // 2026-06-11: render the flame trail on the ufoFx overlay (advance happens in stepFlameTrail).
+  function drawFlameTrail(tctx) {
+    if (!tctx || flameTrail.length === 0) return;
+    tctx.save();
+    for (let i = 0; i < flameTrail.length; i += 1) {
+      const f = flameTrail[i];
+      const k = Math.max(0, 1 - f.life / f.ttl); // 1 → 0 fade
+      tctx.globalAlpha = k * 0.9;
+      tctx.fillStyle = `rgba(${f.color},1)`;
+      tctx.beginPath();
+      tctx.arc(f.x, f.y, f.r * (0.5 + k * 0.5), 0, Math.PI * 2);
+      tctx.fill();
+    }
+    tctx.restore();
+  }
+
   // 2026-06-10: draw all collectible powerups. Timer/goldbars/quadshot/snowflake render
   // their sprite (baked-in glow); bomb keeps the canvas-drawn ring + glyph. Rendered on the
   // ufoFx overlay (like the tap blasts) so they show above the PIXI layer. Expiry is handled
@@ -9327,6 +9538,7 @@ function initGalaxyCanvas() {
       setPlasmaOverlayVisible(stroidToss.active);
       if (stroidToss.active) drawPlasmaOverlay(now);
       drawUfoFxOverlay(ctx);
+      drawFlameTrail(ufoFxCtx || ctx);
       drawPowerups(ufoFxCtx || ctx);
       drawLandmineCountdownOverlay(ufoFxCtx || ctx);
       drawPlacedBombsOverlay(ufoFxCtx || ctx);
@@ -9646,6 +9858,7 @@ function initGalaxyCanvas() {
       ctx.restore();
     }
     drawUfoFxOverlay(ctx);
+    drawFlameTrail(ufoFxCtx || ctx);
     drawPowerups(ufoFxCtx || ctx);
     drawLandmineCountdownOverlay(ufoFxCtx || ctx);
     drawPlacedBombsOverlay(ufoFxCtx || ctx);
@@ -9965,10 +10178,18 @@ function initGalaxyCanvas() {
     }
     let mode = "tap";
     if (engineMode === "arcade" && arcadeActive) {
-      const hitIndex = findHitAsteroidIndex(point.x, point.y);
-      const hitAsteroid = hitIndex >= 0 ? sim.asteroids[hitIndex] : null;
-      if (hitAsteroid && hitAsteroid.kind >= 2 && startStroidToss(hitIndex, point, event.pointerId, now)) {
+      // 2026-06-11: mines take grab priority over stroids at an overlapping point (rarer,
+      // more deliberate). A plain tap that never becomes a hold/flick falls back to the tap
+      // path below (arm/detonate for mines, split for stroids) via launchStroidToss → cancel.
+      const grabMine = findGrabbableMineAt(point.x, point.y);
+      if (grabMine && startMineToss(grabMine, point, event.pointerId, now)) {
         mode = "stroidToss";
+      } else {
+        const hitIndex = findHitAsteroidIndex(point.x, point.y);
+        const hitAsteroid = hitIndex >= 0 ? sim.asteroids[hitIndex] : null;
+        if (hitAsteroid && hitAsteroid.kind >= 2 && startStroidToss(hitIndex, point, event.pointerId, now)) {
+          mode = "stroidToss";
+        }
       }
     }
     galaxyGesture = {

@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-11 22:53";
+const BUILD_TS = "2026-06-11 23:20";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -409,7 +409,7 @@ const PLASMA_CAGE_COOLDOWN_MS = 5000;
 const PLASMA_CAGE_DRAG_THRESHOLD = 20;
 const PLASMA_CAGE_VOLUME_BOOST = Math.pow(10, 4 / 20);
 const STROID_TOSS_HOLD_MS = 500;
-const STROID_TOSS_TIMEOUT_MS = 15000; // 2026-06-11: a toss that never connects self-destructs at 15s
+const STROID_TOSS_TIMEOUT_MS = 6000; // 2026-06-11: a toss that never connects self-destructs at 6s (dwindles over the same window)
 const STROID_TOSS_MIN_SHRINK = 0.4; // 2026-06-11: a tossed stroid dwindles to 40% of its size over the flight
 const STROID_TOSS_FLOOR_SPEED = 180; // 2026-06-11: a tossed stroid never crawls below this (can't stall/stick)
 const STROID_TOSS_MIN_SPEED = 500;
@@ -6858,6 +6858,13 @@ function initGalaxyCanvas() {
   function updateStroidTossHold(now) {
     const asteroid = getGrabbedEntity();
     if (!asteroid) return;
+    // 2026-06-11: self-heal an orphaned grab. If the owning pointer gesture is gone (replaced
+    // by a stray tap, or never released), the grab would otherwise pin the stroid in place
+    // forever — release it so the stroid resumes motion (this was sticking tossed stroids).
+    if (!galaxyGesture || galaxyGesture.mode !== "stroidToss") {
+      cancelStroidToss();
+      return;
+    }
     if (!stroidToss.grabbed) {
       asteroid.vx = 0;
       asteroid.vy = 0;
@@ -9170,10 +9177,13 @@ function initGalaxyCanvas() {
       const simFrozen = now < freezeUntil;
       for (let i = 0; i < sim.asteroids.length; i += 1) {
         const a = sim.asteroids[i];
-        if (a._stroidHeld) {
-          // 2026-06-11: only the asteroid actually in the grab gesture stays pinned. A stray
-          // held flag (e.g. a canceled gesture) would otherwise freeze a stroid in place
-          // forever — clear it so the stroid resumes motion.
+        // 2026-06-11: a tossed (flaming) stroid is NEVER held — held and tossed are mutually
+        // exclusive states. Clear any stray held flag so a tossed stroid can never be pinned in
+        // place (this was the flaming-stroid-stuck-at-edge bug). Only a non-tossed stroid that
+        // is the current grab target stays pinned; any other stray held flag is cleared too.
+        if (a.tossed) {
+          a._stroidHeld = false;
+        } else if (a._stroidHeld) {
           if (a === stroidToss.asteroid) {
             a.vx = 0;
             a.vy = 0;

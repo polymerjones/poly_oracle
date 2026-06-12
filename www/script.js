@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-11 22:25";
+const BUILD_TS = "2026-06-11 22:37";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -409,7 +409,8 @@ const PLASMA_CAGE_COOLDOWN_MS = 5000;
 const PLASMA_CAGE_DRAG_THRESHOLD = 20;
 const PLASMA_CAGE_VOLUME_BOOST = Math.pow(10, 4 / 20);
 const STROID_TOSS_HOLD_MS = 500;
-const STROID_TOSS_TIMEOUT_MS = 8000;
+const STROID_TOSS_TIMEOUT_MS = 15000; // 2026-06-11: a toss that never connects self-destructs at 15s
+const STROID_TOSS_MIN_SHRINK = 0.4; // 2026-06-11: a tossed stroid dwindles to 40% of its size over the flight
 const STROID_TOSS_MIN_SPEED = 500;
 const STROID_TOSS_MAX_SPEED = 700;
 // 2026-06-11: tossable mines (placed bombs + landmine) — heavy lob physics
@@ -6929,6 +6930,7 @@ function initGalaxyCanvas() {
       entity.tossed = true;
       entity.tossedAt = now;
       entity.tossHealth = 3;
+      entity._tossBaseR = entity.r; // 2026-06-11: anchor for the in-flight dwindle
       sim.tossedAsteroid = entity;
       playGameSfx(Math.random() < 0.5 ? "stroidthrow1" : "stroidthrow2", 0.85);
     }
@@ -7007,6 +7009,27 @@ function initGalaxyCanvas() {
     return true;
   }
 
+  // 2026-06-11: a tossed stroid that flies the full STROID_TOSS_TIMEOUT_MS without connecting
+  // burns out and self-destructs — crackle + mine-final-explosion layered (both `important`
+  // so the native per-frame audio budget doesn't drop one).
+  function selfDestructTossedAsteroid(tossed) {
+    if (!tossed) return;
+    const x = tossed.x;
+    const y = tossed.y;
+    const kind = tossed.kind || 3;
+    const spriteKey = tossed.spriteKey;
+    spawnExplosion(x, y, 46, true, 2.4, 1, kind, spriteKey);
+    addFrozenShatterFx(x, y); // ice burst if it fizzles out mid-freeze (no-op otherwise)
+    addWarpRing(x, y, "rgba(255,160,60,1)");
+    cssShake(1.0);
+    cssFlash("#ffaa44", 0.25, 220);
+    triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
+    playGameSfx("particle_crackle1", 0.9, { important: true });
+    playGameSfx("landmine_boom", 1.0, { important: true }); // minefinalexplo.mp3
+    removeAsteroidRef(tossed);
+    if (sim.tossedAsteroid === tossed) sim.tossedAsteroid = null;
+  }
+
   function detonateTossedAsteroid(tossed) {
     if (!tossed) return;
     const x = tossed.x;
@@ -7074,24 +7097,36 @@ function initGalaxyCanvas() {
     for (let ti = 0; ti < tossedList.length; ti += 1) {
       const tossed = tossedList[ti];
       if (!sim.asteroids.includes(tossed)) continue; // removed by an earlier detonation this frame
-      if (now - tossed.tossedAt > STROID_TOSS_TIMEOUT_MS) {
-        tossed.tossed = false;
-        tossed.tossedAt = 0;
-        delete tossed.tossHealth;
-        if (sim.tossedAsteroid === tossed) sim.tossedAsteroid = null;
+      const tossAge = now - tossed.tossedAt;
+      // 2026-06-11: a tossed stroid that never connects self-destructs at the timeout (it used
+      // to revert to a normal drifter) and dwindles toward STROID_TOSS_MIN_SHRINK along the way.
+      if (tossAge > STROID_TOSS_TIMEOUT_MS) {
+        selfDestructTossedAsteroid(tossed);
         continue;
+      }
+      if (tossed._tossBaseR) {
+        const p = clamp(tossAge / STROID_TOSS_TIMEOUT_MS, 0, 1);
+        tossed.r = tossed._tossBaseR * (1 - (1 - STROID_TOSS_MIN_SHRINK) * p);
       }
       for (let i = 0; i < sim.asteroids.length; i += 1) {
         const other = sim.asteroids[i];
-        if (!other || other === tossed || other.tossed) continue; // skip other in-flight tosses
+        if (!other || other === tossed) continue;
         // 2026-06-10: 250ms spawn grace — split children appear at the impact point and would
         // otherwise be re-hit on the next frame, chain-splitting everything instantly.
         if (other.spawnedAtMs && now - other.spawnedAtMs < 250) continue;
         const dist = Math.hypot(other.x - tossed.x, other.y - tossed.y);
-        if (dist <= tossed.r + other.r) {
+        if (dist > tossed.r + other.r) continue;
+        if (other.tossed) {
+          // 2026-06-11: two airborne tosses meeting head-on both detonate. Require a short
+          // airborne grace on BOTH so stroids launched from overlapping spots don't blow up
+          // the instant they're released.
+          if (now - tossed.tossedAt < 150 || now - other.tossedAt < 150) continue;
+          detonateTossedAsteroid(tossed);
+          detonateTossedAsteroid(other);
+        } else {
           handleTossedAsteroidImpact(tossed, other);
-          break; // this tossed stroid resolves one impact per frame
         }
+        break; // this tossed stroid resolves one impact per frame
       }
     }
   }
@@ -8328,7 +8363,7 @@ function initGalaxyCanvas() {
 
     autoTimer = setTimeout(dismiss, 7000);
 
-    // Row-by-row tally reveal: dividers + rows appear one at a time, 400ms apart
+    // Row-by-row tally reveal: dividers + rows appear one at a time, 200ms apart
     const revealEls = Array.from(panel.querySelectorAll(".lsr-div, .lsr-row"));
     writeLoopHandle = audioEngine.playLoop("write_on_text_loop", { volume: state.whisper ? 0.2 : 0.38 });
     revealEls.forEach((el, i) => {
@@ -8389,7 +8424,7 @@ function initGalaxyCanvas() {
             }
           }
         }
-      }, 260 + i * 400));
+      }, 150 + i * 200));
     });
   }
 

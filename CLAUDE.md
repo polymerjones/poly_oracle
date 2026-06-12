@@ -19,7 +19,6 @@ Every item below must be resolved before App Store submission:
 - [ ] `DEBUG_FORCE_LEVEL_SELECT` → set back to `false` (script.js, near line 470)
 - [ ] Powerup level gate → restore to `cfg.level >= 4` (currently `>= 1` for freeze testing)
 - [ ] Powerup weights → restore snowflake 10 / goldbars 15 → 30 (`POWERUP_WEIGHTS`)
+- [ ] Remove forced goldbars spawn in the level's final 15s (`goldbarsForceSpawnedThisLevel`)
 - [ ] Search script.js for `DEBUG: revert before release` and resolve **all** hits
 - [ ] Verify `hasBeatenGame()` has no overrides
-- [ ] Record `shatter.mp3` ice sound — placeholder is `crack` at rate 1.4
-      (search for `TODO: add shatter.mp3`), add it to `GAME_SFX` and `gamesfx/`

@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-10 17:58";
+const BUILD_TS = "2026-06-11 21:31";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -346,6 +346,13 @@ const GAME_SFX = {
   reveal2: "reveal2.mp3",
   landmine_arm: "gamesfx/arm_bomb1.mp3",
   landmine_boom: "gamesfx/minefinalexplo.mp3",
+  // 2026-06-10: powerup/freeze sound pack
+  crunch: "gamesfx/crunch.mp3", // stroid grab + bomb grab
+  pickup_gold: "gamesfx/pickup_gold.mp3",
+  item_pickup2: "gamesfx/item_pickup2.mp3", // unassigned - crunchy item pickup
+  freeze: "gamesfx/freeze.mp3",
+  unfreeze: "gamesfx/unfreeze.mp3",
+  freeze_explode: "gamesfx/freeze_explode.mp3", // frozen asteroid shatter
   blip1: "gamesfx/blip1.mp3",
   blip: "gamesfx/blip.mp3",
   gameover: "gamesfx/gameover.mp3",
@@ -1415,7 +1422,7 @@ const commBoxController = (() => {
         };
         try {
           voAudio = new Audio(audioSrc);
-          voAudio.volume = 0.9;
+          voAudio.volume = 0.7;
           voAudio.play().catch(() => {
             if (!audioFallbackTimer) audioFallbackTimer = setTimeout(endTalking, duration);
           });
@@ -5238,7 +5245,9 @@ function initGalaxyCanvas() {
   // 2026-06-10: freeze is now a collectible inventory item activated from the HUD (like bombs)
   let playerFreezeInventory = 0;
   const MAX_FREEZE_INVENTORY = 3;
-  const FREEZE_DURATION_MS = 6000;
+  const FREEZE_DURATION_MS = 12000;
+  let _freezeWasActive = false; // edge-detects freeze expiry for the unfreeze sound
+  let goldbarsForceSpawnedThisLevel = false; // DEBUG: revert before release
   let bombAimMode = false;
   let nextBombPowerupAt = performance.now()
     + BOMB_POWERUP_INTERVAL_MIN
@@ -5275,6 +5284,10 @@ function initGalaxyCanvas() {
   let _timerRatio = 1;
   let _iosAudioFrameBudget = 0;
   let _iosAudioLastFrame = 0;
+  // 2026-06-10: set while a quadshot tap resolves its hits — several destruction sounds land
+  // in the same frame and the 2-per-frame native budget was silently dropping all but the
+  // first two (the UFO destroy sound most noticeably)
+  let _sfxBudgetExempt = false;
   let lastAsteroidCollisionSfxAt = 0;
   let suppressAstCollisionSfxUntil = 0;
   let _lastExplosionSoundAt = 0;
@@ -6006,7 +6019,7 @@ function initGalaxyCanvas() {
     // 2026-06-09: `important` one-shots (e.g. the plasma net blast) bypass the per-frame
     // budget — otherwise the asteroid-vaporize booms fired in the same frame exhaust the
     // 2-sounds/16ms cap and the plasma blast gets silently dropped on the native app.
-    if (isIOSNative && !opts.important) {
+    if (isIOSNative && !opts.important && !_sfxBudgetExempt) {
       const frameNow = performance.now();
       if (frameNow - _iosAudioLastFrame < 16) {
         if (_iosAudioFrameBudget >= 2) return;
@@ -6769,6 +6782,9 @@ function initGalaxyCanvas() {
         galaxyPlayCanvas.style.cursor = "grabbing";
         stroidToss.lastSparkAt = 0;
         triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
+        // 2026-06-10: grab crunch — at the grabbed transition, not pointerdown, so plain
+        // taps on asteroids don't crunch before their destruction boom
+        playGameSfx("crunch", 0.85);
       }
     }
   }
@@ -7998,6 +8014,8 @@ function initGalaxyCanvas() {
     powerups.length = 0;
     quadShotUntil = 0;
     freezeUntil = 0;
+    _freezeWasActive = false; // no unfreeze sound on level transitions / menu exit
+    goldbarsForceSpawnedThisLevel = false;
     playerFreezeInventory = 0;
     updateHudFreezeInventory();
     updateHudQuadBadge();
@@ -8749,11 +8767,15 @@ function initGalaxyCanvas() {
       const cfg = ARCADE_LEVELS[currentLevelIndex];
       // 2026-06-10: an active freeze pauses the level clock — shift every time anchor by dt
       // each frozen frame so remaining/elapsed (and the perimeter line) hold their position.
-      if (now < freezeUntil) {
+      const frozenNow = now < freezeUntil;
+      if (frozenNow) {
         levelEndsAt += dt;
         levelRunStartAt += dt;
         if (Number.isFinite(nextSpawnAt)) nextSpawnAt += dt;
+      } else if (_freezeWasActive) {
+        playGameSfx("unfreeze", 0.85); // freeze just lapsed — movement resumes this frame
       }
+      _freezeWasActive = frozenNow;
       const remainingMs = levelEndsAt - now;
       updateArcadeHud(now);
 
@@ -8839,6 +8861,21 @@ function initGalaxyCanvas() {
         // expire after lifetime (powerup expiry keeps running even during a snowflake freeze)
         for (let pi = powerups.length - 1; pi >= 0; pi -= 1) {
           if (now - powerups[pi].spawnedAt > BOMB_POWERUP_LIFETIME_MS) powerups.splice(pi, 1);
+        }
+        // DEBUG: revert before release — force a goldbars spawn in the level's final 15s
+        // (once per level, normal margins) so the gold pickup is easy to test.
+        if (!goldbarsForceSpawnedThisLevel && levelRemainingMs <= 15000 && levelRemainingMs > 0
+            && !powerups.some((p) => p.type === "goldbars")) {
+          goldbarsForceSpawnedThisLevel = true;
+          powerups.push({
+            type: "goldbars",
+            x: 80 + Math.random() * Math.max(1, sim.width - 160),
+            y: 140 + Math.random() * Math.max(1, sim.height - 300),
+            r: 22,
+            spawnedAt: now,
+            opacity: 1.0,
+          });
+          playGameSfx("blip", 0.8);
         }
         updateHudQuadBadge();
       }
@@ -9128,7 +9165,10 @@ function initGalaxyCanvas() {
       const pu = powerups[i];
       const remaining = BOMB_POWERUP_LIFETIME_MS - (nowP - pu.spawnedAt);
       const opacity = remaining < 500 ? Math.max(0, remaining / 500) : 1.0;
-      const pulse = 0.95 + 0.05 * Math.sin(nowP / 300);
+      // quadshot pulses slightly harder than the rest so it still stands out (was a spin)
+      const pulse = pu.type === "quadshot"
+        ? 0.92 + 0.08 * Math.sin(nowP / 250)
+        : 0.95 + 0.05 * Math.sin(nowP / 300);
       const blinkRed = remaining < 3000 && Math.floor(nowP / 167) % 2 === 0;
       tctx.save();
       tctx.globalAlpha = opacity;
@@ -9136,10 +9176,6 @@ function initGalaxyCanvas() {
       tctx.scale(pulse, pulse);
       const sprite = powerupSprites[pu.type];
       if (pu.type !== "bomb" && sprite && sprite.complete && sprite.naturalWidth > 0) {
-        if (pu.type === "quadshot") {
-          // slow spin — one full rotation every 6s (replaces the old spinning Q)
-          tctx.rotate(((nowP % 6000) / 6000) * Math.PI * 2);
-        }
         tctx.drawImage(
           sprite,
           -POWERUP_SPRITE_SIZE / 2,
@@ -9714,6 +9750,11 @@ function initGalaxyCanvas() {
       }
     }
     playPlayerFireSound();
+    // 2026-06-10: while quadshot is active a single tap can destroy several things at once —
+    // exempt the whole hit resolution from the native per-frame sound budget so every hit's
+    // destruction sound layers instead of being dropped.
+    const quadActive = performance.now() < quadShotUntil;
+    _sfxBudgetExempt = quadActive;
     const hitSomething = resolveShotAt(x, y, now, isTouch);
     // 2026-06-10: quadshot — 3 extra shots clustered around the tap point while active.
     // Each extra shot seeks the nearest live asteroid within QUADSHOT_SEEK_RADIUS and fires
@@ -9721,7 +9762,7 @@ function initGalaxyCanvas() {
     // landed inside an asteroid's collision radius (r 10-38 + 10 slop), so the cluster
     // visuals overlapped asteroids without ever destroying them.
     let extraHit = false;
-    if (performance.now() < quadShotUntil) {
+    if (quadActive) {
       for (let i = 0; i < 3; i += 1) {
         let ex;
         let ey;
@@ -9740,6 +9781,7 @@ function initGalaxyCanvas() {
         if (resolveShotAt(ex, ey, now, isTouch)) extraHit = true;
       }
     }
+    _sfxBudgetExempt = false;
     if (hitSomething || extraHit) draw(now);
   }
 
@@ -9787,7 +9829,9 @@ function initGalaxyCanvas() {
 
   // 2026-06-10: per-type powerup collection effects.
   function collectPowerup(pu) {
-    playGameSfx("blip", 0.9);
+    // gold bars get their own pickup sound; everything else keeps the generic blip
+    if (pu.type === "goldbars") playGameSfx("pickup_gold", 0.9);
+    else playGameSfx("blip", 0.9);
     if (pu.type === "bomb") {
       if (playerBombInventory < MAX_BOMB_INVENTORY) {
         playerBombInventory++;
@@ -9804,17 +9848,17 @@ function initGalaxyCanvas() {
       const nowP = performance.now();
       levelEndsAt = Math.min(levelEndsAt + 30000, nowP + levelDurationMs);
       playGameSfx("life_gain", 0.7); // chime
-      cssFlash("#ffaa00", 0.18, 250);
+      cssFlash("#ffffff", 0.2, 250);
       return;
     }
     if (pu.type === "goldbars") {
       addArcadeScore(1000);
-      cssFlash("#ffd700", 0.18, 250);
+      cssFlash("#ffd700", 0.22, 250);
       return;
     }
     if (pu.type === "quadshot") {
       quadShotUntil = performance.now() + 12000;
-      cssFlash("#cc66ff", 0.18, 250);
+      cssFlash("#cc66ff", 0.22, 250);
       return;
     }
     if (pu.type === "snowflake") {
@@ -9827,7 +9871,7 @@ function initGalaxyCanvas() {
     }
   }
 
-  // 2026-06-10: player-activated freeze (HUD ❄ button) — flash + shake, then 6s of frozen
+  // 2026-06-10: player-activated freeze (HUD ❄ button) — flash + shake, then 12s of frozen
   // positions via the existing freezeUntil logic. Ignored while a freeze is already running.
   function activateFreezeFromInventory() {
     const nowF = performance.now();
@@ -9837,15 +9881,14 @@ function initGalaxyCanvas() {
     cssFlash("#88ddff", 0.25, 300);
     cssShake(0.8);
     freezeUntil = nowF + FREEZE_DURATION_MS;
-    playGameSfx("blip", 0.9);
+    playGameSfx("freeze", 0.9);
   }
 
   // 2026-06-10: frozen-asteroid destruction — glass-break layer over the normal boom plus
   // ice debris. Runs for any destruction path while a freeze is active.
   function addFrozenShatterFx(x, y) {
     if (performance.now() >= freezeUntil) return;
-    // TODO: add shatter.mp3 — Poly to supply ice shatter sound
-    playGameSfx("crack", 0.9, { rate: 1.4 });
+    playGameSfx("freeze_explode", 0.9);
     const count = 8 + Math.floor(Math.random() * 5);
     for (let i = 0; i < count; i += 1) {
       if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;

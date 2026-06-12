@@ -1,8 +1,6 @@
 node_modules/
 .DS_Store
 *.log
-firebase-config.js
-www/firebase-config.js
 backups/
 ios/build/
 ios/DerivedData/
@@ -14,8 +12,6 @@ polyoraclelogo2.png
 grok-image-*.png
 *-*-*-*-*.jpg
 local/
-newsfx/
 updated script.js
 www/script.js.bak
-www/newsfx/
 www/vo/

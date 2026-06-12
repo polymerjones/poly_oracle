@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-11 23:20";
+const BUILD_TS = "2026-06-12 09:43";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -409,9 +409,7 @@ const PLASMA_CAGE_COOLDOWN_MS = 5000;
 const PLASMA_CAGE_DRAG_THRESHOLD = 20;
 const PLASMA_CAGE_VOLUME_BOOST = Math.pow(10, 4 / 20);
 const STROID_TOSS_HOLD_MS = 500;
-const STROID_TOSS_TIMEOUT_MS = 6000; // 2026-06-11: a toss that never connects self-destructs at 6s (dwindles over the same window)
-const STROID_TOSS_MIN_SHRINK = 0.4; // 2026-06-11: a tossed stroid dwindles to 40% of its size over the flight
-const STROID_TOSS_FLOOR_SPEED = 180; // 2026-06-11: a tossed stroid never crawls below this (can't stall/stick)
+const STROID_TOSS_TIMEOUT_MS = 2800; // 2026-06-12: a toss that never connects self-destructs fast (no dwindle, no revert)
 const STROID_TOSS_MIN_SPEED = 500;
 const STROID_TOSS_MAX_SPEED = 700;
 // 2026-06-11: tossable mines (placed bombs + landmine) — heavy lob physics
@@ -6940,7 +6938,6 @@ function initGalaxyCanvas() {
       entity.tossed = true;
       entity.tossedAt = now;
       entity.tossHealth = 3;
-      entity._tossBaseR = entity.r; // 2026-06-11: anchor for the in-flight dwindle
       sim.tossedAsteroid = entity;
       playGameSfx(Math.random() < 0.5 ? "stroidthrow1" : "stroidthrow2", 0.85);
     }
@@ -7108,15 +7105,11 @@ function initGalaxyCanvas() {
       const tossed = tossedList[ti];
       if (!sim.asteroids.includes(tossed)) continue; // removed by an earlier detonation this frame
       const tossAge = now - tossed.tossedAt;
-      // 2026-06-11: a tossed stroid that never connects self-destructs at the timeout (it used
-      // to revert to a normal drifter) and dwindles toward STROID_TOSS_MIN_SHRINK along the way.
+      // 2026-06-12: a tossed stroid that never connects self-destructs at the timeout — it does
+      // NOT revert to a normal drifter and no longer dwindles; it just flies fast and blows up.
       if (tossAge > STROID_TOSS_TIMEOUT_MS) {
         selfDestructTossedAsteroid(tossed);
         continue;
-      }
-      if (tossed._tossBaseR) {
-        const p = clamp(tossAge / STROID_TOSS_TIMEOUT_MS, 0, 1);
-        tossed.r = tossed._tossBaseR * (1 - (1 - STROID_TOSS_MIN_SHRINK) * p);
       }
       for (let i = 0; i < sim.asteroids.length; i += 1) {
         const other = sim.asteroids[i];
@@ -9199,19 +9192,13 @@ function initGalaxyCanvas() {
         a.y += a.vy * (dt / 1000);
         if (engineMode === "practice") wrapEntityToCanvas(a);
         else wrapEntity(a);
-        if (a.tossed) {
-          // tossed stroids skip clampSpeed, so a shove (UFO blast clamp, grazing collision)
-          // could otherwise drop one near zero with nothing to re-energize it — keep a floor
-          // so a tossed stroid can never stall and stick. It still self-destructs at the timeout.
-          const sp = Math.hypot(a.vx, a.vy);
-          if (sp < STROID_TOSS_FLOOR_SPEED) {
-            const ang = sp > 0.01 ? Math.atan2(a.vy, a.vx) : Math.random() * Math.PI * 2;
-            a.vx = Math.cos(ang) * STROID_TOSS_FLOOR_SPEED;
-            a.vy = Math.sin(ang) * STROID_TOSS_FLOOR_SPEED;
-          }
-        } else {
-          clampSpeed(a);
-        }
+        // 2026-06-12: a tossed stroid keeps its launch velocity untouched — no clampSpeed, no
+        // speed floor. The old floor re-pointed a slowed toss in a RANDOM direction at 180px/s,
+        // which turned an upward toss into a slow sideways drift that never climbed far enough
+        // to wrap (the "stuck at the top, won't wrap" bug). Restoring the baseline behaviour
+        // (fast, straight flight) makes it wrap cleanly; the short self-destruct timeout is what
+        // now guarantees a toss can never linger.
+        if (!a.tossed) clampSpeed(a);
         applyMotionHealth(a, now);
       }
       updateStroidTossHold(now);

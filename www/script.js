@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-11 22:05";
+const BUILD_TS = "2026-06-11 22:25";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -5040,6 +5040,11 @@ function initGalaxyCanvas() {
   const flameTrail = [];
   const FLAME_TRAIL_MAX = 60;
   const FLAME_COLORS = ["255,102,0", "255,170,0", "255,51,0"]; // #ff6600 / #ffaa00 / #ff3300
+  const FLAME_ICE_COLORS = ["170,238,255", "136,221,255", "200,245,255"]; // frozen-toss ice trail
+  // 2026-06-11: second, larger trail — overlapping additive flame blobs (reads as a fire plume
+  // rather than discrete circle sparks). Ices over while a freeze is active.
+  const fireBlobs = [];
+  const FIRE_BLOB_MAX = 46;
   let _fpsOverlay = null;
   let _fpsFrames = 0;
   let _fpsLastTime = 0;
@@ -6994,6 +6999,7 @@ function initGalaxyCanvas() {
     const spriteKey = target.spriteKey;
     if (!removeAsteroidRef(target)) return false;
     spawnExplosion(x, y, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, mediumBlast ? 1.18 : 1, kind, spriteKey);
+    addFrozenShatterFx(x, y); // small (kind-1) frozen toss targets shatter too (no-op unless frozen)
     triggerAsteroidSizeFeedback(kind);
     playAsteroidExplosionBoom(kind, boomStackVolume(bigBlast ? 0.9 : mediumBlast ? 0.9 : 0.76), 0.92 + Math.random() * 0.14);
     addArcadeScore(arcadeMultiplierPoints(kind >= 2 ? 25 : 10));
@@ -7008,13 +7014,15 @@ function initGalaxyCanvas() {
     const kind = tossed.kind || 3;
     const spriteKey = tossed.spriteKey;
     spawnExplosion(x, y, 50, true, 3.0, 1, kind, spriteKey);
+    addFrozenShatterFx(x, y); // a frozen tossed stroid bursts with the ice shatter (no-op unless frozen)
     cssShake(1.0);
     flashScreen("#ff2a1f", 320, 0.7);
     triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
     playAsteroidExplosionBoom(3, 1.0, 0.88 + Math.random() * 0.12);
     playGameSfx("distantexplode", 1.8);
     removeAsteroidRef(tossed);
-    sim.tossedAsteroid = null;
+    // only clear the tracked slot if it was THIS stroid — multiple tosses can be airborne
+    if (sim.tossedAsteroid === tossed) sim.tossedAsteroid = null;
   }
 
   function handleTossedAsteroidImpact(tossed, target) {
@@ -7054,29 +7062,36 @@ function initGalaxyCanvas() {
   }
 
   function updateTossedAsteroidCollision(now) {
-    const tossed = sim.tossedAsteroid;
-    if (!tossed) return;
-    if (!sim.asteroids.includes(tossed)) {
-      sim.tossedAsteroid = null;
-      return;
-    }
-    if (now - tossed.tossedAt > STROID_TOSS_TIMEOUT_MS) {
-      tossed.tossed = false;
-      tossed.tossedAt = 0;
-      delete tossed.tossHealth;
-      sim.tossedAsteroid = null;
-      return;
-    }
+    // 2026-06-11: handle EVERY in-flight tossed asteroid, not just sim.tossedAsteroid. The old
+    // single-slot tracking orphaned the first throw when a second was launched — orphans keep
+    // tossed=true (so resolveAsteroidCollisions skips them) yet were no longer collision-checked,
+    // so they flew through and overlapped other stroids. Snapshot first because an impact can
+    // detonate (splice) the tossed stroid mid-iteration.
+    const tossedList = [];
     for (let i = 0; i < sim.asteroids.length; i += 1) {
-      const other = sim.asteroids[i];
-      if (!other || other === tossed) continue;
-      // 2026-06-10: 250ms spawn grace — split children appear at the impact point and would
-      // otherwise be re-hit on the next frame, chain-splitting everything instantly.
-      if (other.spawnedAtMs && now - other.spawnedAtMs < 250) continue;
-      const dist = Math.hypot(other.x - tossed.x, other.y - tossed.y);
-      if (dist <= tossed.r + other.r) {
-        handleTossedAsteroidImpact(tossed, other);
-        return;
+      if (sim.asteroids[i].tossed) tossedList.push(sim.asteroids[i]);
+    }
+    for (let ti = 0; ti < tossedList.length; ti += 1) {
+      const tossed = tossedList[ti];
+      if (!sim.asteroids.includes(tossed)) continue; // removed by an earlier detonation this frame
+      if (now - tossed.tossedAt > STROID_TOSS_TIMEOUT_MS) {
+        tossed.tossed = false;
+        tossed.tossedAt = 0;
+        delete tossed.tossHealth;
+        if (sim.tossedAsteroid === tossed) sim.tossedAsteroid = null;
+        continue;
+      }
+      for (let i = 0; i < sim.asteroids.length; i += 1) {
+        const other = sim.asteroids[i];
+        if (!other || other === tossed || other.tossed) continue; // skip other in-flight tosses
+        // 2026-06-10: 250ms spawn grace — split children appear at the impact point and would
+        // otherwise be re-hit on the next frame, chain-splitting everything instantly.
+        if (other.spawnedAtMs && now - other.spawnedAtMs < 250) continue;
+        const dist = Math.hypot(other.x - tossed.x, other.y - tossed.y);
+        if (dist <= tossed.r + other.r) {
+          handleTossedAsteroidImpact(tossed, other);
+          break; // this tossed stroid resolves one impact per frame
+        }
       }
     }
   }
@@ -8188,6 +8203,7 @@ function initGalaxyCanvas() {
     tapBlasts.length = 0;
     _bombShrapnel.length = 0;
     flameTrail.length = 0;
+    fireBlobs.length = 0;
     stopPlasmaChargeSound();
     stopWarningState();
   }
@@ -9122,7 +9138,9 @@ function initGalaxyCanvas() {
           continue;
         }
         a.rot += a.spin * (dt / 16);
-        if (simFrozen) continue;
+        // 2026-06-11: a tossed stroid keeps flying during a freeze (player action) — you can
+        // hurl one through the frozen field and shatter it. Only idle drift is frozen.
+        if (simFrozen && !a.tossed) continue;
         a.x += a.vx * (dt / 1000);
         a.y += a.vy * (dt / 1000);
         if (engineMode === "practice") wrapEntityToCanvas(a);
@@ -9316,28 +9334,48 @@ function initGalaxyCanvas() {
   // 2026-06-11: spawn + advance the fire trail behind an in-flight tossed asteroid. Stepped
   // from update() (dt-based) so it never double-advances when draw() runs more than once.
   function stepFlameTrail(dt, now) {
-    const tossed = sim.tossedAsteroid;
-    if (tossed && tossed.tossed && sim.asteroids.includes(tossed)) {
+    // 2026-06-11: trail EVERY in-flight tossed asteroid (multiple can be airborne at once).
+    // While a freeze is active the trail is ice particles instead of flames; the colour is
+    // fixed at spawn so a particle keeps its look as it fades.
+    const frozen = now < freezeUntil;
+    const palette = frozen ? FLAME_ICE_COLORS : FLAME_COLORS;
+    for (let ai = 0; ai < sim.asteroids.length; ai += 1) {
+      const tossed = sim.asteroids[ai];
+      if (!tossed.tossed) continue;
       const speed = Math.hypot(tossed.vx, tossed.vy);
-      if (speed > 1) {
-        const nx = tossed.vx / speed;
-        const ny = tossed.vy / speed;
-        const count = 2 + (Math.random() < 0.5 ? 1 : 0); // 2-3 per frame
-        for (let i = 0; i < count && flameTrail.length < FLAME_TRAIL_MAX; i += 1) {
-          // emit at the trailing edge (opposite the velocity direction)
-          const tx = tossed.x - nx * tossed.r;
-          const ty = tossed.y - ny * tossed.r;
-          flameTrail.push({
-            x: tx + (Math.random() - 0.5) * tossed.r * 0.6,
-            y: ty + (Math.random() - 0.5) * tossed.r * 0.6,
-            vx: -nx * 24 + (Math.random() - 0.5) * 44, // drift back + slight scatter
-            vy: -ny * 24 + (Math.random() - 0.5) * 44,
-            life: 0,
-            ttl: 240 + Math.random() * 140, // ~300ms
-            r: 2 + Math.random() * 3,
-            color: FLAME_COLORS[(Math.random() * FLAME_COLORS.length) | 0],
-          });
-        }
+      if (speed <= 1) continue;
+      const nx = tossed.vx / speed;
+      const ny = tossed.vy / speed;
+      const count = 2 + (Math.random() < 0.5 ? 1 : 0); // 2-3 per frame
+      for (let i = 0; i < count && flameTrail.length < FLAME_TRAIL_MAX; i += 1) {
+        // emit at the trailing edge (opposite the velocity direction)
+        const tx = tossed.x - nx * tossed.r;
+        const ty = tossed.y - ny * tossed.r;
+        flameTrail.push({
+          x: tx + (Math.random() - 0.5) * tossed.r * 0.6,
+          y: ty + (Math.random() - 0.5) * tossed.r * 0.6,
+          vx: -nx * 24 + (Math.random() - 0.5) * 44, // drift back + slight scatter
+          vy: -ny * 24 + (Math.random() - 0.5) * 44,
+          life: 0,
+          ttl: 240 + Math.random() * 140, // ~300ms
+          r: 2 + Math.random() * 3,
+          color: palette[(Math.random() * palette.length) | 0],
+        });
+      }
+      // big fire-plume blobs — 2/frame, sized to the stroid, emitted close to its tail
+      for (let i = 0; i < 2 && fireBlobs.length < FIRE_BLOB_MAX; i += 1) {
+        const bx = tossed.x - nx * tossed.r * 0.8;
+        const by = tossed.y - ny * tossed.r * 0.8;
+        fireBlobs.push({
+          x: bx + (Math.random() - 0.5) * tossed.r * 0.5,
+          y: by + (Math.random() - 0.5) * tossed.r * 0.5,
+          vx: -nx * 55 + (Math.random() - 0.5) * 36,
+          vy: -ny * 55 + (Math.random() - 0.5) * 36,
+          life: 0,
+          ttl: 320 + Math.random() * 200,
+          r: tossed.r * (0.7 + Math.random() * 0.5), // big, scaled to the stroid
+          ice: frozen,
+        });
       }
     }
     for (let i = flameTrail.length - 1; i >= 0; i -= 1) {
@@ -9347,6 +9385,57 @@ function initGalaxyCanvas() {
       f.y += f.vy * (dt / 1000);
       if (f.life >= f.ttl) flameTrail.splice(i, 1);
     }
+    for (let i = fireBlobs.length - 1; i >= 0; i -= 1) {
+      const f = fireBlobs[i];
+      f.life += dt;
+      f.x += f.vx * (dt / 1000);
+      f.y += f.vy * (dt / 1000);
+      if (f.life >= f.ttl) fireBlobs.splice(i, 1);
+    }
+  }
+
+  // 2026-06-11: the big fire plume + a heat tint over each airborne tossed stroid. Additive
+  // ("lighter") compositing makes overlapping warm blobs read as continuous flame, and 3
+  // concentric fills per blob fake a flame gradient cheaply (no per-particle radial gradients,
+  // which are costly on iOS). Ices over to a cool cyan glow while a freeze is active.
+  function drawTossedFireFx(tctx) {
+    if (!tctx) return;
+    const nowF = performance.now();
+    const frozen = nowF < freezeUntil;
+    tctx.save();
+    tctx.globalCompositeOperation = "lighter";
+    // plume blobs (drawn first so they sit behind the stroid)
+    for (let i = 0; i < fireBlobs.length; i += 1) {
+      const f = fireBlobs[i];
+      const k = Math.max(0, 1 - f.life / f.ttl);
+      const r = f.r * (0.35 + k * 0.65); // shrink as it fades → the plume tapers
+      if (f.ice) {
+        tctx.globalAlpha = k * 0.42; tctx.fillStyle = "rgba(120,200,255,1)"; fillCircle(tctx, f.x, f.y, r);
+        tctx.globalAlpha = k * 0.5; tctx.fillStyle = "rgba(190,235,255,1)"; fillCircle(tctx, f.x, f.y, r * 0.55);
+        tctx.globalAlpha = k * 0.55; tctx.fillStyle = "rgba(235,250,255,1)"; fillCircle(tctx, f.x, f.y, r * 0.28);
+      } else {
+        tctx.globalAlpha = k * 0.4; tctx.fillStyle = "rgba(255,60,0,1)"; fillCircle(tctx, f.x, f.y, r);
+        tctx.globalAlpha = k * 0.5; tctx.fillStyle = "rgba(255,160,0,1)"; fillCircle(tctx, f.x, f.y, r * 0.58);
+        tctx.globalAlpha = k * 0.6; tctx.fillStyle = "rgba(255,240,180,1)"; fillCircle(tctx, f.x, f.y, r * 0.3);
+      }
+    }
+    // heat tint over the whole stroid (the freeze overlay already ice-tints frozen stroids)
+    if (!frozen) {
+      for (let i = 0; i < sim.asteroids.length; i += 1) {
+        const a = sim.asteroids[i];
+        if (!a.tossed) continue;
+        const flick = 0.22 + 0.12 * Math.abs(Math.sin(nowF / 60 + a.x * 0.05));
+        tctx.globalAlpha = flick; tctx.fillStyle = "rgba(255,80,0,1)"; fillCircle(tctx, a.x, a.y, a.r * 1.2);
+        tctx.globalAlpha = flick * 1.1; tctx.fillStyle = "rgba(255,180,40,1)"; fillCircle(tctx, a.x, a.y, a.r * 0.7);
+      }
+    }
+    tctx.restore();
+  }
+
+  function fillCircle(tctx, x, y, r) {
+    tctx.beginPath();
+    tctx.arc(x, y, r, 0, Math.PI * 2);
+    tctx.fill();
   }
 
   // 2026-06-11: render the flame trail on the ufoFx overlay (advance happens in stepFlameTrail).
@@ -9538,6 +9627,7 @@ function initGalaxyCanvas() {
       setPlasmaOverlayVisible(stroidToss.active);
       if (stroidToss.active) drawPlasmaOverlay(now);
       drawUfoFxOverlay(ctx);
+      drawTossedFireFx(ufoFxCtx || ctx);
       drawFlameTrail(ufoFxCtx || ctx);
       drawPowerups(ufoFxCtx || ctx);
       drawLandmineCountdownOverlay(ufoFxCtx || ctx);
@@ -9858,6 +9948,7 @@ function initGalaxyCanvas() {
       ctx.restore();
     }
     drawUfoFxOverlay(ctx);
+    drawTossedFireFx(ufoFxCtx || ctx);
     drawFlameTrail(ufoFxCtx || ctx);
     drawPowerups(ufoFxCtx || ctx);
     drawLandmineCountdownOverlay(ufoFxCtx || ctx);

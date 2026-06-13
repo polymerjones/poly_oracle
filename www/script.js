@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-12 19:36";
+const BUILD_TS = "2026-06-12 19:43";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -517,6 +517,7 @@ const SFX = {
   PRE_B: "newreveal002",
   POST: "reveal2",
   SHIMMER: "reveal_flash", // soft bed under the answer-box sparkle bridge
+  RUB: "blip1", // soft tick while rubbing the orb (swap freely: blip, orb_tap, newreveal*)
 };
 
 // === Level Config ===
@@ -2488,6 +2489,10 @@ function addListeners() {
   };
   if ("PointerEvent" in window) {
     orb.addEventListener("pointerdown", onOrbTap);
+    orb.addEventListener("pointerdown", onOrbRubStart);
+    orb.addEventListener("pointermove", onOrbRubMove, { passive: false });
+    orb.addEventListener("pointerup", onOrbRubEnd);
+    orb.addEventListener("pointercancel", onOrbRubEnd);
     orb.addEventListener("touchend", (event) => {
       const now = performance.now();
       if (now - lastOrbTouchEndAt < 320 && event.cancelable) event.preventDefault();
@@ -2498,13 +2503,17 @@ function addListeners() {
     }, { passive: false });
   } else {
     orb.addEventListener("touchstart", onOrbTap, { passive: false });
+    orb.addEventListener("touchstart", onOrbRubStart, { passive: false });
+    orb.addEventListener("touchmove", onOrbRubMove, { passive: false });
     orb.addEventListener("touchend", (event) => {
       const now = performance.now();
       if (now - lastOrbTouchEndAt < 320 && event.cancelable) event.preventDefault();
       lastOrbTouchEndAt = now;
     }, { passive: false });
+    orb.addEventListener("touchcancel", onOrbRubEnd);
     orb.addEventListener("mousedown", onOrbTap);
   }
+  orb.addEventListener("touchend", onOrbRubEnd);
 
   flipAnswer.addEventListener("click", () => {
     if (!state.currentAnswer) return;
@@ -3919,6 +3928,92 @@ function spawnSparkles(count, sizeMultiplier = 1, brightnessMultiplier = 1) {
     sparkles.appendChild(sparkle);
     sparkle.addEventListener("animationend", () => sparkle.remove());
   }
+}
+
+// === Orb "rub" interaction =================================================
+// Press and drag on the orb: a glow trails the fingertip, dropping sparkles and
+// soft ticks as it moves. Additive to the existing orb tap; reveal is untouched.
+const orbRub = document.getElementById("orbRub");
+let orbRubbing = false;
+let orbRubLastX = 0;
+let orbRubLastY = 0;
+let orbRubTravel = 0;
+let orbRubLastSoundAt = 0;
+
+function orbRubPoint(event) {
+  const rect = orb.getBoundingClientRect();
+  const touch = event.touches?.[0] || event.changedTouches?.[0];
+  const clientX = event.clientX ?? touch?.clientX ?? 0;
+  const clientY = event.clientY ?? touch?.clientY ?? 0;
+  return { clientX, clientY, x: clientX - rect.left, y: clientY - rect.top };
+}
+
+function placeOrbRubGlow(x, y) {
+  if (!orbRub) return;
+  orbRub.style.left = `${x}px`;
+  orbRub.style.top = `${y}px`;
+}
+
+function onOrbRubStart(event) {
+  if (state.isRevealing || !orbRub) return;
+  const p = orbRubPoint(event);
+  orbRubbing = true;
+  orbRubLastX = p.x;
+  orbRubLastY = p.y;
+  orbRubTravel = 0;
+  placeOrbRubGlow(p.x, p.y);
+  orb.classList.add("rubbing");
+  if (event.pointerId !== undefined && orb.setPointerCapture) {
+    try { orb.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+  }
+}
+
+function onOrbRubMove(event) {
+  if (!orbRubbing) return;
+  if (event.cancelable) event.preventDefault();
+  const p = orbRubPoint(event);
+  placeOrbRubGlow(p.x, p.y);
+  const dist = Math.hypot(p.x - orbRubLastX, p.y - orbRubLastY);
+  orbRubLastX = p.x;
+  orbRubLastY = p.y;
+  orbRubTravel += dist;
+  // Every ~22px of travel: a fingertip sparkle and a soft tick (rate-limited).
+  if (orbRubTravel >= 22) {
+    orbRubTravel = 0;
+    if (!prefersReducedMotion) spawnRubSparkle(p.clientX, p.clientY);
+    const now = performance.now();
+    if (now - orbRubLastSoundAt > 60) {
+      orbRubLastSoundAt = now;
+      audioEngine.play(SFX.RUB, { volume: 0.22, rate: 0.9 + Math.random() * 0.3 });
+    }
+  }
+}
+
+function onOrbRubEnd(event) {
+  if (!orbRubbing) return;
+  orbRubbing = false;
+  orb.classList.remove("rubbing");
+  if (event?.pointerId !== undefined && orb.releasePointerCapture) {
+    try { orb.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+  }
+}
+
+function spawnRubSparkle(clientX, clientY) {
+  if (!sparkles || sparkles.childElementCount > 120) return;
+  const stageRect = stage.getBoundingClientRect();
+  const x = clientX - stageRect.left + (Math.random() - 0.5) * 14;
+  const y = clientY - stageRect.top + (Math.random() - 0.5) * 14;
+  const sparkle = document.createElement("span");
+  const size = 4 + Math.random() * 6;
+  sparkle.className = "sparkle";
+  sparkle.style.left = `${x}px`;
+  sparkle.style.top = `${y}px`;
+  sparkle.style.width = `${size}px`;
+  sparkle.style.height = `${size}px`;
+  sparkle.style.opacity = "0.55";
+  sparkle.style.animationDelay = `${Math.random() * 0.1}s`;
+  sparkles.appendChild(sparkle);
+  sparkle.addEventListener("animationend", () => sparkle.remove());
 }
 
 function spawnAnswerSparkles(count = 14, scale = 1) {

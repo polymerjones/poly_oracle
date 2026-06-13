@@ -575,6 +575,34 @@ h1 {
   animation: orbReveal 0.88s cubic-bezier(0.2, 0.95, 0.35, 1.02);
 }
 
+/* Tap-and-rub glow: a soft light that follows the finger inside the orb.
+   left/top are set in JS to the fingertip; translate(-50%,-50%) centers the blob. */
+.orb-rub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48%;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.55);
+  background: radial-gradient(circle at center,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(186, 240, 255, 0.72) 26%,
+    rgba(196, 131, 255, 0.34) 54%,
+    rgba(196, 131, 255, 0) 72%);
+  filter: blur(5px);
+  mix-blend-mode: screen;
+  transition: opacity 200ms ease, transform 160ms ease;
+  will-change: left, top, opacity;
+}
+
+.orb.rubbing .orb-rub {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
 .controls {
   margin-top: 14px;
 }

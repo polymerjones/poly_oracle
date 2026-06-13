@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-12 10:08";
+const BUILD_TS = "2026-06-12 19:14";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -404,7 +404,9 @@ const GAME_SFX = {
 const PRACTICE_MAX_ASTEROIDS = 40;
 const PRACTICE_SPAWN_COOLDOWN_MS = 1000;
 const PRACTICE_ENABLED = false;
-const PLASMA_CAGE_CHARGE_MS = 1000;
+// 2026-06-12: net charge/highlight response sped up ~20% (1000 → 800) so the cage locks faster.
+// The previous 1000ms is the "hard mode" candidate value for a future difficulty setting.
+const PLASMA_CAGE_CHARGE_MS = 800;
 const PLASMA_CAGE_COOLDOWN_MS = 5000;
 const PLASMA_CAGE_DRAG_THRESHOLD = 20;
 const PLASMA_CAGE_VOLUME_BOOST = Math.pow(10, 4 / 20);
@@ -412,6 +414,12 @@ const STROID_TOSS_HOLD_MS = 500;
 const STROID_TOSS_TIMEOUT_MS = 2800; // 2026-06-12: a toss that never connects self-destructs fast (no dwindle, no revert)
 const STROID_TOSS_MIN_SPEED = 500;
 const STROID_TOSS_MAX_SPEED = 700;
+// 2026-06-12: releasing a grabbed stroid with no real flick still tosses it — a slow drift
+// (no flame, see FLAME_MIN_SPEED) in its pre-grab direction, instead of dropping dead in place.
+const STROID_TOSS_SLOW_SPEED = 120;
+// flames/heat-tint only render above this speed, so the slow no-flick toss flies cold while a
+// real flick (>= STROID_TOSS_MIN_SPEED) flames. Sits between the slow (120) and flick (500) speeds.
+const FLAME_MIN_SPEED = 300;
 // 2026-06-11: tossable mines (placed bombs + landmine) — heavy lob physics
 const MINE_TOSS_SPEED_FACTOR = 0.45; // bombs launch at 0.45x a stroid's speed
 const MINE_TOSS_DECEL = 240; // px/s^2 friction — decelerates a lobbed mine to rest in ~1-1.5s
@@ -6905,6 +6913,30 @@ function initGalaxyCanvas() {
     // total drag delta — a fast flick that curved or ended near the grab point used to throw
     // backwards (the old <12px fallback even reused the asteroid's random pre-grab drift).
     // 200ms (was 120) keeps the grab-time seed sample in range for sub-200ms flicks.
+    // 2026-06-12: a grabbed stroid released with no/minimal flick gets a slow cold toss (no
+    // flame) in its pre-grab drift direction (or straight up) instead of dropping dead in place.
+    // Mines keep their drop-in-place lob. Quick taps (never grabbed) fall through to handleArcadeTap.
+    const slowTossFallback = () => {
+      if (isMine || !stroidToss.grabbed) return false;
+      const pvx = entity._preTossVx || 0;
+      const pvy = entity._preTossVy || 0;
+      const pl = Math.hypot(pvx, pvy);
+      let dnx = 0;
+      let dny = -1; // default: straight up from the grab point
+      if (pl > 1) { dnx = pvx / pl; dny = pvy / pl; }
+      entity.vx = dnx * STROID_TOSS_SLOW_SPEED;
+      entity.vy = dny * STROID_TOSS_SLOW_SPEED;
+      entity._stroidHeld = false;
+      delete entity._preTossVx;
+      delete entity._preTossVy;
+      entity.tossed = true;
+      entity.tossedAt = now;
+      entity.tossHealth = 3;
+      sim.tossedAsteroid = entity;
+      playGameSfx(Math.random() < 0.5 ? "stroidthrow1" : "stroidthrow2", 0.5);
+      resetStroidToss();
+      return true;
+    };
     const releaseT = performance.now();
     let ref = null;
     for (let i = 0; i < stroidToss.samples.length; i += 1) {
@@ -6913,11 +6945,11 @@ function initGalaxyCanvas() {
         break;
       }
     }
-    if (!ref) return false; // no recent movement — drop in place
+    if (!ref) return slowTossFallback(); // no recent movement — slow cold toss instead of dropping
     const dx = stroidToss.dragX - ref.x;
     const dy = stroidToss.dragY - ref.y;
     const len = Math.hypot(dx, dy);
-    if (len < 10) return false; // insufficient flick — drop in place, don't guess a direction
+    if (len < 10) return slowTossFallback(); // insufficient flick — slow cold toss in the drift direction
     const nx = dx / len;
     const ny = dy / len;
     // bombs are heavy: launch at 0.45x a stroid's speed so they lob rather than zoom
@@ -8475,7 +8507,8 @@ function initGalaxyCanvas() {
         scoreAfter,
         onDismiss: () => {
           setSavedArcadeLevel(nextLevel);
-          showLevelIntro(nextLevel);
+          // 2026-06-12: the "LEVEL X" slam-in fires ONCE, from startLevel() once the next level
+          // is fully loaded — not here on dismiss (that double-slammed: once pre-load, once post).
           setTimeout(() => startLevel(currentLevelIndex + 1), 420);
         },
       });
@@ -9396,7 +9429,7 @@ function initGalaxyCanvas() {
       const tossed = sim.asteroids[ai];
       if (!tossed.tossed) continue;
       const speed = Math.hypot(tossed.vx, tossed.vy);
-      if (speed <= 1) continue;
+      if (speed < FLAME_MIN_SPEED) continue; // slow no-flick tosses fly cold (no flame trail)
       const nx = tossed.vx / speed;
       const ny = tossed.vy / speed;
       const count = 2 + (Math.random() < 0.5 ? 1 : 0); // 2-3 per frame
@@ -9477,6 +9510,7 @@ function initGalaxyCanvas() {
       for (let i = 0; i < sim.asteroids.length; i += 1) {
         const a = sim.asteroids[i];
         if (!a.tossed) continue;
+        if (Math.hypot(a.vx, a.vy) < FLAME_MIN_SPEED) continue; // slow no-flick tosses stay cold
         const flick = 0.22 + 0.12 * Math.abs(Math.sin(nowF / 60 + a.x * 0.05));
         tctx.globalAlpha = flick; tctx.fillStyle = "rgba(255,80,0,1)"; fillCircle(tctx, a.x, a.y, a.r * 1.2);
         tctx.globalAlpha = flick * 1.1; tctx.fillStyle = "rgba(255,180,40,1)"; fillCircle(tctx, a.x, a.y, a.r * 0.7);

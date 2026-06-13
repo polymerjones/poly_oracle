@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-12 19:43";
+const BUILD_TS = "2026-06-12 19:59";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -517,7 +517,6 @@ const SFX = {
   PRE_B: "newreveal002",
   POST: "reveal2",
   SHIMMER: "reveal_flash", // soft bed under the answer-box sparkle bridge
-  RUB: "blip1", // soft tick while rubbing the orb (swap freely: blip, orb_tap, newreveal*)
 };
 
 // === Level Config ===
@@ -3931,14 +3930,90 @@ function spawnSparkles(count, sizeMultiplier = 1, brightnessMultiplier = 1) {
 }
 
 // === Orb "rub" interaction =================================================
-// Press and drag on the orb: a glow trails the fingertip, dropping sparkles and
-// soft ticks as it moves. Additive to the existing orb tap; reveal is untouched.
+// Press and drag on the orb: a bright tip follows the finger and leaves behind
+// glow marks that bloom and fade over a couple seconds, while a low magical drone
+// pulses until release. Additive to the existing orb tap; reveal is untouched.
 const orbRub = document.getElementById("orbRub");
 let orbRubbing = false;
 let orbRubLastX = 0;
 let orbRubLastY = 0;
 let orbRubTravel = 0;
-let orbRubLastSoundAt = 0;
+let orbRubDroneTimer = null;
+
+// A self-contained Web Audio drone: low oscillators warmed by a lowpass filter,
+// amplitude pulsed by a slow LFO (the "WOOM…WOOM" swell). Routed through the
+// engine's masterGain so it respects master volume / whisper.
+const orbRubDrone = {
+  nodes: null,
+  start() {
+    if (this.nodes) return;
+    const ctx = audioEngine.ensureContext?.();
+    if (!ctx || !audioEngine.masterGain) return;
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    const now = ctx.currentTime;
+
+    const out = ctx.createGain();
+    out.gain.value = 0;
+    out.connect(audioEngine.masterGain);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 480;
+    filter.Q.value = 7;
+    filter.connect(out);
+
+    // Tremolo gain swung by the LFO -> the pulse.
+    const trem = ctx.createGain();
+    trem.gain.value = 0.55;
+    trem.connect(filter);
+
+    const lfo = ctx.createOscillator();
+    lfo.type = "sine";
+    lfo.frequency.value = 1.45; // pulse rate (Hz) — slow heartbeat-ish swell
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 0.42; // pulse depth
+    lfo.connect(lfoGain);
+    lfoGain.connect(trem.gain);
+
+    const osc1 = ctx.createOscillator();
+    osc1.type = "sine";
+    osc1.frequency.value = 60; // deep woom
+    const osc2 = ctx.createOscillator();
+    osc2.type = "sine";
+    osc2.frequency.value = 90; // body
+    osc2.detune.value = -7;
+    const osc3 = ctx.createOscillator();
+    osc3.type = "triangle";
+    osc3.frequency.value = 121; // faint shimmer harmonic
+    const osc3Gain = ctx.createGain();
+    osc3Gain.gain.value = 0.16;
+
+    osc1.connect(trem);
+    osc2.connect(trem);
+    osc3.connect(osc3Gain);
+    osc3Gain.connect(trem);
+
+    const target = state.whisper ? 0.1 : 0.22;
+    out.gain.setValueAtTime(0, now);
+    out.gain.linearRampToValueAtTime(target, now + 0.28);
+
+    [osc1, osc2, osc3, lfo].forEach((o) => o.start(now));
+    this.nodes = { ctx, out, osc1, osc2, osc3, lfo };
+  },
+  stop() {
+    const n = this.nodes;
+    if (!n) return;
+    this.nodes = null;
+    const { ctx, out } = n;
+    const now = ctx.currentTime;
+    out.gain.cancelScheduledValues(now);
+    out.gain.setValueAtTime(out.gain.value, now);
+    out.gain.linearRampToValueAtTime(0, now + 0.24);
+    const stopAt = now + 0.28;
+    [n.osc1, n.osc2, n.osc3, n.lfo].forEach((o) => { try { o.stop(stopAt); } catch { /* ignore */ } });
+    setTimeout(() => { try { out.disconnect(); } catch { /* ignore */ } }, 500);
+  },
+};
 
 function orbRubPoint(event) {
   const rect = orb.getBoundingClientRect();
@@ -3954,6 +4029,17 @@ function placeOrbRubGlow(x, y) {
   orbRub.style.top = `${y}px`;
 }
 
+// Drop a glow mark (orb-relative coords) that blooms + fades, then removes itself.
+function spawnRubMark(x, y) {
+  if (!orb) return;
+  const mark = document.createElement("span");
+  mark.className = "orb-rub-mark";
+  mark.style.left = `${x}px`;
+  mark.style.top = `${y}px`;
+  orb.appendChild(mark);
+  mark.addEventListener("animationend", () => mark.remove());
+}
+
 function onOrbRubStart(event) {
   if (state.isRevealing || !orbRub) return;
   const p = orbRubPoint(event);
@@ -3963,6 +4049,11 @@ function onOrbRubStart(event) {
   orbRubTravel = 0;
   placeOrbRubGlow(p.x, p.y);
   orb.classList.add("rubbing");
+  spawnRubMark(p.x, p.y);
+  audioEngine.unlock();
+  // Bring the drone in on a short hold (or first movement) so quick taps stay silent.
+  clearTimeout(orbRubDroneTimer);
+  orbRubDroneTimer = setTimeout(() => { if (orbRubbing) orbRubDrone.start(); }, 150);
   if (event.pointerId !== undefined && orb.setPointerCapture) {
     try { orb.setPointerCapture(event.pointerId); } catch { /* ignore */ }
   }
@@ -3977,15 +4068,14 @@ function onOrbRubMove(event) {
   orbRubLastX = p.x;
   orbRubLastY = p.y;
   orbRubTravel += dist;
-  // Every ~22px of travel: a fingertip sparkle and a soft tick (rate-limited).
-  if (orbRubTravel >= 22) {
+  // Every ~16px of travel: leave a lingering glow mark + a fingertip sparkle.
+  if (orbRubTravel >= 16) {
     orbRubTravel = 0;
+    spawnRubMark(p.x, p.y);
     if (!prefersReducedMotion) spawnRubSparkle(p.clientX, p.clientY);
-    const now = performance.now();
-    if (now - orbRubLastSoundAt > 60) {
-      orbRubLastSoundAt = now;
-      audioEngine.play(SFX.RUB, { volume: 0.22, rate: 0.9 + Math.random() * 0.3 });
-    }
+    // Movement means a real rub — bring the drone in now if the hold timer hasn't.
+    clearTimeout(orbRubDroneTimer);
+    orbRubDrone.start();
   }
 }
 
@@ -3993,6 +4083,8 @@ function onOrbRubEnd(event) {
   if (!orbRubbing) return;
   orbRubbing = false;
   orb.classList.remove("rubbing");
+  clearTimeout(orbRubDroneTimer);
+  orbRubDrone.stop();
   if (event?.pointerId !== undefined && orb.releasePointerCapture) {
     try { orb.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
   }

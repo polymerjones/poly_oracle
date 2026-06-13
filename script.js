@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-12 19:34";
+const BUILD_TS = "2026-06-12 19:36";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -516,6 +516,7 @@ const SFX = {
   PRE_A: "reveal_magic",
   PRE_B: "newreveal002",
   POST: "reveal2",
+  SHIMMER: "reveal_flash", // soft bed under the answer-box sparkle bridge
 };
 
 // === Level Config ===
@@ -3499,6 +3500,8 @@ async function revealAnswer() {
       () => spawnAnswerSparkles(prefersReducedMotion ? 4 : 8, 1.05),
       130,
     );
+    // Soft shimmer bed under the sparkle bridge — rings out into the POST hit on reveal.
+    audioEngine.play(SFX.SHIMMER, { volume: 0.4, rate: 0.96 });
     // FIXED 2026-06-08: early stopCrystalOverlay() removed — finally block handles it
     await stopOrbStrobeCadence(false);
     await delay(420);

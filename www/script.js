@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-12 19:31";
+const BUILD_TS = "2026-06-12 19:34";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -3492,10 +3492,18 @@ async function revealAnswer() {
       microLine,
       revealVoice,
     });
+    // Bridge the dead air inside the answer box: finishReveal fires one sparkle burst,
+    // then keep the box sparkling continuously through the strobe wind-down + hold so it
+    // never sits blank before the answer pops with the big sparkle + sound below.
+    const answerSpark = setInterval(
+      () => spawnAnswerSparkles(prefersReducedMotion ? 4 : 8, 1.05),
+      130,
+    );
     // FIXED 2026-06-08: early stopCrystalOverlay() removed — finally block handles it
     await stopOrbStrobeCadence(false);
     await delay(420);
     clearInterval(postSpark);
+    clearInterval(answerSpark);
     setAnswerTextVisible(true);
     setRevealBgStrobe(false);
     triggerAnswerTextRevealFx();

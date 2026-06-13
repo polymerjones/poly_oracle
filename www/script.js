@@ -1,7 +1,7 @@
 let capacitorHaptics = null;
 let hapticImpactStyle = { Heavy: "HEAVY", Medium: "MEDIUM", Light: "LIGHT" };
 let hapticNotificationType = { Success: "SUCCESS" };
-const DISABLE_GAMEPLAY_HAPTICS = true; // perf test - re-enable after Release build comparison
+const DISABLE_GAMEPLAY_HAPTICS = false; // 2026-06-12: gameplay haptics re-enabled after perf test
 const UFO_BLAST_RADIUS = 220;
 const UFO_BLAST_FORCE = 3.5;
 const UFO_GLOW_DURATION = 4000;
@@ -152,6 +152,17 @@ function triggerGameplayHapticImpact(style) {
   triggerHapticImpact(style);
 }
 
+// 2026-06-12: "huge" haptic for bombs + the plasma-net blast. Capacitor impacts top out at
+// HEAVY, so layer two HEAVY hits with a Medium tail (~130ms total) for a punchy, sustained
+// boom instead of a single tick. Also fires the Vibration API where supported (Android/web).
+function triggerHugeHaptic() {
+  if (DISABLE_GAMEPLAY_HAPTICS) return;
+  triggerHapticImpact(hapticImpactStyle.Heavy);
+  setTimeout(() => triggerHapticImpact(hapticImpactStyle.Heavy), 60);
+  setTimeout(() => triggerHapticImpact(hapticImpactStyle.Medium), 130);
+  try { navigator.vibrate?.([40, 30, 60]); } catch { /* Vibration API optional */ }
+}
+
 function triggerHapticNotification(type) {
   try {
     getCapacitorHaptics()?.notification?.({ type })?.catch?.(() => {});
@@ -167,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-12 20:23";
+const BUILD_TS = "2026-06-12 20:40";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -7802,6 +7813,7 @@ function initGalaxyCanvas() {
       if (!plasmaCage.highlightBlipPlayed && ready) {
         plasmaCage.highlightBlipPlayed = true;
         playPlasmaLockSound();
+        triggerGameplayHapticImpact(hapticImpactStyle.Medium); // 2026-06-12: net locks on = haptic
       }
       return ready;
     }
@@ -7966,7 +7978,7 @@ function initGalaxyCanvas() {
       if (destroyedCount >= 2) {
         cssStatic(450);
       }
-      triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
+      triggerHugeHaptic(); // 2026-06-12: plasma-net blast = big hard rumble
       plasmaCage.cooldownStart = now;
       plasmaCage.cooldownUntil = now + PLASMA_CAGE_COOLDOWN_MS;
       plasmaCage.rechargeSoundPlayed = false;
@@ -8460,6 +8472,7 @@ function initGalaxyCanvas() {
     setTimeout(() => cssShake(1.0), 120);
     window.galaxyBackground?.setHectic(true);
     setTimeout(() => window.galaxyBackground?.setHectic(false), 3000);
+    triggerHugeHaptic(); // 2026-06-12: bomb blast = huge haptic
     playBigBoomSound();
     playGameSfx("bigbang", 1.62);
     // chain: detonate other armed mines caught in the blast (the just-exploded mine is already
@@ -8500,6 +8513,7 @@ function initGalaxyCanvas() {
     setTimeout(() => cssShake(1.0), 120);
     window.galaxyBackground?.setHectic(true);
     setTimeout(() => window.galaxyBackground?.setHectic(false), 3000);
+    triggerHugeHaptic(); // 2026-06-12: bomb blast = huge haptic
     playBigBoomSound();
     playGameSfx("bigbang", 1.62);
   }

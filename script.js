@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-12 19:14";
+const BUILD_TS = "2026-06-12 19:31";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -745,6 +745,7 @@ const verboseDetailsToggle = document.getElementById("verboseDetails");
 const randomVoiceNow = document.getElementById("randomVoiceNow");
 const voiceSelect = document.getElementById("voiceSelect");
 const previewVoice = document.getElementById("previewVoice");
+const previewVoiceStop = document.getElementById("previewVoiceStop");
 const voicePersona = document.getElementById("voicePersona");
 const openVault = document.getElementById("openVault");
 const clearHistory = document.getElementById("clearHistory");
@@ -2479,7 +2480,10 @@ function addListeners() {
       playPixySound(safeIntensity);
       spawnSparkles(safeIntensity.burstCount, safeIntensity.sizeMultiplier, safeIntensity.brightnessMultiplier);
     }
-    revealAnswer();
+    // Orb tap is ambient feedback only (sparkles + sound + the input shake) — same
+    // behavior whether or not the question field has text. Reveal is triggered only by
+    // the Ask button / Enter, never by tapping the orb.
+    shakeQuestionInput();
   };
   if ("PointerEvent" in window) {
     orb.addEventListener("pointerdown", onOrbTap);
@@ -2771,13 +2775,14 @@ function addListeners() {
   });
 
   previewVoice.addEventListener("click", () => {
-    speakText("Question: The Oracle is listening. Answer: Proceed.", {
-      rate: state.whisper ? 0.95 : 1.02,
-      pitch: 1.2,
-      preview: true,
-      voiceName: state.selectedVoice,
-    });
+    playVoicePreview();
   });
+
+  if (previewVoiceStop) {
+    previewVoiceStop.addEventListener("click", () => {
+      stopVoicePreview();
+    });
+  }
 
   openVault.addEventListener("click", () => {
     setSettingsOpen(false);
@@ -3398,15 +3403,19 @@ async function runTapBurst() {
   setOrbScale(REVEAL.GROW_MAX * 0.98);
 }
 
+function shakeQuestionInput() {
+  questionInput.classList.remove("shake");
+  void questionInput.offsetWidth;
+  questionInput.classList.add("shake");
+  setTimeout(() => questionInput.classList.remove("shake"), 320);
+}
+
 async function revealAnswer() {
   if (state.isRevealing) return;
 
   const normalizedQuestion = normalizeQuestion(questionInput.value);
   if (!normalizedQuestion) {
-    questionInput.classList.remove("shake");
-    void questionInput.offsetWidth;
-    questionInput.classList.add("shake");
-    setTimeout(() => questionInput.classList.remove("shake"), 320);
+    shakeQuestionInput();
     return;
   }
 
@@ -3471,9 +3480,10 @@ async function revealAnswer() {
 
     fadeInAnswerBar();
     const barRevealHandle = audioEngine.play(SFX.PRE_B, { volume: 0.95, rate: 1.0 }); // FIXED 2026-06-08: was PRE_A (duplicate)
+    // Keep sparkling continuously right up until the answer pops — no bare spot
+    // between the last sparkle and the reveal. Cleared after the text is shown below.
     const postSpark = setInterval(() => triggerOrbSparkle(0.7), 140);
     await Promise.race([barRevealHandle?.ended || Promise.resolve(), delay(2000)]);
-    clearInterval(postSpark);
 
     finishReveal({
       normalizedQuestion,
@@ -3485,6 +3495,7 @@ async function revealAnswer() {
     // FIXED 2026-06-08: early stopCrystalOverlay() removed — finally block handles it
     await stopOrbStrobeCadence(false);
     await delay(420);
+    clearInterval(postSpark);
     setAnswerTextVisible(true);
     setRevealBgStrobe(false);
     triggerAnswerTextRevealFx();
@@ -4097,6 +4108,41 @@ async function speakText(text, { rate = 1, pitch = 1.2, preview = false, voiceNa
   speakWebText(text, { rate, pitch, preview, voiceName });
 }
 
+function setVoicePreviewPlaying(playing) {
+  if (previewVoiceStop) previewVoiceStop.hidden = !playing;
+}
+
+async function playVoicePreview() {
+  setVoicePreviewPlaying(true);
+  const text = "Question: The Oracle is listening. Answer: Proceed.";
+  const opts = {
+    rate: state.whisper ? 0.95 : 1.02,
+    pitch: 1.2,
+    voiceName: state.selectedVoice,
+  };
+
+  // Native TTS resolves when playback finishes; hide Stop once it returns.
+  const spokenNatively = await speakNativeText(text, opts);
+  if (spokenNatively) {
+    setVoicePreviewPlaying(false);
+    return;
+  }
+
+  // Web speech: hide Stop when the utterance ends or errors.
+  speakWebText(text, { ...opts, preview: true, onEnd: () => setVoicePreviewPlaying(false) });
+}
+
+function stopVoicePreview() {
+  if ("speechSynthesis" in window) {
+    try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+  }
+  const plugin = getNativeTtsPlugin();
+  if (plugin && typeof plugin.stop === "function") {
+    try { plugin.stop(); } catch { /* ignore */ }
+  }
+  setVoicePreviewPlaying(false);
+}
+
 function primeSpeechFromGesture() {
   if (!("speechSynthesis" in window)) return;
   try {
@@ -4145,8 +4191,11 @@ async function speakNativeText(text, { rate = 1, pitch = 1.2, voiceName = "" } =
   }
 }
 
-function speakWebText(text, { rate = 1, pitch = 1.2, preview = false, voiceName = "" } = {}) {
-  if (!("speechSynthesis" in window)) return;
+function speakWebText(text, { rate = 1, pitch = 1.2, preview = false, voiceName = "", onEnd = null } = {}) {
+  if (!("speechSynthesis" in window)) {
+    if (onEnd) onEnd();
+    return;
+  }
   const synth = window.speechSynthesis;
   synth.resume();
   if (!preview) synth.cancel();
@@ -4155,6 +4204,10 @@ function speakWebText(text, { rate = 1, pitch = 1.2, preview = false, voiceName 
   utter.rate = rate;
   utter.pitch = pitch;
   utter.volume = state.whisper ? 0.5 : 1;
+  if (onEnd) {
+    utter.onend = onEnd;
+    utter.onerror = onEnd;
+  }
 
   const voices = getWebVoices();
   const selected = voices.find((voice) => voice.name === (voiceName || state.selectedVoice));
@@ -4168,6 +4221,10 @@ function speakWebText(text, { rate = 1, pitch = 1.2, preview = false, voiceName 
     retry.rate = rate;
     retry.pitch = pitch;
     retry.volume = state.whisper ? 0.5 : 1;
+    if (onEnd) {
+      retry.onend = onEnd;
+      retry.onerror = onEnd;
+    }
     synth.speak(retry);
   }, 220);
 }
@@ -8514,7 +8571,6 @@ function initGalaxyCanvas() {
       });
       return;
     }
-    playGameSfx("level_up", 0.9);
     const _winNow = performance.now();
     if (gameTimer.running) {
       const _lvMs = _winNow - gameTimer.startedAt;
@@ -8528,9 +8584,6 @@ function initGalaxyCanvas() {
       _runMsg += " — NEW RECORD!";
       try { localStorage.setItem(STORAGE_BEST_RUN, String(gameTimer.elapsed)); } catch {}
     }
-    galaxyView?.classList.remove("level-10");
-    audioEngine.stopMusic();
-    stopGalaxyBackground();
     setArcadeWon();
     try { localStorage.setItem(STORAGE_GAME_BEATEN, "true"); } catch {}
     clearArcadeProgress();
@@ -8540,14 +8593,83 @@ function initGalaxyCanvas() {
     } catch {
       // ignore
     }
-    if (arcadeScore > 0) {
-      showInitialsEntry(arcadeScore, _runMsg);
-      return;
-    }
-    showArcadeOverlay("YOU WIN", `You Win Control of the Polyverse — ${_runMsg}`, 0, {
-      buttonText: "Back to Modes",
-      buttonAction: () => showModeSelect(),
+    // 2026-06-12: "YOU WIN" celebration — screen-wide boom barrage + bold slam-in text held
+    // over the still-running level-10 music (ducked), then hand off to the score/initials screen.
+    playWinSequence(() => {
+      galaxyView?.classList.remove("level-10");
+      audioEngine.stopMusic();
+      stopGalaxyBackground();
+      if (arcadeScore > 0) {
+        showInitialsEntry(arcadeScore, _runMsg);
+        return;
+      }
+      showArcadeOverlay("YOU WIN", `You Win Control of the Polyverse — ${_runMsg}`, 0, {
+        buttonText: "Back to Modes",
+        buttonAction: () => showModeSelect(),
+      });
     });
+  }
+
+  // Plays the ~3s game-completion celebration, then invokes onComplete() to transition to the
+  // score/initials screen. Reuses spawnExplosion + cssShake + the arcade slam-text overlay.
+  function playWinSequence(onComplete) {
+    // Duck the level-10 music to 0.4 for the sequence (kept playing for drama; stopped on handoff).
+    if (audioEngine.musicGain && audioEngine.ctx) {
+      const t = audioEngine.ctx.currentTime;
+      audioEngine.musicGain.gain.cancelScheduledValues(t);
+      audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, t);
+      audioEngine.musicGain.gain.linearRampToValueAtTime(0.4 * MUSIC_MAX_GAIN, t + 0.3);
+    }
+    if (audioEngine.currentMusicHtml?.node) {
+      audioEngine.currentMusicHtml.node.volume = 0.4;
+    }
+
+    // Triumphant chime layered over the boom barrage.
+    playGameSfx("level_up", 0.95);
+
+    // 7 large explosions at random spots across the screen, staggered ~180ms over ~1.3s.
+    const EXPLOSION_COUNT = 7;
+    const boomKeys = ["explosion_big", "explosion_med", "explosion_med_alt"];
+    for (let i = 0; i < EXPLOSION_COUNT; i += 1) {
+      setTimeout(() => {
+        const x = sim.width * (0.12 + Math.random() * 0.76);
+        const y = sim.height * (0.15 + Math.random() * 0.6);
+        spawnExplosion(x, y, 60, true, 2.4, 1.2, 3, "roid01");
+        cssShake(i === 0 ? 1.5 : 0.8);
+        playGameSfx(boomKeys[i % boomKeys.length], 1.1 + Math.random() * 0.2, { important: true });
+      }, i * 180);
+    }
+
+    // "YOU WIN" slam-in — same overlay element as the level intro, bigger/bolder via .winBig.
+    if (arcadeOverlay && arcadeOverlayText) {
+      if (overlayTimer) { clearTimeout(overlayTimer); overlayTimer = null; }
+      showEl(arcadeOverlay);
+      arcadeOverlay.classList.add("show");
+      arcadeOverlay.setAttribute("aria-hidden", "false");
+      if (arcadeOverlayBtn) arcadeOverlayBtn.style.display = "none";
+      if (arcadeOverlayBtnSecondary) arcadeOverlayBtnSecondary.style.display = "none";
+      if (arcadeOverlaySub) arcadeOverlaySub.textContent = "";
+      arcadeOverlayText.textContent = "YOU WIN";
+      arcadeOverlayText.classList.remove("fadeOut");
+      arcadeOverlayText.classList.add("winBig");
+      void arcadeOverlayText.offsetWidth;
+      arcadeOverlayText.classList.add("show");
+    }
+
+    // Hold ~1.5s after the slam, fade out, then hand off (~2.9s total).
+    setTimeout(() => {
+      if (arcadeOverlayText) arcadeOverlayText.classList.add("fadeOut");
+      setTimeout(() => {
+        if (arcadeOverlay) {
+          arcadeOverlay.classList.remove("show");
+          arcadeOverlay.setAttribute("aria-hidden", "true");
+        }
+        if (arcadeOverlayText) {
+          arcadeOverlayText.classList.remove("show", "fadeOut", "winBig");
+        }
+        onComplete();
+      }, ARCADE_OVERLAY_FADE_MS);
+    }, 2400);
   }
 
   function promptRetryOrGameOver() {

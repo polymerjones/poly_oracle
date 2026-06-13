@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-12 19:59";
+const BUILD_TS = "2026-06-12 20:07";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2466,6 +2466,7 @@ function addListeners() {
     const tapCooldownMs = isIOSWebKit ? 24 : 24;
     if (now - lastOrbTapAt >= tapCooldownMs) {
       lastOrbTapAt = now;
+      if (!state.minimal) triggerHapticImpact(hapticImpactStyle.Medium);
       const intensity = registerOrbTap();
       const safeIntensity = isIOSWebKit
         ? {
@@ -3933,12 +3934,16 @@ function spawnSparkles(count, sizeMultiplier = 1, brightnessMultiplier = 1) {
 // Press and drag on the orb: a bright tip follows the finger and leaves behind
 // glow marks that bloom and fade over a couple seconds, while a low magical drone
 // pulses until release. Additive to the existing orb tap; reveal is untouched.
+const ORB_RUB_PULSE_EDGE = 1.25; // drone/haptic pulse Hz at the orb edge (slow)
+const ORB_RUB_PULSE_CENTER = 3.2; // pulse Hz dead-center (fast)
 const orbRub = document.getElementById("orbRub");
 let orbRubbing = false;
 let orbRubLastX = 0;
 let orbRubLastY = 0;
 let orbRubTravel = 0;
 let orbRubDroneTimer = null;
+let orbRubHapticTimer = null;
+let orbRubPulseHz = ORB_RUB_PULSE_EDGE;
 
 // A self-contained Web Audio drone: low oscillators warmed by a lowpass filter,
 // amplitude pulsed by a slow LFO (the "WOOM…WOOM" swell). Routed through the
@@ -3969,7 +3974,7 @@ const orbRubDrone = {
 
     const lfo = ctx.createOscillator();
     lfo.type = "sine";
-    lfo.frequency.value = 1.45; // pulse rate (Hz) — slow heartbeat-ish swell
+    lfo.frequency.value = orbRubPulseHz; // pulse rate (Hz) — varies with finger position
     const lfoGain = ctx.createGain();
     lfoGain.gain.value = 0.42; // pulse depth
     lfo.connect(lfoGain);
@@ -3993,12 +3998,19 @@ const orbRubDrone = {
     osc3.connect(osc3Gain);
     osc3Gain.connect(trem);
 
-    const target = state.whisper ? 0.1 : 0.22;
+    const target = state.whisper ? 0.18 : 0.36;
     out.gain.setValueAtTime(0, now);
     out.gain.linearRampToValueAtTime(target, now + 0.28);
 
     [osc1, osc2, osc3, lfo].forEach((o) => o.start(now));
     this.nodes = { ctx, out, osc1, osc2, osc3, lfo };
+  },
+  setPulseRate(hz) {
+    const n = this.nodes;
+    if (!n) return;
+    try {
+      n.lfo.frequency.setTargetAtTime(hz, n.ctx.currentTime, 0.08);
+    } catch { /* ignore */ }
   },
   stop() {
     const n = this.nodes;
@@ -4020,7 +4032,41 @@ function orbRubPoint(event) {
   const touch = event.touches?.[0] || event.changedTouches?.[0];
   const clientX = event.clientX ?? touch?.clientX ?? 0;
   const clientY = event.clientY ?? touch?.clientY ?? 0;
-  return { clientX, clientY, x: clientX - rect.left, y: clientY - rect.top };
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
+  const cx = rect.width / 2;
+  const cy = rect.height / 2;
+  const radius = Math.min(cx, cy) || 1;
+  // 0 = dead center, 1 = at/past the orb edge.
+  const centerRatio = clamp(Math.hypot(x - cx, y - cy) / radius, 0, 1);
+  return { clientX, clientY, x, y, centerRatio };
+}
+
+// Closer to the center → faster pulse. Updates both the drone LFO and haptic cadence.
+function updateOrbRubPulse(centerRatio) {
+  orbRubPulseHz = ORB_RUB_PULSE_CENTER + (ORB_RUB_PULSE_EDGE - ORB_RUB_PULSE_CENTER) * centerRatio;
+  orbRubDrone.setPulseRate(orbRubPulseHz);
+}
+
+function scheduleRubHaptic() {
+  orbRubHapticTimer = setTimeout(() => {
+    orbRubHapticTimer = null;
+    if (!orbRubbing) return;
+    if (!state.minimal) triggerHapticImpact(hapticImpactStyle.Heavy);
+    scheduleRubHaptic();
+  }, Math.max(120, 1000 / orbRubPulseHz));
+}
+
+// Start the drone + the synced hard-pulse haptic loop (both idempotent).
+function beginRubFeedback() {
+  orbRubDrone.start();
+  if (!orbRubHapticTimer) scheduleRubHaptic();
+}
+
+function stopRubFeedback() {
+  orbRubDrone.stop();
+  clearTimeout(orbRubHapticTimer);
+  orbRubHapticTimer = null;
 }
 
 function placeOrbRubGlow(x, y) {
@@ -4047,13 +4093,14 @@ function onOrbRubStart(event) {
   orbRubLastX = p.x;
   orbRubLastY = p.y;
   orbRubTravel = 0;
+  orbRubPulseHz = ORB_RUB_PULSE_CENTER + (ORB_RUB_PULSE_EDGE - ORB_RUB_PULSE_CENTER) * p.centerRatio;
   placeOrbRubGlow(p.x, p.y);
   orb.classList.add("rubbing");
   spawnRubMark(p.x, p.y);
   audioEngine.unlock();
-  // Bring the drone in on a short hold (or first movement) so quick taps stay silent.
+  // Bring the drone + haptic in on a short hold (or first movement) so quick taps stay silent.
   clearTimeout(orbRubDroneTimer);
-  orbRubDroneTimer = setTimeout(() => { if (orbRubbing) orbRubDrone.start(); }, 150);
+  orbRubDroneTimer = setTimeout(() => { if (orbRubbing) beginRubFeedback(); }, 150);
   if (event.pointerId !== undefined && orb.setPointerCapture) {
     try { orb.setPointerCapture(event.pointerId); } catch { /* ignore */ }
   }
@@ -4064,18 +4111,19 @@ function onOrbRubMove(event) {
   if (event.cancelable) event.preventDefault();
   const p = orbRubPoint(event);
   placeOrbRubGlow(p.x, p.y);
+  updateOrbRubPulse(p.centerRatio); // faster pulse toward the center
   const dist = Math.hypot(p.x - orbRubLastX, p.y - orbRubLastY);
   orbRubLastX = p.x;
   orbRubLastY = p.y;
   orbRubTravel += dist;
-  // Every ~16px of travel: leave a lingering glow mark + a fingertip sparkle.
-  if (orbRubTravel >= 16) {
+  // Every ~20px of travel: leave a lingering glow mark + a fingertip sparkle.
+  if (orbRubTravel >= 20) {
     orbRubTravel = 0;
     spawnRubMark(p.x, p.y);
     if (!prefersReducedMotion) spawnRubSparkle(p.clientX, p.clientY);
-    // Movement means a real rub — bring the drone in now if the hold timer hasn't.
+    // Movement means a real rub — bring feedback in now if the hold timer hasn't.
     clearTimeout(orbRubDroneTimer);
-    orbRubDrone.start();
+    beginRubFeedback();
   }
 }
 
@@ -4084,7 +4132,7 @@ function onOrbRubEnd(event) {
   orbRubbing = false;
   orb.classList.remove("rubbing");
   clearTimeout(orbRubDroneTimer);
-  orbRubDrone.stop();
+  stopRubFeedback();
   if (event?.pointerId !== undefined && orb.releasePointerCapture) {
     try { orb.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
   }

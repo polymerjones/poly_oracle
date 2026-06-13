@@ -612,20 +612,22 @@ h1 {
   pointer-events: none;
   transform: translate(-50%, -50%) scale(0.45);
   background: radial-gradient(circle at center,
-    rgba(255, 255, 255, 0.85) 0%,
-    rgba(186, 240, 255, 0.55) 30%,
-    rgba(196, 131, 255, 0.28) 58%,
-    rgba(196, 131, 255, 0) 74%);
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(186, 240, 255, 0.38) 32%,
+    rgba(196, 131, 255, 0.2) 60%,
+    rgba(196, 131, 255, 0) 76%);
   filter: blur(5px);
   mix-blend-mode: screen;
-  animation: orbRubLinger 2.4s ease-out forwards;
+  animation: orbRubLinger 2s ease-out forwards;
   will-change: opacity, transform;
 }
 
+/* Drop to a faint level quickly so overlapping marks don't pile into solid white,
+   then a long low tail fades the rest of the way out. */
 @keyframes orbRubLinger {
-  0%   { opacity: 0.9; transform: translate(-50%, -50%) scale(0.45); }
-  18%  { opacity: 0.78; transform: translate(-50%, -50%) scale(0.9); }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.5); }
+  0%   { opacity: 0.55; transform: translate(-50%, -50%) scale(0.45); }
+  22%  { opacity: 0.22; transform: translate(-50%, -50%) scale(0.95); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.55); }
 }
 
 .controls {

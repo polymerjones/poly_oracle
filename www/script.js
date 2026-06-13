@@ -167,7 +167,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-12 20:07";
+const BUILD_TS = "2026-06-12 20:23";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -349,6 +349,9 @@ const GAME_SFX = {
   // 2026-06-10: powerup/freeze sound pack
   crunch: "gamesfx/crunch.mp3", // stroid grab + bomb grab
   pickup_gold: "gamesfx/pickup_gold.mp3",
+  bling: "gamesfx/bling.mp3", // powerup appears
+  pickup_weapon: "gamesfx/pickup_weapon.mp3", // layered on quadshot pickup
+  weaponclick_pickupbomb: "gamesfx/weaponclick_pickupbomb.mp3", // layered on bomb pickup
   item_pickup2: "gamesfx/item_pickup2.mp3", // unassigned - crunchy item pickup
   freeze: "gamesfx/freeze.mp3",
   unfreeze: "gamesfx/unfreeze.mp3",
@@ -9467,7 +9470,7 @@ function initGalaxyCanvas() {
             spawnedAt: now,
             opacity: 1.0,
           });
-          playGameSfx("blip", 0.8);
+          playGameSfx("bling", 0.8);
           nextBombPowerupAt = now + BOMB_POWERUP_INTERVAL_MIN
             + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
         }
@@ -10596,6 +10599,7 @@ function initGalaxyCanvas() {
         playerBombInventory++;
         updateHudBombInventory();
         playGameSfx("life_gain", 0.7);
+        playGameSfx("weaponclick_pickupbomb", 0.9); // layered bomb-pickup sound
         cssFlash("#00ffcc", 0.15, 200);
       }
       return;
@@ -10617,6 +10621,7 @@ function initGalaxyCanvas() {
     }
     if (pu.type === "quadshot") {
       quadShotUntil = performance.now() + 12000;
+      playGameSfx("pickup_weapon", 0.9); // layered quadshot-pickup sound
       cssFlash("#cc66ff", 0.22, 250);
       return;
     }

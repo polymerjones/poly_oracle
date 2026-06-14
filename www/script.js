@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-13 22:53";
+const BUILD_TS = "2026-06-13 23:11";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -547,6 +547,51 @@ const ARCADE_LEVELS = [
   { level: 10, time: 75, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14 },
 ];
 
+// Stunt (tutorial) Mode — a no-fail walkthrough of the core verbs. Each step shows an
+// instruction and does NOT advance until the player performs that action successfully.
+// Content is intentionally data-driven so a new character's script + VO can be dropped in:
+//   text  — ticker line shown until the step is completed
+//   voSrc — optional VO file (null = text-only for now; fill in when the new VO is recorded)
+//   need  — successes required to advance (1 for all current steps)
+//   setup — per-step entity prep (spawns / stocks inventory) run when the step begins
+const STUNT_STEPS = [
+  {
+    id: "shoot",
+    text: "TAP an asteroid to blast it!",
+    voSrc: null,
+    need: 1,
+    setup: "shoot",
+  },
+  {
+    id: "plasma",
+    text: "TAP & DRAG to draw a PLASMA NET around the rocks!",
+    voSrc: null,
+    need: 1,
+    setup: "plasma",
+  },
+  {
+    id: "toss",
+    text: "GRAB an asteroid and FLING it away!",
+    voSrc: null,
+    need: 1,
+    setup: "toss",
+  },
+  {
+    id: "bomb",
+    text: "Tap \u{1F4A3}, tap the field to drop a bomb, tap it to ARM, tap again to DETONATE!",
+    voSrc: null,
+    need: 1,
+    setup: "bomb",
+  },
+  {
+    id: "freeze",
+    text: "Tap the ❄ button to FREEZE time!",
+    voSrc: null,
+    need: 1,
+    setup: "freeze",
+  },
+];
+
 function getSavedArcadeLevel() {
   try {
     const n = parseInt(localStorage.getItem(STORAGE.arcadeLevel) || "1", 10);
@@ -786,6 +831,7 @@ const arcadeLevelPanel = document.getElementById("arcadeLevelPanel");
 const btnArcadeNew = document.getElementById("btnArcadeNew");
 const btnArcadeResume = document.getElementById("btnArcadeResume");
 const btnArcadeLevelSelect = document.getElementById("btnArcadeLevelSelect");
+const btnArcadeStunt = document.getElementById("btnArcadeStunt");
 const btnArcadeScores = document.getElementById("btnArcadeScores");
 const btnScores = document.getElementById("btnScores");
 const btnArcadeMenuBack = document.getElementById("btnArcadeMenuBack");
@@ -1255,6 +1301,19 @@ const commBoxController = (() => {
       .forEach((b) => b.classList.add("sigbar-active"));
   }
 
+  // 2026-06-13: Stunt Mode — show a ticker line that stays put (cancels any pending auto-hide)
+  // so a tutorial instruction persists until the step is done. `isTickerVisible` lets the
+  // stunt loop re-pin the line if anything (e.g. a future VO ending) hides it.
+  function pinTicker(text) {
+    if (tickerHideTimer) { clearTimeout(tickerHideTimer); tickerHideTimer = null; }
+    showTicker();
+    typeText(text);
+  }
+
+  function isTickerVisible() {
+    return tickerVisible;
+  }
+
   function hideTicker() {
     if (!ticker) return;
     ticker.classList.remove("ticker-visible");
@@ -1520,6 +1579,9 @@ const commBoxController = (() => {
     triggerVO,
     queueVO,
     commVoSrc,
+    pinTicker,
+    hideTicker,
+    isTickerVisible,
     setDamageState,
     reactTo,
     pickFromPool,
@@ -2644,6 +2706,9 @@ function addListeners() {
   }
   if (btnArcadeLevelSelect) {
     btnArcadeLevelSelect.addEventListener("click", () => galaxyCanvasController?.openArcadeLevelSelect?.());
+  }
+  if (btnArcadeStunt) {
+    btnArcadeStunt.addEventListener("click", () => galaxyCanvasController?.startStuntMode?.());
   }
   if (btnArcadeScores) {
     btnArcadeScores.hidden = true;
@@ -5547,6 +5612,12 @@ function initGalaxyCanvas() {
   let bgPreRolledForLevel = false;
 
   let arcadeActive = false;
+  // 2026-06-13: Stunt (tutorial) Mode — gates the level loop off and runs a step machine.
+  let stuntActive = false;
+  let stuntStepIndex = 0;
+  let stuntStepProgress = 0;
+  let stuntStepStartedAt = 0;
+  let stuntAdvancing = false; // brief lockout between a success and the next step
   let currentLevelIndex = 0;
   let _levelPrimaryColor = "#00FFD1";
   let levelEndsAt = 0;
@@ -8014,6 +8085,7 @@ function initGalaxyCanvas() {
     resetPlasmaCageGesture();
     if (charged) {
       const destroyedCount = destroyAsteroidsInPlasmaCage(rect);
+      if (destroyedCount > 0) stuntNotify("plasma");
       window.pixiRenderer?.triggerPlasmaRectFlash?.();
       const fireKey = destroyedCount > 0 ? resolveGameSfxKey("plasma_fire", "ufo_destroy") : "";
       // FIXED 2026-06-09: forceHtmlOnIOS covers iOS Safari; `important` bypasses the native
@@ -8548,6 +8620,7 @@ function initGalaxyCanvas() {
     const i = placedBombs.indexOf(mine);
     if (i >= 0) placedBombs.splice(i, 1);
     explodeMineEntity(mine, opts);
+    stuntNotify("bomb");
   }
 
   function detonateInventoryBomb(aimX, aimY) {
@@ -9049,6 +9122,7 @@ function initGalaxyCanvas() {
   }
 
   function startLevel(idx) {
+    stuntActive = false; // a real arcade level is never a stunt session
     const safeIdx = clamp(idx, 0, ARCADE_LEVELS.length - 1);
     audioEngine.unlock?.();
     audioEngine.loadMany?.(GAME_SFX);
@@ -9259,8 +9333,171 @@ function initGalaxyCanvas() {
     startGalaxyLoop();
   }
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // Stunt (tutorial) Mode — a no-fail walkthrough. Reuses the arcade game loop,
+  // physics, input and rendering, but the timed-level logic in update() is gated
+  // OFF (see `stuntActive` branch). Progression is driven entirely by completing
+  // each step's action, detected via stuntNotify() calls at the existing
+  // action-completion sites (shoot / plasma / toss / bomb / freeze).
+  // ──────────────────────────────────────────────────────────────────────────
+  function startStuntMode() {
+    audioEngine.unlock?.();
+    audioEngine.loadMany?.(GAME_SFX);
+    hideArcadeOverlay();
+    tapBlasts = [];
+    // fresh, pressure-free state
+    arcadeScore = 0;
+    arcadeLives = 0;
+    playerBombInventory = 0;
+    playerFreezeInventory = 0;
+    quadShotUntil = 0;
+    freezeUntil = 0;
+    bombAimMode = false;
+    hudBombBtn?.classList.remove("hudBombBtn--aiming");
+    currentLevelIndex = 0;
+    // no timer in Stunt Mode — levelDurationMs 0 keeps the timer perimeter hidden
+    // (drawTimerPerimeterOverlay guards on levelDurationMs > 0).
+    levelDurationMs = 0;
+    levelEndsAt = 0;
+    retryPending = false;
+    arcadeResumeAvailable = false;
+
+    engineMode = "arcade";
+    arcadeActive = true;
+    stuntActive = true;
+    stuntAdvancing = false;
+
+    setMenuOverlayOpen(false);
+    syncArcadeEntryLabel();
+    setGalaxyViewMode("arcade");
+    setGalaxyTool("draw");
+    galaxyView?.classList.remove("level-10");
+    resetArcadeTimerVisuals();
+    clearGameplayEntities();
+    setGalaxyBackgroundForLevel(1);
+    window.galaxyBackground?.show();
+    window.galaxyBackground?.setTheme(1);
+    window.galaxyBackground?.setLevel(1);
+    playArcadeMusicForLevel(1);
+
+    commBoxController.show();
+    commBoxController.setDamageState("normal");
+    showFpsOverlay();
+    if (hudLevel) hudLevel.textContent = "STUNT MODE";
+    renderLives();
+    renderScore();
+    updateHudBombInventory();
+    updateHudFreezeInventory();
+    updateHudQuadBadge();
+
+    resizeGalaxyCanvas();
+    computePlayfield();
+    setTimeout(computePlayfield, 50);
+    startGalaxyLoop();
+
+    arcadePausedUntil = performance.now(); // gameplay allowed immediately
+    stuntBeginStep(0);
+  }
+
+  // Per-step entity prep. Spawns exactly what a step needs; for bomb/freeze it stocks the
+  // inventory directly so the unique verb (deploy / activate) is what's being taught.
+  function stuntSetupStep(setupKind) {
+    clearGameplayEntities();
+    const spawnBig = (n) => {
+      for (let i = 0; i < n; i += 1) {
+        const p = randomPerimeterPoint();
+        spawnAsteroid(p.x, p.y, 3, false);
+      }
+    };
+    if (setupKind === "shoot") spawnBig(1);
+    else if (setupKind === "plasma") spawnBig(3);
+    else if (setupKind === "toss") spawnBig(1);
+    else if (setupKind === "bomb") {
+      playerBombInventory = 1;
+      updateHudBombInventory();
+      spawnBig(2);
+    } else if (setupKind === "freeze") {
+      playerFreezeInventory = 1;
+      updateHudFreezeInventory();
+      spawnBig(3);
+    }
+  }
+
+  function stuntBeginStep(i) {
+    stuntStepIndex = i;
+    stuntStepProgress = 0;
+    stuntAdvancing = false;
+    stuntStepStartedAt = performance.now();
+    const step = STUNT_STEPS[i];
+    if (!step) return;
+    stuntSetupStep(step.setup);
+    stuntShowInstruction(step);
+  }
+
+  function stuntShowInstruction(step) {
+    commBoxController.show();
+    commBoxController.pinTicker(step.text);
+    if (step.voSrc) {
+      commBoxController.queueVO({ audioSrc: commBoxController.commVoSrc(step.voSrc) });
+    }
+  }
+
+  // Called from the action-completion hooks. No-op outside Stunt Mode, so the hooks are
+  // safe to leave in the normal gameplay paths.
+  function stuntNotify(eventId) {
+    if (!stuntActive || stuntAdvancing) return;
+    const step = STUNT_STEPS[stuntStepIndex];
+    if (!step || eventId !== step.id) return;
+    stuntStepProgress += 1;
+    if (stuntStepProgress < (step.need || 1)) return;
+    stuntAdvancing = true;
+    playGameSfx("life_gain", 0.8); // success chime
+    const next = stuntStepIndex + 1;
+    setTimeout(() => {
+      if (!stuntActive) return;
+      if (next < STUNT_STEPS.length) stuntBeginStep(next);
+      else stuntComplete();
+    }, 850);
+  }
+
+  function updateStunt(now) {
+    // keep the instruction pinned (defends against a future VO ending and auto-hiding it)
+    const step = STUNT_STEPS[stuntStepIndex];
+    if (step && !stuntAdvancing && !commBoxController.isTickerVisible()) {
+      commBoxController.pinTicker(step.text);
+    }
+    // keep a live target on-screen for the shoot/plasma/toss steps so the player is never stuck
+    if (step && !stuntAdvancing && sim.asteroids.length === 0
+        && (step.setup === "shoot" || step.setup === "plasma" || step.setup === "toss")) {
+      const need = step.setup === "plasma" ? 3 : 1;
+      for (let i = 0; i < need; i += 1) {
+        const p = randomPerimeterPoint();
+        spawnAsteroid(p.x, p.y, 3, true);
+      }
+    }
+  }
+
+  function stuntComplete() {
+    stuntAdvancing = true;
+    commBoxController.hideTicker();
+    showArcadeOverlay("STUNT MODE COMPLETE", "Nice flying, cadet!", 0, {
+      buttonText: "Back to Arcade",
+      buttonAction: () => exitStuntMode(),
+    });
+  }
+
+  function exitStuntMode() {
+    stuntActive = false;
+    stuntAdvancing = false;
+    hideArcadeOverlay();
+    commBoxController.hideTicker();
+    showModeSelect();   // tears down the arcade session (engineMode → menu) and lands on root
+    openArcadeMenu();   // then reopen the Arcade submenu where the Stunt Mode button lives
+  }
+
   function startPracticeMode() {
     if (!PRACTICE_ENABLED) return;
+    stuntActive = false;
     audioEngine.unlock?.();
     audioEngine.loadMany?.(GAME_SFX);
     hideArcadeOverlay();
@@ -9300,6 +9537,14 @@ function initGalaxyCanvas() {
     hideArcadeOverlay();
     retryPending = false;
     stopWarningState();
+    // 2026-06-13: leaving Stunt Mode by any path is always a clean exit — never preserve it as a
+    // resumable arcade session, and clear the flag so a later real game runs its level logic.
+    if (stuntActive) {
+      stuntActive = false;
+      stuntAdvancing = false;
+      commBoxController.hideTicker();
+      preserveArcade = false;
+    }
     const canPreserve = preserveArcade && engineMode === "arcade" && arcadeActive;
     if (canPreserve) {
       const now = performance.now();
@@ -9447,7 +9692,12 @@ function initGalaxyCanvas() {
       if (s.y > sim.height) s.y -= sim.height;
     }
 
-    if (engineMode === "arcade" && arcadeActive) {
+    // 2026-06-13: Stunt Mode runs its own step machine in place of the timed level logic.
+    // It deliberately skips the whole arcade block below (no timer, no auto-spawn, no
+    // levelComplete, no game-over) while leaving the gameplayAllowed physics/input block active.
+    if (stuntActive) updateStunt(now);
+
+    if (engineMode === "arcade" && arcadeActive && !stuntActive) {
       const cfg = ARCADE_LEVELS[currentLevelIndex];
       // 2026-06-10: an active freeze pauses the level clock — shift every time anchor by dt
       // each frozen frame so remaining/elapsed (and the perimeter line) hold their position.
@@ -10655,6 +10905,7 @@ function initGalaxyCanvas() {
     if (hitIndex >= 0) {
       triggerCrosshairFire();
       splitAsteroidByIndex(hitIndex);
+      stuntNotify("shoot");
       return true;
     }
     return false;
@@ -10717,6 +10968,7 @@ function initGalaxyCanvas() {
     cssShake(0.8);
     freezeUntil = nowF + FREEZE_DURATION_MS;
     playGameSfx("freeze", 0.9);
+    stuntNotify("freeze");
   }
 
   // 2026-06-10: frozen-asteroid destruction — glass-break layer over the normal boom plus
@@ -10902,6 +11154,7 @@ function initGalaxyCanvas() {
       // fail the grabbed/hold-time gate and drop the stroid. launchStroidToss's own guards
       // (recent sample + ≥10px movement) already separate a flick from a static tap.
       const didLaunch = stroidToss.active ? launchStroidToss(now) : false;
+      if (didLaunch) stuntNotify("toss");
       if (!didLaunch) {
         cancelStroidToss();
       }
@@ -11133,6 +11386,9 @@ function initGalaxyCanvas() {
     },
     startArcadeAtLevel(levelNum) {
       startArcadeAtLevel(levelNum);
+    },
+    startStuntMode() {
+      startStuntMode();
     },
     triggerBoom() {
       // no-op in current arcade interaction model
@@ -11368,12 +11624,18 @@ function initGalaxyBackground() {
     draw(performance.now());
   }
 
-  // resize() above paints the first frame; flip on .is-ready on the next frame
-  // so the CSS opacity transition runs and the starfield slow-fades in rather
-  // than popping over the bare gradient on launch.
+  // Fade the starfield in instead of popping it over the bare gradient on launch.
+  // Reduced-motion: just show it. Otherwise we must guarantee the browser commits
+  // the opacity:0 start state to a painted frame *before* flipping to .is-ready,
+  // or it coalesces both states into one style recalc and the transition never
+  // runs (the canvas snaps on). Force a reflow to lock in opacity:0, then flip on
+  // a later frame (double rAF — a single rAF can still be coalesced in WKWebView).
   if (prefersReducedMotion) {
     canvas.classList.add("is-ready");
   } else {
-    requestAnimationFrame(() => canvas.classList.add("is-ready"));
+    void canvas.offsetWidth; // commit opacity:0 as a painted state
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => canvas.classList.add("is-ready")),
+    );
   }
 }

@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-14 12:44";
+const BUILD_TS = "2026-06-14 13:02";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -11106,12 +11106,12 @@ function initGalaxyCanvas() {
       return;
     }
     if (pu.type === "missile") {
-      if (playerMissileInventory < MAX_MISSILE_INVENTORY) {
-        playerMissileInventory += 1;
-        updateHudMissileInventory();
-        playGameSfx("pickup_weapon", 0.9);
-        cssFlash("#ff4444", 0.2, 250);
-      }
+      // 2026-06-14: one pickup = a full pack of MAX missiles (the 3-rocket art), fired one at a
+      // time with a reload between shots. Powerup re-spawn is suppressed while any are stocked.
+      playerMissileInventory = MAX_MISSILE_INVENTORY;
+      updateHudMissileInventory();
+      playGameSfx("pickup_weapon", 0.9);
+      cssFlash("#ff4444", 0.2, 250);
       return;
     }
     if (pu.type === "snowflake") {
@@ -11212,6 +11212,30 @@ function initGalaxyCanvas() {
     const t = clamp((now - m.launchedAt) / m.flightMs, 0, 1);
     m.x = lerp(m.launchX, m.targetX, t);
     m.y = lerp(m.launchY, m.targetY, t);
+    // 2026-06-14: rocket exhaust — emit orange sparks at the tail each frame into the shared
+    // flameTrail system (it advances, draws, and expires them; drawn under the missile sprite).
+    {
+      const dxh = m.targetX - m.x;
+      const dyh = m.targetY - m.y;
+      const hl = Math.hypot(dxh, dyh) || 1;
+      const nx = dxh / hl;
+      const ny = dyh / hl;
+      const tailX = m.x - nx * 10;
+      const tailY = m.y - ny * 10;
+      const count = 2 + (Math.random() < 0.5 ? 1 : 0);
+      for (let i = 0; i < count && flameTrail.length < FLAME_TRAIL_MAX; i += 1) {
+        flameTrail.push({
+          x: tailX + (Math.random() - 0.5) * 5,
+          y: tailY + (Math.random() - 0.5) * 5,
+          vx: -nx * 60 + (Math.random() - 0.5) * 40, // drift back along the tail + scatter
+          vy: -ny * 60 + (Math.random() - 0.5) * 40,
+          life: 0,
+          ttl: 260 + Math.random() * 160,
+          r: 2 + Math.random() * 2.5,
+          color: FLAME_COLORS[(Math.random() * FLAME_COLORS.length) | 0],
+        });
+      }
+    }
     if (t > 0.85 && !m.prehitPlayed) {
       m.prehitPlayed = true;
       playGameSfx("missile_prehit", 0.9);
@@ -11829,7 +11853,8 @@ function initGalaxyCanvas() {
       missileAimMode = true;
       hudMissileBtn?.classList.add("hudMissileBtn--aiming");
       updateHudMissileInventory();
-      playGameSfx("blip", 0.6);
+      // 2026-06-14: arming the missile uses the weapon/reload sound, not the generic powerup blip
+      playGameSfx("pickup_weapon", 0.7);
     },
     isArcade() {
       return engineMode === "arcade";

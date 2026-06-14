@@ -171,14 +171,14 @@ function triggerHapticNotification(type) {
   }
 }
 
-const APP_VERSION = "v3.3.0";
+const APP_VERSION = "v4.0.0";
 const storageKey = "poly-oracle-v11-state";
 const firstRunHintKey = "poly_oracle_seen_hint_v1_2_1";
 const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-12 20:40";
+const BUILD_TS = "2026-06-13 22:53";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2939,6 +2939,9 @@ function setSettingsOpen(open) {
     settingsPanel.style.pointerEvents = "auto";
     settingsPanel.classList.add("open");
   } else {
+    // Closing settings: kill any in-progress voice preview so it doesn't
+    // keep playing after the panel is gone.
+    stopVoicePreview();
     hideBackdrop(settingsBackdrop);
     settingsPanel.classList.remove("open");
     settingsPanel.style.pointerEvents = "none";
@@ -6168,6 +6171,7 @@ function initGalaxyCanvas() {
     a.tossed = false;
     a.tossedAt = 0;
     a._stroidHeld = false;
+    a._coldTossUntil = 0;
     delete a._preTossVx;
     delete a._preTossVy;
     sim.asteroidPool.push(a);
@@ -7231,25 +7235,37 @@ function initGalaxyCanvas() {
     // backwards (the old <12px fallback even reused the asteroid's random pre-grab drift).
     // 200ms (was 120) keeps the grab-time seed sample in range for sub-200ms flicks.
     // 2026-06-12: a grabbed stroid released with no/minimal flick gets a slow cold toss (no
-    // flame) in its pre-grab drift direction (or straight up) instead of dropping dead in place.
-    // Mines keep their drop-in-place lob. Quick taps (never grabbed) fall through to handleArcadeTap.
+    // flame) instead of dropping dead in place. Mines keep their drop-in-place lob. Quick taps
+    // (never grabbed) fall through to handleArcadeTap.
+    // 2026-06-13: the cold toss drifts in the AIM ARROW direction (grab→drag vector, exactly what
+    // the on-screen arrow draws), falling back to the pre-grab drift, then straight up. It becomes
+    // a plain cold DRIFTER — NOT a `tossed` projectile — so it neither flames nor self-destructs on
+    // the toss timeout the way a real flick does; it just floats off and wraps like any asteroid.
     const slowTossFallback = () => {
       if (isMine || !stroidToss.grabbed) return false;
-      const pvx = entity._preTossVx || 0;
-      const pvy = entity._preTossVy || 0;
-      const pl = Math.hypot(pvx, pvy);
       let dnx = 0;
       let dny = -1; // default: straight up from the grab point
-      if (pl > 1) { dnx = pvx / pl; dny = pvy / pl; }
+      const adx = stroidToss.dragX - stroidToss.grabX;
+      const ady = stroidToss.dragY - stroidToss.grabY;
+      const al = Math.hypot(adx, ady);
+      if (al > 8) {
+        dnx = adx / al; dny = ady / al; // aim arrow direction
+      } else {
+        const pvx = entity._preTossVx || 0;
+        const pvy = entity._preTossVy || 0;
+        const pl = Math.hypot(pvx, pvy);
+        if (pl > 1) { dnx = pvx / pl; dny = pvy / pl; } // pre-grab drift
+      }
       entity.vx = dnx * STROID_TOSS_SLOW_SPEED;
       entity.vy = dny * STROID_TOSS_SLOW_SPEED;
       entity._stroidHeld = false;
       delete entity._preTossVx;
       delete entity._preTossVy;
-      entity.tossed = true;
-      entity.tossedAt = now;
-      entity.tossHealth = 3;
-      sim.tossedAsteroid = entity;
+      // 2026-06-13: a cold drift released DURING a snowflake freeze must still glide (it's a
+      // deliberate player action, like a flicked toss flying through a frozen field) instead of
+      // hanging motionless. Capture the current freeze's end so it glides through THIS freeze only;
+      // a later freeze (freezeUntil jumps past this stamp) re-freezes it like any normal drifter.
+      entity._coldTossUntil = freezeUntil;
       playGameSfx(Math.random() < 0.5 ? "stroidthrow1" : "stroidthrow2", 0.5);
       resetStroidToss();
       return true;
@@ -7363,6 +7379,44 @@ function initGalaxyCanvas() {
     addArcadeScore(arcadeMultiplierPoints(kind >= 2 ? 25 : 10));
     trackKillStreak();
     return true;
+  }
+
+  // 2026-06-13: full-destroy a stroid on the ice (no split) — shared by the cold-glide-vs-frozen
+  // overlap below. playSound=false on the second of a pair so freeze_explode only fires once.
+  function shatterFrozenStroid(a, playSound) {
+    const x = a.x;
+    const y = a.y;
+    const kind = a.kind || 1;
+    const spriteKey = a.spriteKey;
+    if (!removeAsteroidRef(a)) return false;
+    spawnExplosion(x, y, kind >= 3 ? 28 : kind === 2 ? 18 : 12, false, kind >= 3 ? 1.6 : 1.1, 1, kind, spriteKey);
+    addFrozenShatterFx(x, y, playSound); // ice particles (+ freeze_explode when playSound)
+    addArcadeScore(arcadeMultiplierPoints(kind >= 2 ? 25 : 10));
+    trackKillStreak();
+    return true;
+  }
+
+  // 2026-06-13: while the field is frozen, idle stroids are stationary and resolveAsteroidCollisions
+  // is skipped — so a cold-drift toss gliding through (see _coldTossUntil) would silently OVERLAP a
+  // frozen rock. Instead, shatter BOTH on the ice: freeze_explode + ice flash + ice particles.
+  function updateColdTossFreezeCollision(now) {
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const g = sim.asteroids[i];
+      if (g.tossed || !g._coldTossUntil || now >= g._coldTossUntil) continue; // not a live cold glider
+      for (let j = 0; j < sim.asteroids.length; j += 1) {
+        const other = sim.asteroids[j];
+        if (!other || other === g) continue;
+        // split children appear at the impact point — don't instantly re-shatter them
+        if (other.spawnedAtMs && now - other.spawnedAtMs < 250) continue;
+        if (Math.hypot(other.x - g.x, other.y - g.y) > g.r + other.r) continue;
+        cssFlash("rgba(170,238,255,1)", 0.22, 200);
+        cssShake(0.7);
+        triggerGameplayHapticImpact(hapticImpactStyle.Medium);
+        shatterFrozenStroid(g, true);
+        shatterFrozenStroid(other, false);
+        break; // g is gone — stop scanning targets for it
+      }
+    }
   }
 
   // 2026-06-11: a tossed stroid that flies the full STROID_TOSS_TIMEOUT_MS without connecting
@@ -8656,10 +8710,10 @@ function initGalaxyCanvas() {
     (galaxyView || document.body).appendChild(overlay);
 
     // FIX 2026-06-09: make sure a UFO doesn't linger behind the scorecard
-    if (ufo) {
-      stopUfoDrone();
-      ufo = null;
-    }
+    // 2026-06-13: clear ALL gameplay entities (asteroids, flames, powerups, particles, mines…)
+    // the moment the scorecard appears so the playfield is empty behind it — they used to linger,
+    // still rendering, until the next startLevel() cleared them on dismiss. Idempotent with that.
+    clearGameplayEntities();
 
     // FIX 2026-06-09: duck music to 0.75 while the scorecard is up, restore on dismiss
     const scorecardMusicGainBefore = audioEngine.musicGain?.gain?.value ?? MUSIC_MAX_GAIN;
@@ -9605,7 +9659,9 @@ function initGalaxyCanvas() {
         a.rot += a.spin * (dt / 16);
         // 2026-06-11: a tossed stroid keeps flying during a freeze (player action) — you can
         // hurl one through the frozen field and shatter it. Only idle drift is frozen.
-        if (simFrozen && !a.tossed) continue;
+        // 2026-06-13: a cold-drift toss (no flick) released during this same freeze also keeps
+        // gliding — _coldTossUntil holds the releasing freeze's end (see slowTossFallback).
+        if (simFrozen && !a.tossed && !(a._coldTossUntil && now < a._coldTossUntil)) continue;
         a.x += a.vx * (dt / 1000);
         a.y += a.vy * (dt / 1000);
         if (engineMode === "practice") wrapEntityToCanvas(a);
@@ -9622,7 +9678,8 @@ function initGalaxyCanvas() {
       updateStroidTossHold(now);
       updateTossedAsteroidCollision(now);
       stepFlameTrail(dt, now);
-      if (!simFrozen) resolveAsteroidCollisions();
+      if (simFrozen) updateColdTossFreezeCollision(now);
+      else resolveAsteroidCollisions();
 
       if (landmine) {
         if (updateMineEntity(landmine, dt, now, (opts) => explodeLandmine(opts), { quietArm: false, frozen: simFrozen })) {
@@ -10664,9 +10721,9 @@ function initGalaxyCanvas() {
 
   // 2026-06-10: frozen-asteroid destruction — glass-break layer over the normal boom plus
   // ice debris. Runs for any destruction path while a freeze is active.
-  function addFrozenShatterFx(x, y) {
+  function addFrozenShatterFx(x, y, playSound = true) {
     if (performance.now() >= freezeUntil) return;
-    playGameSfx("freeze_explode", 0.9);
+    if (playSound) playGameSfx("freeze_explode", 0.9);
     const count = 8 + Math.floor(Math.random() * 5);
     for (let i = 0; i < count; i += 1) {
       if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
@@ -11309,5 +11366,14 @@ function initGalaxyBackground() {
     resume();
   } else {
     draw(performance.now());
+  }
+
+  // resize() above paints the first frame; flip on .is-ready on the next frame
+  // so the CSS opacity transition runs and the starfield slow-fades in rather
+  // than popping over the bare gradient on launch.
+  if (prefersReducedMotion) {
+    canvas.classList.add("is-ready");
+  } else {
+    requestAnimationFrame(() => canvas.classList.add("is-ready"));
   }
 }

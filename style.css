@@ -144,6 +144,14 @@ body.reveal-screen-shake #oracleView {
   height: 100%;
   z-index: 1;
   pointer-events: none;
+  /* Start hidden so the starfield slow-fades in once it first draws,
+     instead of popping over the bare CSS gradient on launch. */
+  opacity: 0;
+  transition: opacity 900ms ease;
+}
+
+#galaxyCanvas.is-ready {
+  opacity: 1;
 }
 
 .bg-video {

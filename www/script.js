@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-14 13:02";
+const BUILD_TS = "2026-06-14 13:22";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -5422,6 +5422,9 @@ function initGalaxyCanvas() {
 
   const EPS = 0.01;
   const MIN_SPEED = 10;
+  // 2026-06-14: normal asteroid drift tops out well under this. Anything flung faster (e.g. by a
+  // missile blast knockback) eases back down to this ceiling instead of drifting fast forever.
+  const KNOCKBACK_DRIFT_MAX = 90;
   const plasmaCage = {
     active: false,
     startX: 0,
@@ -5693,6 +5696,10 @@ function initGalaxyCanvas() {
   let missileAimMode = false;
   let missileCrosshair = null; // { x, y, lockedAsteroid, placedAt } flashing target marker
   let activeMissile = null; // single in-flight missile entity (max 1)
+  // 2026-06-14: asteroids caught in a missile blast are split a few per frame (not all at once)
+  // to avoid the single-frame hitch — entries are { a, cx, cy, r }. Drained by stepMissileSplitQueue.
+  let missileSplitQueue = [];
+  const MISSILE_SPLITS_PER_FRAME = 2;
   let missileForceSpawnedThisLevel = false; // DEBUG: revert before release
   const MISSILE_LOCK_RADIUS = 120; // nearest-asteroid lock search around the tap
   // missile blast = 50% of the bomb's full blast radius (explodeMineEntity uses 700)
@@ -8795,6 +8802,7 @@ function initGalaxyCanvas() {
     missileAimMode = false;
     activeMissile = null;
     missileCrosshair = null;
+    missileSplitQueue.length = 0; // drop stale asteroid refs from a queued blast
     missileForceSpawnedThisLevel = false;
     hudMissileBtn?.classList.remove("hudMissileBtn--aiming");
     updateHudMissileInventory();
@@ -9938,6 +9946,7 @@ function initGalaxyCanvas() {
         updateHudQuadBadge();
         updateHudMissileInventory();
         stepMissile(now);
+        stepMissileSplitQueue();
       }
 
       if (!ufo && arcadeUfoSpawnAt && now >= arcadeUfoSpawnAt && now >= arcadePausedUntil) {
@@ -10049,6 +10058,17 @@ function initGalaxyCanvas() {
         // (fast, straight flight) makes it wrap cleanly; the short self-destruct timeout is what
         // now guarantees a toss can never linger.
         if (!a.tossed) clampSpeed(a);
+        // 2026-06-14: ease a knocked-back asteroid's super-normal speed back down to the drift
+        // ceiling — exponential decay of the excess (~3s to settle from a full missile shove).
+        if (!a.tossed) {
+          const sp = Math.hypot(a.vx, a.vy);
+          if (sp > KNOCKBACK_DRIFT_MAX) {
+            const newSp = KNOCKBACK_DRIFT_MAX + (sp - KNOCKBACK_DRIFT_MAX) * Math.exp(-dt / 700);
+            const k = newSp / sp;
+            a.vx *= k;
+            a.vy *= k;
+          }
+        }
         applyMotionHealth(a, now);
       }
       updateStroidTossHold(now);
@@ -11161,6 +11181,7 @@ function initGalaxyCanvas() {
     }
     missileCrosshair = { x, y, lockedAsteroid, placedAt: performance.now() };
     playGameSfx("missile_lockon", 0.9);
+    triggerGameplayHapticImpact(hapticImpactStyle.Medium); // 2026-06-14: target-lock confirm buzz
     fireMissile(x, y, lockedAsteroid);
   }
 
@@ -11251,6 +11272,22 @@ function initGalaxyCanvas() {
     }
   }
 
+  // 2026-06-14: drain the queued missile-blast splits a few per frame. Skip any asteroid that's
+  // gone (destroyed by another path) or drifted clear of the blast — guards against a pooled
+  // object being recycled into a far-away new asteroid before its turn comes up.
+  function stepMissileSplitQueue() {
+    if (missileSplitQueue.length === 0) return;
+    let budget = MISSILE_SPLITS_PER_FRAME;
+    while (budget > 0 && missileSplitQueue.length) {
+      budget -= 1;
+      const { a, cx, cy, r } = missileSplitQueue.shift();
+      const idx = sim.asteroids.indexOf(a);
+      if (idx < 0) continue;
+      if (Math.hypot(a.x - cx, a.y - cy) > r * 1.3) continue;
+      splitAsteroidByIndex(idx);
+    }
+  }
+
   // PART 6: knockback for an object outside the blast radius — force scales with proximity.
   function applyMissileKnockback(obj, dx, dy, dist, blastRadius) {
     const force = Math.max(0, 1 - dist / (blastRadius * 3)) * 800;
@@ -11276,14 +11313,15 @@ function initGalaxyCanvas() {
     cssFlash("#ff4400", 0.2, 200);
     window.galaxyBackground?.setHectic(true);
     setTimeout(() => window.galaxyBackground?.setHectic(false), 2000);
-    // asteroids — iterate backwards (splitAsteroidByIndex mutates the array; split children
-    // are appended past the cursor so they're not re-processed this blast).
+    // asteroids — knock back the ones outside the blast immediately (cheap); QUEUE the ones
+    // inside for staggered splitting (a few per frame in stepMissileSplitQueue) so we don't
+    // split a whole field in one frame — that synchronous burst was the explosion hitch.
     for (let i = sim.asteroids.length - 1; i >= 0; i -= 1) {
       const a = sim.asteroids[i];
       const dx = a.x - tx;
       const dy = a.y - ty;
       const dist = Math.hypot(dx, dy) || 0.0001;
-      if (dist <= blastRadius) splitAsteroidByIndex(i);
+      if (dist <= blastRadius) missileSplitQueue.push({ a, cx: tx, cy: ty, r: blastRadius });
       else applyMissileKnockback(a, dx, dy, dist, blastRadius);
     }
     // UFO — destroy (blast hit) if inside, else knock it back (UFO moves via vx/vy)

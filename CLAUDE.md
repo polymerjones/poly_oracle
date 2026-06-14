@@ -33,7 +33,9 @@ Every item below must be resolved before App Store submission:
 
 - [ ] `DEBUG_FORCE_LEVEL_SELECT` → set back to `false` (script.js, near line 470)
 - [ ] Powerup level gate → restore to `cfg.level >= 4` (currently `>= 1` for freeze testing)
-- [ ] Powerup weights → restore snowflake 10 / goldbars 15 → 30 (`POWERUP_WEIGHTS`)
+- [ ] Powerup weights → restore snowflake 10 / goldbars → 25 (`POWERUP_WEIGHTS`; goldbars dropped 5 for the missile's 15)
 - [ ] Remove forced goldbars spawn in the level's final 15s (`goldbarsForceSpawnedThisLevel`)
+- [ ] Missile level gate → restore `missileUnlocked` to `level >= 5` (currently `>= 1`)
+- [ ] Remove forced missile spawn at level start (`missileForceSpawnedThisLevel`)
 - [ ] Search script.js for `DEBUG: revert before release` and resolve **all** hits
 - [ ] Verify `hasBeatenGame()` has no overrides

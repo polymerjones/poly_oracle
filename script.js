@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-13 23:11";
+const BUILD_TS = "2026-06-14 12:44";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -363,6 +363,11 @@ const GAME_SFX = {
   bling: "gamesfx/bling.mp3", // powerup appears
   pickup_weapon: "gamesfx/pickup_weapon.mp3", // layered on quadshot pickup
   weaponclick_pickupbomb: "gamesfx/weaponclick_pickupbomb.mp3", // layered on bomb pickup
+  // 2026-06-14: homing missile powerup sound pack
+  missile_lockon: "gamesfx/missile_lockon.mp3", // crosshair placed / target acquired
+  missile_fired: "gamesfx/missile_fired.mp3", // launch
+  missile_prehit: "gamesfx/missile_prehit.mp3", // ~last 15% of flight
+  missile_explo: "gamesfx/missile_explo.mp3", // impact
   item_pickup2: "gamesfx/item_pickup2.mp3", // unassigned - crunchy item pickup
   freeze: "gamesfx/freeze.mp3",
   unfreeze: "gamesfx/unfreeze.mp3",
@@ -438,6 +443,10 @@ const FLAME_MIN_SPEED = 300;
 const MINE_TOSS_SPEED_FACTOR = 0.45; // bombs launch at 0.45x a stroid's speed
 const MINE_TOSS_DECEL = 240; // px/s^2 friction — decelerates a lobbed mine to rest in ~1-1.5s
 const MINE_TOSS_REST_SPEED = 40; // below this the toss settles back to normal drift
+// 2026-06-14: an ARMED bomb only detonates on contact while it's in a decently HARD toss above
+// this speed. A drifting armed bomb (never tossed, or a toss bled down below this) bounces off
+// asteroids instead of blowing up on any incidental touch.
+const MINE_TOSS_DETONATE_MIN_SPEED = 120;
 const CHAOS_THRESHOLD = 60;
 const LEVEL_THEMES = {
   1:  { primary: "#00FFD1", name: "Deep Space" },
@@ -846,6 +855,9 @@ const hudScore = document.getElementById("hudScore");
 const hudGameTimer = document.getElementById("hudGameTimer");
 const hudBombBtn = document.getElementById("hudBombBtn");
 const hudFreezeBtn = document.getElementById("hudFreezeBtn");
+const hudMissileBtn = document.getElementById("hudMissileBtn");
+const hudMissileCount = document.getElementById("hudMissileCount");
+const hudMissileReload = document.getElementById("hudMissileReload");
 const hudQuadBadge = document.getElementById("hudQuadBadge");
 
 function formatRunTime(ms) {
@@ -2696,6 +2708,12 @@ function addListeners() {
   if (hudFreezeBtn) {
     hudFreezeBtn.addEventListener("click", () => {
       galaxyCanvasController?.activateFreeze?.();
+    });
+  }
+  if (hudMissileBtn) {
+    hudMissileBtn.addEventListener("click", () => {
+      // 2026-06-14: arm missile aim mode; the next tap on the play area sets the target.
+      galaxyCanvasController?.toggleMissileAim?.();
     });
   }
   if (btnArcadeNew) {
@@ -5593,6 +5611,7 @@ function initGalaxyCanvas() {
     quadshot: "powerups/powerup_quadshot.png",
     timer: "powerups/powerup_timer.png",
     snowflake: "powerups/powerup_freeze.png",
+    missile: "powerups/powerup_missile.png",
   };
   const powerupSprites = {};
   Object.keys(powerupSpritePaths).forEach((key) => {
@@ -5640,11 +5659,13 @@ function initGalaxyCanvas() {
   let powerups = [];
   const POWERUP_MAX_ONSCREEN = 2;
   const POWERUP_WEIGHTS = [
-    { type: "goldbars", weight: 15 }, // DEBUG: revert before release (normally 30)
+    // 2026-06-14: goldbars dropped 5 to make room for the missile's 15.
+    { type: "goldbars", weight: 10 }, // DEBUG: revert before release (normally 25)
     { type: "timer", weight: 25 },
     { type: "quadshot", weight: 25 },
     { type: "snowflake", weight: 40 }, // DEBUG: revert before release (normally 10)
     { type: "bomb", weight: 10 },
+    { type: "missile", weight: 15 }, // 2026-06-14: homing missile powerup
   ];
   const POWERUP_COLORS = {
     bomb: "#00ffcc",
@@ -5652,6 +5673,7 @@ function initGalaxyCanvas() {
     goldbars: "#ffd700",
     quadshot: "#cc66ff",
     snowflake: "#88ddff",
+    missile: "#ffd700", // gold ring glow
   };
   let quadShotUntil = 0;
   let freezeUntil = 0;
@@ -5663,16 +5685,34 @@ function initGalaxyCanvas() {
   let _freezeWasActive = false; // edge-detects freeze expiry for the unfreeze sound
   let goldbarsForceSpawnedThisLevel = false; // DEBUG: revert before release
   let bombAimMode = false;
+  // 2026-06-14: homing missile powerup — inventory, targeting + single in-flight missile.
+  let playerMissileInventory = 0;
+  const MAX_MISSILE_INVENTORY = 3;
+  let missileReloadUntil = 0;
+  const MISSILE_RELOAD_MS = 1500;
+  let missileAimMode = false;
+  let missileCrosshair = null; // { x, y, lockedAsteroid, placedAt } flashing target marker
+  let activeMissile = null; // single in-flight missile entity (max 1)
+  let missileForceSpawnedThisLevel = false; // DEBUG: revert before release
+  const MISSILE_LOCK_RADIUS = 120; // nearest-asteroid lock search around the tap
+  // missile blast = 50% of the bomb's full blast radius (explodeMineEntity uses 700)
+  const MISSILE_BLAST_RADIUS = 350;
+  // DEBUG: revert before release — missile unlocks at level >= 5 (currently >= 1)
+  const missileUnlocked = (level) => level >= 1;
   let nextBombPowerupAt = performance.now()
     + BOMB_POWERUP_INTERVAL_MIN
     + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
 
-  function pickPowerupType() {
-    const total = POWERUP_WEIGHTS.reduce((s, w) => s + w.weight, 0);
+  function pickPowerupType(level = 99) {
+    // 2026-06-14: the missile only enters the pool once unlocked for this level.
+    const pool = POWERUP_WEIGHTS.filter(
+      (w) => w.type !== "missile" || missileUnlocked(level),
+    );
+    const total = pool.reduce((s, w) => s + w.weight, 0);
     let roll = Math.random() * total;
-    for (let i = 0; i < POWERUP_WEIGHTS.length; i += 1) {
-      roll -= POWERUP_WEIGHTS[i].weight;
-      if (roll <= 0) return POWERUP_WEIGHTS[i].type;
+    for (let i = 0; i < pool.length; i += 1) {
+      roll -= pool[i].weight;
+      if (roll <= 0) return pool[i].type;
     }
     return "bomb";
   }
@@ -5872,6 +5912,37 @@ function initGalaxyCanvas() {
     hudFreezeBtn.textContent = `❄ \xD7${playerFreezeInventory}`;
     hudFreezeBtn.disabled = !hasFreezes;
     hudFreezeBtn.classList.toggle("has-freezes", hasFreezes);
+  }
+
+  // 2026-06-14: homing missile inventory button — count, gray/active/pulse states, plus a
+  // thin reload progress bar (0→full over MISSILE_RELOAD_MS). Called on collect/fire and every
+  // arcade frame so the reload bar + ready-pulse stay live.
+  function updateHudMissileInventory() {
+    if (!hudMissileBtn) return;
+    const nowM = performance.now();
+    const count = playerMissileInventory;
+    const has = count > 0;
+    const reloading = nowM < missileReloadUntil;
+    hudMissileBtn.style.display = "";
+    const label = `\u{1F680} \xD7${count}`;
+    if (hudMissileCount && hudMissileCount.textContent !== label) {
+      hudMissileCount.textContent = label;
+    }
+    // can't fire with no stock, while reloading, or while a missile is already in flight
+    hudMissileBtn.disabled = !has || reloading || !!activeMissile;
+    hudMissileBtn.classList.toggle("has-missiles", has && !reloading);
+    hudMissileBtn.classList.toggle("reloading", reloading);
+    // pulse only when reload is complete, a missile is stocked, none in flight, not aiming
+    hudMissileBtn.classList.toggle(
+      "missile-ready",
+      has && !reloading && !activeMissile && !missileAimMode,
+    );
+    if (hudMissileReload) {
+      const prog = reloading
+        ? clamp(1 - (missileReloadUntil - nowM) / MISSILE_RELOAD_MS, 0, 1)
+        : (has ? 1 : 0);
+      hudMissileReload.style.width = `${(prog * 100).toFixed(1)}%`;
+    }
   }
 
   // 2026-06-10: quadshot HUD badge — violet Q with seconds remaining while the effect runs.
@@ -8518,14 +8589,20 @@ function initGalaxyCanvas() {
       mine.x += mine.vx * (dt / 1000);
       mine.y += mine.vy * (dt / 1000);
       wrapEntity(mine);
-      if (armed) {
-        // armed mines (tossed OR drifting) detonate on contact; chains via explodeMineEntity
+      // 2026-06-14: an armed bomb detonates on contact ONLY during a decently HARD toss. A
+      // drifting armed bomb (never tossed, or a toss that's bled down to a gentle drift) is a
+      // physical object that bounces off asteroids — same as an unarmed mine — instead of
+      // blowing up on any incidental touch.
+      const hardToss = mine._tossActive
+        && Math.hypot(mine.vx, mine.vy) >= MINE_TOSS_DETONATE_MIN_SPEED;
+      if (armed && hardToss) {
+        // chains via explodeMineEntity
         if (armedMineHitsSomething(mine)) {
           explodeFn({ halfRadius: mine.phase === "armed" });
           return true;
         }
       } else {
-        // spawned (unarmed): physical object — bounce off asteroids, keep drifting
+        // unarmed, or armed-but-drifting: physical object — bounce off asteroids, keep drifting
         if (!mine._tossActive) {
           clampSpeed(mine);
           applyMotionHealth(mine, now);
@@ -8705,11 +8782,22 @@ function initGalaxyCanvas() {
     freezeUntil = 0;
     _freezeWasActive = false; // no unfreeze sound on level transitions / menu exit
     goldbarsForceSpawnedThisLevel = false;
-    playerFreezeInventory = 0;
+    // 2026-06-14: freeze inventory PERSISTS across levels (matches bomb) — collected freezes
+    // carry forward; only a full game reset (startArcadeNew / startStuntMode) zeroes it.
     updateHudFreezeInventory();
     updateHudQuadBadge();
     bombAimMode = false;
     hudBombBtn?.classList.remove("hudBombBtn--aiming");
+    // 2026-06-14: clear in-flight homing-missile state on level transitions / menu exit, but the
+    // missile INVENTORY persists across levels (matches bomb) — only a full game reset
+    // (startArcadeNew / startStuntMode) zeroes it.
+    missileReloadUntil = 0;
+    missileAimMode = false;
+    activeMissile = null;
+    missileCrosshair = null;
+    missileForceSpawnedThisLevel = false;
+    hudMissileBtn?.classList.remove("hudMissileBtn--aiming");
+    updateHudMissileInventory();
     stopUfoDrone();
     ufo = null;
     arcadeUfoSpawnAt = 0;
@@ -9287,6 +9375,15 @@ function initGalaxyCanvas() {
     updateHudQuadBadge();
     bombAimMode = false;
     hudBombBtn?.classList.remove("hudBombBtn--aiming");
+    // 2026-06-14: reset homing-missile state on a fresh run
+    playerMissileInventory = 0;
+    missileReloadUntil = 0;
+    missileAimMode = false;
+    activeMissile = null;
+    missileCrosshair = null;
+    missileForceSpawnedThisLevel = false;
+    hudMissileBtn?.classList.remove("hudMissileBtn--aiming");
+    updateHudMissileInventory();
     nextBombPowerupAt = performance.now() + BOMB_POWERUP_INTERVAL_MIN
       + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
     renderLives();
@@ -9354,6 +9451,14 @@ function initGalaxyCanvas() {
     freezeUntil = 0;
     bombAimMode = false;
     hudBombBtn?.classList.remove("hudBombBtn--aiming");
+    // 2026-06-14: keep the missile button grayed/empty in Stunt Mode
+    playerMissileInventory = 0;
+    missileReloadUntil = 0;
+    missileAimMode = false;
+    activeMissile = null;
+    missileCrosshair = null;
+    hudMissileBtn?.classList.remove("hudMissileBtn--aiming");
+    updateHudMissileInventory();
     currentLevelIndex = 0;
     // no timer in Stunt Mode — levelDurationMs 0 keeps the timer perimeter hidden
     // (drawTimerPerimeterOverlay guards on levelDurationMs > 0).
@@ -9779,9 +9884,12 @@ function initGalaxyCanvas() {
         // Progressive introduction — no powerups before level 4. Spawn zone keeps clear of
         // the top HUD (140px) and the commander portrait/comm box (160px).
         // DEBUG: revert before release — gate is normally cfg.level >= 4
-        if (powerups.length < POWERUP_MAX_ONSCREEN && cfg.level >= 1 && now >= nextBombPowerupAt) {
+        // 2026-06-14 (PART 9): while the player holds a missile or one is in flight, suppress
+        // NEW powerup spawns (existing ones on screen stay collectible).
+        const missileBusy = playerMissileInventory > 0 || activeMissile;
+        if (!missileBusy && powerups.length < POWERUP_MAX_ONSCREEN && cfg.level >= 1 && now >= nextBombPowerupAt) {
           powerups.push({
-            type: pickPowerupType(),
+            type: pickPowerupType(cfg.level),
             x: 80 + Math.random() * Math.max(1, sim.width - 160),
             y: 140 + Math.random() * Math.max(1, sim.height - 300),
             r: 22,
@@ -9791,6 +9899,22 @@ function initGalaxyCanvas() {
           playGameSfx("bling", 0.8);
           nextBombPowerupAt = now + BOMB_POWERUP_INTERVAL_MIN
             + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
+        }
+
+        // DEBUG: revert before release — force one missile powerup at the start of each level
+        // so the homing missile is easy to test (mirrors the goldbars force-spawn below).
+        if (!missileForceSpawnedThisLevel && missileUnlocked(cfg.level) && !missileBusy
+            && !powerups.some((p) => p.type === "missile")) {
+          missileForceSpawnedThisLevel = true;
+          powerups.push({
+            type: "missile",
+            x: 80 + Math.random() * Math.max(1, sim.width - 160),
+            y: 140 + Math.random() * Math.max(1, sim.height - 300),
+            r: 22,
+            spawnedAt: now,
+            opacity: 1.0,
+          });
+          playGameSfx("bling", 0.8);
         }
         // expire after lifetime (powerup expiry keeps running even during a snowflake freeze)
         for (let pi = powerups.length - 1; pi >= 0; pi -= 1) {
@@ -9812,6 +9936,8 @@ function initGalaxyCanvas() {
           playGameSfx("blip", 0.8);
         }
         updateHudQuadBadge();
+        updateHudMissileInventory();
+        stepMissile(now);
       }
 
       if (!ufo && arcadeUfoSpawnAt && now >= arcadeUfoSpawnAt && now >= arcadePausedUntil) {
@@ -10255,6 +10381,17 @@ function initGalaxyCanvas() {
       tctx.scale(pulse, pulse);
       const sprite = powerupSprites[pu.type];
       if (pu.type !== "bomb" && sprite && sprite.complete && sprite.naturalWidth > 0) {
+        // 2026-06-14: the missile gets an explicit gold glow ring (#ffd700) behind its sprite.
+        if (pu.type === "missile") {
+          tctx.beginPath();
+          tctx.arc(0, 0, POWERUP_SPRITE_SIZE / 2 - 2, 0, Math.PI * 2);
+          tctx.strokeStyle = blinkRed ? "#ff3333" : "#ffd700";
+          tctx.lineWidth = 2.5;
+          tctx.shadowColor = blinkRed ? "#ff3333" : "#ffd700";
+          tctx.shadowBlur = 14;
+          tctx.stroke();
+          tctx.shadowBlur = 0;
+        }
         tctx.drawImage(
           sprite,
           -POWERUP_SPRITE_SIZE / 2,
@@ -10413,6 +10550,7 @@ function initGalaxyCanvas() {
       drawPlacedBombsOverlay(ufoFxCtx || ctx);
       drawFreezeOverlay(ufoFxCtx || ctx);
       drawAndStepTapBlasts(ufoFxCtx || ctx);
+      drawMissileFx(ufoFxCtx || ctx, now);
       return;
     }
     setPlasmaOverlayVisible(true);
@@ -10734,6 +10872,7 @@ function initGalaxyCanvas() {
     drawPlacedBombsOverlay(ufoFxCtx || ctx);
     drawFreezeOverlay(ufoFxCtx || ctx);
     drawAndStepTapBlasts(ufoFxCtx || ctx);
+    drawMissileFx(ufoFxCtx || ctx, now);
 
     const particleLimit = _frameBudgetExceeded ? Math.min(40, sim.particles.length) : sim.particles.length;
     for (let i = 0; i < particleLimit; i += 1) {
@@ -10824,6 +10963,8 @@ function initGalaxyCanvas() {
       return;
     }
     // 2026-06-10: tap to collect a powerup — consumes the tap (bomb aim mode above wins).
+    // 2026-06-14 (PART 9.3): this runs BEFORE the missile-aim check so collecting a powerup
+    // always wins over placing a missile target at the same point.
     for (let pi = 0; pi < powerups.length; pi += 1) {
       const pu = powerups[pi];
       if (Math.hypot(x - pu.x, y - pu.y) <= pu.r * 1.8) {
@@ -10831,6 +10972,19 @@ function initGalaxyCanvas() {
         collectPowerup(pu);
         return;
       }
+    }
+    // 2026-06-14 (PART 4): missile targeting — the next tap places the crosshair + fires.
+    // Consumes the tap (no laser/X-blast). Bomb aim (top) already returned earlier.
+    if (missileAimMode) {
+      missileAimMode = false;
+      hudMissileBtn?.classList.remove("hudMissileBtn--aiming");
+      // ignore if a missile slipped into flight / reload between arming and this tap
+      if (playerMissileInventory > 0 && performance.now() > missileReloadUntil && !activeMissile) {
+        placeMissileTarget(x, y);
+      }
+      updateHudMissileInventory();
+      draw(now);
+      return;
     }
     playPlayerFireSound();
     // 2026-06-10: while quadshot is active a single tap can destroy several things at once —
@@ -10945,6 +11099,19 @@ function initGalaxyCanvas() {
       quadShotUntil = performance.now() + 12000;
       playGameSfx("pickup_weapon", 0.9); // layered quadshot-pickup sound
       cssFlash("#cc66ff", 0.22, 250);
+      // 2026-06-14: quad shot supersedes the missile weapon — clear missile inventory + aim.
+      playerMissileInventory = 0;
+      missileAimMode = false;
+      updateHudMissileInventory();
+      return;
+    }
+    if (pu.type === "missile") {
+      if (playerMissileInventory < MAX_MISSILE_INVENTORY) {
+        playerMissileInventory += 1;
+        updateHudMissileInventory();
+        playGameSfx("pickup_weapon", 0.9);
+        cssFlash("#ff4444", 0.2, 250);
+      }
       return;
     }
     if (pu.type === "snowflake") {
@@ -10969,6 +11136,222 @@ function initGalaxyCanvas() {
     freezeUntil = nowF + FREEZE_DURATION_MS;
     playGameSfx("freeze", 0.9);
     stuntNotify("freeze");
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 2026-06-14: HOMING MISSILE — targeting → flight → explosion.
+  // The HUD button arms missileAimMode; the next play-area tap places a crosshair,
+  // locks the nearest asteroid within MISSILE_LOCK_RADIUS, and launches a single
+  // missile from the bottom-left that homes the locked rock (or flies to the tap
+  // point) over ~1s, then detonates with a half-bomb-radius blast + knockback.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // PART 4: place the target + immediately fire. Called from the tap handler.
+  function placeMissileTarget(x, y) {
+    // nearest live asteroid within the lock radius (null = free-fire at the tap point)
+    let lockedAsteroid = null;
+    let bestDist = MISSILE_LOCK_RADIUS;
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const a = sim.asteroids[i];
+      const d = Math.hypot(a.x - x, a.y - y);
+      if (d <= bestDist) {
+        bestDist = d;
+        lockedAsteroid = a;
+      }
+    }
+    missileCrosshair = { x, y, lockedAsteroid, placedAt: performance.now() };
+    playGameSfx("missile_lockon", 0.9);
+    fireMissile(x, y, lockedAsteroid);
+  }
+
+  // PART 5: launch the missile entity from the bottom-left.
+  function fireMissile(targetX, targetY, lockedAsteroid) {
+    if (activeMissile) return; // max 1 missile in flight
+    if (playerMissileInventory <= 0) return;
+    const nowM = performance.now();
+    playGameSfx("missile_fired", 0.95);
+    playerMissileInventory -= 1;
+    missileReloadUntil = nowM + MISSILE_RELOAD_MS;
+    updateHudMissileInventory();
+    const launchX = 80;
+    const launchY = sim.height - 80;
+    activeMissile = {
+      x: launchX,
+      y: launchY,
+      launchX,
+      launchY,
+      targetX,
+      targetY,
+      lockedAsteroid: lockedAsteroid || null,
+      launchedAt: nowM,
+      flightMs: 1000, // 1.0s dramatic flight
+      exploded: false,
+      prehitPlayed: false,
+      angle: 0,
+    };
+    // PART 6 tail: when the reload completes (and a missile is still stocked) chirp + pulse.
+    // The ready-pulse class is driven by updateHudMissileInventory once missileReloadUntil passes.
+    setTimeout(() => {
+      if (engineMode === "arcade" && playerMissileInventory > 0) {
+        playGameSfx("pickup_weapon", 0.7);
+      }
+    }, MISSILE_RELOAD_MS);
+  }
+
+  // PART 5: advance the in-flight missile each frame (homing + prehit + detonation trigger).
+  function stepMissile(now) {
+    const m = activeMissile;
+    if (!m || m.exploded) return;
+    // home the locked asteroid while it's still alive; otherwise fly to last-known point
+    if (m.lockedAsteroid && sim.asteroids.includes(m.lockedAsteroid)) {
+      m.targetX = m.lockedAsteroid.x;
+      m.targetY = m.lockedAsteroid.y;
+    } else {
+      m.lockedAsteroid = null;
+    }
+    const t = clamp((now - m.launchedAt) / m.flightMs, 0, 1);
+    m.x = lerp(m.launchX, m.targetX, t);
+    m.y = lerp(m.launchY, m.targetY, t);
+    if (t > 0.85 && !m.prehitPlayed) {
+      m.prehitPlayed = true;
+      playGameSfx("missile_prehit", 0.9);
+    }
+    if (t >= 1) {
+      m.exploded = true;
+      const tx = m.targetX;
+      const ty = m.targetY;
+      activeMissile = null;
+      missileCrosshair = null; // remove crosshair + lock ring on impact
+      explodeMissile(tx, ty);
+      updateHudMissileInventory();
+    }
+  }
+
+  // PART 6: knockback for an object outside the blast radius — force scales with proximity.
+  function applyMissileKnockback(obj, dx, dy, dist, blastRadius) {
+    const force = Math.max(0, 1 - dist / (blastRadius * 3)) * 800;
+    if (force <= 0) return;
+    obj.vx = (obj.vx || 0) + (dx / dist) * force;
+    obj.vy = (obj.vy || 0) + (dy / dist) * force;
+    const sp = Math.hypot(obj.vx, obj.vy);
+    if (sp > 700) {
+      obj.vx *= 700 / sp;
+      obj.vy *= 700 / sp;
+    }
+  }
+
+  // PART 6: missile impact — destroy everything inside MISSILE_BLAST_RADIUS, fling the rest.
+  function explodeMissile(tx, ty) {
+    const blastRadius = MISSILE_BLAST_RADIUS;
+    playGameSfx("missile_explo", 1.0);
+    spawnExplosion(tx, ty, 60, true, 1.3); // large, fire
+    window.pixiRenderer?.triggerBombDetonation?.(tx, ty, blastRadius);
+    addWarpRing(tx, ty, "rgba(255,90,90,1)");
+    triggerHugeHaptic();
+    cssShake(1.2);
+    cssFlash("#ff4400", 0.2, 200);
+    window.galaxyBackground?.setHectic(true);
+    setTimeout(() => window.galaxyBackground?.setHectic(false), 2000);
+    // asteroids — iterate backwards (splitAsteroidByIndex mutates the array; split children
+    // are appended past the cursor so they're not re-processed this blast).
+    for (let i = sim.asteroids.length - 1; i >= 0; i -= 1) {
+      const a = sim.asteroids[i];
+      const dx = a.x - tx;
+      const dy = a.y - ty;
+      const dist = Math.hypot(dx, dy) || 0.0001;
+      if (dist <= blastRadius) splitAsteroidByIndex(i);
+      else applyMissileKnockback(a, dx, dy, dist, blastRadius);
+    }
+    // UFO — destroy (blast hit) if inside, else knock it back (UFO moves via vx/vy)
+    if (ufo) {
+      const dx = ufo.x - tx;
+      const dy = ufo.y - ty;
+      const dist = Math.hypot(dx, dy) || 0.0001;
+      if (dist <= blastRadius) hitUfo();
+      else applyMissileKnockback(ufo, dx, dy, dist, blastRadius);
+    }
+    // level landmine — detonate if caught in the blast (static, so no knockback)
+    if (landmine) {
+      const dist = Math.hypot(landmine.x - tx, landmine.y - ty);
+      if (dist <= blastRadius) explodeLandmine({ halfRadius: true });
+    }
+    // placed bombs — iterate backwards (explodePlacedBomb splices)
+    for (let i = placedBombs.length - 1; i >= 0; i -= 1) {
+      const b = placedBombs[i];
+      const dist = Math.hypot(b.x - tx, b.y - ty);
+      if (dist <= blastRadius) explodePlacedBomb(b, { halfRadius: true });
+    }
+  }
+
+  // PART 4/5 draw: crosshair + lock ring + the pixel rocket. On the ufoFx overlay each frame.
+  function drawMissileFx(tctx, now) {
+    if (!tctx) return;
+    if (missileCrosshair) {
+      const ch = missileCrosshair;
+      const flashRed = Math.floor(now / 125) % 2 === 0; // ~4Hz red/white alternation
+      const col = flashRed ? "#ff3333" : "#ffffff";
+      const R = 24;
+      const arm = R + 8;
+      tctx.save();
+      tctx.strokeStyle = col;
+      tctx.lineWidth = 2;
+      tctx.shadowColor = col;
+      tctx.shadowBlur = 8;
+      tctx.beginPath();
+      tctx.arc(ch.x, ch.y, R, 0, Math.PI * 2);
+      tctx.stroke();
+      tctx.beginPath();
+      tctx.moveTo(ch.x - arm, ch.y); tctx.lineTo(ch.x - 6, ch.y);
+      tctx.moveTo(ch.x + 6, ch.y); tctx.lineTo(ch.x + arm, ch.y);
+      tctx.moveTo(ch.x, ch.y - arm); tctx.lineTo(ch.x, ch.y - 6);
+      tctx.moveTo(ch.x, ch.y + 6); tctx.lineTo(ch.x, ch.y + arm);
+      tctx.stroke();
+      tctx.restore();
+      // pulsing red highlight ring around the locked asteroid (while it's still alive)
+      const la = ch.lockedAsteroid;
+      if (la && sim.asteroids.includes(la)) {
+        const pulse = 1 + 0.15 * Math.sin(now / 90);
+        tctx.save();
+        tctx.strokeStyle = "#ff3333";
+        tctx.lineWidth = 2.5;
+        tctx.shadowColor = "#ff3333";
+        tctx.shadowBlur = 12;
+        tctx.beginPath();
+        tctx.arc(la.x, la.y, (la.r + 10) * pulse, 0, Math.PI * 2);
+        tctx.stroke();
+        tctx.restore();
+      }
+    }
+    const m = activeMissile;
+    if (m && !m.exploded) {
+      let ang = Math.atan2(m.targetY - m.y, m.targetX - m.x);
+      if (Math.hypot(m.targetX - m.x, m.targetY - m.y) < 4) ang = m.angle;
+      m.angle = ang;
+      tctx.save();
+      tctx.translate(m.x, m.y);
+      tctx.rotate(ang);
+      // flame trail — orange/yellow puffs behind the body (−x), fading
+      for (let i = 0; i < 4; i += 1) {
+        const fx = -10 - i * 6;
+        const a = Math.max(0, 0.7 - i * 0.16);
+        tctx.fillStyle = `rgba(255,${180 - i * 30},40,${a.toFixed(2)})`;
+        tctx.beginPath();
+        tctx.arc(fx + (Math.random() * 2 - 1), Math.random() * 2 - 1, Math.max(1, 4 - i * 0.7), 0, Math.PI * 2);
+        tctx.fill();
+      }
+      // body — silver rectangle ~14×8
+      tctx.fillStyle = "#cfd4da";
+      tctx.fillRect(-7, -4, 14, 8);
+      // tip — red triangle at the front (+x)
+      tctx.fillStyle = "#ff3a2a";
+      tctx.beginPath();
+      tctx.moveTo(7, -4);
+      tctx.lineTo(15, 0);
+      tctx.lineTo(7, 4);
+      tctx.closePath();
+      tctx.fill();
+      tctx.restore();
+    }
   }
 
   // 2026-06-10: frozen-asteroid destruction — glass-break layer over the normal boom plus
@@ -11408,6 +11791,12 @@ function initGalaxyCanvas() {
       }
       bombAimMode = !bombAimMode;
       hudBombBtn?.classList.toggle("hudBombBtn--aiming", bombAimMode);
+      // 2026-06-14: bomb aim takes priority — cancel any active missile aim.
+      if (bombAimMode && missileAimMode) {
+        missileAimMode = false;
+        hudMissileBtn?.classList.remove("hudMissileBtn--aiming");
+        updateHudMissileInventory();
+      }
       updateHudBombInventory(); // suppress/restore the attention pulse based on aim state
       if (bombAimMode) playGameSfx("blip", 0.6);
     },
@@ -11415,6 +11804,32 @@ function initGalaxyCanvas() {
     activateFreeze() {
       if (!arcadeActive || engineMode !== "arcade") return;
       activateFreezeFromInventory();
+    },
+    // 2026-06-14: HUD missile button — toggle aim mode; the next canvas tap sets the target.
+    toggleMissileAim() {
+      if (!arcadeActive || engineMode !== "arcade") return;
+      if (missileAimMode) {
+        missileAimMode = false;
+        hudMissileBtn?.classList.remove("hudMissileBtn--aiming");
+        updateHudMissileInventory();
+        return;
+      }
+      // can't aim with no stock, mid-reload, or a missile already in flight
+      if (playerMissileInventory <= 0 || performance.now() <= missileReloadUntil || activeMissile) {
+        missileAimMode = false;
+        hudMissileBtn?.classList.remove("hudMissileBtn--aiming");
+        return;
+      }
+      // bomb aim takes priority — entering missile aim cancels bomb aim
+      if (bombAimMode) {
+        bombAimMode = false;
+        hudBombBtn?.classList.remove("hudBombBtn--aiming");
+        updateHudBombInventory();
+      }
+      missileAimMode = true;
+      hudMissileBtn?.classList.add("hudMissileBtn--aiming");
+      updateHudMissileInventory();
+      playGameSfx("blip", 0.6);
     },
     isArcade() {
       return engineMode === "arcade";

@@ -2040,6 +2040,57 @@ select:focus-visible {
   box-shadow: 0 0 10px rgba(136, 221, 255, 0.55);
 }
 
+/* 2026-06-14: homing missile inventory button — gold twin of the bomb/freeze buttons,
+   with a thin reload progress bar along the bottom edge. */
+.hudMissileBtn {
+  position: relative;
+  overflow: hidden;
+  margin-left: 8px;
+  min-height: 40px;
+  min-width: 60px;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  border: 1.5px solid rgba(255, 215, 0, 0.7);
+  background: rgba(40, 32, 4, 0.85);
+  opacity: 0.35; /* grayed-out empty slot by default */
+  transition: opacity 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+.hudMissileBtn.has-missiles {
+  opacity: 1;
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.55);
+}
+.hudMissileBtn.reloading {
+  opacity: 0.5; /* grayed while the 1.5s reload runs */
+}
+/* pulse when reload is done AND a missile is stocked (ready to fire) */
+.hudMissileBtn.missile-ready {
+  animation: missileReady 1s ease-in-out infinite;
+}
+/* active targeting glow (next tap places the crosshair) */
+.hudMissileBtn--aiming {
+  opacity: 1;
+  border-color: #fff;
+  box-shadow: 0 0 16px rgba(255, 215, 0, 0.95), 0 0 28px rgba(255, 180, 0, 0.6);
+}
+.hudMissileReload {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 0%;
+  background: #ffd700;
+  box-shadow: 0 0 6px rgba(255, 215, 0, 0.9);
+  pointer-events: none;
+}
+@keyframes missileReady {
+  0%, 100% { box-shadow: 0 0 6px rgba(255, 215, 0, 0.5); }
+  50% { box-shadow: 0 0 16px rgba(255, 215, 0, 0.95), 0 0 28px rgba(255, 180, 0, 0.6); }
+}
+
 /* 2026-06-10: quadshot powerup badge — violet Q with seconds remaining while active */
 .hudQuadBadge {
   display: none;

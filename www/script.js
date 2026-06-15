@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-15 16:27";
+const BUILD_TS = "2026-06-15 16:37";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1055,7 +1055,6 @@ const commBoxController = (() => {
   let idleIndex = 0;
   let easterEggCooldown = 0;
 
-  const GLITCH = "▓░█▒╬╫╪";
   const VO3_FILES = new Set([
     "blast_em_ha_ha.mp3",
     "EHEHAHH.mp3",
@@ -1468,17 +1467,15 @@ const commBoxController = (() => {
     function step() {
       if (token !== typingToken) return;
       if (i <= text.length) {
+        // 2026-06-15: clean typewriter — type the text on in order with just a glowing leading
+        // character. (Was prepending the newest char + trailing GLITCH blocks, which read as
+        // "dancing" junk characters at the start of every line.)
         const typed = text.slice(0, i);
-        const glitch = i < text.length
-          ? Array.from({ length: Math.min(3, text.length - i) },
-            () => GLITCH[Math.floor(Math.random() * GLITCH.length)]).join("")
-          : "";
         const lead = typed.slice(-1) || "";
         const rest = typed.slice(0, -1);
         tickerText.innerHTML =
-          `<span style="color:#00ffee;text-shadow:0 0 6px #00ffee">${lead}</span>` +
           `<span style="color:#00d4d4">${rest}</span>` +
-          `<span style="color:#003333;opacity:0.7">${glitch}</span>`;
+          `<span style="color:#00ffee;text-shadow:0 0 6px #00ffee">${lead}</span>`;
         i++;
         setTimeout(step, 22 + Math.random() * 18);
       } else {
@@ -10136,7 +10133,7 @@ function initGalaxyCanvas() {
     const s = document.createElement("style");
     s.id = "tutorialChromeCss";
     s.textContent =
-      "#tutorialSkipHint{position:fixed;left:50%;top:74px;transform:translateX(-50%);z-index:9998;"
+      "#tutorialSkipHint{position:fixed;left:50%;bottom:150px;transform:translateX(-50%);z-index:9998;"
       + "font-family:monospace;font-size:11px;font-weight:300;letter-spacing:3px;color:#00ffcc;"
       + "pointer-events:none;display:none;text-shadow:0 0 6px rgba(0,255,204,.6);"
       + "animation:tutSkipStrobe 1.5s ease-in-out infinite;}"

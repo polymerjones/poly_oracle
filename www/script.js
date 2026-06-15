@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-15 16:37";
+const BUILD_TS = "2026-06-15 16:54";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -9998,7 +9998,9 @@ function initGalaxyCanvas() {
     tutorialTimerStartedAt = performance.now();
     _timerRemainingMs = levelDurationMs;
     commBoxController.setCommCenter(true);
-    showCommArrows();
+    // 2026-06-15: no comm-pointing arrows at the very start — they cluttered the intro and aren't
+    // needed (SPC is just talking about the perimeter timer). hideCommArrows() stays wired in the
+    // timer phase + cleanup as harmless no-ops.
     showSkipHint();
     runTutorial();
   }
@@ -10517,6 +10519,11 @@ function initGalaxyCanvas() {
         playGameSfx("freeze", 0.9);
         spcVO("63", "Good shooting — but try grabbing and tossing a frozen stroid.");
       }
+      // 2026-06-15: the "toss" event fires the instant the stroid is flicked — playing the success
+      // line right then talks over the throw. Wait for the tossed stroid to actually resolve
+      // (collide + detonate, or self-destruct) so the cadet SEES the destruction first.
+      await waitFor(() => !sim.asteroids.some((a) => a.tossed));
+      await waitMs(300); // let the blast read before SPC chimes in
       spcVO("64", "Very cool, Cadet.");
       await clearTutorialField();
       await waitMs(350);
@@ -10590,6 +10597,11 @@ function initGalaxyCanvas() {
       _timerRemainingMs = Math.max(0, levelDurationMs - (now - tutorialTimerStartedAt));
     }
     if (tutorialPaused) return; // frozen: no waiter resolution, no phase progress
+    // "DOUBLE-TAP TO SKIP" only makes sense while SPC is delivering dialogue (there's chatter to
+    // skip). The moment SPC goes quiet and we're just waiting for the player to complete an action,
+    // hide it. Driven each frame off the SPC queue/playing state.
+    if (_spcPlaying || _spcQueue.length > 0) showSkipHint();
+    else hideSkipHint();
     if (_tutWaiters.length) {
       let resolvedAction = false;
       for (let i = _tutWaiters.length - 1; i >= 0; i -= 1) {
@@ -12584,7 +12596,11 @@ function initGalaxyCanvas() {
       return;
     }
     let mode = "tap";
-    if (engineMode === "arcade" && arcadeActive) {
+    // 2026-06-15: while aiming a missile or bomb, a play-area press must place the target — it
+    // must NOT grab a stroid/mine for tossing. Tapping on/near a stroid to target it was being
+    // hijacked into a toss-grab, so the missile/bomb never fired (the tutorial "missile didn't
+    // fire" bug). Suppress the grab entirely in either aim mode so the tap reaches handleArcadeTap.
+    if (engineMode === "arcade" && arcadeActive && !missileAimMode && !bombAimMode) {
       // 2026-06-11: mines take grab priority over stroids at an overlapping point (rarer,
       // more deliberate). A plain tap that never becomes a hold/flick falls back to the tap
       // path below (arm/detonate for mines, split for stroids) via launchStroidToss → cancel.

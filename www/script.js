@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-14 13:22";
+const BUILD_TS = "2026-06-14 17:11";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -5694,14 +5694,14 @@ function initGalaxyCanvas() {
   let missileReloadUntil = 0;
   const MISSILE_RELOAD_MS = 1500;
   let missileAimMode = false;
-  let missileCrosshair = null; // { x, y, lockedAsteroid, placedAt } flashing target marker
+  let missileCrosshair = null; // { x, y, placedAt } flashing blast-zone target marker
   let activeMissile = null; // single in-flight missile entity (max 1)
   // 2026-06-14: asteroids caught in a missile blast are split a few per frame (not all at once)
   // to avoid the single-frame hitch — entries are { a, cx, cy, r }. Drained by stepMissileSplitQueue.
   let missileSplitQueue = [];
   const MISSILE_SPLITS_PER_FRAME = 2;
+  let missileImpactFlash = null; // { x, y, start } localized impact flash, drawn in drawMissileFx
   let missileForceSpawnedThisLevel = false; // DEBUG: revert before release
-  const MISSILE_LOCK_RADIUS = 120; // nearest-asteroid lock search around the tap
   // missile blast = 50% of the bomb's full blast radius (explodeMineEntity uses 700)
   const MISSILE_BLAST_RADIUS = 350;
   // DEBUG: revert before release — missile unlocks at level >= 5 (currently >= 1)
@@ -6148,6 +6148,8 @@ function initGalaxyCanvas() {
     const showLevels = mode === "levels";
     if (btnArcade) btnArcade.style.display = showRoot ? "" : "none";
     if (btnPractice) btnPractice.style.display = showRoot ? "" : "none";
+    // 2026-06-14: Stunt Mode is a top-level mode now (Select Mode menu), not under Arcade
+    if (btnArcadeStunt) btnArcadeStunt.style.display = showRoot ? "" : "none";
     if (debugLevelPanel) debugLevelPanel.style.display = "none";
     if (arcadeMenuPanel) {
       arcadeMenuPanel.hidden = !showArcade;
@@ -8803,6 +8805,7 @@ function initGalaxyCanvas() {
     activeMissile = null;
     missileCrosshair = null;
     missileSplitQueue.length = 0; // drop stale asteroid refs from a queued blast
+    missileImpactFlash = null;
     missileForceSpawnedThisLevel = false;
     hudMissileBtn?.classList.remove("hudMissileBtn--aiming");
     updateHudMissileInventory();
@@ -11035,6 +11038,9 @@ function initGalaxyCanvas() {
           ex = clamp(x + Math.cos(ang) * dist, 0, sim.width);
           ey = clamp(y + Math.sin(ang) * dist, 0, sim.height);
         }
+        // 2026-06-14: each cluster shot fires its own report so quadshot sounds like a burst
+        // (was silent past the first tap). Budget-exempt above so they layer instead of dropping.
+        playGameSfx("advfire", 0.6, { important: true });
         if (resolveShotAt(ex, ey, now, isTouch)) extraHit = true;
       }
     }
@@ -11159,34 +11165,26 @@ function initGalaxyCanvas() {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // 2026-06-14: HOMING MISSILE — targeting → flight → explosion.
-  // The HUD button arms missileAimMode; the next play-area tap places a crosshair,
-  // locks the nearest asteroid within MISSILE_LOCK_RADIUS, and launches a single
-  // missile from the bottom-left that homes the locked rock (or flies to the tap
-  // point) over ~1s, then detonates with a half-bomb-radius blast + knockback.
+  // 2026-06-14: MISSILE — targeting → flight → explosion (dumb-fire, not homing).
+  // The HUD button arms missileAimMode; the next play-area tap places the target +
+  // blast-zone marker and launches a single missile from the bottom-left that flies
+  // straight to the tapped point over ~1s, then detonates with a half-bomb-radius
+  // blast that fully vaporizes everything inside it (and flings the rest).
   // ──────────────────────────────────────────────────────────────────────────
 
   // PART 4: place the target + immediately fire. Called from the tap handler.
   function placeMissileTarget(x, y) {
-    // nearest live asteroid within the lock radius (null = free-fire at the tap point)
-    let lockedAsteroid = null;
-    let bestDist = MISSILE_LOCK_RADIUS;
-    for (let i = 0; i < sim.asteroids.length; i += 1) {
-      const a = sim.asteroids[i];
-      const d = Math.hypot(a.x - x, a.y - y);
-      if (d <= bestDist) {
-        bestDist = d;
-        lockedAsteroid = a;
-      }
-    }
-    missileCrosshair = { x, y, lockedAsteroid, placedAt: performance.now() };
+    // 2026-06-14: dumb-fire — the missile always flies to the player's tapped target (no homing).
+    // The crosshair doubles as the blast-zone marker (radius MISSILE_BLAST_RADIUS), drawn in
+    // drawMissileFx while the missile is in flight.
+    missileCrosshair = { x, y, placedAt: performance.now() };
     playGameSfx("missile_lockon", 0.9);
-    triggerGameplayHapticImpact(hapticImpactStyle.Medium); // 2026-06-14: target-lock confirm buzz
-    fireMissile(x, y, lockedAsteroid);
+    triggerGameplayHapticImpact(hapticImpactStyle.Medium); // target-lock confirm buzz
+    fireMissile(x, y);
   }
 
   // PART 5: launch the missile entity from the bottom-left.
-  function fireMissile(targetX, targetY, lockedAsteroid) {
+  function fireMissile(targetX, targetY) {
     if (activeMissile) return; // max 1 missile in flight
     if (playerMissileInventory <= 0) return;
     const nowM = performance.now();
@@ -11203,7 +11201,6 @@ function initGalaxyCanvas() {
       launchY,
       targetX,
       targetY,
-      lockedAsteroid: lockedAsteroid || null,
       launchedAt: nowM,
       flightMs: 1000, // 1.0s dramatic flight
       exploded: false,
@@ -11219,17 +11216,10 @@ function initGalaxyCanvas() {
     }, MISSILE_RELOAD_MS);
   }
 
-  // PART 5: advance the in-flight missile each frame (homing + prehit + detonation trigger).
+  // PART 5: advance the in-flight missile each frame (straight flight to target + prehit + detonate).
   function stepMissile(now) {
     const m = activeMissile;
     if (!m || m.exploded) return;
-    // home the locked asteroid while it's still alive; otherwise fly to last-known point
-    if (m.lockedAsteroid && sim.asteroids.includes(m.lockedAsteroid)) {
-      m.targetX = m.lockedAsteroid.x;
-      m.targetY = m.lockedAsteroid.y;
-    } else {
-      m.lockedAsteroid = null;
-    }
     const t = clamp((now - m.launchedAt) / m.flightMs, 0, 1);
     m.x = lerp(m.launchX, m.targetX, t);
     m.y = lerp(m.launchY, m.targetY, t);
@@ -11284,7 +11274,9 @@ function initGalaxyCanvas() {
       const idx = sim.asteroids.indexOf(a);
       if (idx < 0) continue;
       if (Math.hypot(a.x - cx, a.y - cy) > r * 1.3) continue;
-      splitAsteroidByIndex(idx);
+      // 2026-06-14: missile fully VAPORIZES asteroids (big rocks don't split into children) with
+      // fiery debris + particles. Per-asteroid booms suppressed — the one missile_explo carries it.
+      vaporizeAsteroidByIndex(idx, true);
     }
   }
 
@@ -11304,13 +11296,18 @@ function initGalaxyCanvas() {
   // PART 6: missile impact — destroy everything inside MISSILE_BLAST_RADIUS, fling the rest.
   function explodeMissile(tx, ty) {
     const blastRadius = MISSILE_BLAST_RADIUS;
-    playGameSfx("missile_explo", 1.0);
-    spawnExplosion(tx, ty, 60, true, 1.3); // large, fire
+    // important: don't let the per-frame iOS sound budget drop the main blast report
+    playGameSfx("missile_explo", 1.0, { important: true });
+    // 2026-06-14: keep this base burst modest — the iOS particle budget (MAX_EXPLOSION_PARTICLES)
+    // is small, so a huge burst here would starve the per-asteroid vaporize FX (they'd "just
+    // disappear"). The staggered vaporize refills the budget across frames for fiery debris.
+    spawnExplosion(tx, ty, 22, true, 1.3); // fiery impact core
     window.pixiRenderer?.triggerBombDetonation?.(tx, ty, blastRadius);
     addWarpRing(tx, ty, "rgba(255,90,90,1)");
-    triggerHugeHaptic();
-    cssShake(1.2);
-    cssFlash("#ff4400", 0.2, 200);
+    missileImpactFlash = { x: tx, y: ty, start: performance.now() }; // localized impact flash
+    triggerHugeHaptic(); // big rumble on detonation
+    cssShake(1.4);
+    cssFlash("#ff5500", 0.24, 220);
     window.galaxyBackground?.setHectic(true);
     setTimeout(() => window.galaxyBackground?.setHectic(false), 2000);
     // asteroids — knock back the ones outside the blast immediately (cheap); QUEUE the ones
@@ -11345,44 +11342,64 @@ function initGalaxyCanvas() {
     }
   }
 
-  // PART 4/5 draw: crosshair + lock ring + the pixel rocket. On the ufoFx overlay each frame.
+  // PART 4/5 draw: localized impact flash + blast-zone marker + the pixel rocket. On the ufoFx
+  // overlay each frame.
   function drawMissileFx(tctx, now) {
     if (!tctx) return;
-    if (missileCrosshair) {
-      const ch = missileCrosshair;
-      const flashRed = Math.floor(now / 125) % 2 === 0; // ~4Hz red/white alternation
-      const col = flashRed ? "#ff3333" : "#ffffff";
-      const R = 24;
-      const arm = R + 8;
-      tctx.save();
-      tctx.strokeStyle = col;
-      tctx.lineWidth = 2;
-      tctx.shadowColor = col;
-      tctx.shadowBlur = 8;
-      tctx.beginPath();
-      tctx.arc(ch.x, ch.y, R, 0, Math.PI * 2);
-      tctx.stroke();
-      tctx.beginPath();
-      tctx.moveTo(ch.x - arm, ch.y); tctx.lineTo(ch.x - 6, ch.y);
-      tctx.moveTo(ch.x + 6, ch.y); tctx.lineTo(ch.x + arm, ch.y);
-      tctx.moveTo(ch.x, ch.y - arm); tctx.lineTo(ch.x, ch.y - 6);
-      tctx.moveTo(ch.x, ch.y + 6); tctx.lineTo(ch.x, ch.y + arm);
-      tctx.stroke();
-      tctx.restore();
-      // pulsing red highlight ring around the locked asteroid (while it's still alive)
-      const la = ch.lockedAsteroid;
-      if (la && sim.asteroids.includes(la)) {
-        const pulse = 1 + 0.15 * Math.sin(now / 90);
+    // localized impact flash — a quick additive fireball pop at the detonation point
+    if (missileImpactFlash) {
+      const age = now - missileImpactFlash.start;
+      const dur = 260;
+      if (age >= dur) {
+        missileImpactFlash = null;
+      } else {
+        const t = age / dur;
+        const k = 1 - t;
+        const R = 40 + t * 200;
         tctx.save();
-        tctx.strokeStyle = "#ff3333";
-        tctx.lineWidth = 2.5;
-        tctx.shadowColor = "#ff3333";
-        tctx.shadowBlur = 12;
-        tctx.beginPath();
-        tctx.arc(la.x, la.y, (la.r + 10) * pulse, 0, Math.PI * 2);
-        tctx.stroke();
+        tctx.globalCompositeOperation = "lighter";
+        tctx.globalAlpha = k * 0.55;
+        tctx.fillStyle = "rgba(255,120,40,1)";
+        tctx.beginPath(); tctx.arc(missileImpactFlash.x, missileImpactFlash.y, R, 0, Math.PI * 2); tctx.fill();
+        tctx.globalAlpha = k * 0.8;
+        tctx.fillStyle = "rgba(255,210,120,1)";
+        tctx.beginPath(); tctx.arc(missileImpactFlash.x, missileImpactFlash.y, R * 0.55, 0, Math.PI * 2); tctx.fill();
+        tctx.globalAlpha = k * 0.95;
+        tctx.fillStyle = "rgba(255,255,235,1)";
+        tctx.beginPath(); tctx.arc(missileImpactFlash.x, missileImpactFlash.y, R * 0.26, 0, Math.PI * 2); tctx.fill();
         tctx.restore();
       }
+    }
+    // blast-zone marker — a flashing red circle showing where the missile will detonate and the
+    // radius it will clear (drawn while the crosshair/target is live).
+    if (missileCrosshair) {
+      const ch = missileCrosshair;
+      const flashOn = Math.floor(now / 140) % 2 === 0; // ~3.5Hz flash
+      tctx.save();
+      tctx.strokeStyle = flashOn ? "rgba(255,51,51,0.95)" : "rgba(255,120,80,0.5)";
+      tctx.lineWidth = 2.5;
+      tctx.shadowColor = "#ff3333";
+      tctx.shadowBlur = 10;
+      tctx.beginPath();
+      tctx.arc(ch.x, ch.y, MISSILE_BLAST_RADIUS, 0, Math.PI * 2);
+      tctx.stroke();
+      // faint danger-zone fill
+      tctx.globalAlpha = flashOn ? 0.1 : 0.05;
+      tctx.fillStyle = "#ff3333";
+      tctx.beginPath();
+      tctx.arc(ch.x, ch.y, MISSILE_BLAST_RADIUS, 0, Math.PI * 2);
+      tctx.fill();
+      tctx.globalAlpha = 1;
+      // small center crosshair at the exact target
+      tctx.shadowBlur = 6;
+      const arm = 14;
+      tctx.beginPath();
+      tctx.moveTo(ch.x - arm, ch.y); tctx.lineTo(ch.x - 5, ch.y);
+      tctx.moveTo(ch.x + 5, ch.y); tctx.lineTo(ch.x + arm, ch.y);
+      tctx.moveTo(ch.x, ch.y - arm); tctx.lineTo(ch.x, ch.y - 5);
+      tctx.moveTo(ch.x, ch.y + 5); tctx.lineTo(ch.x, ch.y + arm);
+      tctx.stroke();
+      tctx.restore();
     }
     const m = activeMissile;
     if (m && !m.exploded) {

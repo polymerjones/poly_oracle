@@ -183,6 +183,7 @@ const pixiRenderer = (() => {
       plasmaGraphics = new PIXI.Graphics();
       plasmaContainer.addChild(plasmaGraphics);
       bombGraphics = new PIXI.Graphics();
+      bombGraphics.blendMode = PIXI.BLEND_MODES.ADD; // 2026-06-14: firey explosion (was a black implosion)
       bombContainer.addChild(bombGraphics);
       landmineGraphics = new PIXI.Graphics();
       landmineContainer.addChild(landmineGraphics);
@@ -933,57 +934,37 @@ const pixiRenderer = (() => {
       const age = now - bomb.start;
       const r = bomb.visualRadius;
 
-      if (age < 500) {
-        const t = age / 500;
-        const pullR = r * 0.7 * t;
-
-        bombGraphics.lineStyle(2, 0x00ffd1, 0.6 * t);
-        bombGraphics.drawCircle(bomb.x, bomb.y, pullR * 1.4);
-
-        bombGraphics.beginFill(0x000000, 0.95 * t);
-        bombGraphics.drawCircle(bomb.x, bomb.y, pullR);
+      if (age < 420) {
+        // 2026-06-14: expanding FIREBALL (additive) — white-hot core → orange → red glow that
+        // grows to the blast radius and fades. Replaces the old black-hole implosion.
+        const t = age / 420;
+        const grow = Math.pow(t, 0.55); // fast out, ease near the end
+        const fade = 1 - t;
+        const coreR = r * (0.18 + grow * 0.95);
+        // outer red/orange glow
+        bombGraphics.beginFill(0xff3300, 0.55 * fade);
+        bombGraphics.drawCircle(bomb.x, bomb.y, coreR * 1.35);
         bombGraphics.endFill();
-
-        bombGraphics.beginFill(0x000000, 1.0);
-        bombGraphics.drawCircle(bomb.x, bomb.y, pullR * 0.6);
+        // mid orange body
+        bombGraphics.beginFill(0xff7a00, 0.7 * fade);
+        bombGraphics.drawCircle(bomb.x, bomb.y, coreR);
         bombGraphics.endFill();
-
-        bombGraphics.lineStyle(1.5, 0x00ffd1, 0.45 * t);
-        for (let arm = 0; arm < 6; arm += 1) {
-          const baseAngle = arm * (Math.PI / 3) + t * 4;
-          bombGraphics.moveTo(
-            bomb.x + Math.cos(baseAngle) * pullR * 1.2,
-            bomb.y + Math.sin(baseAngle) * pullR * 1.2,
-          );
-          for (let step = 1; step <= 12; step += 1) {
-            const pct = step / 12;
-            const angle = baseAngle + pct * 2.2;
-            const armR = pullR * 1.2 * (1 - pct * 0.85);
-            bombGraphics.lineTo(
-              bomb.x + Math.cos(angle) * armR,
-              bomb.y + Math.sin(angle) * armR,
-            );
-          }
-        }
-
-        const horizonPulse = 0.5 + Math.sin(age * 0.04) * 0.3;
-        bombGraphics.lineStyle(3, 0x4400ff, 0.7 * t * horizonPulse);
-        bombGraphics.drawCircle(bomb.x, bomb.y, pullR * 0.65);
-
-        bombGraphics.lineStyle(2, 0xff6600, 0.5 * t);
-        bombGraphics.drawEllipse(bomb.x, bomb.y, pullR * 1.1, pullR * 0.25);
-        bombGraphics.lineStyle(1, 0xffaa00, 0.3 * t);
-        bombGraphics.drawEllipse(bomb.x, bomb.y, pullR * 0.9, pullR * 0.18);
-      } else if (age < 650) {
-        const t = (age - 500) / 150;
-        bombGraphics.beginFill(0x000000, 0.85 * (1 - t));
-        bombGraphics.drawCircle(bomb.x, bomb.y, r * 0.6 * (1 - t));
+        // hot yellow inner
+        bombGraphics.beginFill(0xffcc33, 0.8 * fade);
+        bombGraphics.drawCircle(bomb.x, bomb.y, coreR * 0.6);
         bombGraphics.endFill();
+        // white-hot center (brightest at the start)
+        bombGraphics.beginFill(0xffffff, 0.9 * (1 - grow));
+        bombGraphics.drawCircle(bomb.x, bomb.y, coreR * 0.32);
+        bombGraphics.endFill();
+        // leading shock edge
+        bombGraphics.lineStyle(3, 0xffdd88, 0.6 * fade);
+        bombGraphics.drawCircle(bomb.x, bomb.y, coreR * 1.4);
         if (!bomb.flashTriggered) {
           bomb.flashTriggered = true;
           flashAlpha = 1.0;
           if (flashContainer?._rect) {
-            flashContainer._rect.tint = 0xffffff;
+            flashContainer._rect.tint = 0xfff0d0;
             flashContainer._rect.alpha = flashAlpha;
           }
         }
@@ -996,7 +977,7 @@ const pixiRenderer = (() => {
         ];
         for (let j = 0; j < rings.length; j += 1) {
           const ring = rings[j];
-          const rt = Math.max(0, Math.min(1, (age - 650 - ring.delay) / (750 - ring.delay)));
+          const rt = Math.max(0, Math.min(1, (age - 420 - ring.delay) / (750 - ring.delay)));
           if (rt <= 0 || rt >= 1) continue;
           const rr = r * (ring.from + (ring.to - ring.from) * rt);
           const alpha = ring.alpha * (1 - rt);
@@ -1007,7 +988,7 @@ const pixiRenderer = (() => {
         }
       }
 
-      if (age >= 650 && !bomb.debrisSpawned && debrisContainer) {
+      if (age >= 120 && !bomb.debrisSpawned && debrisContainer) {
         bomb.debrisSpawned = true;
         spawnBombDebris(bomb, now);
       }

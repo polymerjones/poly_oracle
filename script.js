@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-15 16:09";
+const BUILD_TS = "2026-06-15 16:27";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1361,11 +1361,28 @@ const commBoxController = (() => {
       hud.style.bottom = "auto";
       hud.style.top = "34%";
       hud.style.transform = "translate(-50%, -50%) scale(1.06)";
+      // 2026-06-15: the ticker is absolutely anchored to the RIGHT of the portrait (left:128px),
+      // and it's position:absolute so it doesn't count toward the HUD's width — centering the HUD
+      // only centered the 120px portrait, leaving the 260px ticker hanging off the right edge.
+      // For the centered cutscene, dock the ticker BELOW the portrait, centered under it, so it
+      // stays fully on-screen. setCommCenter(false) restores the normal right-dock.
+      if (ticker) {
+        ticker.style.transition =
+          "left .55s ease, top .55s ease, bottom .55s ease, opacity .2s ease, transform .2s ease";
+        ticker.style.left = "-70px"; // (120/2) - (260/2): center the 260px ticker under the 120px portrait
+        ticker.style.top = "132px";  // 12px gap below the 120px-tall portrait
+        ticker.style.bottom = "auto";
+      }
     } else {
       hud.style.left = "16px";
       hud.style.top = "auto";
       hud.style.bottom = "20px";
       hud.style.transform = "none";
+      if (ticker) {
+        ticker.style.left = "128px";
+        ticker.style.top = "auto";
+        ticker.style.bottom = "0";
+      }
     }
   }
 
@@ -5429,7 +5446,10 @@ function createLoopVideoController(video) {
   video.playsInline = true;
   video.preload = "auto";
   try {
-    video.load();
+    // 2026-06-15: don't reload if the element's `autoplay` has already begun fetching/decoding —
+    // calling load() here aborts that head start and reintroduces the ~1s first-frame delay on the
+    // oracle screen. Only force a load when nothing has started yet (readyState HAVE_NOTHING).
+    if (video.readyState === 0) video.load();
   } catch {
     // ignore load errors
   }
@@ -10173,13 +10193,15 @@ function initGalaxyCanvas() {
       _commArrowBot.style.transform = "rotate(-45deg)";
       document.body.appendChild(_commArrowBot);
     }
-    // comm box sits centered at ~(50%, 34%) during the intro cutscene
+    // comm box sits centered at ~(50%, 34%) during the intro cutscene; the ticker is docked
+    // directly below the portrait (see setCommCenter), so the arrows frame the whole unit:
+    // top arrow above the portrait, bottom arrow below the ticker (~cy+144 bottom edge).
     const cx = window.innerWidth / 2;
     const cy = window.innerHeight * 0.34;
     _commArrowTop.style.left = `${cx - 17}px`;
     _commArrowTop.style.top = `${cy - 130}px`;
     _commArrowBot.style.left = `${cx - 17}px`;
-    _commArrowBot.style.top = `${cy + 96}px`;
+    _commArrowBot.style.top = `${cy + 158}px`;
     _commArrowTop.style.display = "block";
     _commArrowBot.style.display = "block";
   }

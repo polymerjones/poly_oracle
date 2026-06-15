@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-15 10:50";
+const BUILD_TS = "2026-06-15 11:55";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -329,6 +329,13 @@ const STORAGE = {
   arcadeWon: "poly_oracle_arcade_won",
   rewardCelestial: "poly_oracle_reward_celestial",
 };
+
+// 2026-06-15: Stunt Mode tutorial completion gate — unlocks the Stunt-Practice button.
+const STUNT_TRAINING_DONE_KEY = "poly_stunt_training_complete";
+function isStuntTrainingComplete() {
+  try { return localStorage.getItem(STUNT_TRAINING_DONE_KEY) === "1"; }
+  catch { return false; }
+}
 
 const BG = {
   L1_3: "galaxybg1b-h264.mp4",
@@ -481,6 +488,7 @@ const MUSIC = {
   L5_6:    "assets/music/Stroids_BASS_Phonk.mp3",
   L7_8:    "assets/music/Stroids_Phonk_2.mp3",
   L9:      "assets/music/Stroids_metal_Loop.mp3",
+  L11_SWARM: "assets/music/L11_Swarm.mp3",       // levels 11+
 };
 
 function musicKeyForLevel(levelNum) {
@@ -505,7 +513,8 @@ function getMusicForLevel(level) {
   if (level <= 6)     return MUSIC.L5_6;
   if (level <= 8)     return MUSIC.L7_8;
   if (level === 9)    return MUSIC.L9;
-  if (level >= 10)    return MUSIC.L10;
+  if (level === 10)   return MUSIC.L10;
+  if (level >= 11)    return MUSIC.L11_SWARM;
   return MUSIC.L1_3;
 }
 
@@ -566,50 +575,9 @@ const ARCADE_LEVELS = [
   { level: 15, time: 88, totalToClear: 40, startSpawn: 9, spawnEveryMs: 1150, maxOnScreen: 16 },
 ];
 
-// Stunt (tutorial) Mode — a no-fail walkthrough of the core verbs. Each step shows an
-// instruction and does NOT advance until the player performs that action successfully.
-// Content is intentionally data-driven so a new character's script + VO can be dropped in:
-//   text  — ticker line shown until the step is completed
-//   voSrc — optional VO file (null = text-only for now; fill in when the new VO is recorded)
-//   need  — successes required to advance (1 for all current steps)
-//   setup — per-step entity prep (spawns / stocks inventory) run when the step begins
-const STUNT_STEPS = [
-  {
-    id: "shoot",
-    text: "TAP an asteroid to blast it!",
-    voSrc: null,
-    need: 1,
-    setup: "shoot",
-  },
-  {
-    id: "plasma",
-    text: "TAP & DRAG to draw a PLASMA NET around the rocks!",
-    voSrc: null,
-    need: 1,
-    setup: "plasma",
-  },
-  {
-    id: "toss",
-    text: "GRAB an asteroid and FLING it away!",
-    voSrc: null,
-    need: 1,
-    setup: "toss",
-  },
-  {
-    id: "bomb",
-    text: "Tap \u{1F4A3}, tap the field to drop a bomb, tap it to ARM, tap again to DETONATE!",
-    voSrc: null,
-    need: 1,
-    setup: "bomb",
-  },
-  {
-    id: "freeze",
-    text: "Tap the ❄ button to FREEZE time!",
-    voSrc: null,
-    need: 1,
-    setup: "freeze",
-  },
-];
+// Stunt (tutorial) Mode — a no-fail SPC-guided walkthrough of the core verbs. The phase script
+// and engine live inside the galaxyCanvasController closure (TUTORIAL_PHASES / runTutorial),
+// since they need direct access to the spawn + sim internals.
 
 function getSavedArcadeLevel() {
   try {
@@ -881,6 +849,10 @@ const btnArcadeNew = document.getElementById("btnArcadeNew");
 const btnArcadeResume = document.getElementById("btnArcadeResume");
 const btnArcadeLevelSelect = document.getElementById("btnArcadeLevelSelect");
 const btnArcadeStunt = document.getElementById("btnArcadeStunt");
+const stuntModeMenuPanel = document.getElementById("stuntModeMenuPanel");
+const btnStuntTraining = document.getElementById("btnStuntTraining");
+const btnStuntPractice = document.getElementById("btnStuntPractice");
+const btnStuntBack = document.getElementById("btnStuntBack");
 const btnArcadeScores = document.getElementById("btnArcadeScores");
 const btnScores = document.getElementById("btnScores");
 const btnArcadeMenuBack = document.getElementById("btnArcadeMenuBack");
@@ -1242,7 +1214,45 @@ const commBoxController = (() => {
     "youre_not_doing_so_well_cadet.mp3": "YOU'RE NOT DOING SO WELL, CADET.",
   };
 
+  // 2026-06-15: Stunt Mode swaps the commander portrait for SPC. While an override is set,
+  // the normal frame cycling (idle/talk/react) is a no-op so the SPC image stays pinned.
+  let portraitOverride = null;
+  const callsignEl = () => document.getElementById("commanderCallsign");
+  // teal placeholder shown if vo/spc_portrait.png is missing (data-URI so no extra request)
+  const SPC_PLACEHOLDER =
+    "data:image/svg+xml;utf8," +
+    encodeURIComponent(
+      "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'>" +
+      "<rect width='120' height='120' fill='#031313'/>" +
+      "<rect x='3' y='3' width='114' height='114' fill='none' stroke='#00d4d4' stroke-width='2'/>" +
+      "<text x='60' y='70' font-family='monospace' font-size='30' font-weight='bold' " +
+      "fill='#00e8e8' text-anchor='middle'>SPC</text></svg>",
+    );
+
+  function setPortraitOverride(src, callsign = "SPC") {
+    portraitOverride = src || SPC_PLACEHOLDER;
+    const cs = callsignEl();
+    if (cs) cs.textContent = callsign;
+    if (portrait) {
+      portrait.onerror = () => { portrait.onerror = null; portrait.src = SPC_PLACEHOLDER; };
+      portrait.src = portraitOverride;
+    }
+  }
+
+  function clearPortraitOverride() {
+    portraitOverride = null;
+    if (portrait) portrait.onerror = null;
+    const cs = callsignEl();
+    if (cs) cs.textContent = "CMDR";
+    setFrame("idle");
+  }
+
+  function isVOActive() {
+    return _voPlaying || _voQueue.length > 0;
+  }
+
   function setFrame(key) {
+    if (portraitOverride) return;
     if (!portrait || !FRAMES[key]) return;
     currentFrame = key;
     portrait.src = FRAMES[key];
@@ -1603,7 +1613,16 @@ const commBoxController = (() => {
     });
   }
 
+  // 2026-06-15: while Stunt Mode owns the comm box, only SPC speaks — drop every other
+  // (CMDR) line so gameplay praise/reactions never interleave with the tutorial.
+  let _exclusiveSpeaker = false;
+  function setExclusiveSpeaker(on) {
+    _exclusiveSpeaker = !!on;
+    if (on) { _voQueue.length = 0; }
+  }
+
   function queueVO(options = {}) {
+    if (_exclusiveSpeaker && !options._spc) return;
     const highPriority = options.priority === "high";
     if (highPriority) {
       _voQueue.length = 0;
@@ -1634,6 +1653,10 @@ const commBoxController = (() => {
     pinTicker,
     hideTicker,
     isTickerVisible,
+    setPortraitOverride,
+    clearPortraitOverride,
+    setExclusiveSpeaker,
+    isVOActive,
     setDamageState,
     reactTo,
     pickFromPool,
@@ -2766,7 +2789,17 @@ function addListeners() {
     btnArcadeLevelSelect.addEventListener("click", () => galaxyCanvasController?.openArcadeLevelSelect?.());
   }
   if (btnArcadeStunt) {
-    btnArcadeStunt.addEventListener("click", () => galaxyCanvasController?.startStuntMode?.());
+    // 2026-06-15: Stunt Mode now opens a sub-menu (Training / Practice) instead of launching directly.
+    btnArcadeStunt.addEventListener("click", () => galaxyCanvasController?.showStuntModeMenu?.());
+  }
+  if (btnStuntTraining) {
+    btnStuntTraining.addEventListener("click", () => galaxyCanvasController?.startStuntMode?.());
+  }
+  if (btnStuntPractice) {
+    btnStuntPractice.addEventListener("click", () => galaxyCanvasController?.startStuntPractice?.());
+  }
+  if (btnStuntBack) {
+    btnStuntBack.addEventListener("click", () => galaxyCanvasController?.showModeSelect?.());
   }
   if (btnArcadeScores) {
     btnArcadeScores.hidden = true;
@@ -5740,12 +5773,24 @@ function initGalaxyCanvas() {
   let bgPreRolledForLevel = false;
 
   let arcadeActive = false;
-  // 2026-06-13: Stunt (tutorial) Mode — gates the level loop off and runs a step machine.
+  // 2026-06-13/2026-06-15: Stunt (tutorial) Mode — gates the timed level loop off (via
+  // `stuntActive`) and runs an async phase engine (SPC tutorial) in its place.
   let stuntActive = false;
-  let stuntStepIndex = 0;
-  let stuntStepProgress = 0;
-  let stuntStepStartedAt = 0;
-  let stuntAdvancing = false; // brief lockout between a success and the next step
+  let stuntAdvancing = false; // retained: brief lockout used by exit/menu teardown paths
+  // 2026-06-15: tutorial phase engine state (see TUTORIAL_PHASES / runTutorial below)
+  let tutorialPhase = -1;          // -1 = not running
+  let tutorialState = {};          // per-phase mutable scratch
+  const tutorialEvents = {};       // event-id -> count, fed by stuntNotify(), read by waitEvent()
+  let _tutRunToken = 0;            // bumped on any exit to abort in-flight async phase chains
+  let _tutWaiters = [];            // [{ pred, resolve, reject }] polled each frame by updateStunt
+  let _tutTimers = [];             // pending waitMs timeouts, cleared on abort
+  // SPC voice queue — feeds commBoxController one caption at a time (the comm queue caps at 2).
+  let _spcQueue = [];
+  let _spcPlaying = false;
+  // Stunt → Practice: endless arcade gameplay (no timer, no level-complete, score not submitted).
+  let practiceEndless = false;
+  // SPC_xx.mp3 audio is recorded later; until a key is listed here, the line is text-only.
+  const SPC_VO_AVAILABLE = new Set();
   let currentLevelIndex = 0;
   let _levelPrimaryColor = "#00FFD1";
   let levelEndsAt = 0;
@@ -6252,10 +6297,12 @@ function initGalaxyCanvas() {
     const showRoot = mode === "root";
     const showArcade = mode === "arcade";
     const showLevels = mode === "levels";
+    const showStunt = mode === "stunt";
     if (btnArcade) btnArcade.style.display = showRoot ? "" : "none";
     if (btnPractice) btnPractice.style.display = showRoot ? "" : "none";
     // 2026-06-14: Stunt Mode is a top-level mode now (Select Mode menu), not under Arcade
     if (btnArcadeStunt) btnArcadeStunt.style.display = showRoot ? "" : "none";
+    if (btnScores) btnScores.style.display = showRoot ? "" : "none";
     if (debugLevelPanel) debugLevelPanel.style.display = "none";
     if (arcadeMenuPanel) {
       arcadeMenuPanel.hidden = !showArcade;
@@ -6266,6 +6313,22 @@ function initGalaxyCanvas() {
       arcadeLevelPanel.hidden = !showLevels;
       arcadeLevelPanel.classList.toggle("show", showLevels);
       arcadeLevelPanel.setAttribute("aria-hidden", showLevels ? "false" : "true");
+    }
+    if (stuntModeMenuPanel) {
+      stuntModeMenuPanel.hidden = !showStunt;
+      stuntModeMenuPanel.classList.toggle("show", showStunt);
+      stuntModeMenuPanel.setAttribute("aria-hidden", showStunt ? "false" : "true");
+    }
+  }
+
+  // 2026-06-15: Stunt Mode sub-menu — Training (always available) + Practice (unlocked after
+  // training completes, tracked via localStorage poly_stunt_training_complete).
+  function showStuntModeMenu() {
+    setArcadeSubmenu("stunt");
+    if (btnStuntPractice) {
+      const unlocked = isStuntTrainingComplete();
+      btnStuntPractice.disabled = !unlocked;
+      btnStuntPractice.classList.toggle("locked", !unlocked);
     }
   }
 
@@ -6948,12 +7011,15 @@ function initGalaxyCanvas() {
     };
     playGameSfx("ufo_spawn", 0.6);
     startUfoDrone();
-    commBoxController.reactTo("ufo");
-    // FIXED 2026-06-08: removed priority:"high" so UFO comm queues rather than cutting current comm
-    commBoxController.queueVO({
-      audioSrc: commBoxController.commVoSrc("vo-ufo_spotted_takeemout.mp3"),
-      event: "ufo",
-    });
+    // 2026-06-15: during the tutorial only SPC speaks — suppress the CMDR UFO callout.
+    if (!stuntActive) {
+      commBoxController.reactTo("ufo");
+      // FIXED 2026-06-08: removed priority:"high" so UFO comm queues rather than cutting current comm
+      commBoxController.queueVO({
+        audioSrc: commBoxController.commVoSrc("vo-ufo_spotted_takeemout.mp3"),
+        event: "ufo",
+      });
+    }
     addWarpRing(x, y, "rgba(160,255,255,1)");
   }
 
@@ -8312,6 +8378,7 @@ function initGalaxyCanvas() {
     if (charged) {
       const destroyedCount = destroyAsteroidsInPlasmaCage(rect);
       if (destroyedCount > 0) stuntNotify("plasma");
+      else stuntNotify("plasma_miss"); // tutorial Phase 3 coaching on an empty net
       window.pixiRenderer?.triggerPlasmaRectFlash?.();
       const fireKey = destroyedCount > 0 ? resolveGameSfxKey("plasma_fire", "ufo_destroy") : "";
       // FIXED 2026-06-09: forceHtmlOnIOS covers iOS Safari; `important` bypasses the native
@@ -9368,6 +9435,7 @@ function initGalaxyCanvas() {
 
   function startLevel(idx) {
     stuntActive = false; // a real arcade level is never a stunt session
+    practiceEndless = false; // ...nor an endless practice session (Stunt Practice re-sets this after)
     const safeIdx = clamp(idx, 0, ARCADE_LEVELS.length - 1);
     audioEngine.unlock?.();
     audioEngine.loadMany?.(GAME_SFX);
@@ -9621,10 +9689,11 @@ function initGalaxyCanvas() {
     hudMissileBtn?.classList.remove("hudMissileBtn--aiming");
     updateHudMissileInventory();
     currentLevelIndex = 0;
-    // no timer in Stunt Mode — levelDurationMs 0 keeps the timer perimeter hidden
-    // (drawTimerPerimeterOverlay guards on levelDurationMs > 0).
-    levelDurationMs = 0;
-    levelEndsAt = 0;
+    // 2026-06-15: show the perimeter timer FULL + paused so Phase 0 can teach it. The timed-level
+    // update block is gated off by stuntActive (no depletion / game-over), and the perimeter draw
+    // reads _timerRemainingMs — pinned to levelDurationMs by resetArcadeTimerVisuals() below.
+    levelDurationMs = 60000;
+    levelEndsAt = performance.now() + levelDurationMs;
     retryPending = false;
     arcadeResumeAvailable = false;
 
@@ -9665,103 +9734,500 @@ function initGalaxyCanvas() {
     startGalaxyLoop();
 
     arcadePausedUntil = performance.now(); // gameplay allowed immediately
-    stuntBeginStep(0);
+    // 2026-06-15: swap the commander portrait for SPC (Specialist) and silence CMDR for the
+    // whole tutorial so only SPC speaks (Part 7).
+    commBoxController.setPortraitOverride("vo/spc_portrait.png", "SPC");
+    commBoxController.setExclusiveSpeaker(true);
+    runTutorial();
   }
 
-  // Per-step entity prep. Spawns exactly what a step needs; for bomb/freeze it stocks the
-  // inventory directly so the unique verb (deploy / activate) is what's being taught.
-  function stuntSetupStep(setupKind) {
-    clearGameplayEntities();
-    const spawnBig = (n) => {
-      for (let i = 0; i < n; i += 1) {
-        const p = randomPerimeterPoint();
-        spawnAsteroid(p.x, p.y, 3, false);
-      }
-    };
-    if (setupKind === "shoot") spawnBig(1);
-    else if (setupKind === "plasma") spawnBig(3);
-    else if (setupKind === "toss") spawnBig(1);
-    else if (setupKind === "bomb") {
-      playerBombInventory = 1;
-      updateHudBombInventory();
-      spawnBig(2);
-    } else if (setupKind === "freeze") {
-      playerFreezeInventory = 1;
-      updateHudFreezeInventory();
-      spawnBig(3);
-    }
+  // ════════════════════════════════════════════════════════════════════════
+  // TUTORIAL ENGINE (Stunt Mode → Training). An async phase script drives SPC's
+  // walkthrough; each phase awaits player actions detected by polling game state
+  // (waitFor) or counting events fed through stuntNotify().
+  // ════════════════════════════════════════════════════════════════════════
+  const TUT_ABORT = "tut-abort";
+  let tutorialFireBlocked = false; // Phase 0 mutes the laser while SPC talks
+
+  // ── async primitives, all abortable via _tutRunToken ──────────────────────
+  function waitMs(ms) {
+    return new Promise((resolve, reject) => {
+      const entry = { reject };
+      entry.id = setTimeout(() => {
+        const i = _tutTimers.indexOf(entry);
+        if (i >= 0) _tutTimers.splice(i, 1);
+        resolve();
+      }, ms);
+      _tutTimers.push(entry);
+    });
+  }
+  function waitFor(pred) {
+    return new Promise((resolve, reject) => {
+      try { if (pred()) { resolve(); return; } } catch { /* keep waiting */ }
+      _tutWaiters.push({ pred, resolve, reject });
+    });
+  }
+  function waitEvent(name, n = 1) {
+    const base = tutorialEvents[name] || 0;
+    return waitFor(() => (tutorialEvents[name] || 0) >= base + n);
+  }
+  function waitVOIdle() {
+    return waitFor(() => !_spcPlaying && _spcQueue.length === 0 && !commBoxController.isVOActive());
+  }
+  function waitPowerupCollected(type) {
+    return waitFor(() => !powerups.some((p) => p.type === type));
+  }
+  function abortTutorialAsync() {
+    _tutWaiters.forEach((w) => { try { w.reject(TUT_ABORT); } catch {} });
+    _tutWaiters = [];
+    _tutTimers.forEach((t) => { clearTimeout(t.id); try { t.reject(TUT_ABORT); } catch {} });
+    _tutTimers = [];
+    _spcQueue = [];
+    _spcPlaying = false;
   }
 
-  function stuntBeginStep(i) {
-    stuntStepIndex = i;
-    stuntStepProgress = 0;
-    stuntAdvancing = false;
-    stuntStepStartedAt = performance.now();
-    const step = STUNT_STEPS[i];
-    if (!step) return;
-    stuntSetupStep(step.setup);
-    stuntShowInstruction(step);
+  // ── SPC voice (Part 3) — queues captions one at a time into the comm box ──
+  function spcVoSrc(key) {
+    return SPC_VO_AVAILABLE.has(key) ? `vo/SPC_${key}.mp3` : null;
   }
-
-  function stuntShowInstruction(step) {
-    commBoxController.show();
-    commBoxController.pinTicker(step.text);
-    if (step.voSrc) {
-      commBoxController.queueVO({ audioSrc: commBoxController.commVoSrc(step.voSrc) });
-    }
+  function spcVO(key, text) {
+    _spcQueue.push({ key, text });
+    pumpSpc();
   }
-
-  // Called from the action-completion hooks. No-op outside Stunt Mode, so the hooks are
-  // safe to leave in the normal gameplay paths.
-  function stuntNotify(eventId) {
-    if (!stuntActive || stuntAdvancing) return;
-    const step = STUNT_STEPS[stuntStepIndex];
-    if (!step || eventId !== step.id) return;
-    stuntStepProgress += 1;
-    if (stuntStepProgress < (step.need || 1)) return;
-    stuntAdvancing = true;
-    playGameSfx("life_gain", 0.8); // success chime
-    const next = stuntStepIndex + 1;
-    setTimeout(() => {
-      if (!stuntActive) return;
-      if (next < STUNT_STEPS.length) stuntBeginStep(next);
-      else stuntComplete();
-    }, 850);
-  }
-
-  function updateStunt(now) {
-    // keep the instruction pinned (defends against a future VO ending and auto-hiding it)
-    const step = STUNT_STEPS[stuntStepIndex];
-    if (step && !stuntAdvancing && !commBoxController.isTickerVisible()) {
-      commBoxController.pinTicker(step.text);
-    }
-    // keep a live target on-screen for the shoot/plasma/toss steps so the player is never stuck
-    if (step && !stuntAdvancing && sim.asteroids.length === 0
-        && (step.setup === "shoot" || step.setup === "plasma" || step.setup === "toss")) {
-      const need = step.setup === "plasma" ? 3 : 1;
-      for (let i = 0; i < need; i += 1) {
-        const p = randomPerimeterPoint();
-        spawnAsteroid(p.x, p.y, 3, true);
-      }
-    }
-  }
-
-  function stuntComplete() {
-    stuntAdvancing = true;
-    commBoxController.hideTicker();
-    showArcadeOverlay("STUNT MODE COMPLETE", "Nice flying, cadet!", 0, {
-      buttonText: "Back to Arcade",
-      buttonAction: () => exitStuntMode(),
+  function pumpSpc() {
+    if (_spcPlaying || _spcQueue.length === 0) return;
+    const { key, text } = _spcQueue.shift();
+    _spcPlaying = true;
+    const audioSrc = spcVoSrc(key);
+    const duration = Math.max(2400, Math.min(7000, text.length * 62));
+    commBoxController.queueVO({
+      lines: [text],
+      audioSrc,
+      duration,
+      _spc: true, // bypass the exclusive-speaker guard (CMDR lines are dropped)
+      _onEnd: () => { _spcPlaying = false; pumpSpc(); },
     });
   }
 
+  // ── HUD pointer (Part 4) ──────────────────────────────────────────────────
+  let _hudPointerEl = null;
+  let _hudPointerTimer = null;
+  function ensureTutorialPointerCss() {
+    if (document.getElementById("tutorialPointerCss")) return;
+    const s = document.createElement("style");
+    s.id = "tutorialPointerCss";
+    s.textContent =
+      "#tutorialPointer{position:fixed;z-index:9999;color:#00ffcc;font-size:28px;font-weight:bold;"
+      + "pointer-events:none;text-shadow:0 0 8px #00ffcc,0 0 16px #00ffcc;display:none;"
+      + "animation:tutorialPulse 0.6s ease-in-out infinite alternate;}"
+      + "@keyframes tutorialPulse{from{transform:scale(0.9);}to{transform:scale(1.1);}}";
+    document.head.appendChild(s);
+  }
+  function showHudPointer(targetElementId, durationMs = 5000) {
+    ensureTutorialPointerCss();
+    const target = document.getElementById(targetElementId);
+    if (!target) return;
+    if (!_hudPointerEl) {
+      _hudPointerEl = document.createElement("div");
+      _hudPointerEl.id = "tutorialPointer";
+      document.body.appendChild(_hudPointerEl);
+    }
+    const r = target.getBoundingClientRect();
+    // HUD weapon buttons sit low on the screen → point down from just above them.
+    const arrowDown = r.top > window.innerHeight * 0.5;
+    _hudPointerEl.textContent = arrowDown ? "↓" : "↑";
+    _hudPointerEl.style.left = `${r.left + r.width / 2 - 14}px`;
+    _hudPointerEl.style.top = arrowDown ? `${r.top - 38}px` : `${r.bottom + 8}px`;
+    _hudPointerEl.style.display = "block";
+    if (_hudPointerTimer) clearTimeout(_hudPointerTimer);
+    if (durationMs > 0) _hudPointerTimer = setTimeout(hideHudPointer, durationMs);
+  }
+  function hideHudPointer() {
+    if (_hudPointerTimer) { clearTimeout(_hudPointerTimer); _hudPointerTimer = null; }
+    if (_hudPointerEl) _hudPointerEl.style.display = "none";
+  }
+
+  // ── tutorial entity helpers (Part 5) ──────────────────────────────────────
+  function tutZonePoint(zone) {
+    const cx = playfield.x + playfield.w / 2;
+    const cy = playfield.y + playfield.h / 2;
+    if (zone === "top") {
+      return { x: cx + (Math.random() - 0.5) * playfield.w * 0.5, y: playfield.y + playfield.h * 0.18 };
+    }
+    if (zone === "center") return { x: cx, y: cy };
+    return randomPerimeterPoint();
+  }
+  function spawnTutorialAsteroids(count, kind = 2, options = {}) {
+    const refs = [];
+    for (let i = 0; i < count; i += 1) {
+      const p = tutZonePoint(options.positionZone || "random");
+      const a = spawnAsteroid(p.x, p.y, kind, false);
+      if (a) {
+        if (options.fast) { a.vx *= 1.7; a.vy *= 1.7; }
+        refs.push(a);
+      }
+    }
+    return refs;
+  }
+  function spawnTutorialUFO() {
+    spawnUfo();
+    if (ufo) {
+      ufo.tutorial = true;     // skips teleport + auto-despawn (see UFO update block)
+      ufo.vx *= 0.5;
+      ufo.vy *= 0.5;
+      ufo.despawnAt = Infinity;
+    }
+    return ufo;
+  }
+  function spawnTutorialPowerup(type, position) {
+    const p = position || { x: playfield.x + playfield.w / 2, y: playfield.y + playfield.h / 2 };
+    const pu = { type, x: p.x, y: p.y, r: 22, spawnedAt: performance.now(), opacity: 1.0 };
+    powerups.push(pu);
+    playGameSfx("bling", 0.8);
+    return pu;
+  }
+  function spawnTutorialLandmine(position) {
+    const p = position || { x: playfield.x + playfield.w * 0.5, y: playfield.y + playfield.h * 0.5 };
+    landmine = createMineEntity(p.x, p.y);
+    playGameSfx("blip1", 0.8, { rate: 1.05 });
+    addWarpRing(p.x, p.y, "rgba(124,255,91,1)");
+    return landmine;
+  }
+  function clearTutorialField() {
+    for (const a of sim.asteroids) spawnExplosion(a.x, a.y, 14, false, 1.1, 1, a.kind, a.spriteKey);
+    if (ufo && ufo.alive) spawnExplosion(ufo.x, ufo.y, 18, true, 1.4);
+    if (landmine) spawnExplosion(landmine.x, landmine.y, 18, true, 1.4);
+    for (const b of placedBombs) spawnExplosion(b.x, b.y, 14, false, 1.1);
+    playGameSfx("ufo_destroy", 0.6);
+    clearGameplayEntities();
+    powerups.length = 0;
+    return waitMs(450);
+  }
+  function tutorialAsteroidsAllCleared() {
+    return sim.asteroids.length === 0;
+  }
+  function rechargePlasmaNow() {
+    // Phase 3: after a missed net, keep the weapon hot so the cadet can retry immediately.
+    plasmaCage.charged = true;
+    plasmaCage.chargeStart = performance.now() - 1e9;
+  }
+
+  // ── per-verb retry sub-loops ──────────────────────────────────────────────
+  // Resolves on the first net that destroys ≥1 stroid. Coaches on empty nets, and re-stocks the
+  // field (via respawn) if the cadet clears it with the laser instead — never a soft-lock.
+  async function tutorialPlasmaSuccess(respawn) {
+    const baseHit = tutorialEvents.plasma || 0;
+    for (;;) {
+      const baseMiss = tutorialEvents.plasma_miss || 0;
+      await waitFor(() =>
+        (tutorialEvents.plasma || 0) > baseHit
+        || (tutorialEvents.plasma_miss || 0) > baseMiss
+        || tutorialAsteroidsAllCleared());
+      if ((tutorialEvents.plasma || 0) > baseHit) return;
+      if ((tutorialEvents.plasma_miss || 0) > baseMiss) {
+        tutorialState.plasmaMisses = (tutorialState.plasmaMisses || 0) + 1;
+        if (tutorialState.plasmaMisses === 1) {
+          spcVO("20", "Make sure the stroids are targeted first.");
+          spcVO("21", "Try it again.");
+        } else {
+          spcVO("22", "Take your time — get them highlighted before you release.");
+        }
+        rechargePlasmaNow();
+      } else if (respawn) {
+        respawn(); // field emptied by laser — give them stroids to net
+        rechargePlasmaNow();
+      }
+    }
+  }
+
+  // ── the 10-phase script (Part 6) ──────────────────────────────────────────
+  const TUTORIAL_PHASES = [
+    { id: "intro", run: async () => {
+      tutorialFireBlocked = true;
+      spcVO("01", "Hi there Cadet, welcome to the Polyverse simulator.");
+      spcVO("02", "Let me show you the ropes before the real battle.");
+      spcVO("03", "First — the perimeter timer.");
+      spcVO("04a", "That line around the screen edges");
+      spcVO("04b", "shows how long you have to clear the field.");
+      await waitVOIdle();
+    } },
+    { id: "timer", run: async () => {
+      spcVO("05", "Every so often a timer power-up appears.");
+      spcVO("06", "Grab it to buy time. Tap it now.");
+      spawnTutorialPowerup("timer", tutZonePoint("center"));
+      await waitPowerupCollected("timer");
+      spcVO("07", "Great!");
+      await waitVOIdle();
+    } },
+    { id: "laser", run: async () => {
+      tutorialFireBlocked = false;
+      spawnTutorialAsteroids(1, 3);
+      spcVO("08", "These are the stroids.");
+      spcVO("09", "Our job is to clear them from the Polyverse.");
+      spcVO("10", "Tap the play area to fire your laser.");
+      spcVO("11", "Blast the stroid and all of its pieces.");
+      await waitFor(tutorialAsteroidsAllCleared);
+      spcVO("12", "Fantastic, Cadet. You'll show these stroids who's boss.");
+      await waitVOIdle();
+      await waitMs(1200);
+    } },
+    { id: "plasma", run: async () => {
+      spawnTutorialAsteroids(2, 2);
+      spcVO("13", "Next, the plasma net weapon.");
+      spcVO("14", "Tap, drag and hold to set the net.");
+      spcVO("15", "Highlighted objects are targeted.");
+      spcVO("16", "Release to fire and destroy everything inside.");
+      tutorialState.plasmaMisses = 0;
+      await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(2, 2));
+      spcVO("17", "NICE! Great work, Cadet.");
+      spcVO("18", "Now let the plasma recharge and do it again!");
+      await waitFor(() => plasmaCage.charged);
+      spcVO("19", "Plasma is recharged.");
+      spawnTutorialAsteroids(3, 2);
+      tutorialState.plasmaMisses = 0;
+      await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(3, 2));
+      spcVO("17b", "NICE! Great work, Cadet.");
+      await clearTutorialField();
+      await waitMs(800);
+    } },
+    { id: "ufo", run: async () => {
+      spawnTutorialAsteroids(3, 2);
+      spawnTutorialUFO();
+      spcVO("23", "UFO spotted, Cadet!");
+      spcVO("24", "Shoot it twice to take it out!");
+      waitFor(() => ufo && ufo.hitCount >= 1)
+        .then(() => { if (stuntActive) spcVO("25", "Direct hit! Do it again!"); })
+        .catch(() => {});
+      await waitFor(() => !ufo);
+      spcVO("26", "Wow, there you go.");
+      spcVO("27", "Destroying a UFO instantly recharges your plasma.");
+      spcVO("28", "So a good move is to net the stroids when a UFO shows up,");
+      spcVO("29", "pop the UFO, and instantly get another net shot.");
+      spcVO("30", "Let's try it.");
+      await clearTutorialField();
+      spawnTutorialAsteroids(3, 2);
+      spawnTutorialUFO();
+      spcVO("31", "Use your plasma net on those stroids.");
+      await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(3, 2));
+      spcVO("32", "Now destroy the UFO quickly!");
+      await waitFor(() => !ufo);
+      spawnTutorialAsteroids(4, 2);
+      spcVO("33", "Plasma recharged — make another net!");
+      await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(4, 2));
+      spcVO("34", "Nice work, Cadet. You learn fast.");
+      await clearTutorialField();
+      await waitMs(800);
+    } },
+    { id: "toss", run: async () => {
+      spawnTutorialAsteroids(3, 3);
+      spcVO("35", "Next, the stroid toss attack.");
+      spcVO("36", "Tap and hold a stroid to grab it.");
+      tutorialState.tossFailures = 0;
+      const baseToss = tutorialEvents.toss || 0;
+      while ((tutorialEvents.toss || 0) <= baseToss) {
+        const baseFail = tutorialEvents.toss_fail || 0;
+        await waitFor(() =>
+          (tutorialEvents.toss || 0) > baseToss
+          || (tutorialEvents.toss_fail || 0) > baseFail
+          || tutorialAsteroidsAllCleared());
+        if ((tutorialEvents.toss || 0) > baseToss) break;
+        if ((tutorialEvents.toss_fail || 0) > baseFail) {
+          tutorialState.tossFailures += 1;
+          if (tutorialState.tossFailures === 1) spcVO("38", "You have to swipe or flick to toss it.");
+          else spcVO("39", "Give it a good flick, Cadet — put some effort in!");
+        } else {
+          spawnTutorialAsteroids(3, 3); // cleared them with the laser — give grabbable stroids back
+        }
+      }
+      spcVO("40", "Very good, Cadet.");
+      spawnTutorialAsteroids(6, 2);
+      spcVO("41", "Things will get hectic out there.");
+      await waitMs(2000);
+    } },
+    { id: "landmine", run: async () => {
+      spawnTutorialLandmine(tutZonePoint("center"));
+      spcVO("42", "When you see a bomb, tap it to arm it.");
+      spcVO("43", "You can also grab and toss bombs like stroids.");
+      spcVO("44", "The bomb will explode soon.");
+      spcVO("45", "To detonate it yourself, tap it again.");
+      tutorialState.mineTapBase = tutorialEvents.mine_tap || 0;
+      for (;;) {
+        await waitFor(() => !landmine);
+        if ((tutorialEvents.mine_tap || 0) > tutorialState.mineTapBase) break; // player engaged it
+        // auto-detonated before the cadet touched it — coach + respawn
+        spcVO("46", "Okay Cadet, let's detonate the bomb ourselves.");
+        spcVO("47", "Tap the armed bomb to detonate it.");
+        tutorialState.mineTapBase = tutorialEvents.mine_tap || 0;
+        spawnTutorialLandmine(tutZonePoint("center"));
+        if (tutorialAsteroidsAllCleared()) spawnTutorialAsteroids(2, 2);
+      }
+      spcVO("48", "Boom. That was fantastic, Cadet.");
+      spcVO("49", "Bombs can save you from some hairy situations.");
+      await clearTutorialField();
+      await waitMs(800);
+    } },
+    { id: "bombInventory", run: async () => {
+      spawnTutorialPowerup("bomb", tutZonePoint("center"));
+      spcVO("50", "Sometimes a bomb power-up appears on the field.");
+      spcVO("51", "Tap it to add it to your HUD inventory.");
+      await waitPowerupCollected("bomb");
+      spcVO("52", "Tap the bomb icon in your HUD.");
+      showHudPointer("hudBombBtn", 6000);
+      await waitFor(() => bombAimMode);
+      hideHudPointer();
+      spcVO("53", "Now tap the screen to place it.");
+      await waitFor(() => placedBombs.length > 0);
+      spcVO("54", "Arm it, then tap again to detonate.");
+      await waitEvent("bomb");
+      await clearTutorialField();
+      await waitMs(800);
+    } },
+    { id: "quadshot", run: async () => {
+      spawnTutorialPowerup("quadshot", tutZonePoint("center"));
+      spcVO("55", "Throughout the missions, power-ups appear.");
+      spcVO("56", "That's the quad shot power-up. Pick it up!");
+      await waitPowerupCollected("quadshot");
+      spawnTutorialAsteroids(3, 2);
+      spcVO("57", "Blast those stroids with the quad shot!");
+      while (performance.now() < quadShotUntil) {
+        await waitFor(() => tutorialAsteroidsAllCleared() || performance.now() >= quadShotUntil);
+        if (performance.now() >= quadShotUntil) break;
+        spawnTutorialAsteroids(3, 2);
+        spcVO("58", "Keep firing, Cadet!");
+      }
+      await clearTutorialField();
+      await waitMs(800);
+    } },
+    { id: "freeze", run: async () => {
+      spawnTutorialPowerup("snowflake", tutZonePoint("center"));
+      spcVO("59", "Pick up the freeze power-up.");
+      await waitPowerupCollected("snowflake");
+      spawnTutorialAsteroids(3, 2);
+      spcVO("60", "Tap the freeze button on your HUD to activate it.");
+      showHudPointer("hudFreezeBtn", 6000);
+      await waitEvent("freeze");
+      hideHudPointer();
+      spcVO("61", "Objects are frozen for a short time. Blast 'em!");
+      spcVO("62", "Frozen stroids can be tossed too. Grab one and toss it.");
+      tutorialState.frozenTossBase = tutorialEvents.toss || 0;
+      while ((tutorialEvents.toss || 0) <= tutorialState.frozenTossBase) {
+        await waitFor(() =>
+          (tutorialEvents.toss || 0) > tutorialState.frozenTossBase || tutorialAsteroidsAllCleared());
+        if ((tutorialEvents.toss || 0) > tutorialState.frozenTossBase) break;
+        spawnTutorialAsteroids(3, 2);
+        freezeUntil = performance.now() + FREEZE_DURATION_MS;
+        playGameSfx("freeze", 0.9);
+        spcVO("63", "Good shooting — but try grabbing and tossing a frozen stroid.");
+      }
+      spcVO("64", "Very cool, Cadet.");
+      await clearTutorialField();
+      await waitMs(800);
+    } },
+    { id: "missile", run: async () => {
+      spawnTutorialPowerup("missile", tutZonePoint("center"));
+      spawnTutorialAsteroids(4, 2);
+      spcVO("65", "Pick up the missiles, Cadet.");
+      await waitPowerupCollected("missile");
+      spcVO("66", "Tap the missile weapon in the HUD to arm a missile.");
+      showHudPointer("hudMissileBtn", 6000);
+      await waitFor(() => missileAimMode);
+      hideHudPointer();
+      spcVO("67", "Now tap to set a target and watch the destruction.");
+      await waitFor(() => activeMissile);
+      await waitFor(() => !activeMissile);
+      spcVO("68", "Excellent work, Cadet.");
+      spcVO("69", "This concludes our training for today.");
+      await waitVOIdle();
+      await waitMs(800);
+      spcVO("70", "Go practice if you like — the Polyverse awaits.");
+      await waitVOIdle();
+      await waitMs(800);
+    } },
+  ];
+
+  // Drives the phase array start-to-finish; aborts cleanly if the session ends mid-phase.
+  async function runTutorial() {
+    const token = ++_tutRunToken;
+    abortTutorialAsync(); // drop any stragglers from a prior session
+    for (const k of Object.keys(tutorialEvents)) delete tutorialEvents[k];
+    tutorialFireBlocked = false;
+    tutorialState = {};
+    try {
+      for (tutorialPhase = 0; tutorialPhase < TUTORIAL_PHASES.length; tutorialPhase += 1) {
+        if (token !== _tutRunToken) return;
+        tutorialState = {};
+        await TUTORIAL_PHASES[tutorialPhase].run();
+      }
+    } catch (e) {
+      if (e === TUT_ABORT || token !== _tutRunToken) return; // expected on exit
+      console.warn("[tutorial] phase error", e);
+    }
+    if (token !== _tutRunToken) return;
+    endTutorial();
+  }
+
+  function endTutorial() {
+    try { localStorage.setItem(STUNT_TRAINING_DONE_KEY, "1"); } catch {}
+    tutorialPhase = -1;
+    hideHudPointer();
+    startStuntPractice(); // hand straight off into Practice
+  }
+
+  // stuntNotify: lightweight event counter fed from the existing action sites. No-op outside
+  // a tutorial session; the phase script reads these counts via waitEvent().
+  function stuntNotify(eventId) {
+    if (!stuntActive) return;
+    tutorialEvents[eventId] = (tutorialEvents[eventId] || 0) + 1;
+  }
+
+  // Called each frame while stuntActive — resolves satisfied async waiters + runs the active
+  // phase's optional onUpdate hook. (Level timer / spawns stay off via the stuntActive gate.)
+  function updateStunt(now) {
+    if (_tutWaiters.length) {
+      for (let i = _tutWaiters.length - 1; i >= 0; i -= 1) {
+        const w = _tutWaiters[i];
+        let ok = false;
+        try { ok = w.pred(); } catch { ok = false; }
+        if (ok) { _tutWaiters.splice(i, 1); w.resolve(); }
+      }
+    }
+    const ph = TUTORIAL_PHASES[tutorialPhase];
+    if (ph && ph.onUpdate) { try { ph.onUpdate(now); } catch {} }
+  }
+
+  // Part 10: tear down all tutorial state. Idempotent — safe to call from any exit path.
+  function cleanupTutorial() {
+    _tutRunToken += 1;        // abort any in-flight phase chain
+    abortTutorialAsync();
+    hideHudPointer();
+    tutorialPhase = -1;
+    tutorialState = {};
+    for (const k of Object.keys(tutorialEvents)) delete tutorialEvents[k];
+    tutorialFireBlocked = false;
+    commBoxController.setExclusiveSpeaker(false);
+    commBoxController.clearPortraitOverride();
+  }
+
   function exitStuntMode() {
+    cleanupTutorial();
     stuntActive = false;
     stuntAdvancing = false;
     hideArcadeOverlay();
     commBoxController.hideTicker();
     showModeSelect();   // tears down the arcade session (engineMode → menu) and lands on root
-    openArcadeMenu();   // then reopen the Arcade submenu where the Stunt Mode button lives
+    showStuntModeMenu(); // reopen the Stunt Mode sub-menu where Training/Practice live
+  }
+
+  // Part 9: Practice = endless arcade gameplay. Reached from the tutorial's end or the
+  // Stunt Mode → Practice button (once training is complete). CMDR is restored.
+  function startStuntPractice() {
+    cleanupTutorial();
+    stuntActive = false;
+    startArcadeNew();           // fresh level-1 arcade session (resets practiceEndless to false)...
+    // ...which we then flip to never-ending: the update loop holds the timer full + re-arms
+    // spawns while practiceEndless is set (see the arcade update block).
+    practiceEndless = true;
+    if (hudLevel) hudLevel.textContent = "PRACTICE";
   }
 
   function startPracticeMode() {
@@ -9809,9 +10275,15 @@ function initGalaxyCanvas() {
     // 2026-06-13: leaving Stunt Mode by any path is always a clean exit — never preserve it as a
     // resumable arcade session, and clear the flag so a later real game runs its level logic.
     if (stuntActive) {
+      cleanupTutorial();
       stuntActive = false;
       stuntAdvancing = false;
       commBoxController.hideTicker();
+      preserveArcade = false;
+    }
+    // 2026-06-15: endless Practice is never a resumable arcade save — always a clean exit.
+    if (practiceEndless) {
+      practiceEndless = false;
       preserveArcade = false;
     }
     const canPreserve = preserveArcade && engineMode === "arcade" && arcadeActive;
@@ -9968,6 +10440,14 @@ function initGalaxyCanvas() {
 
     if (engineMode === "arcade" && arcadeActive && !stuntActive) {
       const cfg = ARCADE_LEVELS[currentLevelIndex];
+      // 2026-06-15 (Part 9): Practice is endless — hold the timer full, suppress the low-timer
+      // warnings + final-15s gold force, keep a steady spawn stream, and recur UFOs.
+      if (practiceEndless) {
+        levelEndsAt = now + levelDurationMs;
+        levelRunStartAt = now;
+        if (spawnQueue < 2) spawnQueue = 2;
+        if (!ufo && !arcadeUfoSpawnAt) arcadeUfoSpawnAt = now + 15000 + Math.random() * 10000;
+      }
       // 2026-06-10: an active freeze pauses the level clock — shift every time anchor by dt
       // each frozen frame so remaining/elapsed (and the perimeter line) hold their position.
       const frozenNow = now < freezeUntil;
@@ -10113,7 +10593,7 @@ function initGalaxyCanvas() {
         arcadeUfoSpawnAt = 0;
       }
 
-      if (spawnQueue === 0 && spawnedTotal >= totalToSpawn && sim.asteroids.length === 0) {
+      if (!practiceEndless && spawnQueue === 0 && spawnedTotal >= totalToSpawn && sim.asteroids.length === 0) {
         levelComplete();
       }
 
@@ -10262,7 +10742,7 @@ function initGalaxyCanvas() {
             wrapEntity(ufo);
             clampSpeed(ufo);
             applyMotionHealth(ufo, now);
-            if (now >= ufo.teleportAt) {
+            if (now >= ufo.teleportAt && !ufo.tutorial) {
               ufo.x = playfield.x + playfield.w * (0.1 + Math.random() * 0.8);
               ufo.y = playfield.y + playfield.h * (0.1 + Math.random() * 0.8);
               ufo.teleportAt = now + (900 + Math.random() * 500);
@@ -11222,6 +11702,7 @@ function initGalaxyCanvas() {
     shotsFired += 1;
     if (landmine && isPointOnMine(landmine, sx, sy)) {
       triggerCrosshairFire();
+      stuntNotify("mine_tap"); // tutorial Phase 6: player engaged the bomb (arm / detonate)
       armLandmine();
       return true;
     }
@@ -11238,7 +11719,7 @@ function initGalaxyCanvas() {
       return true;
     }
     const hitIndex = findHitAsteroidIndex(sx, sy);
-    if (hitIndex >= 0) {
+    if (hitIndex >= 0 && !tutorialFireBlocked) {
       triggerCrosshairFire();
       splitAsteroidByIndex(hitIndex);
       stuntNotify("shoot");
@@ -11771,9 +12252,11 @@ function initGalaxyCanvas() {
       // 2026-06-10: no minimum hold before a toss — a quick flick released in <500ms used to
       // fail the grabbed/hold-time gate and drop the stroid. launchStroidToss's own guards
       // (recent sample + ≥10px movement) already separate a flick from a static tap.
+      const wasGrabbed = stroidToss.active;
       const didLaunch = stroidToss.active ? launchStroidToss(now) : false;
       if (didLaunch) stuntNotify("toss");
       if (!didLaunch) {
+        if (wasGrabbed) stuntNotify("toss_fail"); // grabbed but released without a flick (Phase 5 coaching)
         cancelStroidToss();
       }
       galaxyGesture = null;
@@ -12007,6 +12490,13 @@ function initGalaxyCanvas() {
     },
     startStuntMode() {
       startStuntMode();
+    },
+    showStuntModeMenu() {
+      showStuntModeMenu();
+    },
+    startStuntPractice() {
+      if (!isStuntTrainingComplete()) return; // gated until training is finished
+      startStuntPractice();
     },
     triggerBoom() {
       // no-op in current arcade interaction model

@@ -252,6 +252,12 @@
             <div id="arcadeLevelGrid" class="arcadeLevelGrid"></div>
             <button id="btnArcadeLevelBack" class="modeBackBtn" type="button">← Back</button>
           </div>
+          <div id="stuntModeMenuPanel" class="arcadeMenuPanel" hidden aria-hidden="true">
+            <div class="arcadeMenuTitle">Stunt Mode</div>
+            <button id="btnStuntTraining" class="modeBtn" type="button">Training</button>
+            <button id="btnStuntPractice" class="modeBtn" type="button">Practice</button>
+            <button id="btnStuntBack" class="modeBackBtn" type="button">← Back</button>
+          </div>
           <div id="debugLevelPanel" class="debugLevelPanel" hidden aria-hidden="true">
             <label class="debugLevelLabel" for="debugLevelSelect">Debug Level Select</label>
             <div class="debugLevelRow">
@@ -358,7 +364,7 @@
         <div style="flex-shrink:0; margin-right:8px;
           border-right:1px solid #004444; padding-right:8px;
           display:flex;flex-direction:column;justify-content:center;">
-          <div style="color:#00e8e8;font-family:monospace;
+          <div id="commanderCallsign" style="color:#00e8e8;font-family:monospace;
             font-size:8px;letter-spacing:2px;font-weight:bold;">CMDR</div>
           <div style="color:#004444;font-family:monospace;
             font-size:7px;letter-spacing:1px;margin-top:2px;">441.7</div>

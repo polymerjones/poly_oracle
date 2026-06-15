@@ -39,3 +39,14 @@ Every item below must be resolved before App Store submission:
 - [ ] Remove forced missile spawn at level start (`missileForceSpawnedThisLevel`)
 - [ ] Search script.js for `DEBUG: revert before release` and resolve **all** hits
 - [ ] Verify `hasBeatenGame()` has no overrides
+
+### Stunt Mode (Training tutorial)
+
+- [ ] Record `SPC_01.mp3` … `SPC_70.mp3` → `vo/` folder (SPC is the female Specialist)
+- [ ] Supply `spc_portrait.png` → `vo/` folder (falls back to a teal "SPC" placeholder if absent)
+- [ ] Once SPC audio is recorded, add its keys to the `SPC_VO_AVAILABLE` set in `script.js`
+      (currently empty → all tutorial lines are text-only captions)
+- [ ] Verify all 10 tutorial phases advance correctly on device (laser, plasma, UFO, toss,
+      landmine, bomb inventory, quad, freeze, missile → Practice handoff)
+- [ ] Confirm Stunt Mode → Practice unlocks only after training completes
+      (`poly_stunt_training_complete` localStorage key)

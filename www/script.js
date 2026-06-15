@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-15 11:55";
+const BUILD_TS = "2026-06-15 12:56";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -5784,9 +5784,13 @@ function initGalaxyCanvas() {
   let _tutRunToken = 0;            // bumped on any exit to abort in-flight async phase chains
   let _tutWaiters = [];            // [{ pred, resolve, reject }] polled each frame by updateStunt
   let _tutTimers = [];             // pending waitMs timeouts, cleared on abort
-  // SPC voice queue — feeds commBoxController one caption at a time (the comm queue caps at 2).
+  // SPC voice — captions are pinned directly to the comm ticker (no hide/show flicker between
+  // lines) and advance on a tight timer (or audio end when recorded).
   let _spcQueue = [];
   let _spcPlaying = false;
+  let _spcTimer = null;
+  let _spcAudio = null;
+  let tutorialBlockPlasmaToss = false; // Phase 2: only the laser is taught — block net/toss
   // Stunt → Practice: endless arcade gameplay (no timer, no level-complete, score not submitted).
   let practiceEndless = false;
   // SPC_xx.mp3 audio is recorded later; until a key is listed here, the line is text-only.
@@ -7416,6 +7420,7 @@ function initGalaxyCanvas() {
   }
 
   function startStroidToss(index, point, pointerId, now) {
+    if (tutorialBlockPlasmaToss) return false; // tutorial laser step only teaches the laser
     const asteroid = sim.asteroids[index];
     // 2026-06-11: an in-flight (flaming) tossed stroid can't be grabbed again — re-grabbing
     // pinned it in place (grab zeroes velocity), which is what stalled upward tosses.
@@ -8238,6 +8243,7 @@ function initGalaxyCanvas() {
   }
 
   function beginPlasmaCage(start, current, now) {
+    if (tutorialBlockPlasmaToss) return false; // tutorial laser step only teaches the laser
     if (!isPlasmaCageReady(now)) return false;
     plasmaCage.active = true;
     plasmaCage.startX = start.x;
@@ -8379,6 +8385,8 @@ function initGalaxyCanvas() {
       const destroyedCount = destroyAsteroidsInPlasmaCage(rect);
       if (destroyedCount > 0) stuntNotify("plasma");
       else stuntNotify("plasma_miss"); // tutorial Phase 3 coaching on an empty net
+      // In the tutorial the net never goes on cooldown — the cadet can keep practicing freely.
+      if (stuntActive) rechargePlasmaNow();
       window.pixiRenderer?.triggerPlasmaRectFlash?.();
       const fireKey = destroyedCount > 0 ? resolveGameSfxKey("plasma_fire", "ufo_destroy") : "";
       // FIXED 2026-06-09: forceHtmlOnIOS covers iOS Safari; `important` bypasses the native
@@ -9772,7 +9780,7 @@ function initGalaxyCanvas() {
     return waitFor(() => (tutorialEvents[name] || 0) >= base + n);
   }
   function waitVOIdle() {
-    return waitFor(() => !_spcPlaying && _spcQueue.length === 0 && !commBoxController.isVOActive());
+    return waitFor(() => !_spcPlaying && _spcQueue.length === 0);
   }
   function waitPowerupCollected(type) {
     return waitFor(() => !powerups.some((p) => p.type === type));
@@ -9782,13 +9790,19 @@ function initGalaxyCanvas() {
     _tutWaiters = [];
     _tutTimers.forEach((t) => { clearTimeout(t.id); try { t.reject(TUT_ABORT); } catch {} });
     _tutTimers = [];
-    _spcQueue = [];
-    _spcPlaying = false;
+    spcFlush();
   }
 
-  // ── SPC voice (Part 3) — queues captions one at a time into the comm box ──
+  // ── SPC voice (Part 3) — captions pinned to the comm ticker; lines advance on a tight timer
+  // (or on audio-end once SPC_*.mp3 exist). No hide/show between lines = no flicker. ──
   function spcVoSrc(key) {
     return SPC_VO_AVAILABLE.has(key) ? `vo/SPC_${key}.mp3` : null;
+  }
+  function spcFlush() {
+    _spcQueue = [];
+    _spcPlaying = false;
+    if (_spcTimer) { clearTimeout(_spcTimer); _spcTimer = null; }
+    if (_spcAudio) { try { _spcAudio.pause(); } catch {} _spcAudio = null; }
   }
   function spcVO(key, text) {
     _spcQueue.push({ key, text });
@@ -9798,15 +9812,27 @@ function initGalaxyCanvas() {
     if (_spcPlaying || _spcQueue.length === 0) return;
     const { key, text } = _spcQueue.shift();
     _spcPlaying = true;
-    const audioSrc = spcVoSrc(key);
-    const duration = Math.max(2400, Math.min(7000, text.length * 62));
-    commBoxController.queueVO({
-      lines: [text],
-      audioSrc,
-      duration,
-      _spc: true, // bypass the exclusive-speaker guard (CMDR lines are dropped)
-      _onEnd: () => { _spcPlaying = false; pumpSpc(); },
-    });
+    commBoxController.show();
+    commBoxController.pinTicker(text); // types text + keeps ticker visible (cancels auto-hide)
+    const src = spcVoSrc(key);
+    const dur = Math.max(1300, Math.min(5000, text.length * 46));
+    const advance = () => {
+      if (_spcTimer) { clearTimeout(_spcTimer); _spcTimer = null; }
+      _spcAudio = null;
+      _spcPlaying = false;
+      pumpSpc();
+    };
+    if (src) {
+      try {
+        _spcAudio = new Audio(src);
+        _spcAudio.volume = 0.85;
+        _spcAudio.onended = advance;
+        _spcAudio.play().catch(() => { _spcTimer = setTimeout(advance, dur); });
+        _spcTimer = setTimeout(advance, 12000); // safety net if 'ended' never fires
+      } catch { _spcTimer = setTimeout(advance, dur); }
+    } else {
+      _spcTimer = setTimeout(advance, dur);
+    }
   }
 
   // ── HUD pointer (Part 4) ──────────────────────────────────────────────────
@@ -9855,7 +9881,12 @@ function initGalaxyCanvas() {
       return { x: cx + (Math.random() - 0.5) * playfield.w * 0.5, y: playfield.y + playfield.h * 0.18 };
     }
     if (zone === "center") return { x: cx, y: cy };
-    return randomPerimeterPoint();
+    // default ("random"): scatter in the central ~55% of the playfield, never on the edges —
+    // tutorial stroids should be easy to see and reach.
+    return {
+      x: cx + (Math.random() - 0.5) * playfield.w * 0.55,
+      y: cy + (Math.random() - 0.5) * playfield.h * 0.5,
+    };
   }
   function spawnTutorialAsteroids(count, kind = 2, options = {}) {
     const refs = [];
@@ -9961,6 +9992,7 @@ function initGalaxyCanvas() {
     } },
     { id: "laser", run: async () => {
       tutorialFireBlocked = false;
+      tutorialBlockPlasmaToss = true; // only the laser this step
       spawnTutorialAsteroids(1, 3);
       spcVO("08", "These are the stroids.");
       spcVO("09", "Our job is to clear them from the Polyverse.");
@@ -9969,9 +10001,10 @@ function initGalaxyCanvas() {
       await waitFor(tutorialAsteroidsAllCleared);
       spcVO("12", "Fantastic, Cadet. You'll show these stroids who's boss.");
       await waitVOIdle();
-      await waitMs(1200);
+      await waitMs(700);
     } },
     { id: "plasma", run: async () => {
+      tutorialBlockPlasmaToss = false; // net + toss unlocked from here on
       spawnTutorialAsteroids(2, 2);
       spcVO("13", "Next, the plasma net weapon.");
       spcVO("14", "Tap, drag and hold to set the net.");
@@ -9988,7 +10021,7 @@ function initGalaxyCanvas() {
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(3, 2));
       spcVO("17b", "NICE! Great work, Cadet.");
       await clearTutorialField();
-      await waitMs(800);
+      await waitMs(350);
     } },
     { id: "ufo", run: async () => {
       spawnTutorialAsteroids(3, 2);
@@ -10016,7 +10049,7 @@ function initGalaxyCanvas() {
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(4, 2));
       spcVO("34", "Nice work, Cadet. You learn fast.");
       await clearTutorialField();
-      await waitMs(800);
+      await waitMs(350);
     } },
     { id: "toss", run: async () => {
       spawnTutorialAsteroids(3, 3);
@@ -10042,7 +10075,7 @@ function initGalaxyCanvas() {
       spcVO("40", "Very good, Cadet.");
       spawnTutorialAsteroids(6, 2);
       spcVO("41", "Things will get hectic out there.");
-      await waitMs(2000);
+      await waitMs(900);
     } },
     { id: "landmine", run: async () => {
       spawnTutorialLandmine(tutZonePoint("center"));
@@ -10064,7 +10097,7 @@ function initGalaxyCanvas() {
       spcVO("48", "Boom. That was fantastic, Cadet.");
       spcVO("49", "Bombs can save you from some hairy situations.");
       await clearTutorialField();
-      await waitMs(800);
+      await waitMs(350);
     } },
     { id: "bombInventory", run: async () => {
       spawnTutorialPowerup("bomb", tutZonePoint("center"));
@@ -10080,7 +10113,7 @@ function initGalaxyCanvas() {
       spcVO("54", "Arm it, then tap again to detonate.");
       await waitEvent("bomb");
       await clearTutorialField();
-      await waitMs(800);
+      await waitMs(350);
     } },
     { id: "quadshot", run: async () => {
       spawnTutorialPowerup("quadshot", tutZonePoint("center"));
@@ -10096,7 +10129,7 @@ function initGalaxyCanvas() {
         spcVO("58", "Keep firing, Cadet!");
       }
       await clearTutorialField();
-      await waitMs(800);
+      await waitMs(350);
     } },
     { id: "freeze", run: async () => {
       spawnTutorialPowerup("snowflake", tutZonePoint("center"));
@@ -10121,7 +10154,7 @@ function initGalaxyCanvas() {
       }
       spcVO("64", "Very cool, Cadet.");
       await clearTutorialField();
-      await waitMs(800);
+      await waitMs(350);
     } },
     { id: "missile", run: async () => {
       spawnTutorialPowerup("missile", tutZonePoint("center"));
@@ -10138,10 +10171,10 @@ function initGalaxyCanvas() {
       spcVO("68", "Excellent work, Cadet.");
       spcVO("69", "This concludes our training for today.");
       await waitVOIdle();
-      await waitMs(800);
+      await waitMs(350);
       spcVO("70", "Go practice if you like — the Polyverse awaits.");
       await waitVOIdle();
-      await waitMs(800);
+      await waitMs(350);
     } },
   ];
 
@@ -10151,6 +10184,7 @@ function initGalaxyCanvas() {
     abortTutorialAsync(); // drop any stragglers from a prior session
     for (const k of Object.keys(tutorialEvents)) delete tutorialEvents[k];
     tutorialFireBlocked = false;
+    tutorialBlockPlasmaToss = false;
     tutorialState = {};
     try {
       for (tutorialPhase = 0; tutorialPhase < TUTORIAL_PHASES.length; tutorialPhase += 1) {
@@ -10183,13 +10217,20 @@ function initGalaxyCanvas() {
   // Called each frame while stuntActive — resolves satisfied async waiters + runs the active
   // phase's optional onUpdate hook. (Level timer / spawns stay off via the stuntActive gate.)
   function updateStunt(now) {
+    // Keep tutorial powerups perpetually fresh so an app-switch (or any long pause) never makes
+    // them blink red + expire — they live until collected.
+    for (let i = 0; i < powerups.length; i += 1) powerups[i].spawnedAt = now;
     if (_tutWaiters.length) {
+      let resolvedAction = false;
       for (let i = _tutWaiters.length - 1; i >= 0; i -= 1) {
         const w = _tutWaiters[i];
         let ok = false;
         try { ok = w.pred(); } catch { ok = false; }
-        if (ok) { _tutWaiters.splice(i, 1); w.resolve(); }
+        if (ok) { _tutWaiters.splice(i, 1); w.resolve(); resolvedAction = true; }
       }
+      // The player just completed/triggered something — drop any still-queued instructional VO
+      // so the next line (usually the success/transition beat) plays immediately. No dead air.
+      if (resolvedAction) spcFlush();
     }
     const ph = TUTORIAL_PHASES[tutorialPhase];
     if (ph && ph.onUpdate) { try { ph.onUpdate(now); } catch {} }
@@ -10204,7 +10245,9 @@ function initGalaxyCanvas() {
     tutorialState = {};
     for (const k of Object.keys(tutorialEvents)) delete tutorialEvents[k];
     tutorialFireBlocked = false;
+    tutorialBlockPlasmaToss = false;
     commBoxController.setExclusiveSpeaker(false);
+    commBoxController.hideTicker();
     commBoxController.clearPortraitOverride();
   }
 
@@ -11749,7 +11792,9 @@ function initGalaxyCanvas() {
       // so it reflects the new remaining time automatically.
       const nowP = performance.now();
       levelEndsAt = Math.min(levelEndsAt + 30000, nowP + levelDurationMs);
-      playGameSfx("life_gain", 0.7); // chime
+      _timerRemainingMs = levelDurationMs; // snap the perimeter visibly back to full
+      playGameSfx("bling", 0.95);          // clear, audible pickup
+      playGameSfx("life_gain", 1.0);       // + chime
       cssFlash("#ffffff", 0.2, 250);
       return;
     }

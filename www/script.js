@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-14 17:11";
+const BUILD_TS = "2026-06-15 10:35";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -544,16 +544,26 @@ const SFX = {
 
 // === Level Config ===
 const ARCADE_LEVELS = [
-  { level: 1, time: 48, totalToClear: 2, startSpawn: 2, spawnEveryMs: 0, maxOnScreen: 12 },
-  { level: 2, time: 50, totalToClear: 3, startSpawn: 3, spawnEveryMs: 0, maxOnScreen: 12 },
-  { level: 3, time: 52, totalToClear: 7, startSpawn: 3, spawnEveryMs: 2200, maxOnScreen: 12 },
-  { level: 4, time: 54, totalToClear: 9, startSpawn: 4, spawnEveryMs: 2200, maxOnScreen: 12 },
-  { level: 5, time: 56, totalToClear: 11, startSpawn: 4, spawnEveryMs: 2000, maxOnScreen: 12 },
-  { level: 6, time: 58, totalToClear: 13, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
-  { level: 7, time: 60, totalToClear: 15, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
-  { level: 8, time: 64, totalToClear: 17, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14 },
-  { level: 9, time: 68, totalToClear: 20, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14 },
+  // 2026-06-15: early levels bumped denser (were 2/3/7/9 to-clear) so the opening doesn't read
+  // empty. L1/L2 have no trickle (spawnEveryMs 0), so totalToClear MUST equal startSpawn there.
+  { level: 1, time: 48, totalToClear: 4, startSpawn: 4, spawnEveryMs: 0, maxOnScreen: 12 },
+  { level: 2, time: 50, totalToClear: 6, startSpawn: 6, spawnEveryMs: 0, maxOnScreen: 12 },
+  { level: 3, time: 52, totalToClear: 10, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12 },
+  { level: 4, time: 54, totalToClear: 12, startSpawn: 6, spawnEveryMs: 2000, maxOnScreen: 12 },
+  { level: 5, time: 56, totalToClear: 13, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12 },
+  { level: 6, time: 58, totalToClear: 14, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
+  { level: 7, time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
+  { level: 8, time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14 },
+  { level: 9, time: 68, totalToClear: 21, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14 },
   { level: 10, time: 75, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14 },
+  // 2026-06-15: second act — the run no longer ends at level 10. Levels 11-15 reuse the
+  // level-10 boss music + background (musicForLevel/bgKeyForLevel both clamp at >=10) and the
+  // hotroid sprites, ramping density/time. "YOU WIN" now fires after clearing level 15.
+  { level: 11, time: 78, totalToClear: 27, startSpawn: 7, spawnEveryMs: 1350, maxOnScreen: 15 },
+  { level: 12, time: 80, totalToClear: 30, startSpawn: 8, spawnEveryMs: 1300, maxOnScreen: 15 },
+  { level: 13, time: 82, totalToClear: 33, startSpawn: 8, spawnEveryMs: 1250, maxOnScreen: 16 },
+  { level: 14, time: 84, totalToClear: 36, startSpawn: 9, spawnEveryMs: 1200, maxOnScreen: 16 },
+  { level: 15, time: 88, totalToClear: 40, startSpawn: 9, spawnEveryMs: 1150, maxOnScreen: 16 },
 ];
 
 // Stunt (tutorial) Mode — a no-fail walkthrough of the core verbs. Each step shows an
@@ -674,16 +684,46 @@ const canonicalAnswers = [
   "Yeppurs",
   "Yeah, buddy",
   "Heck Yes",
+  "Without a doubt",
+  "Signs point to yes",
   "Nope",
   "I don't think so",
+  "Don't count on it",
   "That is for God to decide",
   "Ask another day",
+  "The stars say wait",
   "You're asking the wrong question, think about it and ask another day",
   "Yes",
   "Not today",
   "Heck No",
   "No",
 ];
+
+// 2026-06-15: weighted reveal odds. Default weight is 1; the deflection / non-answers are
+// dialed down so a real yes/no lands far more often. The "wrong question" line in particular
+// was ~1-in-13 (too frequent) — now it's rare. Used by pickCanonicalAnswer() on reveal.
+const ANSWER_WEIGHTS = {
+  "You're asking the wrong question, think about it and ask another day": 0.18,
+  "That is for God to decide": 0.5,
+  "Ask another day": 0.6,
+  "The stars say wait": 0.7,
+};
+
+function pickWeighted(list, weightOf) {
+  let total = 0;
+  for (const item of list) total += Math.max(0, weightOf(item));
+  if (total <= 0) return pick(list);
+  let r = Math.random() * total;
+  for (const item of list) {
+    r -= Math.max(0, weightOf(item));
+    if (r < 0) return item;
+  }
+  return list[list.length - 1];
+}
+
+function pickCanonicalAnswer() {
+  return pickWeighted(canonicalAnswers, (a) => ANSWER_WEIGHTS[a] ?? 1);
+}
 
 const packs = {
   classic: {
@@ -3200,7 +3240,7 @@ function applySettingsToUi() {
   document.body.classList.toggle("minimal", state.minimal);
   document.body.classList.toggle("verbose-details", state.verboseDetails);
 
-  revealAudio.volume = state.whisper ? 0.32 : 0.82;
+  revealAudio.volume = state.whisper ? 0.3 : 0.72;
   if (galaxyController) galaxyController.setMinimal(state.minimal);
 }
 
@@ -3531,7 +3571,7 @@ async function revealAnswer() {
 
   questionInput.value = normalizedQuestion;
 
-  const answerLine = pick(canonicalAnswers);
+  const answerLine = pickCanonicalAnswer();
   const polarity = inferPolarity(answerLine);
   const microLine = pick(packs[state.selectedPack][polarity]);
   const modeId = effectiveModeId();
@@ -3552,7 +3592,9 @@ async function revealAnswer() {
     hideAnswerBar();
 
     startCrystalOverlay();
-    audioEngine.play(SFX.MAIN, { volume: 0.9, rate: 1.0 });
+    // 2026-06-15: reveal SFX levels pulled down a touch and normalized so the spoken
+    // question/answer (TTS at full volume, fired after these) reads clearly over the bed.
+    audioEngine.play(SFX.MAIN, { volume: 0.82, rate: 1.0 });
 
     const burstPromise = runTapBurst();
     const burstFlashInterval = setInterval(() => {
@@ -3572,7 +3614,7 @@ async function revealAnswer() {
     });
 
     const pre = Math.random() < 0.5 ? SFX.PRE_A : SFX.PRE_B;
-    audioEngine.play(pre, { volume: 0.85, rate: 1.0 });
+    audioEngine.play(pre, { volume: 0.78, rate: 1.0 });
     const tensionEnd = performance.now() + 700;
     while (performance.now() < tensionEnd) {
       const now = performance.now();
@@ -3589,7 +3631,7 @@ async function revealAnswer() {
     }
 
     fadeInAnswerBar();
-    const barRevealHandle = audioEngine.play(SFX.PRE_B, { volume: 0.95, rate: 1.0 }); // FIXED 2026-06-08: was PRE_A (duplicate)
+    const barRevealHandle = audioEngine.play(SFX.PRE_B, { volume: 0.82, rate: 1.0 }); // FIXED 2026-06-08: was PRE_A (duplicate)
     // Keep sparkling continuously right up until the answer pops — no bare spot
     // between the last sparkle and the reveal. Cleared after the text is shown below.
     const postSpark = setInterval(() => triggerOrbSparkle(0.7), 140);
@@ -3619,7 +3661,7 @@ async function revealAnswer() {
     setAnswerTextVisible(true);
     setRevealBgStrobe(false);
     triggerAnswerTextRevealFx();
-    audioEngine.play(SFX.POST, { volume: 0.95, rate: 1.0 });
+    audioEngine.play(SFX.POST, { volume: 0.85, rate: 1.0 });
     await delay(620);
 
     if (state.voiceReadsAnswer !== false) {
@@ -4157,14 +4199,34 @@ function scheduleRubHaptic() {
   }, Math.max(120, 1000 / orbRubPulseHz));
 }
 
+// 2026-06-15: a second looping layer (orb_rub2.mp3) sits on top of the synth drone for a
+// richer rub texture. Plain looping <audio> (matches revealAudio); volume respects whisper.
+let orbRub2Audio = null;
+function startOrbRub2Loop() {
+  try {
+    if (!orbRub2Audio) {
+      orbRub2Audio = new Audio("gamesfx/orb_rub2.mp3");
+      orbRub2Audio.loop = true;
+    }
+    orbRub2Audio.volume = state.whisper ? 0.18 : 0.45;
+    if (orbRub2Audio.paused) orbRub2Audio.play().catch(() => {});
+  } catch { /* ignore */ }
+}
+function stopOrbRub2Loop() {
+  if (!orbRub2Audio) return;
+  try { orbRub2Audio.pause(); } catch { /* ignore */ }
+}
+
 // Start the drone + the synced hard-pulse haptic loop (both idempotent).
 function beginRubFeedback() {
   orbRubDrone.start();
+  startOrbRub2Loop();
   if (!orbRubHapticTimer) scheduleRubHaptic();
 }
 
 function stopRubFeedback() {
   orbRubDrone.stop();
+  stopOrbRub2Loop();
   clearTimeout(orbRubHapticTimer);
   orbRubHapticTimer = null;
 }
@@ -4193,6 +4255,11 @@ function onOrbRubStart(event) {
   orbRubLastX = p.x;
   orbRubLastY = p.y;
   orbRubTravel = 0;
+  // 2026-06-15: each rub gets a fresh random hue + linger time. The glow + trail marks read
+  // these CSS vars (hue-rotates the base cyan/purple gradient; sets the mark fade duration),
+  // so every rub feels different.
+  orb.style.setProperty("--rub-hue", `${Math.floor(Math.random() * 360)}deg`);
+  orb.style.setProperty("--rub-fade", `${(1.3 + Math.random() * 2.4).toFixed(2)}s`);
   orbRubPulseHz = ORB_RUB_PULSE_CENTER + (ORB_RUB_PULSE_EDGE - ORB_RUB_PULSE_CENTER) * p.centerRatio;
   placeOrbRubGlow(p.x, p.y);
   orb.classList.add("rubbing");
@@ -6435,6 +6502,46 @@ function initGalaxyCanvas() {
     if (edge === 1) return { x: right - inset, y: top + Math.random() * playfield.h };
     if (edge === 2) return { x: left + Math.random() * playfield.w, y: bottom - inset };
     return { x: left + inset, y: top + Math.random() * playfield.h };
+  }
+
+  // 2026-06-15: a point inside the playfield, clear of the center where the ship sits, so a
+  // freshly-seeded asteroid never spawns on top of the player. Used to mix interior spawns
+  // into the early levels (they used to enter only from the rim, which read as empty).
+  function randomInteriorPoint(minCenterDist = 130) {
+    const cx = sim.width / 2;
+    const cy = sim.height / 2;
+    const inset = 30;
+    const minX = playfield.x + inset;
+    const maxX = playfield.x + playfield.w - inset;
+    const minY = playfield.y + inset;
+    const maxY = playfield.y + playfield.h - inset;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const x = minX + Math.random() * Math.max(1, maxX - minX);
+      const y = minY + Math.random() * Math.max(1, maxY - minY);
+      if (Math.hypot(x - cx, y - cy) >= minCenterDist) return { x, y };
+    }
+    const ang = Math.random() * Math.PI * 2;
+    return {
+      x: clamp(cx + Math.cos(ang) * minCenterDist, minX, maxX),
+      y: clamp(cy + Math.sin(ang) * minCenterDist, minY, maxY),
+    };
+  }
+
+  // 2026-06-15: powerups used to spawn at a hardcoded y:140 margin that ignored the real HUD
+  // height + safe-area inset, so on notched devices a powerup (e.g. the missile) could land
+  // UNDER the HUD where its collect-tap is eaten by the HUD overlay. Spawn inside the computed
+  // playfield (already HUD-aware) instead, inset by the sprite's half-size so it stays fully
+  // tappable.
+  function randomPowerupPoint(r = POWERUP_SPRITE_SIZE / 2) {
+    const margin = r + 10;
+    const minX = playfield.x + margin;
+    const maxX = playfield.x + playfield.w - margin;
+    const minY = playfield.y + margin;
+    const maxY = playfield.y + playfield.h - margin;
+    return {
+      x: minX + Math.random() * Math.max(1, maxX - minX),
+      y: minY + Math.random() * Math.max(1, maxY - minY),
+    };
   }
 
   function clampSpeed(entity) {
@@ -9276,8 +9383,12 @@ function initGalaxyCanvas() {
     if (cfg.level === 10) {
       playGameSfx("lastlevelstart", 0.96);
     }
+    // 2026-06-15: early levels felt empty when every starting asteroid entered from the rim.
+    // Seed a share of them in the interior (clear of the center ship) so the field reads full
+    // from the first second. Tapers to 0 once the later levels are naturally busy.
+    const interiorShare = cfg.level <= 2 ? 0.5 : cfg.level <= 4 ? 0.35 : 0;
     for (let i = 0; i < cfg.startSpawn; i += 1) {
-      const p = randomPerimeterPoint();
+      const p = Math.random() < interiorShare ? randomInteriorPoint() : randomPerimeterPoint();
       spawnAsteroid(p.x, p.y, 3, false);
       spawnedTotal += 1;
     }
@@ -9494,7 +9605,10 @@ function initGalaxyCanvas() {
     window.galaxyBackground?.show();
     window.galaxyBackground?.setTheme(1);
     window.galaxyBackground?.setLevel(1);
-    playArcadeMusicForLevel(1);
+    // 2026-06-15: Stunt (tutorial) Mode uses the dedicated tutorial track. Passing level 0 to
+    // musicForLevel returns MUSIC.TUTORIAL (Stroids_tutorial_instrumental) instead of the
+    // level-1 arcade loop.
+    playArcadeMusicForLevel(0);
 
     commBoxController.show();
     commBoxController.setDamageState("normal");
@@ -9899,10 +10013,11 @@ function initGalaxyCanvas() {
         // NEW powerup spawns (existing ones on screen stay collectible).
         const missileBusy = playerMissileInventory > 0 || activeMissile;
         if (!missileBusy && powerups.length < POWERUP_MAX_ONSCREEN && cfg.level >= 1 && now >= nextBombPowerupAt) {
+          const puPt = randomPowerupPoint();
           powerups.push({
             type: pickPowerupType(cfg.level),
-            x: 80 + Math.random() * Math.max(1, sim.width - 160),
-            y: 140 + Math.random() * Math.max(1, sim.height - 300),
+            x: puPt.x,
+            y: puPt.y,
             r: 22,
             spawnedAt: now,
             opacity: 1.0,
@@ -9917,10 +10032,11 @@ function initGalaxyCanvas() {
         if (!missileForceSpawnedThisLevel && missileUnlocked(cfg.level) && !missileBusy
             && !powerups.some((p) => p.type === "missile")) {
           missileForceSpawnedThisLevel = true;
+          const missilePt = randomPowerupPoint();
           powerups.push({
             type: "missile",
-            x: 80 + Math.random() * Math.max(1, sim.width - 160),
-            y: 140 + Math.random() * Math.max(1, sim.height - 300),
+            x: missilePt.x,
+            y: missilePt.y,
             r: 22,
             spawnedAt: now,
             opacity: 1.0,
@@ -9936,10 +10052,11 @@ function initGalaxyCanvas() {
         if (!goldbarsForceSpawnedThisLevel && levelRemainingMs <= 15000 && levelRemainingMs > 0
             && !powerups.some((p) => p.type === "goldbars")) {
           goldbarsForceSpawnedThisLevel = true;
+          const goldPt = randomPowerupPoint();
           powerups.push({
             type: "goldbars",
-            x: 80 + Math.random() * Math.max(1, sim.width - 160),
-            y: 140 + Math.random() * Math.max(1, sim.height - 300),
+            x: goldPt.x,
+            y: goldPt.y,
             r: 22,
             spawnedAt: now,
             opacity: 1.0,

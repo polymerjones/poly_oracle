@@ -600,7 +600,8 @@ h1 {
     rgba(186, 240, 255, 0.72) 26%,
     rgba(196, 131, 255, 0.34) 54%,
     rgba(196, 131, 255, 0) 72%);
-  filter: blur(5px);
+  /* --rub-hue is randomized per rub in JS (onOrbRubStart) to recolor the base gradient. */
+  filter: blur(5px) hue-rotate(var(--rub-hue, 0deg));
   mix-blend-mode: screen;
   transition: opacity 200ms ease, transform 160ms ease;
   will-change: left, top, opacity;
@@ -624,9 +625,10 @@ h1 {
     rgba(186, 240, 255, 0.38) 32%,
     rgba(196, 131, 255, 0.2) 60%,
     rgba(196, 131, 255, 0) 76%);
-  filter: blur(5px);
+  /* Inherits --rub-hue / --rub-fade (randomized per rub in JS) for color + fade variety. */
+  filter: blur(5px) hue-rotate(var(--rub-hue, 0deg));
   mix-blend-mode: screen;
-  animation: orbRubLinger 2s ease-out forwards;
+  animation: orbRubLinger var(--rub-fade, 2s) ease-out forwards;
   will-change: opacity, transform;
 }
 

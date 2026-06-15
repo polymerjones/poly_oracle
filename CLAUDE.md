@@ -40,6 +40,16 @@ Every item below must be resolved before App Store submission:
 - [ ] Search script.js for `DEBUG: revert before release` and resolve **all** hits
 - [ ] Verify `hasBeatenGame()` has no overrides
 
+### Levels 12-15 (second act)
+
+- [ ] Record `vo/gauntlet_intro.mp3` (level 15 commander intro — caption fallback in place)
+- [ ] Supply `assets/music/L14_critical.mp3` and `assets/music/L15_gauntlet.mp3` music tracks,
+      then point `getMusicForLevel()` L14/L15 back to `MUSIC.L14_CRITICAL` / `MUSIC.L15_GAUNTLET`
+      (currently fall back to L13 / L10-boss because the files are missing)
+- [ ] Wire `dualUfo` (L15) — needs the single→multi UFO refactor (stubbed; see
+      `setupUfoSpawnForLevel` TODO). Test dual UFO behavior on level 15 once implemented.
+- [ ] Wire `waves` (L15 `cfg.waves`) — second-wave spawning (stubbed; see `startLevel` TODO)
+
 ### Stunt Mode (Training tutorial)
 
 - [ ] Record `SPC_01.mp3` … `SPC_70.mp3` → `vo/` folder (SPC is the female Specialist)

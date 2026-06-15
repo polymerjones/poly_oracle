@@ -20,6 +20,18 @@ const galaxyBackground = (() => {
     { sky: "#030800", neb: [[60, 160, 0], [100, 200, 10], [40, 120, 0]], star: [220, 255, 160], gas: [[80, 200, 0], [120, 240, 20], [60, 160, 0]] },
     // L10 — Hellfire (red/orange)
     { sky: "#1E0200", neb: [[200, 30, 0], [240, 80, 0], [160, 15, 0]], star: [255, 160, 60], gas: [[220, 70, 0], [255, 110, 10], [180, 45, 0]] },
+    // 2026-06-15: second act (levels 11-15) — Part 5. star[] is the single star tint the renderer
+    // uses; neb[]/gas[] are the nebula/gas cloud palettes (RGB).
+    // L11 — Void Grey (cold, high-contrast)
+    { sky: "#0A0A0A", neb: [[26, 26, 26], [42, 42, 42], [20, 20, 20]], star: [204, 204, 204], gas: [[40, 40, 40], [60, 60, 60], [30, 30, 30]] },
+    // L12 — Cyberpunk Neon (purple-blue swirl, cyan/magenta stars)
+    { sky: "#050510", neb: [[26, 0, 64], [0, 8, 48], [40, 0, 90]], star: [0, 255, 255], gas: [[0, 200, 255], [150, 0, 255], [60, 0, 140]] },
+    // L13 — Virtual Boy Red (pure red + black)
+    { sky: "#000000", neb: [[26, 0, 0], [51, 0, 0], [20, 0, 0]], star: [255, 0, 0], gas: [[136, 0, 0], [204, 0, 0], [80, 0, 0]] },
+    // L14 — Forest Green
+    { sky: "#050F05", neb: [[10, 31, 10], [13, 43, 13], [8, 24, 8]], star: [0, 255, 68], gas: [[0, 200, 40], [136, 255, 0], [68, 204, 0]] },
+    // L15 — Inferno (intense fire — denser than L10)
+    { sky: "#150500", neb: [[42, 8, 0], [26, 3, 0], [50, 12, 0]], star: [255, 102, 0], gas: [[255, 102, 0], [255, 204, 0], [255, 51, 0]] },
   ];
 
   const PDEFS = [
@@ -182,7 +194,13 @@ const galaxyBackground = (() => {
     if (level <= 6)  return { main: [26, 90, 74],   atmosphere: [32, 137, 122] }; // #1a5a4a / #20897a deep teal
     if (level <= 8)  return { main: [107, 37, 0],   atmosphere: [196, 64, 0] };   // #6b2500 / #c44000 fire orange (2026-06-09)
     if (level === 9) return { main: [107, 74, 0],   atmosphere: [160, 112, 16] }; // #6b4a00 / #a07010 gold/amber
-    return { main: [107, 26, 0], atmosphere: [160, 32, 0] };                      // #6b1a00 / #a02000 boss red-orange
+    // 2026-06-15: second-act planets (Part 4). Hex from the brief, converted to RGB arrays.
+    if (level === 11) return { main: [42, 42, 42],  atmosphere: [68, 68, 68] };   // #2a2a2a / #444444 void grey
+    if (level === 12) return { main: [45, 0, 96],   atmosphere: [119, 0, 204] };  // #2d0060 / #7700cc cyberpunk purple
+    if (level === 13) return { main: [26, 0, 0],    atmosphere: [136, 0, 0] };    // #1a0000 / #880000 virtual boy red
+    if (level === 14) return { main: [13, 43, 13],  atmosphere: [26, 92, 26] };   // #0d2b0d / #1a5c1a forest green
+    if (level === 15) return { main: [42, 5, 0],    atmosphere: [204, 34, 0] };   // #2a0500 / #cc2200 inferno
+    return { main: [107, 26, 0], atmosphere: [160, 32, 0] };                      // #6b1a00 / #a02000 boss red-orange (level 10)
   }
 
   function drawPlanet(def, px, py) {
@@ -646,7 +664,8 @@ const galaxyBackground = (() => {
 
   function setTheme(levelNum) {
     _planetLevel = levelNum; // 2026-06-09: keep planet color in sync with the level
-    const idx = Math.min(9, Math.max(0, levelNum - 1));
+    // 2026-06-15: clamp to the full THEMES range (was 9) so levels 11-15 get their own themes.
+    const idx = Math.min(THEMES.length - 1, Math.max(0, levelNum - 1));
     if (idx === themeIdx && blend >= 1) return;
     curTheme = THEMES[idx];
     tgtTheme = THEMES[idx];

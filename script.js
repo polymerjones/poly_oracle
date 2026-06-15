@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-15 10:35";
+const BUILD_TS = "2026-06-15 10:42";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -4201,20 +4201,49 @@ function scheduleRubHaptic() {
 
 // 2026-06-15: a second looping layer (orb_rub2.mp3) sits on top of the synth drone for a
 // richer rub texture. Plain looping <audio> (matches revealAudio); volume respects whisper.
+// Halved from the first cut (was 0.45/0.18) and ramped in/out so it never cuts off abruptly.
 let orbRub2Audio = null;
+let orbRub2FadeTimer = null;
+const orbRub2TargetVol = () => (state.whisper ? 0.09 : 0.22);
+
+// Ramp orbRub2 volume toward `target` over `ms` (setInterval — <audio>.volume has no ramp).
+function fadeOrbRub2(target, ms, onDone) {
+  if (!orbRub2Audio) return;
+  if (orbRub2FadeTimer) { clearInterval(orbRub2FadeTimer); orbRub2FadeTimer = null; }
+  const stepMs = 30;
+  const start = orbRub2Audio.volume;
+  const steps = Math.max(1, Math.round(ms / stepMs));
+  let i = 0;
+  orbRub2FadeTimer = setInterval(() => {
+    i += 1;
+    const t = Math.min(1, i / steps);
+    if (orbRub2Audio) orbRub2Audio.volume = clamp(start + (target - start) * t, 0, 1);
+    if (t >= 1) {
+      clearInterval(orbRub2FadeTimer);
+      orbRub2FadeTimer = null;
+      onDone?.();
+    }
+  }, stepMs);
+}
+
 function startOrbRub2Loop() {
   try {
     if (!orbRub2Audio) {
       orbRub2Audio = new Audio("gamesfx/orb_rub2.mp3");
       orbRub2Audio.loop = true;
     }
-    orbRub2Audio.volume = state.whisper ? 0.18 : 0.45;
-    if (orbRub2Audio.paused) orbRub2Audio.play().catch(() => {});
+    if (orbRub2Audio.paused) {
+      orbRub2Audio.volume = 0; // start silent, fade up
+      orbRub2Audio.play().catch(() => {});
+    }
+    fadeOrbRub2(orbRub2TargetVol(), 300); // fade in
   } catch { /* ignore */ }
 }
 function stopOrbRub2Loop() {
   if (!orbRub2Audio) return;
-  try { orbRub2Audio.pause(); } catch { /* ignore */ }
+  fadeOrbRub2(0, 280, () => { // fade out, then pause
+    try { orbRub2Audio.pause(); } catch { /* ignore */ }
+  });
 }
 
 // Start the drone + the synced hard-pulse haptic loop (both idempotent).

@@ -49,7 +49,7 @@ async function initMediaSession() {
         album: "Arcade Mode",
         artwork: [{
           src: "favicon.png",
-          sizes: "512x512",
+          sizes: "256x256",
           type: "image/png",
         }],
       });
@@ -92,7 +92,7 @@ async function updateMediaSessionLevel(levelNum) {
       album: "Arcade Mode",
       artwork: [{
         src: "favicon.png",
-        sizes: "512x512",
+        sizes: "256x256",
         type: "image/png",
       }],
     });
@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-15 12:56";
+const BUILD_TS = "2026-06-15 15:11";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1251,6 +1251,24 @@ const commBoxController = (() => {
     return _voPlaying || _voQueue.length > 0;
   }
 
+  // 2026-06-15: tutorial "cutscene" — slide the whole comm HUD to screen-center, then back to
+  // its normal bottom-left dock. The base position lives in the inline style (bottom:20px;left:16px).
+  function setCommCenter(on) {
+    if (!hud) return;
+    hud.style.transition = "left .55s ease, top .55s ease, bottom .55s ease, transform .55s ease";
+    if (on) {
+      hud.style.left = "50%";
+      hud.style.bottom = "auto";
+      hud.style.top = "34%";
+      hud.style.transform = "translate(-50%, -50%) scale(1.06)";
+    } else {
+      hud.style.left = "16px";
+      hud.style.top = "auto";
+      hud.style.bottom = "20px";
+      hud.style.transform = "none";
+    }
+  }
+
   function setFrame(key) {
     if (portraitOverride) return;
     if (!portrait || !FRAMES[key]) return;
@@ -1656,6 +1674,7 @@ const commBoxController = (() => {
     setPortraitOverride,
     clearPortraitOverride,
     setExclusiveSpeaker,
+    setCommCenter,
     isVOActive,
     setDamageState,
     reactTo,
@@ -2715,8 +2734,41 @@ function addListeners() {
   });
 
   closeGalaxy.addEventListener("click", () => {
+    // During training the Modes button pauses (with a Resume) instead of tearing the session down.
+    if (galaxyCanvasController?.isTutorialActive?.()) {
+      galaxyCanvasController.pauseTutorial?.();
+      return;
+    }
     galaxyCanvasController?.showModeSelect?.({ preserveArcade: true, openArcadeMenu: true });
   });
+
+  // Auto-pause training when the app is backgrounded (fixes the "came back to limbo" case).
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && galaxyCanvasController?.isTutorialActive?.()
+        && !galaxyCanvasController?.isTutorialPaused?.()) {
+      galaxyCanvasController.pauseTutorial?.();
+    }
+  });
+
+  // While training is paused, the pause overlay accepts a double-tap OR a downward swipe to resume.
+  if (arcadeOverlay) {
+    let _ovTapAt = 0;
+    let _ovSwipeY = null;
+    const ovResume = () => {
+      if (galaxyCanvasController?.isTutorialPaused?.()) galaxyCanvasController.resumeTutorial?.();
+    };
+    arcadeOverlay.addEventListener("pointerdown", (e) => {
+      if (!galaxyCanvasController?.isTutorialPaused?.()) return;
+      _ovSwipeY = e.clientY;
+      const t = performance.now();
+      if (t - _ovTapAt < 320) { _ovTapAt = 0; ovResume(); } else { _ovTapAt = t; }
+    });
+    arcadeOverlay.addEventListener("pointerup", (e) => {
+      if (!galaxyCanvasController?.isTutorialPaused?.() || _ovSwipeY == null) return;
+      if (e.clientY - _ovSwipeY > 70) ovResume(); // downward swipe
+      _ovSwipeY = null;
+    });
+  }
 
   toolDraw.addEventListener("click", () => {
     if (galaxyCanvasController?.isArcade?.()) return;
@@ -5791,6 +5843,10 @@ function initGalaxyCanvas() {
   let _spcTimer = null;
   let _spcAudio = null;
   let tutorialBlockPlasmaToss = false; // Phase 2: only the laser is taught — block net/toss
+  let tutorialPaused = false;          // pause menu / app-switch
+  let tutorialTimerRunning = false;    // intro: perimeter visibly counts down until timer powerup
+  let tutorialTimerStartedAt = 0;
+  let _tutLastEmptyTapAt = 0;          // double-tap-empty-space → skip chatter
   // Stunt → Practice: endless arcade gameplay (no timer, no level-complete, score not submitted).
   let practiceEndless = false;
   // SPC_xx.mp3 audio is recorded later; until a key is listed here, the line is text-only.
@@ -9746,6 +9802,15 @@ function initGalaxyCanvas() {
     // whole tutorial so only SPC speaks (Part 7).
     commBoxController.setPortraitOverride("vo/spc_portrait.png", "SPC");
     commBoxController.setExclusiveSpeaker(true);
+    // Intro cutscene: comm box starts centered, the perimeter timer counts down, and two neon
+    // arrows point at the comm box while SPC explains it. The timer powerup ends the cutscene.
+    tutorialPaused = false;
+    tutorialTimerRunning = true;
+    tutorialTimerStartedAt = performance.now();
+    _timerRemainingMs = levelDurationMs;
+    commBoxController.setCommCenter(true);
+    showCommArrows();
+    showSkipHint();
     runTutorial();
   }
 
@@ -9873,6 +9938,109 @@ function initGalaxyCanvas() {
     if (_hudPointerEl) _hudPointerEl.style.display = "none";
   }
 
+  // ── one-time CSS for the tutorial overlays (tooltip + comm-pointing arrows) ──
+  function ensureTutorialChromeCss() {
+    if (document.getElementById("tutorialChromeCss")) return;
+    const s = document.createElement("style");
+    s.id = "tutorialChromeCss";
+    s.textContent =
+      "#tutorialSkipHint{position:fixed;left:50%;top:74px;transform:translateX(-50%);z-index:9998;"
+      + "font-family:monospace;font-size:11px;font-weight:300;letter-spacing:3px;color:#00ffcc;"
+      + "pointer-events:none;display:none;text-shadow:0 0 6px rgba(0,255,204,.6);"
+      + "animation:tutSkipStrobe 1.5s ease-in-out infinite;}"
+      + "@keyframes tutSkipStrobe{0%,100%{opacity:.12;}50%{opacity:.5;}}"
+      + ".tutCommArrow{position:fixed;z-index:9998;font-size:34px;font-weight:bold;color:#00ffcc;"
+      + "pointer-events:none;display:none;text-shadow:0 0 10px #00ffcc,0 0 20px #00ffcc;"
+      + "animation:tutArrowBob 0.8s ease-in-out infinite alternate;}"
+      + "@keyframes tutArrowBob{from{opacity:.55;}to{opacity:1;}}";
+    document.head.appendChild(s);
+  }
+
+  // ── "DOUBLE TAP TO SKIP" tooltip (#1) ──────────────────────────────────────
+  let _skipHintEl = null;
+  function showSkipHint() {
+    ensureTutorialChromeCss();
+    if (!_skipHintEl) {
+      _skipHintEl = document.createElement("div");
+      _skipHintEl.id = "tutorialSkipHint";
+      _skipHintEl.textContent = "DOUBLE-TAP TO SKIP";
+      document.body.appendChild(_skipHintEl);
+    }
+    _skipHintEl.style.display = "block";
+  }
+  function hideSkipHint() { if (_skipHintEl) _skipHintEl.style.display = "none"; }
+
+  // double-tap on empty space → jump past the chatter to the live instruction (glitch + sound)
+  function tutorialSkip() {
+    if (!stuntActive || tutorialPaused) return;
+    if (_spcQueue.length > 0) {
+      const last = _spcQueue[_spcQueue.length - 1];
+      spcFlush();
+      spcVO(last.key, last.text);
+    }
+    window.pixiRenderer?.triggerPlasmaRectFlash?.();
+    playGameSfx("printtext", 0.6);
+  }
+
+  // ── two neon arrows pointing at the (centered) comm box during the intro (#2) ──
+  let _commArrowTop = null;
+  let _commArrowBot = null;
+  function showCommArrows() {
+    ensureTutorialChromeCss();
+    if (!_commArrowTop) {
+      _commArrowTop = document.createElement("div");
+      _commArrowTop.className = "tutCommArrow";
+      _commArrowTop.textContent = "↓";
+      _commArrowTop.style.transform = "rotate(-45deg)";
+      document.body.appendChild(_commArrowTop);
+    }
+    if (!_commArrowBot) {
+      _commArrowBot = document.createElement("div");
+      _commArrowBot.className = "tutCommArrow";
+      _commArrowBot.textContent = "↑";
+      _commArrowBot.style.transform = "rotate(-45deg)";
+      document.body.appendChild(_commArrowBot);
+    }
+    // comm box sits centered at ~(50%, 34%) during the intro cutscene
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight * 0.34;
+    _commArrowTop.style.left = `${cx - 17}px`;
+    _commArrowTop.style.top = `${cy - 130}px`;
+    _commArrowBot.style.left = `${cx - 17}px`;
+    _commArrowBot.style.top = `${cy + 96}px`;
+    _commArrowTop.style.display = "block";
+    _commArrowBot.style.display = "block";
+  }
+  function hideCommArrows() {
+    if (_commArrowTop) _commArrowTop.style.display = "none";
+    if (_commArrowBot) _commArrowBot.style.display = "none";
+  }
+
+  // ── pause / resume training (#4) ───────────────────────────────────────────
+  function pauseTutorial() {
+    if (!stuntActive || tutorialPaused) return;
+    tutorialPaused = true;
+    arcadePausedUntil = Infinity;          // freeze gameplay physics
+    if (_spcTimer) { clearTimeout(_spcTimer); _spcTimer = null; }
+    if (_spcAudio) { try { _spcAudio.pause(); } catch {} }
+    hideSkipHint();
+    showArcadeOverlay("TRAINING PAUSED", "Double-tap or swipe down to resume", 0, {
+      buttonText: "Resume",
+      buttonAction: () => resumeTutorial(),
+      secondaryButtonText: "Quit Training",
+      secondaryButtonAction: () => exitStuntMode(),
+    });
+  }
+  function resumeTutorial() {
+    if (!tutorialPaused) return;
+    tutorialPaused = false;
+    hideArcadeOverlay();
+    arcadePausedUntil = performance.now();
+    showSkipHint();
+    _spcPlaying = false;
+    pumpSpc();                              // continue any queued narration
+  }
+
   // ── tutorial entity helpers (Part 5) ──────────────────────────────────────
   function tutZonePoint(zone) {
     const cx = playfield.x + playfield.w / 2;
@@ -9983,11 +10151,17 @@ function initGalaxyCanvas() {
       await waitVOIdle();
     } },
     { id: "timer", run: async () => {
+      // The powerup appearing ends the cutscene: comm box docks to the bottom, arrows clear.
+      commBoxController.setCommCenter(false);
+      hideCommArrows();
       spcVO("05", "Every so often a timer power-up appears.");
       spcVO("06", "Grab it to buy time. Tap it now.");
       spawnTutorialPowerup("timer", tutZonePoint("center"));
       await waitPowerupCollected("timer");
-      spcVO("07", "Great!");
+      // Collected: perimeter snapped back to full (collectPowerup) — now hold it there, paused.
+      tutorialTimerRunning = false;
+      _timerRemainingMs = levelDurationMs;
+      spcVO("07", "Great! From here the timer's paused while you train.");
       await waitVOIdle();
     } },
     { id: "laser", run: async () => {
@@ -10220,6 +10394,11 @@ function initGalaxyCanvas() {
     // Keep tutorial powerups perpetually fresh so an app-switch (or any long pause) never makes
     // them blink red + expire — they live until collected.
     for (let i = 0; i < powerups.length; i += 1) powerups[i].spawnedAt = now;
+    // Intro: the perimeter visibly counts down until the cadet grabs the timer powerup (#2).
+    if (tutorialTimerRunning) {
+      _timerRemainingMs = Math.max(0, levelDurationMs - (now - tutorialTimerStartedAt));
+    }
+    if (tutorialPaused) return; // frozen: no waiter resolution, no phase progress
     if (_tutWaiters.length) {
       let resolvedAction = false;
       for (let i = _tutWaiters.length - 1; i >= 0; i -= 1) {
@@ -10246,7 +10425,12 @@ function initGalaxyCanvas() {
     for (const k of Object.keys(tutorialEvents)) delete tutorialEvents[k];
     tutorialFireBlocked = false;
     tutorialBlockPlasmaToss = false;
+    tutorialPaused = false;
+    tutorialTimerRunning = false;
+    hideSkipHint();
+    hideCommArrows();
     commBoxController.setExclusiveSpeaker(false);
+    commBoxController.setCommCenter(false); // dock back to bottom-left
     commBoxController.hideTicker();
     commBoxController.clearPortraitOverride();
   }
@@ -11695,6 +11879,11 @@ function initGalaxyCanvas() {
     const quadActive = performance.now() < quadShotUntil;
     _sfxBudgetExempt = quadActive;
     const hitSomething = resolveShotAt(x, y, now, isTouch);
+    // Tutorial: a quick double-tap on empty space skips past SPC's chatter to the live instruction.
+    if (stuntActive && !hitSomething) {
+      if (now - _tutLastEmptyTapAt < 320) { _tutLastEmptyTapAt = 0; tutorialSkip(); return; }
+      _tutLastEmptyTapAt = now;
+    }
     // 2026-06-10: quadshot — 3 extra shots clustered around the tap point while active.
     // Each extra shot seeks the nearest live asteroid within QUADSHOT_SEEK_RADIUS and fires
     // at its center through the same hit pipeline. Pure random 30-80px offsets almost never
@@ -11793,6 +11982,7 @@ function initGalaxyCanvas() {
       const nowP = performance.now();
       levelEndsAt = Math.min(levelEndsAt + 30000, nowP + levelDurationMs);
       _timerRemainingMs = levelDurationMs; // snap the perimeter visibly back to full
+      tutorialTimerRunning = false;        // ...and freeze it there (no one-frame re-deplete)
       playGameSfx("bling", 0.95);          // clear, audible pickup
       playGameSfx("life_gain", 1.0);       // + chime
       cssFlash("#ffffff", 0.2, 250);
@@ -12542,6 +12732,18 @@ function initGalaxyCanvas() {
     startStuntPractice() {
       if (!isStuntTrainingComplete()) return; // gated until training is finished
       startStuntPractice();
+    },
+    isTutorialActive() {
+      return stuntActive;
+    },
+    isTutorialPaused() {
+      return tutorialPaused;
+    },
+    pauseTutorial() {
+      pauseTutorial();
+    },
+    resumeTutorial() {
+      resumeTutorial();
     },
     triggerBoom() {
       // no-op in current arcade interaction model

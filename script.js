@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-15 10:42";
+const BUILD_TS = "2026-06-15 10:50";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -4201,10 +4201,16 @@ function scheduleRubHaptic() {
 
 // 2026-06-15: a second looping layer (orb_rub2.mp3) sits on top of the synth drone for a
 // richer rub texture. Plain looping <audio> (matches revealAudio); volume respects whisper.
-// Halved from the first cut (was 0.45/0.18) and ramped in/out so it never cuts off abruptly.
+// Halved from the first cut (was 0.45/0.18) and long-ramped in/out so it never cuts off.
+// Each NEW rub restarts the clip from the top (a paused <audio> resumes mid-clip otherwise);
+// the seek is done while silenced so the restart isn't audible. `orbRub2Active` keeps the
+// continuous-rub case (beginRubFeedback fires repeatedly on drag) from re-seeking → stutter.
 let orbRub2Audio = null;
 let orbRub2FadeTimer = null;
+let orbRub2Active = false;
 const orbRub2TargetVol = () => (state.whisper ? 0.09 : 0.22);
+const ORB_RUB2_FADE_IN_MS = 750;
+const ORB_RUB2_FADE_OUT_MS = 950;
 
 // Ramp orbRub2 volume toward `target` over `ms` (setInterval — <audio>.volume has no ramp).
 function fadeOrbRub2(target, ms, onDone) {
@@ -4232,17 +4238,21 @@ function startOrbRub2Loop() {
       orbRub2Audio = new Audio("gamesfx/orb_rub2.mp3");
       orbRub2Audio.loop = true;
     }
-    if (orbRub2Audio.paused) {
-      orbRub2Audio.volume = 0; // start silent, fade up
-      orbRub2Audio.play().catch(() => {});
-    }
-    fadeOrbRub2(orbRub2TargetVol(), 300); // fade in
+    if (orbRub2Active) return; // already running this rub — let the loop continue, don't re-seek
+    orbRub2Active = true;
+    if (orbRub2FadeTimer) { clearInterval(orbRub2FadeTimer); orbRub2FadeTimer = null; }
+    orbRub2Audio.volume = 0;             // silence first so the restart-from-top seek is inaudible
+    try { orbRub2Audio.currentTime = 0; } catch { /* ignore */ }
+    if (orbRub2Audio.paused) orbRub2Audio.play().catch(() => {});
+    fadeOrbRub2(orbRub2TargetVol(), ORB_RUB2_FADE_IN_MS); // long fade in
   } catch { /* ignore */ }
 }
 function stopOrbRub2Loop() {
-  if (!orbRub2Audio) return;
-  fadeOrbRub2(0, 280, () => { // fade out, then pause
-    try { orbRub2Audio.pause(); } catch { /* ignore */ }
+  if (!orbRub2Audio || !orbRub2Active) return;
+  orbRub2Active = false;
+  fadeOrbRub2(0, ORB_RUB2_FADE_OUT_MS, () => {
+    // Only pause if another rub didn't start during the fade-out (which flips Active back on).
+    if (!orbRub2Active) { try { orbRub2Audio.pause(); } catch { /* ignore */ } }
   });
 }
 

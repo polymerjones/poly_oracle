@@ -53,7 +53,7 @@ Every item below must be resolved before App Store submission:
 ### Stunt Mode (Training tutorial)
 
 - [ ] Record `SPC_01.mp3` … `SPC_70.mp3` → `vo/` folder (SPC is the female Specialist)
-- [ ] Supply `spc_portrait.png` → `vo/` folder (falls back to a teal "SPC" placeholder if absent)
+- [x] SPC portrait: ✅ covered by 20 animated frames in `vo/spc_*.png` — static `spc_portrait.png` not needed
 - [ ] Once SPC audio is recorded, add its keys to the `SPC_VO_AVAILABLE` set in `script.js`
       (currently empty → all tutorial lines are text-only captions)
 - [ ] Verify all 10 tutorial phases advance correctly on device (laser, plasma, UFO, toss,

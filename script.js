@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-16 11:16";
+const BUILD_TS = "2026-06-16 11:45";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1024,6 +1024,41 @@ const commBoxController = (() => {
     preloaded[key] = img;
   });
 
+  // 2026-06-16: SPC (Specialist) animated portrait — the Stunt Mode tutorial swaps the comm
+  // portrait to SPC and drives these frames via setSpcFrame / spcSpeakStart / blink (see below).
+  // Parallel structure to the commander FRAMES map above.
+  const SPC_FRAMES = {
+    idle:          "vo/spc_idle_smile.png",
+    idle_neutral:  "vo/spc_idle_neutral.png",
+    idle_smirk:    "vo/spc_idle_smirk.png",
+    idle_gentle:   "vo/spc_idle_gentle.png",
+    idle_soft:     "vo/spc_idle_soft.png",
+    idle_warm:     "vo/spc_idle_warm.png",
+    talk:          "vo/spc_talk_neutral.png",
+    talk_calm:     "vo/spc_talk_calm.png",
+    talk_friendly: "vo/spc_talk_friendly.png",
+    talk_happy:    "vo/spc_talk_happy.png",
+    talk_smile:    "vo/spc_talk_smile.png",
+    talk_neutral:  "vo/spc_talk_neutral.png",
+    smile_wide:    "vo/spc_idle_smile_wide.png",
+    smile_open:    "vo/spc_smile_open.png",
+    laugh:         "vo/spc_laugh.png",
+    praise:        "vo/spc_praise.png",
+    alert:         "vo/spc_alert.png",
+    blink:         "vo/spc_blink.png",
+    blink_down:    "vo/spc_blink_down.png",
+    shades:        "vo/spc_shades.png",
+    shades_blink:  "vo/spc_shades_blink.png",
+  };
+
+  const spcImages = {};
+  Object.entries(SPC_FRAMES).forEach(([key, src]) => {
+    const img = new Image();
+    img.decoding = "async";
+    img.src = src;
+    spcImages[key] = img;
+  });
+
   const hud = document.getElementById("commanderHUD");
   const portrait = document.getElementById("commanderImg");
   const ticker = document.getElementById("commanderTicker");
@@ -1317,6 +1352,97 @@ const commBoxController = (() => {
   // the normal frame cycling (idle/talk/react) is a no-op so the SPC image stays pinned.
   let portraitOverride = null;
   const callsignEl = () => document.getElementById("commanderCallsign");
+
+  // 2026-06-16: SPC animated-portrait state. `_spcMode` is true while the SPC override owns the
+  // portrait; speech runs a mouth-flap through talk frames, and an idle blink ticks between lines.
+  let _spcMode = false;
+  let _spcRestFrame = "idle";   // idle frame returned to after a line / blink
+  let _spcSpeaking = false;
+  let _spcMouthFlap = null;
+  let _spcBlinkTimer = null;
+  // The base talking cycle (mouth-flap) when no expression hint is supplied.
+  const SPC_TALK_CYCLE = ["talk", "talk_calm", "talk_friendly"];
+  // Expression hints flap between the emotion frame and a matching talk frame so the portrait
+  // both holds the mood AND moves its mouth while the line plays. Single-entry sets are held.
+  const SPC_EXPR_FLAP = {
+    praise:      ["praise", "talk_happy"],
+    smile_wide:  ["smile_wide", "talk_smile"],
+    smile_open:  ["smile_open", "talk_happy"],
+    idle_smirk:  ["idle_smirk", "talk_calm"],
+    idle_gentle: ["idle_gentle", "talk_calm"],
+    idle_soft:   ["idle_soft", "talk_calm"],
+    idle_warm:   ["idle_warm", "talk_friendly"],
+    alert:       ["alert", "talk_neutral"],
+    laugh:       ["laugh", "talk_happy"],
+    shades:      ["shades"], // held "cool" closing pose — no flap
+  };
+
+  // Part 4: set a single SPC frame directly (no-op unless SPC owns the portrait + frame loaded).
+  function setSpcFrame(key) {
+    if (!_spcMode || !portrait) return;
+    const img = spcImages[key];
+    if (!img || !img.src) return;
+    portrait.src = img.src;
+  }
+
+  function _spcStopFlap() {
+    if (_spcMouthFlap) { clearInterval(_spcMouthFlap); _spcMouthFlap = null; }
+  }
+  function _spcStopBlink() {
+    if (_spcBlinkTimer) { clearTimeout(_spcBlinkTimer); _spcBlinkTimer = null; }
+  }
+  // Part 6: periodic blink while idle (every 3-5s, 120ms), only when not speaking.
+  function _spcStartBlink() {
+    _spcStopBlink();
+    if (!_spcMode) return;
+    const schedule = () => {
+      _spcBlinkTimer = setTimeout(() => {
+        if (_spcMode && !_spcSpeaking) {
+          const base = _spcRestFrame || "idle";
+          const blinkFrame = base === "shades" ? "shades_blink" : "blink";
+          setSpcFrame(blinkFrame);
+          setTimeout(() => { if (_spcMode && !_spcSpeaking) setSpcFrame(base); }, 120);
+        }
+        schedule();
+      }, 3000 + Math.random() * 2000);
+    };
+    schedule();
+  }
+
+  // Part 4/5: begin the talking animation for one SPC line. `frameHint` picks the mood.
+  function spcSpeakStart(frameHint) {
+    if (!_spcMode) return;
+    _spcStopBlink();
+    _spcStopFlap();
+    _spcSpeaking = true;
+    _spcRestFrame = "idle"; // default rest; idle_* hints (below) make the mood linger after the line
+    let frames;
+    if (frameHint && SPC_EXPR_FLAP[frameHint]) {
+      frames = SPC_EXPR_FLAP[frameHint];
+      if (frameHint.indexOf("idle_") === 0 || frameHint === "shades") _spcRestFrame = frameHint;
+    } else if (frameHint && spcImages[frameHint]) {
+      // a talk_* (or other loaded) hint: lead the flap with it, then vary the mouth
+      frames = [frameHint, "talk_calm", "talk_friendly"];
+    } else {
+      frames = SPC_TALK_CYCLE;
+    }
+    setSpcFrame(frames[0]);
+    if (frames.length === 1) return; // held expression — no mouth flap
+    let i = 0;
+    _spcMouthFlap = setInterval(() => {
+      i += 1;
+      setSpcFrame(frames[i % frames.length]);
+    }, 150);
+  }
+
+  // End of a line (or whole queue): stop the flap, settle on the rest frame, resume blinking.
+  function spcSpeakEnd() {
+    _spcStopFlap();
+    _spcSpeaking = false;
+    setSpcFrame(_spcRestFrame || "idle");
+    _spcStartBlink();
+  }
+
   // teal placeholder shown if vo/spc_portrait.png is missing (data-URI so no extra request)
   const SPC_PLACEHOLDER =
     "data:image/svg+xml;utf8," +
@@ -1330,16 +1456,25 @@ const commBoxController = (() => {
 
   function setPortraitOverride(src, callsign = "SPC") {
     portraitOverride = src || SPC_PLACEHOLDER;
+    _spcMode = true;
+    _spcRestFrame = "idle";
+    _spcSpeaking = false;
     const cs = callsignEl();
     if (cs) cs.textContent = callsign;
     if (portrait) {
       portrait.onerror = () => { portrait.onerror = null; portrait.src = SPC_PLACEHOLDER; };
-      portrait.src = portraitOverride;
+      // prefer the animated SPC idle frame when available; fall back to the static override src
+      portrait.src = (spcImages.idle && spcImages.idle.src) ? spcImages.idle.src : portraitOverride;
     }
+    _spcStartBlink();
   }
 
   function clearPortraitOverride() {
     portraitOverride = null;
+    _spcMode = false;
+    _spcSpeaking = false;
+    _spcStopFlap();
+    _spcStopBlink();
     if (portrait) portrait.onerror = null;
     const cs = callsignEl();
     if (cs) cs.textContent = "CMDR";
@@ -1787,6 +1922,9 @@ const commBoxController = (() => {
     isTickerVisible,
     setPortraitOverride,
     clearPortraitOverride,
+    setSpcFrame,
+    spcSpeakStart,
+    spcSpeakEnd,
     setExclusiveSpeaker,
     setCommCenter,
     isVOActive,
@@ -10120,22 +10258,26 @@ function initGalaxyCanvas() {
     if (_spcTimer) { clearTimeout(_spcTimer); _spcTimer = null; }
     if (_spcAudio) { try { _spcAudio.pause(); } catch {} _spcAudio = null; }
   }
-  function spcVO(key, text) {
-    _spcQueue.push({ key, text });
+  function spcVO(key, text, frameHint) {
+    _spcQueue.push({ key, text, frameHint });
     pumpSpc();
   }
   function pumpSpc() {
     if (_spcPlaying || _spcQueue.length === 0) return;
-    const { key, text } = _spcQueue.shift();
+    const { key, text, frameHint } = _spcQueue.shift();
     _spcPlaying = true;
     commBoxController.show();
     commBoxController.pinTicker(text); // types text + keeps ticker visible (cancels auto-hide)
+    commBoxController.spcSpeakStart?.(frameHint); // animate the SPC portrait for this line
     const src = spcVoSrc(key);
     const dur = Math.max(1300, Math.min(5000, text.length * 46));
     const advance = () => {
       if (_spcTimer) { clearTimeout(_spcTimer); _spcTimer = null; }
       _spcAudio = null;
       _spcPlaying = false;
+      // settle the portrait to idle (+ resume blink) only when nothing else is queued; a
+      // following line starts its own mouth-flap immediately, so no idle flicker between lines.
+      if (_spcQueue.length === 0) commBoxController.spcSpeakEnd?.();
       pumpSpc();
     };
     if (src) {
@@ -10276,6 +10418,7 @@ function initGalaxyCanvas() {
     arcadePausedUntil = Infinity;          // freeze gameplay physics
     if (_spcTimer) { clearTimeout(_spcTimer); _spcTimer = null; }
     if (_spcAudio) { try { _spcAudio.pause(); } catch {} }
+    commBoxController.spcSpeakEnd?.(); // settle the SPC portrait while paused (no flap behind overlay)
     hideSkipHint();
     showArcadeOverlay("TRAINING PAUSED", "Double-tap or swipe down to resume", 0, {
       buttonText: "Resume",
@@ -10379,10 +10522,10 @@ function initGalaxyCanvas() {
       if ((tutorialEvents.plasma_miss || 0) > baseMiss) {
         tutorialState.plasmaMisses = (tutorialState.plasmaMisses || 0) + 1;
         if (tutorialState.plasmaMisses === 1) {
-          spcVO("20", "Make sure the stroids are targeted first.");
-          spcVO("21", "Try it again.");
+          spcVO("20", "Make sure the stroids are targeted first.", "alert");
+          spcVO("21", "Try it again.", "alert");
         } else {
-          spcVO("22", "Take your time — get them highlighted before you release.");
+          spcVO("22", "Take your time — get them highlighted before you release.", "alert");
         }
         rechargePlasmaNow();
       } else if (respawn) {
@@ -10396,37 +10539,37 @@ function initGalaxyCanvas() {
   const TUTORIAL_PHASES = [
     { id: "intro", run: async () => {
       tutorialFireBlocked = true;
-      spcVO("01", "Hi there Cadet, welcome to the Polyverse simulator.");
-      spcVO("02", "Let me show you the ropes before the real battle.");
-      spcVO("03", "First — the perimeter timer.");
-      spcVO("04a", "That line around the screen edges");
-      spcVO("04b", "shows how long you have to clear the field.");
+      spcVO("01", "Hi there Cadet, welcome to the Polyverse simulator.", "talk_friendly");
+      spcVO("02", "Let me show you the ropes before the real battle.", "talk_friendly");
+      spcVO("03", "First — the perimeter timer.", "talk_friendly");
+      spcVO("04a", "That line around the screen edges", "talk_friendly");
+      spcVO("04b", "shows how long you have to clear the field.", "talk_friendly");
       await waitVOIdle();
     } },
     { id: "timer", run: async () => {
       // The powerup appearing ends the cutscene: comm box docks to the bottom, arrows clear.
       commBoxController.setCommCenter(false);
       hideCommArrows();
-      spcVO("05", "Every so often a timer power-up appears.");
-      spcVO("06", "Grab it to buy time. Tap it now.");
+      spcVO("05", "Every so often a timer power-up appears.", "talk_calm");
+      spcVO("06", "Grab it to buy time. Tap it now.", "talk_calm");
       spawnTutorialPowerup("timer", tutZonePoint("center"));
       await waitPowerupCollected("timer");
       // Collected: perimeter snapped back to full (collectPowerup) — now hold it there, paused.
       tutorialTimerRunning = false;
       _timerRemainingMs = levelDurationMs;
-      spcVO("07", "Great! From here the timer's paused while you train.");
+      spcVO("07", "Great! From here the timer's paused while you train.", "talk_calm");
       await waitVOIdle();
     } },
     { id: "laser", run: async () => {
       tutorialFireBlocked = false;
       tutorialBlockPlasmaToss = true; // only the laser this step
       spawnTutorialAsteroids(1, 3);
-      spcVO("08", "These are the stroids.");
-      spcVO("09", "Our job is to clear them from the Polyverse.");
-      spcVO("10", "Tap the play area to fire your laser.");
-      spcVO("11", "Blast the stroid and all of its pieces.");
+      spcVO("08", "These are the stroids.", "talk_neutral");
+      spcVO("09", "Our job is to clear them from the Polyverse.", "talk_neutral");
+      spcVO("10", "Tap the play area to fire your laser.", "talk_neutral");
+      spcVO("11", "Blast the stroid and all of its pieces.", "talk_neutral");
       await waitFor(tutorialAsteroidsAllCleared);
-      spcVO("12", "Fantastic, Cadet. You'll show these stroids who's boss.");
+      spcVO("12", "Fantastic, Cadet. You'll show these stroids who's boss.", "praise");
       await waitVOIdle();
       await waitMs(700);
     } },
@@ -10439,27 +10582,27 @@ function initGalaxyCanvas() {
       spcVO("16", "Release to fire and destroy everything inside.");
       tutorialState.plasmaMisses = 0;
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(2, 2));
-      spcVO("17", "NICE! Great work, Cadet.");
-      spcVO("18", "Now let the plasma recharge and do it again!");
+      spcVO("17", "NICE! Great work, Cadet.", "praise");
+      spcVO("18", "Now let the plasma recharge and do it again!", "talk_friendly");
       await waitFor(() => plasmaCage.charged);
       spcVO("19", "Plasma is recharged.");
       spawnTutorialAsteroids(3, 2);
       tutorialState.plasmaMisses = 0;
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(3, 2));
-      spcVO("17b", "NICE! Great work, Cadet.");
+      spcVO("17b", "NICE! Great work, Cadet.", "praise");
       await clearTutorialField();
       await waitMs(350);
     } },
     { id: "ufo", run: async () => {
       spawnTutorialAsteroids(3, 2);
       spawnTutorialUFO();
-      spcVO("23", "UFO spotted, Cadet!");
-      spcVO("24", "Shoot it twice to take it out!");
+      spcVO("23", "UFO spotted, Cadet!", "alert");
+      spcVO("24", "Shoot it twice to take it out!", "alert");
       waitFor(() => ufo && ufo.hitCount >= 1)
-        .then(() => { if (stuntActive) spcVO("25", "Direct hit! Do it again!"); })
+        .then(() => { if (stuntActive) spcVO("25", "Direct hit! Do it again!", "praise"); })
         .catch(() => {});
       await waitFor(() => !ufo);
-      spcVO("26", "Wow, there you go.");
+      spcVO("26", "Wow, there you go.", "praise");
       spcVO("27", "Destroying a UFO instantly recharges your plasma.");
       spcVO("28", "So a good move is to net the stroids when a UFO shows up,");
       spcVO("29", "pop the UFO, and instantly get another net shot.");
@@ -10469,12 +10612,12 @@ function initGalaxyCanvas() {
       spawnTutorialUFO();
       spcVO("31", "Use your plasma net on those stroids.");
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(3, 2));
-      spcVO("32", "Now destroy the UFO quickly!");
+      spcVO("32", "Now destroy the UFO quickly!", "alert");
       await waitFor(() => !ufo);
       spawnTutorialAsteroids(4, 2);
       spcVO("33", "Plasma recharged — make another net!");
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(4, 2));
-      spcVO("34", "Nice work, Cadet. You learn fast.");
+      spcVO("34", "Nice work, Cadet. You learn fast.", "praise");
       await clearTutorialField();
       await waitMs(350);
     } },
@@ -10493,35 +10636,35 @@ function initGalaxyCanvas() {
         if ((tutorialEvents.toss || 0) > baseToss) break;
         if ((tutorialEvents.toss_fail || 0) > baseFail) {
           tutorialState.tossFailures += 1;
-          if (tutorialState.tossFailures === 1) spcVO("38", "You have to swipe or flick to toss it.");
-          else spcVO("39", "Give it a good flick, Cadet — put some effort in!");
+          if (tutorialState.tossFailures === 1) spcVO("38", "You have to swipe or flick to toss it.", "idle_smirk");
+          else spcVO("39", "Give it a good flick, Cadet — put some effort in!", "idle_smirk");
         } else {
           spawnTutorialAsteroids(3, 3); // cleared them with the laser — give grabbable stroids back
         }
       }
-      spcVO("40", "Very good, Cadet.");
+      spcVO("40", "Very good, Cadet.", "smile_wide");
       spawnTutorialAsteroids(6, 2);
       spcVO("41", "Things will get hectic out there.");
       await waitMs(900);
     } },
     { id: "landmine", run: async () => {
       spawnTutorialLandmine(tutZonePoint("center"));
-      spcVO("42", "When you see a bomb, tap it to arm it.");
-      spcVO("43", "You can also grab and toss bombs like stroids.");
-      spcVO("44", "The bomb will explode soon.");
-      spcVO("45", "To detonate it yourself, tap it again.");
+      spcVO("42", "When you see a bomb, tap it to arm it.", "talk_calm");
+      spcVO("43", "You can also grab and toss bombs like stroids.", "talk_calm");
+      spcVO("44", "The bomb will explode soon.", "talk_calm");
+      spcVO("45", "To detonate it yourself, tap it again.", "talk_calm");
       tutorialState.mineTapBase = tutorialEvents.mine_tap || 0;
       for (;;) {
         await waitFor(() => !landmine);
         if ((tutorialEvents.mine_tap || 0) > tutorialState.mineTapBase) break; // player engaged it
         // auto-detonated before the cadet touched it — coach + respawn
-        spcVO("46", "Okay Cadet, let's detonate the bomb ourselves.");
-        spcVO("47", "Tap the armed bomb to detonate it.");
+        spcVO("46", "Okay Cadet, let's detonate the bomb ourselves.", "talk_calm");
+        spcVO("47", "Tap the armed bomb to detonate it.", "talk_calm");
         tutorialState.mineTapBase = tutorialEvents.mine_tap || 0;
         spawnTutorialLandmine(tutZonePoint("center"));
         if (tutorialAsteroidsAllCleared()) spawnTutorialAsteroids(2, 2);
       }
-      spcVO("48", "Boom. That was fantastic, Cadet.");
+      spcVO("48", "Boom. That was fantastic, Cadet.", "praise");
       spcVO("49", "Bombs can save you from some hairy situations.");
       await clearTutorialField();
       await waitMs(350);
@@ -10548,12 +10691,12 @@ function initGalaxyCanvas() {
       spcVO("56", "That's the quad shot power-up. Pick it up!");
       await waitPowerupCollected("quadshot");
       spawnTutorialAsteroids(3, 2);
-      spcVO("57", "Blast those stroids with the quad shot!");
+      spcVO("57", "Blast those stroids with the quad shot!", "smile_open");
       while (performance.now() < quadShotUntil) {
         await waitFor(() => tutorialAsteroidsAllCleared() || performance.now() >= quadShotUntil);
         if (performance.now() >= quadShotUntil) break;
         spawnTutorialAsteroids(3, 2);
-        spcVO("58", "Keep firing, Cadet!");
+        spcVO("58", "Keep firing, Cadet!", "smile_open");
       }
       await clearTutorialField();
       await waitMs(350);
@@ -10567,8 +10710,8 @@ function initGalaxyCanvas() {
       showHudPointer("hudFreezeBtn", 6000);
       await waitEvent("freeze");
       hideHudPointer();
-      spcVO("61", "Objects are frozen for a short time. Blast 'em!");
-      spcVO("62", "Frozen stroids can be tossed too. Grab one and toss it.");
+      spcVO("61", "Objects are frozen for a short time. Blast 'em!", "idle_gentle");
+      spcVO("62", "Frozen stroids can be tossed too. Grab one and toss it.", "idle_gentle");
       tutorialState.frozenTossBase = tutorialEvents.toss || 0;
       while ((tutorialEvents.toss || 0) <= tutorialState.frozenTossBase) {
         await waitFor(() =>
@@ -10577,14 +10720,14 @@ function initGalaxyCanvas() {
         spawnTutorialAsteroids(3, 2);
         freezeUntil = performance.now() + FREEZE_DURATION_MS;
         playGameSfx("freeze", 0.9);
-        spcVO("63", "Good shooting — but try grabbing and tossing a frozen stroid.");
+        spcVO("63", "Good shooting — but try grabbing and tossing a frozen stroid.", "idle_gentle");
       }
       // 2026-06-15: the "toss" event fires the instant the stroid is flicked — playing the success
       // line right then talks over the throw. Wait for the tossed stroid to actually resolve
       // (collide + detonate, or self-destruct) so the cadet SEES the destruction first.
       await waitFor(() => !sim.asteroids.some((a) => a.tossed));
       await waitMs(300); // let the blast read before SPC chimes in
-      spcVO("64", "Very cool, Cadet.");
+      spcVO("64", "Very cool, Cadet.", "praise");
       await clearTutorialField();
       await waitMs(350);
     } },
@@ -10593,18 +10736,18 @@ function initGalaxyCanvas() {
       spawnTutorialAsteroids(4, 2);
       spcVO("65", "Pick up the missiles, Cadet.");
       await waitPowerupCollected("missile");
-      spcVO("66", "Tap the missile weapon in the HUD to arm a missile.");
+      spcVO("66", "Tap the missile weapon in the HUD to arm a missile.", "alert");
       showHudPointer("hudMissileBtn", 6000);
       await waitFor(() => missileAimMode);
       hideHudPointer();
-      spcVO("67", "Now tap to set a target and watch the destruction.");
+      spcVO("67", "Now tap to set a target and watch the destruction.", "alert");
       await waitFor(() => activeMissile);
       await waitFor(() => !activeMissile);
-      spcVO("68", "Excellent work, Cadet.");
-      spcVO("69", "This concludes our training for today.");
+      spcVO("68", "Excellent work, Cadet.", "praise");
+      spcVO("69", "This concludes our training for today.", "talk_friendly");
       await waitVOIdle();
       await waitMs(350);
-      spcVO("70", "Go practice if you like — the Polyverse awaits.");
+      spcVO("70", "Go practice if you like — the Polyverse awaits.", "shades");
       await waitVOIdle();
       await waitMs(350);
     } },

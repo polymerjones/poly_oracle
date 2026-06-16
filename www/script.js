@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-16 15:27";
+const BUILD_TS = "2026-06-16 15:53";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1029,6 +1029,7 @@ const commBoxController = (() => {
   // Parallel structure to the commander FRAMES map above.
   const SPC_FRAMES = {
     idle:          "vo/spc_idle_smile.png",
+    idle_smile:    "vo/spc_idle_smile.png", // canonical rest pose (alias of idle)
     idle_neutral:  "vo/spc_idle_neutral.png",
     idle_smirk:    "vo/spc_idle_smirk.png",
     idle_gentle:   "vo/spc_idle_gentle.png",
@@ -1356,12 +1357,12 @@ const commBoxController = (() => {
   // 2026-06-16: SPC animated-portrait state. `_spcMode` is true while the SPC override owns the
   // portrait; speech runs a mouth-flap through talk frames, and an idle blink ticks between lines.
   let _spcMode = false;
-  let _spcRestFrame = "idle";   // idle frame returned to after a line / blink
+  let _spcRestFrame = "idle_smile";   // idle frame returned to after a line / blink
   let _spcSpeaking = false;
   let _spcMouthFlap = null;
   let _spcBlinkTimer = null;
   // The base talking cycle (mouth-flap) when no expression hint is supplied.
-  const SPC_TALK_CYCLE = ["talk", "talk_calm", "talk_friendly"];
+  const SPC_TALK_CYCLE = ["talk_calm", "talk_neutral", "talk_friendly"];
   // Expression hints flap between the emotion frame and a matching talk frame so the portrait
   // both holds the mood AND moves its mouth while the line plays. Single-entry sets are held.
   const SPC_EXPR_FLAP = {
@@ -1380,7 +1381,8 @@ const commBoxController = (() => {
   // Part 4: set a single SPC frame directly (no-op unless SPC owns the portrait + frame loaded).
   function setSpcFrame(key) {
     if (!_spcMode || !portrait) return;
-    const img = spcImages[key];
+    let img = spcImages[key];
+    if (!img || !img.src) img = spcImages.idle_smile; // default lookup falls back to the rest pose
     if (!img || !img.src) return;
     portrait.src = img.src;
   }
@@ -1398,7 +1400,7 @@ const commBoxController = (() => {
     const schedule = () => {
       _spcBlinkTimer = setTimeout(() => {
         if (_spcMode && !_spcSpeaking) {
-          const base = _spcRestFrame || "idle";
+          const base = _spcRestFrame || "idle_smile";
           const blinkFrame = base === "shades" ? "shades_blink" : "blink";
           setSpcFrame(blinkFrame);
           setTimeout(() => { if (_spcMode && !_spcSpeaking) setSpcFrame(base); }, 120);
@@ -1415,7 +1417,7 @@ const commBoxController = (() => {
     _spcStopBlink();
     _spcStopFlap();
     _spcSpeaking = true;
-    _spcRestFrame = "idle"; // default rest; idle_* hints (below) make the mood linger after the line
+    _spcRestFrame = "idle_smile"; // default rest; idle_* hints (below) make the mood linger after the line
     let frames;
     if (frameHint && SPC_EXPR_FLAP[frameHint]) {
       frames = SPC_EXPR_FLAP[frameHint];
@@ -1439,7 +1441,7 @@ const commBoxController = (() => {
   function spcSpeakEnd() {
     _spcStopFlap();
     _spcSpeaking = false;
-    setSpcFrame(_spcRestFrame || "idle");
+    setSpcFrame(_spcRestFrame || "idle_smile");
     _spcStartBlink();
   }
 
@@ -1457,14 +1459,14 @@ const commBoxController = (() => {
   function setPortraitOverride(src, callsign = "SPC") {
     portraitOverride = src || SPC_PLACEHOLDER;
     _spcMode = true;
-    _spcRestFrame = "idle";
+    _spcRestFrame = "idle_smile";
     _spcSpeaking = false;
     const cs = callsignEl();
     if (cs) cs.textContent = callsign;
     if (portrait) {
       portrait.onerror = () => { portrait.onerror = null; portrait.src = SPC_PLACEHOLDER; };
       // prefer the animated SPC idle frame when available; fall back to the static override src
-      portrait.src = (spcImages.idle && spcImages.idle.src) ? spcImages.idle.src : portraitOverride;
+      portrait.src = (spcImages.idle_smile && spcImages.idle_smile.src) ? spcImages.idle_smile.src : portraitOverride;
     }
     _spcStartBlink();
   }
@@ -1598,6 +1600,9 @@ const commBoxController = (() => {
     const text = Array.isArray(lines) ? lines.join(" ") : (lines || "");
     tickerText.innerHTML = "";
     let i = 0;
+    // Part 2: the printtext SFX fires once at the START of the type-on animation (not the end),
+    // at 80% of its prior volume (0.5 → 0.4) so it underscores the line beginning to print.
+    if (text) { try { window.playGameSfx?.("printtext", 0.4); } catch {} }
 
     function step() {
       if (token !== typingToken) return;
@@ -1615,7 +1620,6 @@ const commBoxController = (() => {
         setTimeout(step, 22 + Math.random() * 18);
       } else {
         tickerText.innerHTML = `<span style="color:#00cccc">${text}</span>`;
-        try { window.playGameSfx?.("printtext", 0.5); } catch {}
       }
     }
     step();
@@ -1811,7 +1815,7 @@ const commBoxController = (() => {
       tickerHideTimer = setTimeout(() => {
         hideTicker();
         finish();
-      }, 1200);
+      }, 1800); // Part 3: +50% so captions linger longer before auto-hiding
     };
 
     try {
@@ -2993,15 +2997,25 @@ function addListeners() {
       galaxyCanvasController.pauseTutorial?.();
       return;
     }
+    // During endless Practice the Modes button exits straight back to the Stunt Mode menu (Part 8).
+    if (galaxyCanvasController?.isPracticeEndless?.()) {
+      galaxyCanvasController.exitStuntPractice?.();
+      return;
+    }
     galaxyCanvasController?.showModeSelect?.({ preserveArcade: true, openArcadeMenu: true });
   });
 
   // Auto-pause training when the app is backgrounded (fixes the "came back to limbo" case).
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden && galaxyCanvasController?.isTutorialActive?.()
-        && !galaxyCanvasController?.isTutorialPaused?.()) {
-      galaxyCanvasController.pauseTutorial?.();
+    if (document.hidden) {
+      if (galaxyCanvasController?.isTutorialActive?.()
+          && !galaxyCanvasController?.isTutorialPaused?.()) {
+        galaxyCanvasController.pauseTutorial?.();
+      }
+      return;
     }
+    // Returning to foreground — re-prime audio so SFX/VO aren't silent in training/practice (Part 6).
+    galaxyCanvasController?.onAppForeground?.();
   });
 
   // While training is paused, the pause overlay accepts a double-tap OR a downward swipe to resume.
@@ -6103,9 +6117,9 @@ function initGalaxyCanvas() {
   let tutorialPaused = false;          // pause menu / app-switch
   let tutorialTimerRunning = false;    // intro: perimeter visibly counts down until timer powerup
   let tutorialTimerStartedAt = 0;
-  let _tutLastEmptyTapAt = 0;          // double-tap-empty-space → skip chatter
   // Stunt → Practice: endless arcade gameplay (no timer, no level-complete, score not submitted).
   let practiceEndless = false;
+  let nextPracticeMineAt = 0; // Part 8: practice drops a fresh landmine on this 60s cadence
   // SPC_xx.mp3 audio is recorded later; until a key is listed here, the line is text-only.
   const SPC_VO_AVAILABLE = new Set();
   let currentLevelIndex = 0;
@@ -6571,7 +6585,10 @@ function initGalaxyCanvas() {
     _timerRemainingMs = safeRemaining;
     _timerRatio = levelDurationMs > 0 ? clamp(safeRemaining / levelDurationMs, 0, 1) : 0;
     updateGameTimerHud(now);
-    if (hudLevel) hudLevel.textContent = `LEVEL ${ARCADE_LEVELS[currentLevelIndex]?.level || 1}`;
+    // Part 8: Practice shows "PRACTICE" where the level number normally goes.
+    if (hudLevel) hudLevel.textContent = practiceEndless
+      ? "PRACTICE"
+      : `LEVEL ${ARCADE_LEVELS[currentLevelIndex]?.level || 1}`;
     renderLives();
     renderScore();
     renderScoreMultiplier(now);
@@ -10333,39 +10350,112 @@ function initGalaxyCanvas() {
     if (_hudPointerEl) _hudPointerEl.style.display = "none";
   }
 
+  // ── perimeter-timer arrow (Part 5) ─────────────────────────────────────────
+  // A pulsing teal "↑" anchored to the TOP edge of the playfield, pointing at the perimeter
+  // timer line. Shown during the intro once SPC has described the timer; hidden when Phase 1 runs.
+  let _timerArrowEl = null;
+  function showTimerArrow() {
+    ensureTutorialPointerCss(); // provides the @keyframes tutorialPulse used by #timerArrow
+    ensureTutorialChromeCss();
+    if (!galaxyPlayCanvas) return;
+    if (!_timerArrowEl) {
+      _timerArrowEl = document.createElement("div");
+      _timerArrowEl.id = "timerArrow";
+      _timerArrowEl.textContent = "↑";
+      document.body.appendChild(_timerArrowEl);
+    }
+    const rect = galaxyPlayCanvas.getBoundingClientRect();
+    const scaleY = galaxyPlayCanvas.height ? rect.height / galaxyPlayCanvas.height : 1;
+    const topY = rect.top + playfield.y * scaleY; // playfield coords are in canvas-buffer space
+    _timerArrowEl.style.left = "50%";
+    _timerArrowEl.style.top = `${topY + 8}px`;
+    _timerArrowEl.style.transform = "translateX(-50%)";
+    _timerArrowEl.style.display = "block";
+  }
+  function hideTimerArrow() {
+    if (_timerArrowEl) _timerArrowEl.style.display = "none";
+  }
+
   // ── one-time CSS for the tutorial overlays (tooltip + comm-pointing arrows) ──
   function ensureTutorialChromeCss() {
     if (document.getElementById("tutorialChromeCss")) return;
     const s = document.createElement("style");
     s.id = "tutorialChromeCss";
     s.textContent =
-      "#tutorialSkipHint{position:fixed;left:50%;bottom:150px;transform:translateX(-50%);z-index:9998;"
+      "#tutorialSkipHint{position:fixed;z-index:9999;"
       + "font-family:monospace;font-size:11px;font-weight:300;letter-spacing:3px;color:#00ffcc;"
       + "pointer-events:none;display:none;text-shadow:0 0 6px rgba(0,255,204,.6);"
       + "animation:tutSkipStrobe 1.5s ease-in-out infinite;}"
       + "@keyframes tutSkipStrobe{0%,100%{opacity:.12;}50%{opacity:.5;}}"
+      // Part 4: invisible single-tap hitbox sitting just above the comm box. Lives below the hint
+      // (which is pointer-events:none) so taps land on the box; positioned/sized in JS off the box.
+      + "#tutorialSkipBtn{position:fixed;z-index:9998;display:none;pointer-events:auto;"
+      + "background:transparent;border:0;margin:0;padding:0;}"
       + ".tutCommArrow{position:fixed;z-index:9998;font-size:34px;font-weight:bold;color:#00ffcc;"
       + "pointer-events:none;display:none;text-shadow:0 0 10px #00ffcc,0 0 20px #00ffcc;"
       + "animation:tutArrowBob 0.8s ease-in-out infinite alternate;}"
-      + "@keyframes tutArrowBob{from{opacity:.55;}to{opacity:1;}}";
+      + "@keyframes tutArrowBob{from{opacity:.55;}to{opacity:1;}}"
+      // Part 5: pulsing teal arrow that points at the perimeter timer line (top playfield edge).
+      + "#timerArrow{position:fixed;z-index:9999;color:#00d4d4;font-size:30px;font-weight:bold;"
+      + "pointer-events:none;display:none;text-shadow:0 0 8px #00d4d4,0 0 16px #00d4d4;"
+      + "animation:tutorialPulse 0.6s ease-in-out infinite alternate;}";
     document.head.appendChild(s);
   }
 
-  // ── "DOUBLE TAP TO SKIP" tooltip (#1) ──────────────────────────────────────
+  // ── "TAP TO SKIP" hint + invisible tap hitbox above the comm box (Part 4) ───
   let _skipHintEl = null;
-  function showSkipHint() {
+  let _skipBtnEl = null;
+  function _ensureSkipUi() {
     ensureTutorialChromeCss();
     if (!_skipHintEl) {
       _skipHintEl = document.createElement("div");
       _skipHintEl.id = "tutorialSkipHint";
-      _skipHintEl.textContent = "DOUBLE-TAP TO SKIP";
+      _skipHintEl.textContent = "TAP TO SKIP";
       document.body.appendChild(_skipHintEl);
     }
-    _skipHintEl.style.display = "block";
+    if (!_skipBtnEl) {
+      _skipBtnEl = document.createElement("div");
+      _skipBtnEl.id = "tutorialSkipBtn";
+      // single tap anywhere in the hitbox skips the chatter (pointerdown = touch + mouse)
+      _skipBtnEl.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        tutorialSkip();
+      });
+      document.body.appendChild(_skipBtnEl);
+    }
   }
-  function hideSkipHint() { if (_skipHintEl) _skipHintEl.style.display = "none"; }
+  // Anchor the hint + hitbox directly above the comm box: 8px gap above the box's top edge,
+  // hitbox same width as the box. Read off the live box rect so it tracks centered⇄docked moves.
+  function _positionSkipUi() {
+    const box = document.getElementById("commanderTicker");
+    if (!box) return;
+    const r = box.getBoundingClientRect();
+    if (!r.width) return;
+    if (_skipBtnEl) {
+      _skipBtnEl.style.left = `${r.left}px`;
+      _skipBtnEl.style.width = `${r.width}px`;
+      _skipBtnEl.style.height = "26px";
+      _skipBtnEl.style.top = `${r.top - 8 - 26}px`;
+    }
+    if (_skipHintEl) {
+      _skipHintEl.style.left = `${r.left + r.width / 2}px`;
+      _skipHintEl.style.transform = "translateX(-50%)";
+      _skipHintEl.style.top = `${r.top - 8 - 18}px`;
+    }
+  }
+  function showSkipHint() {
+    _ensureSkipUi();
+    _positionSkipUi();
+    _skipHintEl.style.display = "block";
+    _skipBtnEl.style.display = "block";
+  }
+  function hideSkipHint() {
+    if (_skipHintEl) _skipHintEl.style.display = "none";
+    if (_skipBtnEl) _skipBtnEl.style.display = "none";
+  }
 
-  // double-tap on empty space → jump past the chatter to the live instruction (glitch + sound)
+  // single tap on the hitbox → jump past the chatter to the live instruction (glitch + sound)
   function tutorialSkip() {
     if (!stuntActive || tutorialPaused) return;
     if (_spcQueue.length > 0) {
@@ -10456,13 +10546,24 @@ function initGalaxyCanvas() {
   }
   function spawnTutorialAsteroids(count, kind = 2, options = {}) {
     const refs = [];
-    for (let i = 0; i < count; i += 1) {
+    // Part 9: warp tutorial stroids in like normal gameplay — a warp ring + warp sound at each
+    // point (spawnAsteroid's warp:true path) plus a subtle screen flash, staggered 50ms apart so
+    // a batch doesn't all pop in at once.
+    const spawnOne = () => {
       const p = tutZonePoint(options.positionZone || "random");
-      const a = spawnAsteroid(p.x, p.y, kind, false);
+      const a = spawnAsteroid(p.x, p.y, kind, true); // warp:true → playWarpSound + addWarpRing
       if (a) {
         if (options.fast) { a.vx *= 1.7; a.vy *= 1.7; }
         refs.push(a);
       }
+      return a;
+    };
+    // First spawns synchronously so the field is never momentarily empty (a delayed spawn could
+    // otherwise let waitFor(tutorialAsteroidsAllCleared) resolve before it lands); stagger the rest.
+    spawnOne();
+    cssFlash("#00ffd1", 0.1, 120); // gentle teal acknowledgement of the spawn-in
+    for (let i = 1; i < count; i += 1) {
+      setTimeout(() => { if (stuntActive) spawnOne(); }, i * 50);
     }
     return refs;
   }
@@ -10546,9 +10647,11 @@ function initGalaxyCanvas() {
       spcVO("03", "First — the perimeter timer.", "talk_friendly");
       spcVO("04a", "That line around the screen edges", "talk_friendly");
       spcVO("04b", "shows how long you have to clear the field.", "talk_friendly");
+      showTimerArrow(); // Part 5: point at the perimeter timer while SPC describes it
       await waitVOIdle();
     } },
     { id: "timer", run: async () => {
+      hideTimerArrow(); // Part 5: arrow's job is done once Phase 1 begins
       // The powerup appearing ends the cutscene: comm box docks to the bottom, arrows clear.
       commBoxController.setCommCenter(false);
       hideCommArrows();
@@ -10566,10 +10669,10 @@ function initGalaxyCanvas() {
       tutorialFireBlocked = false;
       tutorialBlockPlasmaToss = true; // only the laser this step
       spawnTutorialAsteroids(1, 3);
-      spcVO("08", "These are the stroids.", "talk_neutral");
-      spcVO("09", "Our job is to clear them from the Polyverse.", "talk_neutral");
-      spcVO("10", "Tap the play area to fire your laser.", "talk_neutral");
-      spcVO("11", "Blast the stroid and all of its pieces.", "talk_neutral");
+      spcVO("08", "These are the stroids.", "talk_calm");
+      spcVO("09", "Our job is to clear them from the Polyverse.", "talk_calm");
+      spcVO("10", "Tap the play area to fire your laser.", "talk_calm");
+      spcVO("11", "Blast the stroid and all of its pieces.", "talk_calm");
       await waitFor(tutorialAsteroidsAllCleared);
       spcVO("12", "Fantastic, Cadet. You'll show these stroids who's boss.", "praise");
       await waitVOIdle();
@@ -10604,7 +10707,7 @@ function initGalaxyCanvas() {
         .then(() => { if (stuntActive) spcVO("25", "Direct hit! Do it again!", "praise"); })
         .catch(() => {});
       await waitFor(() => !ufo);
-      spcVO("26", "Wow, there you go.", "praise");
+      spcVO("26", "Wow, there you go.", "laugh");
       spcVO("27", "Destroying a UFO instantly recharges your plasma.");
       spcVO("28", "So a good move is to net the stroids when a UFO shows up,");
       spcVO("29", "pop the UFO, and instantly get another net shot.");
@@ -10612,8 +10715,39 @@ function initGalaxyCanvas() {
       await clearTutorialField();
       spawnTutorialAsteroids(3, 2);
       spawnTutorialUFO();
-      spcVO("31", "Use your plasma net on those stroids.");
-      await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(3, 2));
+      spcVO("31", "Use your plasma net on those stroids.", "talk_friendly");
+      // Part 7: net-then-UFO combo. The net must destroy a stroid BEFORE the UFO is killed. If the
+      // cadet pops the UFO early (laser), respawn it and re-run so the combo is actually practiced.
+      tutorialState.plasmaMisses = 0;
+      const baseComboPlasma = tutorialEvents.plasma || 0;
+      for (;;) {
+        const baseComboMiss = tutorialEvents.plasma_miss || 0;
+        await waitFor(() =>
+          (tutorialEvents.plasma || 0) > baseComboPlasma
+          || (tutorialEvents.plasma_miss || 0) > baseComboMiss
+          || !ufo
+          || tutorialAsteroidsAllCleared());
+        if ((tutorialEvents.plasma || 0) > baseComboPlasma) break; // net landed — combo step 1 done
+        if (!ufo) {
+          // killed the UFO before the net — give it a beat, respawn, and gently re-run the combo
+          await waitMs(2000);
+          if (!stuntActive) return;
+          spawnTutorialUFO();
+          spcVO("31b", "Good shot — but try the plasma net first, then the UFO. Let's run it again.", "talk_calm");
+          if (tutorialAsteroidsAllCleared()) spawnTutorialAsteroids(3, 2);
+          rechargePlasmaNow();
+          continue;
+        }
+        if ((tutorialEvents.plasma_miss || 0) > baseComboMiss) {
+          tutorialState.plasmaMisses += 1;
+          if (tutorialState.plasmaMisses === 1) spcVO("20", "Make sure the stroids are targeted first.", "alert");
+          else spcVO("22", "Take your time — get them highlighted before you release.", "alert");
+          rechargePlasmaNow();
+        } else {
+          spawnTutorialAsteroids(3, 2); // field emptied with the laser — restock grabbable stroids
+          rechargePlasmaNow();
+        }
+      }
       spcVO("32", "Now destroy the UFO quickly!", "alert");
       await waitFor(() => !ufo);
       spawnTutorialAsteroids(4, 2);
@@ -10625,8 +10759,8 @@ function initGalaxyCanvas() {
     } },
     { id: "toss", run: async () => {
       spawnTutorialAsteroids(3, 3);
-      spcVO("35", "Next, the stroid toss attack.");
-      spcVO("36", "Tap and hold a stroid to grab it.");
+      spcVO("35", "Next, the stroid toss attack.", "talk_calm");
+      spcVO("36", "Tap and hold a stroid to grab it.", "talk_calm");
       tutorialState.tossFailures = 0;
       const baseToss = tutorialEvents.toss || 0;
       while ((tutorialEvents.toss || 0) <= baseToss) {
@@ -10644,7 +10778,7 @@ function initGalaxyCanvas() {
           spawnTutorialAsteroids(3, 3); // cleared them with the laser — give grabbable stroids back
         }
       }
-      spcVO("40", "Very good, Cadet.", "smile_wide");
+      spcVO("40", "Very good, Cadet.", "praise");
       spawnTutorialAsteroids(6, 2);
       spcVO("41", "Things will get hectic out there.");
       await waitMs(900);
@@ -10673,24 +10807,24 @@ function initGalaxyCanvas() {
     } },
     { id: "bombInventory", run: async () => {
       spawnTutorialPowerup("bomb", tutZonePoint("center"));
-      spcVO("50", "Sometimes a bomb power-up appears on the field.");
-      spcVO("51", "Tap it to add it to your HUD inventory.");
+      spcVO("50", "Sometimes a bomb power-up appears on the field.", "talk_calm");
+      spcVO("51", "Tap it to add it to your HUD inventory.", "talk_calm");
       await waitPowerupCollected("bomb");
-      spcVO("52", "Tap the bomb icon in your HUD.");
+      spcVO("52", "Tap the bomb icon in your HUD.", "talk_calm");
       showHudPointer("hudBombBtn", 6000);
       await waitFor(() => bombAimMode);
       hideHudPointer();
-      spcVO("53", "Now tap the screen to place it.");
+      spcVO("53", "Now tap the screen to place it.", "talk_calm");
       await waitFor(() => placedBombs.length > 0);
-      spcVO("54", "Arm it, then tap again to detonate.");
+      spcVO("54", "Arm it, then tap again to detonate.", "talk_calm");
       await waitEvent("bomb");
       await clearTutorialField();
       await waitMs(350);
     } },
     { id: "quadshot", run: async () => {
       spawnTutorialPowerup("quadshot", tutZonePoint("center"));
-      spcVO("55", "Throughout the missions, power-ups appear.");
-      spcVO("56", "That's the quad shot power-up. Pick it up!");
+      spcVO("55", "Throughout the missions, power-ups appear.", "talk_calm");
+      spcVO("56", "That's the quad shot power-up. Pick it up!", "talk_calm");
       await waitPowerupCollected("quadshot");
       spawnTutorialAsteroids(3, 2);
       spcVO("57", "Blast those stroids with the quad shot!", "smile_open");
@@ -10705,10 +10839,10 @@ function initGalaxyCanvas() {
     } },
     { id: "freeze", run: async () => {
       spawnTutorialPowerup("snowflake", tutZonePoint("center"));
-      spcVO("59", "Pick up the freeze power-up.");
+      spcVO("59", "Pick up the freeze power-up.", "idle_gentle");
       await waitPowerupCollected("snowflake");
       spawnTutorialAsteroids(3, 2);
-      spcVO("60", "Tap the freeze button on your HUD to activate it.");
+      spcVO("60", "Tap the freeze button on your HUD to activate it.", "idle_gentle");
       showHudPointer("hudFreezeBtn", 6000);
       await waitEvent("freeze");
       hideHudPointer();
@@ -10736,7 +10870,7 @@ function initGalaxyCanvas() {
     { id: "missile", run: async () => {
       spawnTutorialPowerup("missile", tutZonePoint("center"));
       spawnTutorialAsteroids(4, 2);
-      spcVO("65", "Pick up the missiles, Cadet.");
+      spcVO("65", "Pick up the missiles, Cadet.", "talk_calm");
       await waitPowerupCollected("missile");
       spcVO("66", "Tap the missile weapon in the HUD to arm a missile.", "alert");
       showHudPointer("hudMissileBtn", 6000);
@@ -10745,8 +10879,8 @@ function initGalaxyCanvas() {
       spcVO("67", "Now tap to set a target and watch the destruction.", "alert");
       await waitFor(() => activeMissile);
       await waitFor(() => !activeMissile);
-      spcVO("68", "Excellent work, Cadet.", "praise");
-      spcVO("69", "This concludes our training for today.", "talk_friendly");
+      spcVO("68", "Excellent work, Cadet.", "laugh");
+      spcVO("69", "This concludes our training for today.", "praise");
       await waitVOIdle();
       await waitMs(350);
       spcVO("70", "Go practice if you like — the Polyverse awaits.", "shades");
@@ -10802,9 +10936,10 @@ function initGalaxyCanvas() {
       _timerRemainingMs = Math.max(0, levelDurationMs - (now - tutorialTimerStartedAt));
     }
     if (tutorialPaused) return; // frozen: no waiter resolution, no phase progress
-    // "DOUBLE-TAP TO SKIP" only makes sense while SPC is delivering dialogue (there's chatter to
-    // skip). The moment SPC goes quiet and we're just waiting for the player to complete an action,
-    // hide it. Driven each frame off the SPC queue/playing state.
+    // "TAP TO SKIP" only makes sense while SPC is delivering dialogue (there's chatter to skip).
+    // The moment SPC goes quiet and we're just waiting for the player to complete an action, hide
+    // it (and its tap hitbox). Driven each frame off the SPC queue/playing state — this is the
+    // authoritative valid-skip-point gate (Part 4).
     if (_spcPlaying || _spcQueue.length > 0) showSkipHint();
     else hideSkipHint();
     if (_tutWaiters.length) {
@@ -10828,6 +10963,7 @@ function initGalaxyCanvas() {
     _tutRunToken += 1;        // abort any in-flight phase chain
     abortTutorialAsync();
     hideHudPointer();
+    hideTimerArrow();
     tutorialPhase = -1;
     tutorialState = {};
     for (const k of Object.keys(tutorialEvents)) delete tutorialEvents[k];
@@ -10853,15 +10989,31 @@ function initGalaxyCanvas() {
     showStuntModeMenu(); // reopen the Stunt Mode sub-menu where Training/Practice live
   }
 
+  // Part 8: leave an endless Practice session via the Modes button — no score submission, lands
+  // back on the Stunt Mode sub-menu (Training / Practice) rather than the arcade menu.
+  function exitStuntPractice() {
+    practiceEndless = false;
+    hideArcadeOverlay();
+    showModeSelect();   // tears down the arcade session (engineMode → menu)
+    showStuntModeMenu();
+  }
+
   // Part 9: Practice = endless arcade gameplay. Reached from the tutorial's end or the
   // Stunt Mode → Practice button (once training is complete). CMDR is restored.
   function startStuntPractice() {
     cleanupTutorial();
     stuntActive = false;
-    startArcadeNew();           // fresh level-1 arcade session (resets practiceEndless to false)...
-    // ...which we then flip to never-ending: the update loop holds the timer full + re-arms
-    // spawns while practiceEndless is set (see the arcade update block).
+    startArcadeNew();           // full reset (lives/score/powerups); saved arcade progress → 1...
+    // Part 8: re-run the loop on a level-4 config (moderate density, all sizes, a continuous
+    // spawnEveryMs trickle — L1/L2 have spawnEveryMs:0 and would go empty). This does NOT touch
+    // saved arcade progress, it only picks the cfg the endless update block reads.
+    startArcadeAtLevel(4);
+    // ...then flip to never-ending: the update loop holds the timer full + re-arms spawns,
+    // recurs the UFO, and drips landmines while practiceEndless is set (see the arcade update block).
     practiceEndless = true;
+    const nowP = performance.now();
+    arcadeUfoSpawnAt = nowP + 30000;   // first UFO ~30s in (then respawns 45s after each kill)
+    nextPracticeMineAt = nowP + 60000; // first landmine at 60s, every 60s after
     if (hudLevel) hudLevel.textContent = "PRACTICE";
   }
 
@@ -11081,7 +11233,13 @@ function initGalaxyCanvas() {
         levelEndsAt = now + levelDurationMs;
         levelRunStartAt = now;
         if (spawnQueue < 2) spawnQueue = 2;
-        if (!ufo && !arcadeUfoSpawnAt) arcadeUfoSpawnAt = now + 15000 + Math.random() * 10000;
+        // UFO recurs: respawns 45s after each kill (the 30s first-spawn is armed in startStuntPractice).
+        if (!ufo && !arcadeUfoSpawnAt) arcadeUfoSpawnAt = now + 45000;
+        // Landmine drip every 60s (only while none is on the field).
+        if (!landmine && now >= nextPracticeMineAt) {
+          spawnLandmine();
+          nextPracticeMineAt = now + 60000;
+        }
       }
       // 2026-06-10: an active freeze pauses the level clock — shift every time anchor by dt
       // each frozen frame so remaining/elapsed (and the perimeter line) hold their position.
@@ -12318,11 +12476,8 @@ function initGalaxyCanvas() {
     const quadActive = performance.now() < quadShotUntil;
     _sfxBudgetExempt = quadActive;
     const hitSomething = resolveShotAt(x, y, now, isTouch);
-    // Tutorial: a quick double-tap on empty space skips past SPC's chatter to the live instruction.
-    if (stuntActive && !hitSomething) {
-      if (now - _tutLastEmptyTapAt < 320) { _tutLastEmptyTapAt = 0; tutorialSkip(); return; }
-      _tutLastEmptyTapAt = now;
-    }
+    // Tutorial chatter is now skipped via the dedicated #tutorialSkipBtn hitbox above the comm
+    // box (Part 4) — the old double-tap-empty-space detection has been removed.
     // 2026-06-10: quadshot — 3 extra shots clustered around the tap point while active.
     // Each extra shot seeks the nearest live asteroid within QUADSHOT_SEEK_RADIUS and fires
     // at its center through the same hit pipeline. Pure random 30-80px offsets almost never
@@ -13184,11 +13339,25 @@ function initGalaxyCanvas() {
     isTutorialPaused() {
       return tutorialPaused;
     },
+    isPracticeEndless() {
+      return practiceEndless;
+    },
+    exitStuntPractice() {
+      exitStuntPractice();
+    },
     pauseTutorial() {
       pauseTutorial();
     },
     resumeTutorial() {
       resumeTutorial();
+    },
+    // Part 6: app-switch back into a training/practice session. The audio context gets suspended
+    // on background, killing SFX — re-prime it here and resume any SPC line paused on hide.
+    onAppForeground() {
+      if (!stuntActive && !practiceEndless) return;
+      audioEngine.unlock?.();
+      audioEngine.loadMany?.(GAME_SFX);
+      if (_spcAudio) { try { _spcAudio.play().catch(() => {}); } catch {} }
     },
     triggerBoom() {
       // no-op in current arcade interaction model

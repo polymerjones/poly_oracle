@@ -82,6 +82,7 @@ const galaxyBackground = (() => {
   let warping = false;
   let warpT = 0;
   let warpPhase = 0;
+  let _warpFrameTs = 0; // 2026-06-16: timestamp of last rendered frame, for the 45fps warp cap
   let raf = 0;
   let running = false;
   let isNative = false;
@@ -418,10 +419,18 @@ const galaxyBackground = (() => {
     cx.globalAlpha = 1;
   }
 
-  function frame() {
+  function frame(ts) {
     if (!running || !cx) return;
-    t += 0.01;
     raf = requestAnimationFrame(frame);
+    // 2026-06-16: during the between-level warp the GPU cost spikes (radial ray burst +
+    // amplified scroll). Cap that transition to ~45fps via a timestamp gate to lighten the
+    // load — the burst is short and punchy enough that the dropped frames aren't noticeable.
+    // Normal drifting background is left at full refresh.
+    if (warping && ts) {
+      if (ts - _warpFrameTs < 22) return;
+      _warpFrameTs = ts;
+    }
+    t += 0.01;
 
     if (blend < 1) {
       blend = Math.min(1, blend + 0.007);
@@ -564,17 +573,23 @@ const galaxyBackground = (() => {
     if (warping) {
       const prog = warpPhase === 1 ? warpT : Math.max(0, 1 - warpT * 1.2);
       cx.save();
-      for (let i = 0; i < 200; i += 1) {
-        const a = (i / 200) * Math.PI * 2;
-        const base = 18 + prog * 28;
+      // 2026-06-16: 120 rays (was 200, -40%) batched into ONE path + a single stroke (was 200
+      // per-ray strokes). strokeStyle/lineWidth are constant across the burst, so the batch is
+      // visually identical but collapses 200 GPU stroke calls/frame down to one.
+      const RAYS = 120;
+      const base = 18 + prog * 28;
+      cx.strokeStyle = `rgba(${st[0]},${st[1]},${st[2]},${prog * 0.85})`;
+      cx.lineWidth = 0.3 + prog * 2.2;
+      cx.beginPath();
+      for (let i = 0; i < RAYS; i += 1) {
+        const a = (i / RAYS) * Math.PI * 2;
         const len = prog * prog * (120 + Math.random() * 350);
-        cx.strokeStyle = `rgba(${st[0]},${st[1]},${st[2]},${prog * 0.85})`;
-        cx.lineWidth = 0.3 + prog * 2.2;
-        cx.beginPath();
-        cx.moveTo(VPX + Math.cos(a) * base, VPY + Math.sin(a) * base);
-        cx.lineTo(VPX + Math.cos(a) * (base + len), VPY + Math.sin(a) * (base + len));
-        cx.stroke();
+        const ca = Math.cos(a);
+        const sa = Math.sin(a);
+        cx.moveTo(VPX + ca * base, VPY + sa * base);
+        cx.lineTo(VPX + ca * (base + len), VPY + sa * (base + len));
       }
+      cx.stroke();
       if (warpPhase === 2 && warpT < 0.22) {
         const fa = (0.22 - warpT) / 0.22;
         cx.fillStyle = `rgba(240,245,255,${fa * 0.95})`;

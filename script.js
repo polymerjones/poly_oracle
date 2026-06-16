@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-16 10:55";
+const BUILD_TS = "2026-06-16 11:16";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6111,6 +6111,9 @@ function initGalaxyCanvas() {
   let ufo = null;
   let ufoDroneLoopHandle = null;
   let arcadeUfoSpawnAt = 0;
+  // 2026-06-16: recurring mid-level mine drops on the mineLaunch levels (L12/L13/L15) — set in
+  // startLevel after the initial launch, checked in the main spawn-timer block.
+  let nextMineRespawnAt = 0;
   let retryPending = false;
   const gameTimer = { startedAt: 0, elapsed: 0, running: false, bestTime: null, levelTimes: [] };
   try {
@@ -7530,6 +7533,31 @@ function initGalaxyCanvas() {
     const count = sim.asteroids.length;
     if (count < 2) return;
     if (count > 40 && engineMode !== "arcade") return;
+
+    // 2026-06-16: arcade levels peak at ~13-16 on-screen stroids, where a direct pairwise sweep
+    // is both faster AND allocation-free. The spatial grid below churns a fresh `new Set()` plus
+    // brand-new bucket arrays (`cells[key] = []`) every frame — GC pressure that only earns its
+    // keep at large N. That churn was a contributor to the L6 hitch (first level stacking UFO +
+    // mines + powerups on the field). Use the grid only when the field is genuinely crowded.
+    if (count <= 48) {
+      for (let i = 0; i < count; i += 1) {
+        const a = sim.asteroids[i];
+        if (a.tossed || a._stroidHeld) continue;
+        for (let j = i + 1; j < count; j += 1) {
+          const b = sim.asteroids[j];
+          if (b.tossed || b._stroidHeld) continue;
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          if ((dx * dx) + (dy * dy) > 40000) continue;
+          resolveCircleCollision(a, b, 0.92);
+        }
+      }
+      for (let i = 0; i < count; i += 1) {
+        wrapEntity(sim.asteroids[i]);
+        clampSpeed(sim.asteroids[i]);
+      }
+      return;
+    }
 
     const cs = _collGrid.cellSize;
     const cells = _collGrid.cells;
@@ -9772,6 +9800,9 @@ function initGalaxyCanvas() {
       }
       commBoxController.reactTo("landmine");
       playGameSfx("blip1", 0.8, { rate: 1.05 });
+      // 2026-06-16: arm the first mid-level mine respawn 20-30s out (recurring drip in the
+      // main loop keeps the chain-reaction field replenished after the opening salvo clears).
+      nextMineRespawnAt = now + 20000 + Math.random() * 10000;
     }
 
     // TODO: waves — see Level 11 wave system for pattern (cfg.waves not yet wired)
@@ -9891,6 +9922,7 @@ function initGalaxyCanvas() {
     activeMissile = null;
     missileCrosshair = null;
     missileForceSpawnedThisLevel = false;
+    nextMineRespawnAt = 0; // 2026-06-16: recurring mine timer re-armed per level in startLevel
     pendingExplosions.length = 0; // 2026-06-16: no queued chain detonations carry into a fresh run
     hudMissileBtn?.classList.remove("hudMissileBtn--aiming");
     updateHudMissileInventory();
@@ -10913,6 +10945,7 @@ function initGalaxyCanvas() {
         levelEndsAt += dt;
         levelRunStartAt += dt;
         if (Number.isFinite(nextSpawnAt)) nextSpawnAt += dt;
+        if (nextMineRespawnAt) nextMineRespawnAt += dt; // 2026-06-16: hold mine drip during freeze
       } else if (_freezeWasActive) {
         playGameSfx("unfreeze", 0.85); // freeze just lapsed — movement resumes this frame
       }
@@ -10950,6 +10983,21 @@ function initGalaxyCanvas() {
           spawnQueue -= 1;
           spawnedTotal += 1;
           nextSpawnAt = Math.max(nextSpawnAt, now + Math.max(350, cfg.spawnEveryMs));
+        }
+
+        // 2026-06-16: recurring mid-level mine drops on mineLaunch levels (L12/L13/L15). Only
+        // refills when fewer than 2 mines remain on the field, so the chain-reaction layout
+        // replenishes without ever stacking up. Re-arms 20-30s out after each drip.
+        if (cfg.mineLaunch && now >= nextMineRespawnAt && placedBombs.length < 2) {
+          const count = Math.min(2, Math.ceil((cfg.mineCount || 1) / 2));
+          for (let i = 0; i < count; i += 1) {
+            const mx = playfield.x + playfield.w * (0.2 + Math.random() * 0.6);
+            const my = playfield.y + playfield.h * (0.2 + Math.random() * 0.6);
+            placedBombs.push(createMineEntity(mx, my, cfg.mineFuseMs || LANDMINE_FUSE_MS));
+            addWarpRing(mx, my, "rgba(124,255,91,1)");
+          }
+          playGameSfx("blip1", 0.8, { rate: 1.05 });
+          nextMineRespawnAt = now + 20000 + Math.random() * 10000;
         }
 
         const elapsedMs = Math.max(0, now - levelRunStartAt);
@@ -11047,8 +11095,6 @@ function initGalaxyCanvas() {
         }
         updateHudQuadBadge();
         updateHudMissileInventory();
-        stepMissile(now);
-        stepMissileSplitQueue();
       }
 
       if (!ufo && arcadeUfoSpawnAt && now >= arcadeUfoSpawnAt && now >= arcadePausedUntil) {
@@ -11077,6 +11123,12 @@ function initGalaxyCanvas() {
     const gameplayAllowed = engineMode === "practice" || (engineMode === "arcade" && arcadeActive && now >= arcadePausedUntil);
     if (gameplayAllowed) {
       const now_s = performance.now();
+      // 2026-06-16: advance the in-flight missile HERE (not in the arcade-only block above, which
+      // is gated off by !stuntActive). During the Stunt tutorial Phase 9 the missile launched but
+      // was never stepped, so it sat frozen at the launch point and never flew/exploded — the
+      // phase waiter (await !activeMissile) then hung forever. Practice mode missiles now step too.
+      stepMissile(now);
+      stepMissileSplitQueue();
       for (let si = _bombShrapnel.length - 1; si >= 0; si -= 1) {
         const sh = _bombShrapnel[si];
         const age = now_s - sh.startedAt;

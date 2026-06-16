@@ -137,23 +137,6 @@ body.reveal-screen-shake #oracleView {
   100% { transform: translate3d(0, 0, 0); }
 }
 
-#galaxyCanvas {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 1;
-  pointer-events: none;
-  /* Start hidden so the starfield slow-fades in once it first draws,
-     instead of popping over the bare CSS gradient on launch. */
-  opacity: 0;
-  transition: opacity 900ms ease;
-}
-
-#galaxyCanvas.is-ready {
-  opacity: 1;
-}
-
 .bg-video {
   position: fixed;
   inset: 0;
@@ -169,8 +152,12 @@ body.reveal-screen-shake #oracleView {
 }
 
 .oracle-bg-video {
-  z-index: 2;
-  --video-visible-opacity: 0.1;
+  /* Oracle page background is now the looping MP4 (procedural starfield removed).
+     Full opacity, sits behind the orb/stage (z-index 0). The element starts at
+     inline opacity:0 and JS clears it on canplay/loadeddata to fade in over 400ms. */
+  z-index: 0;
+  --video-visible-opacity: 1;
+  transition: opacity 400ms ease;
 }
 
 .stage {
@@ -1451,7 +1438,7 @@ select:focus-visible {
   }
 
   .oracle-bg-video {
-    opacity: 0.62;
+    opacity: 1;
     filter: saturate(1.14) contrast(1.12) brightness(0.54);
   }
 }
@@ -1467,7 +1454,7 @@ select:focus-visible {
   }
 
   .oracle-bg-video {
-    opacity: 0.74;
+    opacity: 1;
     filter: saturate(1.06) contrast(1.2) brightness(0.42);
   }
 
@@ -1488,7 +1475,7 @@ select:focus-visible {
   }
 
   .oracle-bg-video {
-    opacity: 0.76;
+    opacity: 1;
     filter: saturate(1.04) contrast(1.22) brightness(0.38);
   }
 

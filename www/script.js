@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-16 11:45";
+const BUILD_TS = "2026-06-16 15:27";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2794,7 +2794,9 @@ function init() {
   resetUiOverlayState();
   loadState();
   preloadSfx();
-  initGalaxyBackground();
+  // 2026-06-16: procedural Oracle starfield removed — the Oracle page background is now the
+  // looping MP4 (#oracleBgVideo → assets/video/oracle_bg.mp4). initGalaxyBackground() (and its
+  // #galaxyCanvas element) are gone; the gameplay level-video stack is unaffected.
   initGalaxyCanvas();
   initBackgroundVideos();
   applyTheme();
@@ -13263,6 +13265,9 @@ function initGalaxyCanvas() {
 }
 
 // v1.2.2 galaxy bg
+// DEPRECATED 2026-06-16: procedural Oracle starfield. No longer called (the #galaxyCanvas
+// element was removed and the Oracle background is now #oracleBgVideo → assets/video/oracle_bg.mp4).
+// Kept inert as dead code — self-no-ops because getElementById returns null. Safe to delete.
 function initGalaxyBackground() {
   const canvas = document.getElementById("galaxyCanvas");
   if (!canvas) return;

@@ -16,17 +16,18 @@
     <link rel="stylesheet" href="style.css?v=3.3" />
   </head>
   <body>
-    <canvas id="galaxyCanvas" aria-hidden="true"></canvas>
     <video
       id="oracleBgVideo"
       class="bg-video oracle-bg-video"
-      src="galaxybg1b-h264.mp4"
+      src="assets/video/oracle_bg.mp4"
       poster="galaxybg1b-poster.jpg"
       preload="auto"
       autoplay
+      loop
       playsinline
       muted
       aria-hidden="true"
+      style="opacity: 0"
     ></video>
 
     <section id="oracleView" class="view">

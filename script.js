@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-15 16:54";
+const BUILD_TS = "2026-06-16 10:55";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6028,6 +6028,14 @@ function initGalaxyCanvas() {
   // to avoid the single-frame hitch — entries are { a, cx, cy, r }. Drained by stepMissileSplitQueue.
   let missileSplitQueue = [];
   const MISSILE_SPLITS_PER_FRAME = 2;
+  // 2026-06-16: deferred mine-chain queue. A detonating mine used to recursively explode every
+  // mine it caught (explodeMineEntity → chainDetonateMines → explodeMineEntity → …). On the dense
+  // L12/L15 clusters — and whenever a missile/bomb caught several mines at once — that nesting
+  // overflowed the stack and froze the game. Now a caught mine is removed from its container
+  // immediately and queued here; processPendingExplosions() drains it in the update loop, so each
+  // blast fully completes before the next begins (flat iteration, never nested).
+  const pendingExplosions = []; // entries: { mine, source: "landmine" | "placed" }
+  const MINE_CHAIN_PER_FRAME = 2;
   let missileImpactFlash = null; // { x, y, start } localized impact flash, drawn in drawMissileFx
   let missileForceSpawnedThisLevel = false; // DEBUG: revert before release
   // missile blast = 50% of the bomb's full blast radius (explodeMineEntity uses 700)
@@ -9085,23 +9093,42 @@ function initGalaxyCanvas() {
     return false;
   }
 
-  // 2026-06-11: an exploding armed mine triggers any other armed mine within range (recursion
-  // bounded by depth). Each victim removes itself from its container via its own explode path.
-  let _mineChainDepth = 0;
+  // 2026-06-11: an exploding armed mine triggers any other armed mine within range.
+  // 2026-06-16: this used to explode each victim INLINE (explodePlacedBomb → explodeMineEntity →
+  // chainDetonateMines → …), which recursed and overflowed the stack on dense clusters. It now
+  // removes each caught mine from its container immediately (so it can't be re-found, keep running
+  // its fuse, or re-trigger itself) and QUEUES it; processPendingExplosions() detonates the queue
+  // in the update loop, one batch per frame, with no nesting.
   function chainDetonateMines(x, y, radius) {
-    if (_mineChainDepth > 6) return;
-    const victims = [];
     const inRange = (m) => m
       && (m.phase === "armed" || m.phase === "player_armed")
       && Math.hypot(m.x - x, m.y - y) <= radius;
-    if (inRange(landmine)) victims.push(landmine);
-    for (let i = 0; i < placedBombs.length; i += 1) {
-      if (inRange(placedBombs[i])) victims.push(placedBombs[i]);
+    if (inRange(landmine)) {
+      const m = landmine;
+      landmine = null;
+      stopDangerLoop();
+      pendingExplosions.push({ mine: m, source: "landmine" });
     }
-    for (let i = 0; i < victims.length; i += 1) {
-      const m = victims[i];
-      if (m === landmine) explodeLandmine({ halfRadius: true });
-      else explodePlacedBomb(m, { halfRadius: true });
+    for (let i = placedBombs.length - 1; i >= 0; i -= 1) {
+      if (inRange(placedBombs[i])) {
+        const m = placedBombs[i];
+        placedBombs.splice(i, 1);
+        pendingExplosions.push({ mine: m, source: "placed" });
+      }
+    }
+  }
+
+  // 2026-06-16: drain the deferred mine-chain queue from the update loop. Each entry's mine was
+  // already pulled from its container at enqueue time, so explodeMineEntity() detonates it directly
+  // (and may queue further victims — picked up next frame). Capped per frame so a big chain cascades
+  // over a few frames instead of hitching, and can never recurse.
+  function processPendingExplosions() {
+    let budget = MINE_CHAIN_PER_FRAME;
+    while (budget > 0 && pendingExplosions.length) {
+      budget -= 1;
+      const { mine, source } = pendingExplosions.shift();
+      explodeMineEntity(mine, { halfRadius: true });
+      if (source === "placed") stuntNotify("bomb");
     }
   }
 
@@ -9125,11 +9152,10 @@ function initGalaxyCanvas() {
     triggerHugeHaptic(); // 2026-06-12: bomb blast = huge haptic
     playBigBoomSound();
     playGameSfx("bigbang", 1.62);
-    // chain: detonate other armed mines caught in the blast (the just-exploded mine is already
-    // removed from its container by the caller, so it can't re-trigger itself)
-    _mineChainDepth += 1;
+    // chain: queue other armed mines caught in the blast (the just-exploded mine is already
+    // removed from its container by the caller, so it can't re-trigger itself). chainDetonateMines
+    // enqueues rather than recursing — processPendingExplosions() detonates them in the update loop.
     chainDetonateMines(x, y, radius * 0.6);
-    _mineChainDepth -= 1;
   }
 
   function explodeLandmine(opts = {}) {
@@ -9221,6 +9247,7 @@ function initGalaxyCanvas() {
     sim.shooting = null;
     landmine = null;
     placedBombs.length = 0; // 2026-06-10: placed bombs don't carry across levels/menu
+    pendingExplosions.length = 0; // 2026-06-16: drop any queued chain detonations
     stopDangerLoop();
     landmineSpawnedThisLevel = false;
     // 2026-06-10: clear powerups, active effects, and aim state on level transitions / menu exit
@@ -9864,6 +9891,7 @@ function initGalaxyCanvas() {
     activeMissile = null;
     missileCrosshair = null;
     missileForceSpawnedThisLevel = false;
+    pendingExplosions.length = 0; // 2026-06-16: no queued chain detonations carry into a fresh run
     hudMissileBtn?.classList.remove("hudMissileBtn--aiming");
     updateHudMissileInventory();
     nextBombPowerupAt = performance.now() + BOMB_POWERUP_INTERVAL_MIN
@@ -11163,6 +11191,9 @@ function initGalaxyCanvas() {
         const bomb = placedBombs[bi];
         updateMineEntity(bomb, dt, now, (opts) => explodePlacedBomb(bomb, opts), { quietArm: true, frozen: simFrozen });
       }
+      // 2026-06-16: detonate any mines queued by a chain reaction this frame (mine/bomb/missile
+      // blasts enqueue caught mines instead of recursing — see chainDetonateMines).
+      processPendingExplosions();
 
       if (ufo && ufo.alive) {
         if (now >= ufo.despawnAt) {
@@ -12417,9 +12448,11 @@ function initGalaxyCanvas() {
       const dist = Math.hypot(landmine.x - tx, landmine.y - ty);
       if (dist <= blastRadius) explodeLandmine({ halfRadius: true });
     }
-    // placed bombs — iterate backwards (explodePlacedBomb splices)
+    // placed bombs — iterate backwards (explodePlacedBomb splices, and a chain detonation can
+    // splice further entries this same pass, so a slot may already be gone — guard against it).
     for (let i = placedBombs.length - 1; i >= 0; i -= 1) {
       const b = placedBombs[i];
+      if (!b) continue; // 2026-06-16: removed by a chain reaction earlier in this loop
       const dist = Math.hypot(b.x - tx, b.y - ty);
       if (dist <= blastRadius) explodePlacedBomb(b, { halfRadius: true });
     }

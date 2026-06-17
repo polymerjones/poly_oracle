@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-17 12:55";
+const BUILD_TS = "2026-06-17 16:49";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1296,7 +1296,39 @@ const commBoxController = (() => {
     "MAKE_A_PLASMA_NET3.mp3",
   ];
 
+  // 2026-06-17: SPC (Specialist) bonus VO. On levels where SPC owns the comm portrait (currently
+  // L14; _spcMode), praise / timer / struggle lines swap to her recorded bonus files instead of
+  // CMDR's. Files live in vo/SPC_*.mp3. spcBonusVoSrc() returns a path only while SPC is on-screen,
+  // so callers fall back to the CMDR line everywhere else. POOL_SPC_PRAISE shuffles like CMDR pools.
+  const SPC_BONUS_AVAILABLE = new Set([
+    "SPC_crushing_it.mp3",
+    "SPC_boom_like_that.mp3",
+    "SPC_there_you_go.mp3",
+    "SPC_amazing.mp3",
+    "SPC_show_boss.mp3",
+    "SPC_lets_get_after_it.mp3",
+    "SPC_timer_warning.mp3",
+    "SPC_not_doing_hot.mp3",
+  ]);
+  const POOL_SPC_PRAISE = [
+    "SPC_crushing_it.mp3",
+    "SPC_boom_like_that.mp3",
+    "SPC_there_you_go.mp3",
+    "SPC_amazing.mp3",
+    "SPC_show_boss.mp3",
+    "SPC_lets_get_after_it.mp3",
+  ];
+
   const VO_CAPTIONS = {
+    // 2026-06-17: SPC bonus-line captions (shown on the comm ticker while her audio plays).
+    "SPC_crushing_it.mp3": "YOU'RE CRUSHING IT, CADET.",
+    "SPC_boom_like_that.mp3": "BOOM! I LIKE THAT!",
+    "SPC_there_you_go.mp3": "THERE YOU GO!",
+    "SPC_amazing.mp3": "AMAZING!",
+    "SPC_show_boss.mp3": "YOU SHOW HIM WHO'S BOSS.",
+    "SPC_lets_get_after_it.mp3": "LET'S GET AFTER IT, CADET!",
+    "SPC_timer_warning.mp3": "YOU'RE RUNNING OUT OF TIME, CADET.",
+    "SPC_not_doing_hot.mp3": "YOU'RE NOT DOING SO HOT, CADET.",
     // 2026-06-15: level 15 finale (Part 8). Audio is a placeholder (Poly records gauntlet_intro.mp3);
     // until then this caption shows in the comm box.
     "gauntlet_intro.mp3": "THIS IS IT CADET. THE GAUNTLET. GIVE IT EVERYTHING YOU'VE GOT.",
@@ -1377,6 +1409,9 @@ const commBoxController = (() => {
   let _spcSpeaking = false;
   let _spcMouthFlap = null;
   let _spcBlinkTimer = null;
+  // Pending blink/rest restorations from _spcDoBlink — tracked so _spcStopBlink can cancel them.
+  // Without this, a comm interrupting mid-blink leaves the portrait stuck on the blink frame.
+  let _spcBlinkTimeouts = [];
   // The base talking cycle (mouth-flap) when no expression hint is supplied.
   const SPC_TALK_CYCLE = ["talk_calm", "smile_open", "talk_friendly"];
   // Expression hints flap between the emotion frame and a matching talk frame so the portrait
@@ -1408,6 +1443,8 @@ const commBoxController = (() => {
   }
   function _spcStopBlink() {
     if (_spcBlinkTimer) { clearTimeout(_spcBlinkTimer); _spcBlinkTimer = null; }
+    for (const t of _spcBlinkTimeouts) clearTimeout(t);
+    _spcBlinkTimeouts.length = 0;
   }
   // Part 6: periodic blink while idle (every 3-5s, 120ms), only when not speaking.
   // One blink "event" — weighted toward a single blink, occasionally a double/triple flutter.
@@ -1417,25 +1454,26 @@ const commBoxController = (() => {
     const blinkFrame = base === "shades" ? "shades_blink" : "blink";
     const blink = () => { if (_spcMode && !_spcSpeaking) setSpcFrame(blinkFrame); };
     const rest = () => { if (_spcMode && !_spcSpeaking) setSpcFrame(base); };
+    const at = (fn, t) => _spcBlinkTimeouts.push(setTimeout(fn, t)); // tracked so it's cancellable
     const r = Math.random();
     if (r < 0.6) {
       // single (60%)
       blink();
-      setTimeout(rest, 120);
+      at(rest, 120);
     } else if (r < 0.9) {
       // double (30%)
       blink();
-      setTimeout(rest, 120);
-      setTimeout(blink, 220);
-      setTimeout(rest, 340);
+      at(rest, 120);
+      at(blink, 220);
+      at(rest, 340);
     } else {
       // triple (10%)
       blink();
-      setTimeout(rest, 120);
-      setTimeout(blink, 200);
-      setTimeout(rest, 320);
-      setTimeout(blink, 400);
-      setTimeout(rest, 520);
+      at(rest, 120);
+      at(blink, 200);
+      at(rest, 320);
+      at(blink, 400);
+      at(rest, 520);
     }
   }
 
@@ -1826,6 +1864,13 @@ const commBoxController = (() => {
     return `vo/${filename}`;
   }
 
+  // 2026-06-17: SPC bonus-line source. Returns a vo/SPC_*.mp3 path ONLY while SPC owns the
+  // portrait (_spcMode), so gameplay callers transparently fall back to CMDR off SPC levels.
+  function spcBonusVoSrc(filename) {
+    if (!_spcMode) return null;
+    return SPC_BONUS_AVAILABLE.has(filename) ? `vo/${filename}` : null;
+  }
+
   function triggerVO({
     lines = [],
     audioSrc = null,
@@ -1834,6 +1879,7 @@ const commBoxController = (() => {
     event = null,
     onDone = null,
     _onEnd = null,
+    _spc = false,
   } = {}) {
     if (!hudVisible) show();
     if (!hudVisible) {
@@ -1909,7 +1955,9 @@ const commBoxController = (() => {
         };
         try {
           voAudio = new Audio(audioSrc);
-          voAudio.volume = muteCmdrVO ? 0 : 0.7; // 2026-06-17: L14 mutes CMDR voice (caption still types)
+          // 2026-06-17: L14 mutes CMDR voice (caption still types), but SPC's own bonus lines
+          // (_spc) bypass the mute so the Specialist is actually heard on her level.
+          voAudio.volume = (muteCmdrVO && !_spc) ? 0 : (_spc ? 0.85 : 0.7);
           voAudio.play().catch(() => {
             if (!audioFallbackTimer) audioFallbackTimer = setTimeout(endTalking, duration);
           });
@@ -1988,6 +2036,8 @@ const commBoxController = (() => {
     triggerVO,
     queueVO,
     commVoSrc,
+    spcBonusVoSrc,
+    isSpcMode: () => _spcMode,
     setMuteCmdrVO: (on) => { muteCmdrVO = !!on; },
     pinTicker,
     hideTicker,
@@ -2008,6 +2058,7 @@ const commBoxController = (() => {
     POOL_LEVEL_COMPLETE,
     POOL_NICE_SHOT,
     POOL_HYPE,
+    POOL_SPC_PRAISE,
     POOL_BOMB,
     POOL_DETONATE,
     POOL_LOW_LIVES,
@@ -6231,7 +6282,19 @@ function initGalaxyCanvas() {
   let practiceThemeIndex = 1; // starts on the L1 theme; cycles 1→2→…→15→1
   let nextThemeCycleAt = 0;
   // SPC_xx.mp3 audio is recorded later; until a key is listed here, the line is text-only.
-  const SPC_VO_AVAILABLE = new Set();
+  // 2026-06-17: SPC VO is recorded — register every vo/SPC_*.mp3 (key = filename minus the
+  // SPC_ prefix and .mp3 suffix, e.g. SPC_08-09.mp3 → "08-09"). spcVoSrc() plays vo/SPC_<key>.mp3.
+  const SPC_VO_AVAILABLE = new Set([
+    "01", "07", "08-09", "12", "13-14", "15-16", "15-16_release", "17", "17b", "18", "19",
+    "20", "21", "22", "23", "24", "25", "26", "27", "28-30", "28-30_part2", "31", "32", "33",
+    "34", "35", "36", "37", "38", "39", "40", "41", "42-43", "44-45", "46", "47", "48", "49",
+    "50", "51", "52", "53", "54", "54_alt", "55-56", "57", "58", "59", "60", "61", "62",
+    "62_part1", "63", "63b", "63b_part1", "63b_part2", "64", "65", "66", "67", "68", "69", "70",
+    "amazing", "boom_like_that", "crushing_it", "freeze_toggle", "grab_small", "lets_get_after_it",
+    "not_doing_hot", "peeing_pants", "show_boss", "there_you_go", "timer_warning",
+    "BONUS_001", "BONUS_002", "BONUS_003", "BONUS_006", "BONUS_011", "BONUS_012", "BONUS_016",
+    "BONUS_039", "BONUS_057", "BONUS_063", "BONUS_066", "BONUS_075",
+  ]);
   let currentLevelIndex = 0;
   let _levelPrimaryColor = "#00FFD1";
   let levelEndsAt = 0;
@@ -7614,10 +7677,13 @@ function initGalaxyCanvas() {
     stopUfoDrone();
     ufosKilledThisLevel += 1;
     ufo = null;
-    commBoxController.queueVO({
-      audioSrc: commBoxController.commVoSrc("vo-quicklaugh.mp3"),
-      event: "levelcomplete",
-    });
+    // SPC levels: "There you go!" on a UFO kill; CMDR's quick laugh everywhere else.
+    if (!queueSpcBonusVO("SPC_there_you_go.mp3")) {
+      commBoxController.queueVO({
+        audioSrc: commBoxController.commVoSrc("vo-quicklaugh.mp3"),
+        event: "levelcomplete",
+      });
+    }
     plasmaCage.cooldownUntil = 0;
     plasmaCage.rechargeSoundPlayed = true;
     addArcadeScore(100);
@@ -8409,12 +8475,15 @@ function initGalaxyCanvas() {
     const _now = performance.now();
     if (_now - lastHypeVoAt > 15000) {
       lastHypeVoAt = _now;
-      commBoxController.queueVO({
-        audioSrc: commBoxController.commVoSrc(
-          commBoxController.pickFromPool("hype", commBoxController.POOL_HYPE),
-        ),
-        event: "smirk",
-      });
+      // SPC levels: her praise pool stands in for the CMDR "hype" line.
+      if (!queueSpcPraiseVO()) {
+        commBoxController.queueVO({
+          audioSrc: commBoxController.commVoSrc(
+            commBoxController.pickFromPool("hype", commBoxController.POOL_HYPE),
+          ),
+          event: "smirk",
+        });
+      }
     }
   }
 
@@ -8552,6 +8621,22 @@ function initGalaxyCanvas() {
     }
   }
 
+  // 2026-06-17: SPC bonus VO helpers. On SPC levels (currently L14) the Specialist's recorded
+  // bonus lines stand in for the CMDR praise/timer/struggle lines. Each returns true when it has
+  // handled the moment with an SPC line, so the caller skips its CMDR queueVO; returns false off
+  // SPC levels so CMDR plays as before.
+  function queueSpcBonusVO(filename, opts = {}) {
+    const src = commBoxController.spcBonusVoSrc(filename);
+    if (!src) return false;
+    commBoxController.queueVO({ audioSrc: src, _spc: true, priority: opts.priority });
+    return true;
+  }
+  function queueSpcPraiseVO() {
+    if (!commBoxController.isSpcMode()) return false;
+    const file = commBoxController.pickFromPool("spcPraise", commBoxController.POOL_SPC_PRAISE);
+    return queueSpcBonusVO(file);
+  }
+
   function resetKillStreak() {
     _streakCount = 0;
     clearTimeout(_streakTimer);
@@ -8593,6 +8678,8 @@ function initGalaxyCanvas() {
         if (now2 - lastKillStreakVoAt > 15000) {
           lastKillStreakVoAt = now2;
           setTimeout(() => {
+            // SPC levels: her praise pool stands in for the CMDR "cocky" line.
+            if (queueSpcPraiseVO()) return;
             commBoxController.queueVO({
               audioSrc: commBoxController.commVoSrc(
                 commBoxController.pickFromPool("cocky", commBoxController.POOL_COCKY),
@@ -8604,12 +8691,15 @@ function initGalaxyCanvas() {
       } else {
         if (now2 - lastNiceShotVoAt > 12000) {
           lastNiceShotVoAt = now2;
-          commBoxController.queueVO({
-            audioSrc: commBoxController.commVoSrc(
-              commBoxController.pickFromPool("niceshot", commBoxController.POOL_NICE_SHOT),
-            ),
-            event: "smirk",
-          });
+          // SPC levels: her praise pool stands in for the CMDR "nice shot" line.
+          if (!queueSpcPraiseVO()) {
+            commBoxController.queueVO({
+              audioSrc: commBoxController.commVoSrc(
+                commBoxController.pickFromPool("niceshot", commBoxController.POOL_NICE_SHOT),
+              ),
+              event: "smirk",
+            });
+          }
         }
       }
       _streakCount = 0;
@@ -8941,8 +9031,10 @@ function initGalaxyCanvas() {
       const destroyedCount = destroyAsteroidsInPlasmaCage(rect);
       if (destroyedCount > 0) stuntNotify("plasma");
       else stuntNotify("plasma_miss"); // tutorial Phase 3 coaching on an empty net
-      // In the tutorial the net never goes on cooldown — the cadet can keep practicing freely.
-      if (stuntActive) rechargePlasmaNow();
+      // In the tutorial a MISSED net stays hot so the cadet can retry immediately — but a
+      // SUCCESSFUL net runs the real cooldown so the recharge step (10999-11003) has something
+      // to teach. (Force-recharging every net made "let the plasma recharge" resolve instantly.)
+      if (stuntActive && destroyedCount === 0) rechargePlasmaNow();
       window.pixiRenderer?.triggerPlasmaRectFlash?.();
       const fireKey = destroyedCount > 0 ? resolveGameSfxKey("plasma_fire", "ufo_destroy") : "";
       // FIXED 2026-06-09: forceHtmlOnIOS covers iOS Safari; `important` bypasses the native
@@ -9979,13 +10071,16 @@ function initGalaxyCanvas() {
         arcadeLives = clamp(arcadeLives - 1, 0, MAX_LIVES);
         renderLives();
         if (arcadeLives === 1) {
-          commBoxController.queueVO({
-            audioSrc: commBoxController.commVoSrc(
-              commBoxController.pickFromPool("lowlives", commBoxController.POOL_LOW_LIVES),
-            ),
-            event: "lowlives",
-            priority: "high",
-          });
+          // SPC levels: "You're not doing so hot, Cadet." in place of CMDR's low-lives line.
+          if (!queueSpcBonusVO("SPC_not_doing_hot.mp3", { priority: "high" })) {
+            commBoxController.queueVO({
+              audioSrc: commBoxController.commVoSrc(
+                commBoxController.pickFromPool("lowlives", commBoxController.POOL_LOW_LIVES),
+              ),
+              event: "lowlives",
+              priority: "high",
+            });
+          }
         }
         hideArcadeOverlay();
         // 2026-06-16: the render loop + PIXI can be torn down while the fail overlay is up — e.g.
@@ -10181,10 +10276,19 @@ function initGalaxyCanvas() {
     // 2026-06-17: delay the first VO 800ms so the level-intro animation finishes before SPC/CMDR
     // starts talking (the comm box was popping up before the level had visually settled).
     setTimeout(() => {
-      commBoxController.queueVO({
-        audioSrc: commBoxController.commVoSrc(levelStartVO),
-        event: "commander",
-      });
+      // 2026-06-17: level 14 — SPC owns the comm box and CMDR voice is muted, so greet the cadet
+      // with her own intro line ("Let's get after it, Cadet!") instead of the muted CMDR line.
+      const spcIntro = levelNum === 14
+        ? commBoxController.spcBonusVoSrc("SPC_lets_get_after_it.mp3")
+        : null;
+      if (spcIntro) {
+        commBoxController.queueVO({ audioSrc: spcIntro, _spc: true });
+      } else {
+        commBoxController.queueVO({
+          audioSrc: commBoxController.commVoSrc(levelStartVO),
+          event: "commander",
+        });
+      }
     }, 800);
 
     if (levelNum === 1) {
@@ -10986,33 +11090,46 @@ function initGalaxyCanvas() {
       spawnTutorialAsteroids(2, 2);
       spcVO("13-14", "Next up — the plasma net. Tap, drag and hold to set it.");
       spcVO("15-16", "When stroids glow they're targeted. Release to fire.");
-      // Part 3 (2026-06-17): two-stage objective — set, then release. Stage 2 swaps in the moment
-      // the cadet starts dragging (plasmaCage.active). Fire-and-forget watcher (rejects on abort).
-      showTaskInstruction("TAP AND DRAG TO SET PLASMA NET");
-      waitFor(() => plasmaCage.active)
-        .then(() => { if (stuntActive) showTaskInstruction("RELEASE TO FIRE PLASMA NET"); })
-        .catch(() => {});
+      // Part 3 (2026-06-17): two-stage objective — set, then release. The phase's onUpdate hook
+      // (below) keeps the text in sync with plasmaCage.active each frame, so it re-arms back to
+      // "TAP AND DRAG" whenever a gesture resets (miss/cancel/fire) instead of sticking on RELEASE.
+      tutorialState.plasmaObjectiveMode = "setfire";
+      tutorialState.plasmaObjectiveShown = "";
       tutorialState.plasmaMisses = 0;
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(2, 2));
+      tutorialState.plasmaObjectiveMode = null;
       hideTaskInstruction(); // net fired successfully
       spcVO("17", "NICE! Great work, Cadet.", "praise");
       spcVO("18", "Now let the plasma recharge and do it again!", "talk_friendly");
       showPlasmaRechargeArrow(); // Part 4: point at the recharge indicator while it refills
-      await waitFor(() => plasmaCage.charged);
+      // Wait for the real cooldown to elapse (not the in-drag `charged` flag, which a new drag
+      // would satisfy instantly) so the recharge lesson actually plays out.
+      await waitFor(() => performance.now() >= plasmaCage.cooldownUntil);
       hidePlasmaRechargeArrow();
       spcVO("19", "Plasma is recharged.");
       spawnTutorialAsteroids(3, 2);
-      // second round — re-run the two-stage objective
-      showTaskInstruction("TAP AND DRAG TO SET PLASMA NET");
-      waitFor(() => plasmaCage.active)
-        .then(() => { if (stuntActive) showTaskInstruction("RELEASE TO FIRE PLASMA NET"); })
-        .catch(() => {});
+      // second round — re-run the two-stage objective (same onUpdate-driven re-arming text)
+      tutorialState.plasmaObjectiveMode = "setfire";
+      tutorialState.plasmaObjectiveShown = "";
       tutorialState.plasmaMisses = 0;
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(3, 2));
+      tutorialState.plasmaObjectiveMode = null;
       hideTaskInstruction();
       spcVO("17b", "NICE! Great work, Cadet.", "praise");
       await clearTutorialField();
       await waitMs(350);
+    },
+    // Drive the objective text off plasmaCage.active each frame while a "setfire" round is live,
+    // so it re-arms to "TAP AND DRAG" whenever the gesture resets (Part 3 fix, 2026-06-17).
+    onUpdate: () => {
+      if (tutorialState.plasmaObjectiveMode !== "setfire") return;
+      const want = plasmaCage.active
+        ? "RELEASE TO FIRE PLASMA NET"
+        : "TAP AND DRAG TO SET PLASMA NET";
+      if (tutorialState.plasmaObjectiveShown !== want) {
+        tutorialState.plasmaObjectiveShown = want;
+        showTaskInstruction(want);
+      }
     } },
     { id: "ufo", run: async () => {
       spawnTutorialAsteroids(3, 2);
@@ -11761,13 +11878,16 @@ function initGalaxyCanvas() {
             && levelRemainingMs > 0 && engineMode === "arcade") {
           _timerWarnedAt60 = true;
           commBoxController.setDamageState("light");
-          commBoxController.queueVO({
-            audioSrc: commBoxController.commVoSrc(
-              commBoxController.pickFromPool("lowlives", commBoxController.POOL_LOW_LIVES),
-            ),
-            event: "lowlives",
-            priority: "high",
-          });
+          // SPC levels: "You're running out of time, Cadet." in place of CMDR's low-time line.
+          if (!queueSpcBonusVO("SPC_timer_warning.mp3", { priority: "high" })) {
+            commBoxController.queueVO({
+              audioSrc: commBoxController.commVoSrc(
+                commBoxController.pickFromPool("lowlives", commBoxController.POOL_LOW_LIVES),
+              ),
+              event: "lowlives",
+              priority: "high",
+            });
+          }
         }
 
         if (!_timerWarnedAt10 && levelRemainingMs <= 10000

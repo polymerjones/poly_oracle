@@ -2028,6 +2028,12 @@ select:focus-visible {
   opacity: 1;
   box-shadow: 0 0 10px rgba(136, 221, 255, 0.55);
 }
+/* 2026-06-17: freeze toggle ON — button glows brightly so the player knows freeze is active
+   and can be tapped again to unfreeze. */
+.hudFreezeBtn--active {
+  box-shadow: 0 0 12px #88ddff, 0 0 24px #88ddff;
+  border-color: #88ddff;
+}
 
 /* 2026-06-14: homing missile inventory button — gold twin of the bomb/freeze buttons,
    with a thin reload progress bar along the bottom edge. */

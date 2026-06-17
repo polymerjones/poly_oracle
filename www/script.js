@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-17 11:03";
+const BUILD_TS = "2026-06-17 11:52";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -586,11 +586,18 @@ const ARCADE_LEVELS = [
   { level: 2, time: 50, totalToClear: 6, startSpawn: 6, spawnEveryMs: 0, maxOnScreen: 12 },
   { level: 3, time: 52, totalToClear: 10, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12 },
   { level: 4, time: 54, totalToClear: 12, startSpawn: 6, spawnEveryMs: 2000, maxOnScreen: 12 },
-  { level: 5, time: 56, totalToClear: 13, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12 },
-  { level: 6, time: 58, totalToClear: 14, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
+  { level: 5, time: 56, totalToClear: 13, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12,
+    guaranteedSpawn: [{ type: "bomb", atMs: 8000 }, { type: "bomb", atMs: 18000 }] }, // 2026-06-17: two early bomb drops
+  { level: 6, time: 58, totalToClear: 14, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13,
+    musicVolume: 1.15 }, // 2026-06-17: +15% music gain for this level
   { level: 7, time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
   { level: 8, time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14 },
-  { level: 9, time: 68, totalToClear: 21, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14 },
+  { level: 9, time: 68, totalToClear: 21, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14,
+    guaranteedSpawn: [
+      { type: "bomb", atMs: 8000 },
+      { type: "bomb", atMs: 20000 },
+      { type: "quadshot", atMs: 12000 },
+    ] }, // 2026-06-17: two bombs + a quadshot near the start
   { level: 10, time: 75, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14,
     powerupOverride: ["freeze", "goldbars", "bomb"] }, // 2026-06-16: boss-level support kit
   // 2026-06-15: second act — the run no longer ends at level 10. Levels 11-15 reuse the
@@ -2399,6 +2406,7 @@ const audioEngine = {
   ctx: null,
   masterGain: null,
   musicGain: null,
+  _freezeFilter: null, // 2026-06-17: highpass inserted between musicGain→masterGain during freeze
   musicBuffers: new Map(),
   currentMusic: null,
   currentMusicHtml: null,
@@ -2688,7 +2696,7 @@ const audioEngine = {
       return null;
     }
   },
-  async playMusic(key, url, { crossfadeMs = 250 } = {}) {
+  async playMusic(key, url, { crossfadeMs = 250, volume = 1 } = {}) {
     if (!url) return;
     this.ensureMusic();
     if (!this.unlocked) {
@@ -2711,7 +2719,7 @@ const audioEngine = {
       node.preload = "auto";
       node.loop = true;
       node.playsInline = true;
-      node.volume = state.whisper ? 0.43 : MUSIC_MAX_GAIN;
+      node.volume = state.whisper ? 0.43 : Math.min(1, MUSIC_MAX_GAIN * volume);
       node.play().catch(() => {});
       this.currentMusicHtml = { key, url, node };
       return;
@@ -2731,7 +2739,7 @@ const audioEngine = {
     source.start(now);
     gain.gain.cancelScheduledValues(now);
     gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(1, now + crossfadeMs / 1000);
+    gain.gain.linearRampToValueAtTime(volume, now + crossfadeMs / 1000);
     if (this.currentMusic) {
       const old = this.currentMusic;
       try {
@@ -2782,6 +2790,33 @@ const audioEngine = {
     this.musicGain.gain.cancelScheduledValues(now);
     this.musicGain.gain.setValueAtTime(this.musicGain.gain.value, now);
     this.musicGain.gain.linearRampToValueAtTime(target, now + 0.12);
+  },
+  // 2026-06-17: freeze music FX — splice a highpass filter into musicGain→masterGain so the
+  // music thins out (icy) while the field is frozen. Only the Web Audio path is filtered; the
+  // HTML-audio fallback (currentMusicHtml) plays direct and is unaffected (no native filter).
+  applyFreezeFilter() {
+    this.ensureMusic();
+    if (!this.ctx || !this.musicGain || this._freezeFilter) return;
+    const dest = this.masterGain || this.ctx.destination;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "highpass";
+    filter.frequency.value = 900;
+    filter.Q.value = 0.7;
+    filter.connect(dest);
+    try { this.musicGain.disconnect(dest); } catch { /* ignore */ }
+    this.musicGain.connect(filter);
+    this._freezeFilter = filter;
+  },
+  removeFreezeFilter() {
+    if (!this._freezeFilter || !this.ctx || !this.musicGain) {
+      this._freezeFilter = null;
+      return;
+    }
+    const dest = this.masterGain || this.ctx.destination;
+    try { this.musicGain.disconnect(this._freezeFilter); } catch { /* ignore */ }
+    try { this._freezeFilter.disconnect(); } catch { /* ignore */ }
+    this.musicGain.connect(dest);
+    this._freezeFilter = null;
   },
   stopLoop(name) {
     const loop = this.loops.get(name);
@@ -6182,6 +6217,7 @@ function initGalaxyCanvas() {
   let _spcContinuousStartAt = 0;       // when SPC's current uninterrupted talking run began (0 = silent)
   let _spcLinesCompletedThisPhase = 0; // full VO lines finished in the active phase
   let _lastTutInteractionAt = 0;       // last gameplay interaction (play-area press / skip tap)
+  let _spcGrabSmallAt = 0;             // 2026-06-17: rate-limit (8s) the "can't grab small stroids" SPC line
   let _skipHintShown = false;          // is the hint currently faded-in?
   let _skipHintHideTimer = null;       // pending 500ms fade-out when SPC goes quiet
   let tutorialBlockPlasmaToss = false; // Phase 2: only the laser is taught — block net/toss
@@ -6631,7 +6667,9 @@ function initGalaxyCanvas() {
   function playArcadeMusicForLevel(levelNum) {
     audioEngine.unlock();
     const url = getMusicForLevel(levelNum);
-    audioEngine.playMusic(url, url, { crossfadeMs: 250 });
+    // 2026-06-17: a level can boost its music via cfg.musicVolume (e.g. L6 = 1.15).
+    const volume = ARCADE_LEVELS.find((l) => l.level === levelNum)?.musicVolume || 1;
+    audioEngine.playMusic(url, url, { crossfadeMs: 250, volume });
     const nextUrl = getMusicForLevel(levelNum + 1);
     if (nextUrl && nextUrl !== url) {
       audioEngine.loadMusicBuffer(nextUrl).catch(() => {});
@@ -9549,6 +9587,10 @@ function initGalaxyCanvas() {
     quadShotUntil = 0;
     freezeUntil = 0;
     _freezeWasActive = false; // no unfreeze sound on level transitions / menu exit
+    // 2026-06-17: tear down the freeze toggle's lingering FX (icy music filter + HUD glow) so a
+    // level that ends mid-freeze doesn't carry them into the next screen.
+    audioEngine.removeFreezeFilter();
+    hudFreezeBtn?.classList.remove("hudFreezeBtn--active");
     goldbarsForceSpawnedThisLevel = false;
     emergencyTimerSpawned = false; // 2026-06-16: re-arm the under-20s emergency timer drop
     firedGuaranteedSpawns.clear(); // 2026-06-16: re-arm cfg.guaranteedSpawn entries
@@ -10075,7 +10117,11 @@ function initGalaxyCanvas() {
       for (let i = 0; i < mineCount; i += 1) {
         const mx = playfield.x + playfield.w * (0.2 + Math.random() * 0.6);
         const my = playfield.y + playfield.h * (0.2 + Math.random() * 0.6);
-        placedBombs.push(createMineEntity(mx, my, cfg.mineFuseMs || LANDMINE_FUSE_MS));
+        const mine = createMineEntity(mx, my, cfg.mineFuseMs || LANDMINE_FUSE_MS);
+        // 2026-06-17: stagger spawnedAt so the mines auto-arm in a rolling wave (each arms 4s
+        // after the previous) instead of all reaching the 10s auto-arm threshold together.
+        mine.spawnedAt = now + i * 4000;
+        placedBombs.push(mine);
         addWarpRing(mx, my, "rgba(124,255,91,1)");
       }
       commBoxController.reactTo("landmine");
@@ -10523,6 +10569,32 @@ function initGalaxyCanvas() {
     if (_timerArrowEl) _timerArrowEl.style.display = "none";
   }
 
+  // 2026-06-17 (Part 4): teal arrow pointing at the plasma recharge indicator (the cooldown arc
+  // drawn at canvas (sim.width-28, sim.height-28), bottom-right). Reuses the .tutCommArrow style.
+  let _plasmaArrowEl = null;
+  function showPlasmaRechargeArrow() {
+    ensureTutorialChromeCss();
+    if (!galaxyPlayCanvas) return;
+    if (!_plasmaArrowEl) {
+      _plasmaArrowEl = document.createElement("div");
+      _plasmaArrowEl.className = "tutCommArrow";
+      _plasmaArrowEl.id = "plasmaRechargeArrow";
+      _plasmaArrowEl.textContent = "↘";
+      document.body.appendChild(_plasmaArrowEl);
+    }
+    const rect = galaxyPlayCanvas.getBoundingClientRect();
+    const scaleX = galaxyPlayCanvas.width ? rect.width / galaxyPlayCanvas.width : 1;
+    const scaleY = galaxyPlayCanvas.height ? rect.height / galaxyPlayCanvas.height : 1;
+    const ix = rect.left + (sim.width - 28) * scaleX;
+    const iy = rect.top + (sim.height - 28) * scaleY;
+    _plasmaArrowEl.style.left = `${ix - 44}px`; // sit up-left of the indicator, glyph points into it
+    _plasmaArrowEl.style.top = `${iy - 44}px`;
+    _plasmaArrowEl.style.display = "block";
+  }
+  function hidePlasmaRechargeArrow() {
+    if (_plasmaArrowEl) _plasmaArrowEl.style.display = "none";
+  }
+
   // ── one-time CSS for the tutorial overlays (tooltip + comm-pointing arrows) ──
   function ensureTutorialChromeCss() {
     if (document.getElementById("tutorialChromeCss")) return;
@@ -10581,6 +10653,8 @@ function initGalaxyCanvas() {
   // Fade the hint in to its resting opacity (0.35). Idempotent — re-running while shown only keeps
   // the position fresh and cancels any pending fade-out.
   function showSkipHint() {
+    return; // 2026-06-17: "TAP TO SKIP" disabled — no-op so the hint never appears (element stays in DOM, unused)
+    // eslint-disable-next-line no-unreachable
     _ensureSkipUi();
     if (_skipHintHideTimer) { clearTimeout(_skipHintHideTimer); _skipHintHideTimer = null; }
     if (_skipHintShown) { _positionSkipUi(); return; }
@@ -10658,28 +10732,34 @@ function initGalaxyCanvas() {
     if (_taskInstrEl) return _taskInstrEl;
     _taskInstrEl = document.createElement("div");
     _taskInstrEl.id = "commanderTaskInstruction";
+    // 2026-06-17 (Part 2): screen-centered + clamped to 90vw so the banner never clips off the
+    // left edge on narrow viewports. Short lines stay on one line (nowrap, set in showTaskInstruction);
+    // long lines wrap and center. left:50% + translateX(-50%) keeps it screen-centered, not box-relative.
     _taskInstrEl.style.cssText =
-      "position:fixed;z-index:9997;display:none;pointer-events:none;white-space:nowrap;"
+      "position:fixed;z-index:9997;display:none;pointer-events:none;left:50%;"
+      + "max-width:90vw;box-sizing:border-box;"
       + "font-family:monospace;font-size:13px;font-weight:700;color:#ffffff;"
-      + "letter-spacing:1px;text-transform:uppercase;line-height:1.15;"
-      + "background:rgba(0,0,0,0.5);padding:6px;border-radius:6px;"
+      + "letter-spacing:1px;text-transform:uppercase;line-height:1.15;text-align:center;"
+      + "background:rgba(0,0,0,0.5);padding:6px 16px;border-radius:6px;"
       + "transform:translate(-50%,-100%);";
     document.body.appendChild(_taskInstrEl);
     return _taskInstrEl;
   }
-  // Center over the comm box and rest its bottom edge 8px above the HUD's top (translateY -100%).
+  // 2026-06-17 (Part 2): horizontally screen-centered (left:50% in CSS) so it can't clip off the
+  // left edge; we only track the vertical position to rest its bottom edge 8px above the HUD's top.
   function _positionTaskInstr() {
     const hudEl = document.getElementById("commanderHUD");
     if (!hudEl || !_taskInstrEl) return;
     const r = hudEl.getBoundingClientRect();
     if (!r.width) return;
-    _taskInstrEl.style.left = `${r.left + r.width / 2}px`;
     _taskInstrEl.style.top = `${r.top - 8}px`;
   }
   function showTaskInstruction(text) {
     const el = _ensureTaskInstrEl();
     if (!el) return;
     el.textContent = text;
+    // Short directives stay on one line; longer ones wrap (centered) instead of overflowing.
+    el.style.whiteSpace = text.length > 22 ? "normal" : "nowrap";
     _positionTaskInstr();
     el.style.display = "block";
   }
@@ -10906,14 +10986,27 @@ function initGalaxyCanvas() {
       spawnTutorialAsteroids(2, 2);
       spcVO("13-14", "Next up — the plasma net. Tap, drag and hold to set it.");
       spcVO("15-16", "When stroids glow they're targeted. Release to fire.");
-      showTaskInstruction("DRAG AND HOLD — RELEASE TO FIRE PLASMA NET");
+      // Part 3 (2026-06-17): two-stage objective — set, then release. Stage 2 swaps in the moment
+      // the cadet starts dragging (plasmaCage.active). Fire-and-forget watcher (rejects on abort).
+      showTaskInstruction("TAP AND DRAG TO SET PLASMA NET");
+      waitFor(() => plasmaCage.active)
+        .then(() => { if (stuntActive) showTaskInstruction("RELEASE TO FIRE PLASMA NET"); })
+        .catch(() => {});
       tutorialState.plasmaMisses = 0;
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(2, 2));
+      hideTaskInstruction(); // net fired successfully
       spcVO("17", "NICE! Great work, Cadet.", "praise");
       spcVO("18", "Now let the plasma recharge and do it again!", "talk_friendly");
+      showPlasmaRechargeArrow(); // Part 4: point at the recharge indicator while it refills
       await waitFor(() => plasmaCage.charged);
+      hidePlasmaRechargeArrow();
       spcVO("19", "Plasma is recharged.");
       spawnTutorialAsteroids(3, 2);
+      // second round — re-run the two-stage objective
+      showTaskInstruction("TAP AND DRAG TO SET PLASMA NET");
+      waitFor(() => plasmaCage.active)
+        .then(() => { if (stuntActive) showTaskInstruction("RELEASE TO FIRE PLASMA NET"); })
+        .catch(() => {});
       tutorialState.plasmaMisses = 0;
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(3, 2));
       hideTaskInstruction();
@@ -11080,19 +11173,21 @@ function initGalaxyCanvas() {
       hideHudPointer();
       hideTaskInstruction();
       spcVO("61", "Objects are frozen for a short time. Blast 'em!", "idle_gentle");
+      // 2026-06-17: explain the freeze toggle right after it activates, before the toss step.
+      spcVO("freeze_toggle", "Freeze can be enabled and disabled by tapping the freeze icon on your HUD.", "idle_gentle");
       spcVO("62", "Frozen stroids can be tossed too. Grab one and toss it.", "idle_gentle");
       tutorialState.frozenTossBase = tutorialEvents.toss || 0;
       while ((tutorialEvents.toss || 0) <= tutorialState.frozenTossBase) {
         await waitFor(() =>
           (tutorialEvents.toss || 0) > tutorialState.frozenTossBase
           || tutorialAsteroidsAllCleared()
-          || performance.now() >= freezeUntil); // freeze lapsed before a frozen toss
+          || performance.now() >= freezeUntil); // freeze lapsed OR player manually unfroze (freezeUntil → 0)
         if ((tutorialEvents.toss || 0) > tutorialState.frozenTossBase) break;
         if (tutorialAsteroidsAllCleared()) {
           // cleared the field with the laser — restock + re-freeze so the toss can be practiced
           spawnTutorialAsteroids(3, 2);
           freezeUntil = performance.now() + FREEZE_DURATION_MS;
-          playGameSfx("freeze", 0.9);
+          onFreezeStart(); // re-freeze with the full FX set (icy music filter + HUD glow)
           spcVO("63", "Good shooting — but try grabbing and tossing a frozen stroid.", "idle_gentle");
         } else {
           // 2026-06-16: freeze expired before the cadet tossed one — wait a beat, drop a fresh
@@ -11135,7 +11230,7 @@ function initGalaxyCanvas() {
       await waitMs(350);
       spcVO("70", "Go practice if you like — the Polyverse awaits.", "shades");
       await waitVOIdle();
-      await waitMs(350);
+      await waitMs(15000); // 2026-06-17 (Part 8): hold the outro line on-screen 15s before Practice starts
     } },
   ];
 
@@ -11212,6 +11307,7 @@ function initGalaxyCanvas() {
     abortTutorialAsync();
     hideHudPointer();
     hideTimerArrow();
+    hidePlasmaRechargeArrow();
     tutorialPhase = -1;
     tutorialState = {};
     for (const k of Object.keys(tutorialEvents)) delete tutorialEvents[k];
@@ -11603,7 +11699,7 @@ function initGalaxyCanvas() {
         if (Number.isFinite(nextSpawnAt)) nextSpawnAt += dt;
         if (nextMineRespawnAt) nextMineRespawnAt += dt; // 2026-06-16: hold mine drip during freeze
       } else if (_freezeWasActive) {
-        playGameSfx("unfreeze", 0.85); // freeze just lapsed — movement resumes this frame
+        onFreezeEnd(false); // freeze auto-lapsed — unfreeze sfx, drop music filter + HUD glow
       }
       _freezeWasActive = frozenNow;
       const remainingMs = levelEndsAt - now;
@@ -11649,7 +11745,10 @@ function initGalaxyCanvas() {
           for (let i = 0; i < count; i += 1) {
             const mx = playfield.x + playfield.w * (0.2 + Math.random() * 0.6);
             const my = playfield.y + playfield.h * (0.2 + Math.random() * 0.6);
-            placedBombs.push(createMineEntity(mx, my, cfg.mineFuseMs || LANDMINE_FUSE_MS));
+            const mine = createMineEntity(mx, my, cfg.mineFuseMs || LANDMINE_FUSE_MS);
+            // 2026-06-17: stagger a 2-mine drip so the pair doesn't auto-arm/detonate together.
+            mine.spawnedAt = now + i * 3000;
+            placedBombs.push(mine);
             addWarpRing(mx, my, "rgba(124,255,91,1)");
           }
           playGameSfx("blip1", 0.8, { rate: 1.05 });
@@ -12430,6 +12529,8 @@ function initGalaxyCanvas() {
       drawPlacedBombsOverlay(ufoFxCtx || ctx);
       drawFreezeOverlay(ufoFxCtx || ctx);
       drawAndStepTapBlasts(ufoFxCtx || ctx);
+      // KEEP LAST: the missile crosshair (drawMissileFx) must render AFTER drawPowerups on the same
+      // overlay so it's never hidden behind a powerup sprite (Part 5, 2026-06-17).
       drawMissileFx(ufoFxCtx || ctx, now);
       return;
     }
@@ -12752,6 +12853,7 @@ function initGalaxyCanvas() {
     drawPlacedBombsOverlay(ufoFxCtx || ctx);
     drawFreezeOverlay(ufoFxCtx || ctx);
     drawAndStepTapBlasts(ufoFxCtx || ctx);
+    // KEEP LAST (over powerups): crosshair must sit above powerup sprites (Part 5, 2026-06-17).
     drawMissileFx(ufoFxCtx || ctx, now);
 
     const particleLimit = _frameBudgetExceeded ? Math.min(40, sim.particles.length) : sim.particles.length;
@@ -13015,17 +13117,42 @@ function initGalaxyCanvas() {
     }
   }
 
-  // 2026-06-10: player-activated freeze (HUD ❄ button) — flash + shake, then 12s of frozen
-  // positions via the existing freezeUntil logic. Ignored while a freeze is already running.
-  function activateFreezeFromInventory() {
-    const nowF = performance.now();
-    if (playerFreezeInventory <= 0 || nowF < freezeUntil) return;
-    playerFreezeInventory--;
-    updateHudFreezeInventory();
+  // 2026-06-17: all the freeze-ON effects (flash, shake, sfx, icy music highpass, HUD active
+  // glow). Kept stuntNotify OUT of here so internal tutorial re-freezes can reuse it without
+  // firing a spurious "freeze" tutorial event.
+  function onFreezeStart() {
     cssFlash("#88ddff", 0.25, 300);
     cssShake(0.8);
-    freezeUntil = nowF + FREEZE_DURATION_MS;
     playGameSfx("freeze", 0.9);
+    audioEngine.applyFreezeFilter();
+    if (hudFreezeBtn) hudFreezeBtn.classList.add("hudFreezeBtn--active");
+  }
+  // 2026-06-17: all the freeze-OFF effects. Called both on manual toggle-off and on auto-expiry.
+  // Clears freezeUntil + the edge-detect latch so the update-loop doesn't double-fire. manual
+  // taps play the unfreeze sound a touch louder than a silent auto-lapse.
+  function onFreezeEnd(manual) {
+    freezeUntil = 0;
+    _freezeWasActive = false;
+    playGameSfx("unfreeze", manual ? 0.9 : 0.85);
+    audioEngine.removeFreezeFilter();
+    if (hudFreezeBtn) hudFreezeBtn.classList.remove("hudFreezeBtn--active");
+  }
+
+  // 2026-06-17: player-activated freeze TOGGLE (HUD ❄ button). Tap while frozen → unfreeze
+  // immediately; tap while not frozen (and stocked) → freeze for up to FREEZE_DURATION_MS (the
+  // update loop auto-unfreezes via onFreezeEnd when freezeUntil lapses).
+  function toggleFreezeFromInventory() {
+    const nowF = performance.now();
+    if (nowF < freezeUntil) {
+      // currently frozen — manual unfreeze
+      onFreezeEnd(true);
+      return;
+    }
+    if (playerFreezeInventory <= 0) return;
+    playerFreezeInventory--;
+    updateHudFreezeInventory();
+    freezeUntil = nowF + FREEZE_DURATION_MS;
+    onFreezeStart();
     stuntNotify("freeze");
   }
 
@@ -13399,6 +13526,13 @@ function initGalaxyCanvas() {
         const hitAsteroid = hitIndex >= 0 ? sim.asteroids[hitIndex] : null;
         if (hitAsteroid && hitAsteroid.kind >= 2 && startStroidToss(hitIndex, point, event.pointerId, now)) {
           mode = "stroidToss";
+        } else if ((stuntActive || practiceEndless) && hitAsteroid && hitAsteroid.kind === 1) {
+          // 2026-06-17: cadet tried to grab a small (kind-1) stroid — can't be tossed. Coach once
+          // per 8s so repeated taps don't spam SPC. The tap still falls through to fire the laser.
+          if (now - _spcGrabSmallAt > 8000) {
+            _spcGrabSmallAt = now;
+            spcVO("grab_small", "Smaller stroids cannot be grabbed, Cadet.", "idle_smirk");
+          }
         }
       }
     }
@@ -13794,10 +13928,10 @@ function initGalaxyCanvas() {
       updateHudBombInventory(); // suppress/restore the attention pulse based on aim state
       if (bombAimMode) playGameSfx("blip", 0.6);
     },
-    // 2026-06-10: HUD freeze button — activate a stocked freeze
+    // 2026-06-17: HUD freeze button — toggle freeze on/off (tap to freeze, tap again to unfreeze)
     activateFreeze() {
       if (!arcadeActive || engineMode !== "arcade") return;
-      activateFreezeFromInventory();
+      toggleFreezeFromInventory();
     },
     // 2026-06-14: HUD missile button — toggle aim mode; the next canvas tap sets the target.
     toggleMissileAim() {

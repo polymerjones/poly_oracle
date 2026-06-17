@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-16 21:35";
+const BUILD_TS = "2026-06-17 11:03";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1080,6 +1080,9 @@ const commBoxController = (() => {
   let mouthFlap = null;
   let tickerVisible = false;
   let hudVisible = false;
+  // 2026-06-17: level 14 silences CMDR voice lines (captions + all SFX/music still play). Set via
+  // setMuteCmdrVO() from startLevel; reset in clearGameplayEntities on every level transition/exit.
+  let muteCmdrVO = false;
   const _voQueue = [];
   let _voPlaying = false;
   let _voQueueTimer = null;
@@ -1400,17 +1403,41 @@ const commBoxController = (() => {
     if (_spcBlinkTimer) { clearTimeout(_spcBlinkTimer); _spcBlinkTimer = null; }
   }
   // Part 6: periodic blink while idle (every 3-5s, 120ms), only when not speaking.
+  // One blink "event" — weighted toward a single blink, occasionally a double/triple flutter.
+  function _spcDoBlink() {
+    if (!_spcMode || _spcSpeaking) return;
+    const base = _spcRestFrame || "idle_smile";
+    const blinkFrame = base === "shades" ? "shades_blink" : "blink";
+    const blink = () => { if (_spcMode && !_spcSpeaking) setSpcFrame(blinkFrame); };
+    const rest = () => { if (_spcMode && !_spcSpeaking) setSpcFrame(base); };
+    const r = Math.random();
+    if (r < 0.6) {
+      // single (60%)
+      blink();
+      setTimeout(rest, 120);
+    } else if (r < 0.9) {
+      // double (30%)
+      blink();
+      setTimeout(rest, 120);
+      setTimeout(blink, 220);
+      setTimeout(rest, 340);
+    } else {
+      // triple (10%)
+      blink();
+      setTimeout(rest, 120);
+      setTimeout(blink, 200);
+      setTimeout(rest, 320);
+      setTimeout(blink, 400);
+      setTimeout(rest, 520);
+    }
+  }
+
   function _spcStartBlink() {
     _spcStopBlink();
     if (!_spcMode) return;
     const schedule = () => {
       _spcBlinkTimer = setTimeout(() => {
-        if (_spcMode && !_spcSpeaking) {
-          const base = _spcRestFrame || "idle_smile";
-          const blinkFrame = base === "shades" ? "shades_blink" : "blink";
-          setSpcFrame(blinkFrame);
-          setTimeout(() => { if (_spcMode && !_spcSpeaking) setSpcFrame(base); }, 120);
-        }
+        _spcDoBlink();
         schedule();
       }, 3000 + Math.random() * 2000);
     };
@@ -1875,7 +1902,7 @@ const commBoxController = (() => {
         };
         try {
           voAudio = new Audio(audioSrc);
-          voAudio.volume = 0.7;
+          voAudio.volume = muteCmdrVO ? 0 : 0.7; // 2026-06-17: L14 mutes CMDR voice (caption still types)
           voAudio.play().catch(() => {
             if (!audioFallbackTimer) audioFallbackTimer = setTimeout(endTalking, duration);
           });
@@ -1954,6 +1981,7 @@ const commBoxController = (() => {
     triggerVO,
     queueVO,
     commVoSrc,
+    setMuteCmdrVO: (on) => { muteCmdrVO = !!on; },
     pinTicker,
     hideTicker,
     isTickerVisible,
@@ -4597,7 +4625,7 @@ function scheduleRubHaptic() {
 let orbRub2Audio = null;
 let orbRub2FadeTimer = null;
 let orbRub2Active = false;
-const orbRub2TargetVol = () => (state.whisper ? 0.09 : 0.22);
+const orbRub2TargetVol = () => (state.whisper ? 0.063 : 0.154); // 2026-06-17: -30% on the rub layer
 const ORB_RUB2_FADE_IN_MS = 750;
 const ORB_RUB2_FADE_OUT_MS = 950;
 
@@ -6163,6 +6191,9 @@ function initGalaxyCanvas() {
   // Stunt → Practice: endless arcade gameplay (no timer, no level-complete, score not submitted).
   let practiceEndless = false;
   let nextPracticeMineAt = 0; // Part 8: practice drops a fresh landmine on this 60s cadence
+  // Practice background theme cycling: blend to the next level's color theme every 45s.
+  let practiceThemeIndex = 1; // starts on the L1 theme; cycles 1→2→…→15→1
+  let nextThemeCycleAt = 0;
   // SPC_xx.mp3 audio is recorded later; until a key is listed here, the line is text-only.
   const SPC_VO_AVAILABLE = new Set();
   let currentLevelIndex = 0;
@@ -8796,7 +8827,7 @@ function initGalaxyCanvas() {
     plasmaCage.rechargeSoundPlayed = true;
     plasmaCage.lastRechargeVoAt = now;
     playGameSfx(Math.random() < 0.5 ? "plasmarecharged" : "plasmarecharged1", 1.0);
-    playGameSfx("blip", 0.6);
+    playGameSfx("blip", 0.36); // 2026-06-17: -40% so the gun-cock recharge sound stays dominant
     commBoxController.reactTo("plasma_recharged");
     if (now - lastPlasmaRechargedVoAt > 20000) {
       lastPlasmaRechargedVoAt = now;
@@ -9510,6 +9541,7 @@ function initGalaxyCanvas() {
     landmine = null;
     placedBombs.length = 0; // 2026-06-10: placed bombs don't carry across levels/menu
     pendingExplosions.length = 0; // 2026-06-16: drop any queued chain detonations
+    commBoxController.setMuteCmdrVO(false); // 2026-06-17: un-mute CMDR voice when leaving L14
     stopDangerLoop();
     landmineSpawnedThisLevel = false;
     // 2026-06-10: clear powerups, active effects, and aim state on level transitions / menu exit
@@ -10069,15 +10101,18 @@ function initGalaxyCanvas() {
     updateArcadeHud(now);
     showLevelIntro(cfg.level);
 
-    // 2026-06-16: levels 13 & 14 swap the CMDR portrait for SPC (same VO pool — kill streaks etc.
-    // still play, just on SPC's face). Every other level clears the override so CMDR is restored
-    // (handles 12→13 in, 14→15 out, and any retry/restart). setPortraitOverride starts the blink.
-    if (cfg.level === 13 || cfg.level === 14) {
+    // 2026-06-17: only level 14 swaps the CMDR portrait for SPC (level 13 reverted to CMDR). On 14
+    // the same VO pool plays on SPC's face, but CMDR voice lines are muted (see muteCmdrVO below).
+    // Every other level clears the override so CMDR is restored (handles in/out + retry/restart).
+    if (cfg.level === 14) {
       commBoxController.setPortraitOverride(null, "SPC");
       commBoxController.setSpcFrame("idle_smile");
     } else {
       commBoxController.clearPortraitOverride();
     }
+    // 2026-06-17: silence CMDR voice on level 14 (SPC's face, no voice). Captions still type, all
+    // SFX/music unaffected. Reset to false on every level transition in clearGameplayEntities().
+    commBoxController.setMuteCmdrVO(cfg.level === 14);
 
     const levelNum = cfg.level;
     let levelStartVO = null;
@@ -10097,10 +10132,14 @@ function initGalaxyCanvas() {
       );
     }
 
-    commBoxController.queueVO({
-      audioSrc: commBoxController.commVoSrc(levelStartVO),
-      event: "commander",
-    });
+    // 2026-06-17: delay the first VO 800ms so the level-intro animation finishes before SPC/CMDR
+    // starts talking (the comm box was popping up before the level had visually settled).
+    setTimeout(() => {
+      commBoxController.queueVO({
+        audioSrc: commBoxController.commVoSrc(levelStartVO),
+        event: "commander",
+      });
+    }, 800);
 
     if (levelNum === 1) {
       function fireSecondVO() {
@@ -10579,6 +10618,8 @@ function initGalaxyCanvas() {
   // talking >3s continuously, the cadet has heard ≥1 full line this phase, a player action is
   // pending (a non-voOnly waiter), and there was no interaction in the last 2s.
   function updateSkipHint(now) {
+    // keep the task-instruction banner glued above the comm box as it docks / reorients
+    if (_taskInstrEl && _taskInstrEl.style.display === "block") _positionTaskInstr();
     const speaking = _spcPlaying || _spcQueue.length > 0;
     const spokenLongEnough = _spcContinuousStartAt > 0 && (now - _spcContinuousStartAt) > 3000;
     const heardFullLine = _spcLinesCompletedThisPhase >= 1;
@@ -10607,27 +10648,39 @@ function initGalaxyCanvas() {
     playGameSfx("printtext", 0.6);
   }
 
-  // ── task-instruction line (Part 2): a bold, unmissable directive shown in the comm box BELOW
-  // SPC's dialogue. Unlike VO captions it never auto-hides — it persists until the action is
-  // completed / the phase advances (hideTaskInstruction) or the tutorial tears down. ──
+  // ── task-instruction line (Part 2): a bold, unmissable directive. 2026-06-17: moved OUT of the
+  // comm box and up to a standalone fixed banner that floats just ABOVE the comm box (mirrors
+  // #tutorialSkipHint's placement). The comm box now shows only SPC dialogue. Unlike VO captions
+  // this never auto-hides — it persists until the action completes / the phase advances
+  // (hideTaskInstruction) or the tutorial tears down. ──
   let _taskInstrEl = null;
   function _ensureTaskInstrEl() {
     if (_taskInstrEl) return _taskInstrEl;
-    const textArea = document.getElementById("commanderTickerText")?.parentElement;
-    if (!textArea) return null;
     _taskInstrEl = document.createElement("div");
     _taskInstrEl.id = "commanderTaskInstruction";
     _taskInstrEl.style.cssText =
-      "font-family:monospace;font-size:14px;font-weight:700;color:#ffffff;"
-      + "letter-spacing:1px;text-transform:uppercase;line-height:1.15;margin-top:4px;"
-      + "text-shadow:0 0 6px rgba(0,255,204,.75);display:none;";
-    textArea.appendChild(_taskInstrEl);
+      "position:fixed;z-index:9997;display:none;pointer-events:none;white-space:nowrap;"
+      + "font-family:monospace;font-size:13px;font-weight:700;color:#ffffff;"
+      + "letter-spacing:1px;text-transform:uppercase;line-height:1.15;"
+      + "background:rgba(0,0,0,0.5);padding:6px;border-radius:6px;"
+      + "transform:translate(-50%,-100%);";
+    document.body.appendChild(_taskInstrEl);
     return _taskInstrEl;
+  }
+  // Center over the comm box and rest its bottom edge 8px above the HUD's top (translateY -100%).
+  function _positionTaskInstr() {
+    const hudEl = document.getElementById("commanderHUD");
+    if (!hudEl || !_taskInstrEl) return;
+    const r = hudEl.getBoundingClientRect();
+    if (!r.width) return;
+    _taskInstrEl.style.left = `${r.left + r.width / 2}px`;
+    _taskInstrEl.style.top = `${r.top - 8}px`;
   }
   function showTaskInstruction(text) {
     const el = _ensureTaskInstrEl();
     if (!el) return;
     el.textContent = text;
+    _positionTaskInstr();
     el.style.display = "block";
   }
   function hideTaskInstruction() {
@@ -11300,6 +11353,11 @@ function initGalaxyCanvas() {
     practiceEndless = true;
     arcadeUfoSpawnAt = nowP + 30000;   // first UFO ~30s in (then respawns 45s after each kill)
     nextPracticeMineAt = nowP + 60000; // first landmine at 60s, every 60s after
+    // Practice powerups: first drop at 8s, then a steady 12s cadence (see the endless update block).
+    nextBombPowerupAt = nowP + 8000;
+    // Background theme cycling: hold L1 theme, blend to the next every 45s.
+    practiceThemeIndex = 1;
+    nextThemeCycleAt = nowP + 45000;
     if (hudLevel) hudLevel.textContent = "PRACTICE";
   }
 
@@ -11529,6 +11587,12 @@ function initGalaxyCanvas() {
           spawnLandmine();
           nextPracticeMineAt = now + 60000;
         }
+        // Theme cycle every 45s — setTheme() crossfades via its own blend/tgt system.
+        if (now >= nextThemeCycleAt) {
+          practiceThemeIndex = (practiceThemeIndex % 15) + 1;
+          window.galaxyBackground?.setTheme(practiceThemeIndex);
+          nextThemeCycleAt = now + 45000;
+        }
       }
       // 2026-06-10: an active freeze pauses the level clock — shift every time anchor by dt
       // each frozen frame so remaining/elapsed (and the perimeter line) hold their position.
@@ -11680,11 +11744,14 @@ function initGalaxyCanvas() {
           } else {
             spawnPowerupAt(puType, randomPowerupPoint());
             playGameSfx("bling", 0.8);
+            // Practice mode: steady 12s cadence (overrides any level config). Otherwise
             // 2026-06-15: honor a fixed per-level cadence (cfg.powerupIntervalMs) when set.
-            nextBombPowerupAt = cfg.powerupIntervalMs
-              ? now + cfg.powerupIntervalMs
-              : now + BOMB_POWERUP_INTERVAL_MIN
-                + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
+            nextBombPowerupAt = practiceEndless
+              ? now + 12000
+              : cfg.powerupIntervalMs
+                ? now + cfg.powerupIntervalMs
+                : now + BOMB_POWERUP_INTERVAL_MIN
+                  + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
           }
         }
 

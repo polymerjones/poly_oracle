@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-16 16:28";
+const BUILD_TS = "2026-06-16 21:35";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -591,11 +591,13 @@ const ARCADE_LEVELS = [
   { level: 7, time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
   { level: 8, time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14 },
   { level: 9, time: 68, totalToClear: 21, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14 },
-  { level: 10, time: 75, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14 },
+  { level: 10, time: 75, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14,
+    powerupOverride: ["freeze", "goldbars", "bomb"] }, // 2026-06-16: boss-level support kit
   // 2026-06-15: second act — the run no longer ends at level 10. Levels 11-15 reuse the
   // level-10 boss music + background (musicForLevel/bgKeyForLevel both clamp at >=10) and the
   // hotroid sprites, ramping density/time. "YOU WIN" now fires after clearing level 15.
-  { level: 11, time: 78, totalToClear: 27, startSpawn: 7, spawnEveryMs: 1350, maxOnScreen: 15 },
+  { level: 11, time: 78, totalToClear: 27, startSpawn: 7, spawnEveryMs: 1350, maxOnScreen: 15,
+    guaranteedSpawn: [{ type: "quadshot", atMs: 12000 }] }, // 2026-06-16: early quadshot drop
   // 2026-06-15: levels 12-15 are the "second act" with per-level mechanics. New config fields
   // (asteroidKinds, asteroidSpeedMult, mineLaunch/mineCount/mineFuseMs, noUfo, ufoSpawnAt,
   // powerupOverride, powerupIntervalMs, label, musicKey) are honored by the engine. dualUfo and
@@ -631,6 +633,7 @@ const ARCADE_LEVELS = [
     mineLaunch: true,
     mineCount: 3,
     mineFuseMs: 5000,
+    powerupOverride: ["missile", "missile", "goldbars"], // 2026-06-16: missile-weighted pool
     musicKey: "L13_BOOM_PT2",
   },
   {
@@ -645,7 +648,7 @@ const ARCADE_LEVELS = [
     asteroidSpeedMult: 1.6,      // 60% faster
     noUfo: true,
     noLandmines: true,
-    powerupOverride: ["timer", "quadshot"], // only these two powerups
+    powerupOverride: ["freeze", "quadshot", "timer", "timer"], // 2026-06-16: timer-weighted support
     powerupIntervalMs: 10000,    // spawn every 10s
     musicKey: "L14_CRITICAL",
   },
@@ -667,7 +670,10 @@ const ARCADE_LEVELS = [
     waves: [
       { count: 10, triggerAtRemaining: 20 }, // NOT yet wired — see startLevel TODO
     ],
-    powerupOverride: ["missile"], // missile only
+    // 2026-06-16: missile-heavy mix with every type available, dropping every 12s.
+    powerupOverride: ["missile", "missile", "timer", "freeze", "quadshot", "bomb"],
+    powerupIntervalMs: 12000,
+    speedEscalation: true,       // 2026-06-16: live asteroids ramp speed over the level (cap 2.5x)
     musicKey: "L15_GAUNTLET",
   },
 ];
@@ -1362,7 +1368,7 @@ const commBoxController = (() => {
   let _spcMouthFlap = null;
   let _spcBlinkTimer = null;
   // The base talking cycle (mouth-flap) when no expression hint is supplied.
-  const SPC_TALK_CYCLE = ["talk_calm", "talk_neutral", "talk_friendly"];
+  const SPC_TALK_CYCLE = ["talk_calm", "smile_open", "talk_friendly"];
   // Expression hints flap between the emotion frame and a matching talk frame so the portrait
   // both holds the mood AND moves its mouth while the line plays. Single-entry sets are held.
   const SPC_EXPR_FLAP = {
@@ -1535,7 +1541,22 @@ const commBoxController = (() => {
   }
 
   function setFrame(key) {
-    if (portraitOverride) return;
+    if (portraitOverride) {
+      // 2026-06-16: on SPC levels (13/14) the CMDR VO mouth-flap drives the portrait through
+      // setFrame(); instead of no-oping, route those calls into the SPC talking loop so SPC's
+      // mouth actually moves while CMDR lines play. Talk frames → SPC talk cycle; everything
+      // else (idle/blink/reaction) → settle back to idle_smile + blink. The _spcSpeaking guard
+      // keeps the 180ms CMDR flap from restarting the SPC flap on every tick.
+      if (_spcMode) {
+        const talking = typeof key === "string" && key.indexOf("talk") !== -1;
+        if (talking) {
+          if (!_spcSpeaking) spcSpeakStart();
+        } else if (_spcSpeaking) {
+          spcSpeakEnd();
+        }
+      }
+      return;
+    }
     if (!portrait || !FRAMES[key]) return;
     currentFrame = key;
     portrait.src = FRAMES[key];
@@ -2720,13 +2741,15 @@ const audioEngine = {
     this.currentMusic = null;
   },
   setMusicDim(dimOn) {
+    // 2026-06-16: pause / Modes overlay ducks the music to 0.4 (not silent) so it stays present
+    // under the menu; the app-switch (visibilitychange hide) path dims harder, to 0.1.
     if (this.currentMusicHtml?.node) {
       const full = state.whisper ? 0.43 : MUSIC_MAX_GAIN;
-      this.currentMusicHtml.node.volume = dimOn ? (full * 0.3) : full;
+      this.currentMusicHtml.node.volume = dimOn ? (full * 0.4) : full;
     }
     this.ensureMusic();
     if (!this.musicGain || !this.ctx) return;
-    const target = dimOn ? MUSIC_MAX_GAIN * 0.3 : MUSIC_MAX_GAIN;
+    const target = dimOn ? MUSIC_MAX_GAIN * 0.4 : MUSIC_MAX_GAIN;
     const now = this.ctx.currentTime;
     this.musicGain.gain.cancelScheduledValues(now);
     this.musicGain.gain.setValueAtTime(this.musicGain.gain.value, now);
@@ -6212,6 +6235,16 @@ function initGalaxyCanvas() {
   const MINE_CHAIN_PER_FRAME = 2;
   let missileImpactFlash = null; // { x, y, start } localized impact flash, drawn in drawMissileFx
   let missileForceSpawnedThisLevel = false; // DEBUG: revert before release
+  // 2026-06-16: per-level emergency timer drop — on the listed levels, when the clock first
+  // dips under 20s with no timer powerup on screen, force one out (reset in clearGameplayEntities).
+  let emergencyTimerSpawned = false;
+  const EMERGENCY_TIMER_LEVELS = [6, 9, 11, 14, 15];
+  // 2026-06-16: cfg.guaranteedSpawn = [{type, atMs}] — force-spawn a powerup once its atMs elapses.
+  // Tracks which entries (by index) have already fired this level.
+  const firedGuaranteedSpawns = new Set();
+  // 2026-06-16: cfg.speedEscalation (L15) — live asteroids ramp speed with elapsed time. We track
+  // the last-applied factor and scale all asteroids by the per-tick delta ratio (clamped to 2.5x).
+  let appliedSpeedEscalation = 1;
   // missile blast = 50% of the bomb's full blast radius (explodeMineEntity uses 700)
   const MISSILE_BLAST_RADIUS = 350;
   // DEBUG: revert before release — missile unlocks at level >= 5 (currently >= 1)
@@ -6243,6 +6276,22 @@ function initGalaxyCanvas() {
       return override[(Math.random() * override.length) | 0];
     }
     return pickPowerupType(cfg?.level ?? 99);
+  }
+
+  // 2026-06-16: shared powerup spawn helper. Powerups were previously pushed inline in several
+  // places (normal cadence, debug force-spawns); this centralizes the entity shape and accepts the
+  // human-friendly "freeze" alias for the snowflake (freeze) powerup used in level powerupOverrides.
+  function spawnPowerupAt(type, pt = randomPowerupPoint()) {
+    const normalized = type === "freeze" ? "snowflake" : type;
+    powerups.push({
+      type: normalized,
+      x: pt.x,
+      y: pt.y,
+      r: 22,
+      spawnedAt: performance.now(),
+      opacity: 1.0,
+    });
+    return powerups[powerups.length - 1];
   }
   let arcadeResumeAvailable = false;
   let pausedLevelRemainingMs = 0;
@@ -6706,6 +6755,10 @@ function initGalaxyCanvas() {
       btnStuntPractice.disabled = !unlocked;
       btnStuntPractice.classList.toggle("locked", !unlocked);
     }
+    // 2026-06-16: play the tutorial track while the Stunt Mode menu is open. playMusic is a no-op
+    // when the same track is already current, so it carries seamlessly into Training (which also
+    // calls playArcadeMusicForLevel(0)). Back → showModeSelect() stops the music on exit.
+    playArcadeMusicForLevel(0);
   }
 
   function buildArcadeLevelSelect() {
@@ -7269,7 +7322,11 @@ function initGalaxyCanvas() {
     const a = getAsteroid();
     const r = kind === 3 ? 26 + Math.random() * 12 : kind === 2 ? 18 + Math.random() * 8 : 10 + Math.random() * 6;
     // 2026-06-15: per-level asteroidSpeedMult (levels 13-15 ramp this up). Defaults to 1.
-    const speedMult = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.asteroidSpeedMult || 1) : 1;
+    const levelCfg = engineMode === "arcade" ? ARCADE_LEVELS[currentLevelIndex] : null;
+    // 2026-06-16: on speedEscalation levels (L15) mid-level spawns join at the current ramp factor
+    // so they aren't conspicuously slower than the asteroids already on screen.
+    const escMult = levelCfg?.speedEscalation ? appliedSpeedEscalation : 1;
+    const speedMult = (levelCfg?.asteroidSpeedMult || 1) * escMult;
     const speed = (kind === 3 ? 18 + Math.random() * 20 : kind === 2 ? 28 + Math.random() * 27 : 45 + Math.random() * 35) * speedMult;
     const v = randomVelocity(speed * 0.8, speed);
     a.x = x;
@@ -9461,6 +9518,9 @@ function initGalaxyCanvas() {
     freezeUntil = 0;
     _freezeWasActive = false; // no unfreeze sound on level transitions / menu exit
     goldbarsForceSpawnedThisLevel = false;
+    emergencyTimerSpawned = false; // 2026-06-16: re-arm the under-20s emergency timer drop
+    firedGuaranteedSpawns.clear(); // 2026-06-16: re-arm cfg.guaranteedSpawn entries
+    appliedSpeedEscalation = 1; // 2026-06-16: reset L15 speed ramp
     // 2026-06-14: freeze inventory PERSISTS across levels (matches bomb) — collected freezes
     // carry forward; only a full game reset (startArcadeNew / startStuntMode) zeroes it.
     updateHudFreezeInventory();
@@ -9854,7 +9914,17 @@ function initGalaxyCanvas() {
           });
         }
         hideArcadeOverlay();
+        // 2026-06-16: the render loop + PIXI can be torn down while the fail overlay is up — e.g.
+        // the app is backgrounded at the TIME'S UP screen, where the visibilitychange restore is
+        // skipped because it's gated on arcadeActive (false here). startLevel() alone never
+        // re-inits the renderer or restarts the loop, so the retried level renders blank (most
+        // visible on L15, which is effectively always failed-on-time). Re-init before respawning.
+        if (!galaxyRunning) {
+          resizeGalaxyCanvas();
+          computePlayfield();
+        }
         startLevel(currentLevelIndex);
+        startGalaxyLoop();
       },
       secondaryButtonText: "Game Over",
       secondaryButtonAction: () => {
@@ -9872,6 +9942,7 @@ function initGalaxyCanvas() {
       gameTimer.running = false;
     }
     commBoxController.stopVO();
+    commBoxController.clearPortraitOverride(); // 2026-06-16: restore CMDR if we failed on an SPC level (13/14)
     audioEngine.stopMusic();
     stopGalaxyBackground();
     stopWarningState();
@@ -9997,6 +10068,16 @@ function initGalaxyCanvas() {
     }
     updateArcadeHud(now);
     showLevelIntro(cfg.level);
+
+    // 2026-06-16: levels 13 & 14 swap the CMDR portrait for SPC (same VO pool — kill streaks etc.
+    // still play, just on SPC's face). Every other level clears the override so CMDR is restored
+    // (handles 12→13 in, 14→15 out, and any retry/restart). setPortraitOverride starts the blink.
+    if (cfg.level === 13 || cfg.level === 14) {
+      commBoxController.setPortraitOverride(null, "SPC");
+      commBoxController.setSpcFrame("idle_smile");
+    } else {
+      commBoxController.clearPortraitOverride();
+    }
 
     const levelNum = cfg.level;
     let levelStartVO = null;
@@ -10758,10 +10839,8 @@ function initGalaxyCanvas() {
       tutorialFireBlocked = false;
       tutorialBlockPlasmaToss = true; // only the laser this step
       spawnTutorialAsteroids(1, 3);
-      spcVO("08", "These are the stroids.", "talk_calm");
-      spcVO("09", "Our job is to clear them from the Polyverse.", "talk_calm");
-      spcVO("10", "Tap the play area to fire your laser.", "talk_calm");
-      spcVO("11", "Blast the stroid and all of its pieces.", "talk_calm");
+      spcVO("08-09", "These are the stroids — our job is to clear them from the Polyverse.", "talk_calm");
+      spcVO("10-11", "Tap to fire your laser and blast the stroid and all its pieces.", "talk_calm");
       showTaskInstruction("TAP TO FIRE — DESTROY THE STROID");
       await waitFor(tutorialAsteroidsAllCleared);
       hideTaskInstruction();
@@ -10772,10 +10851,8 @@ function initGalaxyCanvas() {
     { id: "plasma", run: async () => {
       tutorialBlockPlasmaToss = false; // net + toss unlocked from here on
       spawnTutorialAsteroids(2, 2);
-      spcVO("13", "Next, the plasma net weapon.");
-      spcVO("14", "Tap, drag and hold to set the net.");
-      spcVO("15", "Highlighted objects are targeted.");
-      spcVO("16", "Release to fire and destroy everything inside.");
+      spcVO("13-14", "Next up — the plasma net. Tap, drag and hold to set it.");
+      spcVO("15-16", "When stroids glow they're targeted. Release to fire.");
       showTaskInstruction("DRAG AND HOLD — RELEASE TO FIRE PLASMA NET");
       tutorialState.plasmaMisses = 0;
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(2, 2));
@@ -10804,9 +10881,7 @@ function initGalaxyCanvas() {
       hideTaskInstruction();
       spcVO("26", "Wow, there you go.", "laugh");
       spcVO("27", "Destroying a UFO instantly recharges your plasma.");
-      spcVO("28", "So a good move is to net the stroids when a UFO shows up,");
-      spcVO("29", "pop the UFO, and instantly get another net shot.");
-      spcVO("30", "Let's try it.");
+      spcVO("28-30", "So net the stroids when a UFO shows up, pop the UFO, and instantly get another net shot. Let's try it.");
       await clearTutorialField();
       spawnTutorialAsteroids(3, 2);
       spawnTutorialUFO();
@@ -10884,10 +10959,8 @@ function initGalaxyCanvas() {
     } },
     { id: "landmine", run: async () => {
       spawnTutorialLandmine(tutZonePoint("center"));
-      spcVO("42", "When you see a bomb, tap it to arm it.", "talk_calm");
-      spcVO("43", "You can also grab and toss bombs like stroids.", "talk_calm");
-      spcVO("44", "The bomb will explode soon.", "talk_calm");
-      spcVO("45", "To detonate it yourself, tap it again.", "talk_calm");
+      spcVO("42-43", "When you see a bomb, tap it to arm it — you can also grab and toss bombs like stroids.", "talk_calm");
+      spcVO("44-45", "The bomb explodes soon, but to detonate it yourself, just tap it again.", "talk_calm");
       showTaskInstruction("TAP THE BOMB TO ARM IT");
       tutorialState.mineTapBase = tutorialEvents.mine_tap || 0;
       for (;;) {
@@ -10958,12 +11031,26 @@ function initGalaxyCanvas() {
       tutorialState.frozenTossBase = tutorialEvents.toss || 0;
       while ((tutorialEvents.toss || 0) <= tutorialState.frozenTossBase) {
         await waitFor(() =>
-          (tutorialEvents.toss || 0) > tutorialState.frozenTossBase || tutorialAsteroidsAllCleared());
+          (tutorialEvents.toss || 0) > tutorialState.frozenTossBase
+          || tutorialAsteroidsAllCleared()
+          || performance.now() >= freezeUntil); // freeze lapsed before a frozen toss
         if ((tutorialEvents.toss || 0) > tutorialState.frozenTossBase) break;
-        spawnTutorialAsteroids(3, 2);
-        freezeUntil = performance.now() + FREEZE_DURATION_MS;
-        playGameSfx("freeze", 0.9);
-        spcVO("63", "Good shooting — but try grabbing and tossing a frozen stroid.", "idle_gentle");
+        if (tutorialAsteroidsAllCleared()) {
+          // cleared the field with the laser — restock + re-freeze so the toss can be practiced
+          spawnTutorialAsteroids(3, 2);
+          freezeUntil = performance.now() + FREEZE_DURATION_MS;
+          playGameSfx("freeze", 0.9);
+          spcVO("63", "Good shooting — but try grabbing and tossing a frozen stroid.", "idle_gentle");
+        } else {
+          // 2026-06-16: freeze expired before the cadet tossed one — wait a beat, drop a fresh
+          // freeze powerup at center and have them re-activate it (no soft-lock on timeout).
+          await waitMs(1000);
+          if (!stuntActive) return;
+          spawnTutorialPowerup("snowflake", tutZonePoint("center"));
+          if (tutorialAsteroidsAllCleared()) spawnTutorialAsteroids(3, 2);
+          spcVO("63b", "Freeze expired — grab another one and try the toss.", "idle_gentle");
+          await waitEvent("freeze"); // re-arm freezeUntil before re-checking for the toss
+        }
       }
       // 2026-06-15: the "toss" event fires the instant the stroid is flicked — playing the success
       // line right then talks over the throw. Wait for the tossed stroid to actually resolve
@@ -11103,6 +11190,7 @@ function initGalaxyCanvas() {
   function exitStuntPractice() {
     practiceEndless = false;
     commBoxController.clearPortraitOverride(); // SPC sat on the portrait through Practice — restore CMDR now
+    commBoxController.setExclusiveSpeaker(false); // re-enable CMDR VO outside Practice
     hideArcadeOverlay();
     showModeSelect();   // tears down the arcade session (engineMode → menu)
     showStuntModeMenu();
@@ -11180,7 +11268,9 @@ function initGalaxyCanvas() {
     //    and settle on the shades idle pose. No exclusive-speaker, no centered comm, ticker hidden
     //    — she just sits there blinking (shades ↔ shades_blink) while the player practices. ──
     commBoxController.setPortraitOverride("vo/spc_portrait.png", "SPC");
-    commBoxController.setExclusiveSpeaker(false);
+    // 2026-06-16: Practice shows SPC's mug only — no ticker text, no CMDR voice lines. Exclusive
+    // speaker drops every non-SPC queueVO so gameplay praise/reactions stay silent throughout.
+    commBoxController.setExclusiveSpeaker(true);
     commBoxController.setCommCenter(false);
     commBoxController.hideTicker();
     commBoxController.setSpcIdle("shades");
@@ -11269,6 +11359,7 @@ function initGalaxyCanvas() {
       practiceEndless = false;
       preserveArcade = false;
       commBoxController.clearPortraitOverride(); // 2026-06-16: SPC owned the portrait in Practice — restore CMDR
+      commBoxController.setExclusiveSpeaker(false); // Practice silenced CMDR — re-enable on exit
     }
     const canPreserve = preserveArcade && engineMode === "arcade" && arcadeActive;
     if (canPreserve) {
@@ -11278,6 +11369,7 @@ function initGalaxyCanvas() {
       arcadeResumeAvailable = true;
     } else {
       commBoxController.hide();
+      commBoxController.clearPortraitOverride(); // 2026-06-16: clean exit restores CMDR (SPC owns L13/14)
       clearGameplayEntities();
       arcadeActive = false;
       arcadeResumeAvailable = false;
@@ -11530,29 +11622,70 @@ function initGalaxyCanvas() {
           landmineSpawnedThisLevel = true;
         }
 
+        // 2026-06-16: emergency timer drop — on the listed levels, the first time the clock dips
+        // under 20s with no timer powerup already on screen, force one out (ignores the on-screen
+        // cap on purpose so the lifeline always lands).
+        if (!emergencyTimerSpawned
+            && EMERGENCY_TIMER_LEVELS.includes(cfg.level)
+            && levelRemainingMs < 20000 && levelRemainingMs > 0
+            && !powerups.some((p) => p.type === "timer")) {
+          emergencyTimerSpawned = true;
+          spawnPowerupAt("timer", randomPowerupPoint());
+          playGameSfx("bling", 0.8);
+        }
+
+        // 2026-06-16: cfg.guaranteedSpawn = [{type, atMs}] — force-drop a powerup once its atMs of
+        // level time has elapsed (each entry fires once; re-armed per level in clearGameplayEntities).
+        if (Array.isArray(cfg.guaranteedSpawn)) {
+          for (let gi = 0; gi < cfg.guaranteedSpawn.length; gi += 1) {
+            const g = cfg.guaranteedSpawn[gi];
+            if (!firedGuaranteedSpawns.has(gi) && elapsedMs >= (g?.atMs || 0)) {
+              firedGuaranteedSpawns.add(gi);
+              spawnPowerupAt(g.type, randomPowerupPoint());
+              playGameSfx("bling", 0.8);
+            }
+          }
+        }
+
+        // 2026-06-16: cfg.speedEscalation (L15) — scale every live asteroid toward a target
+        // multiplier of 1 + (elapsedMs/5000)*0.04 (≈4% per 5s), capped at 2.5x the spawn speed.
+        // We apply only the per-tick delta ratio so collision-modified velocities ramp in step;
+        // freeze pauses elapsedMs, so the ramp naturally holds during a freeze.
+        if (cfg.speedEscalation) {
+          const target = Math.min(2.5, 1 + (elapsedMs / 5000) * 0.04);
+          if (target > appliedSpeedEscalation + 1e-4) {
+            const ratio = target / appliedSpeedEscalation;
+            for (let ai = 0; ai < sim.asteroids.length; ai += 1) {
+              sim.asteroids[ai].vx *= ratio;
+              sim.asteroids[ai].vy *= ratio;
+            }
+            appliedSpeedEscalation = target;
+          }
+        }
+
         // 2026-06-10: periodically spawn a collectible powerup (weighted random type).
         // Progressive introduction — no powerups before level 4. Spawn zone keeps clear of
         // the top HUD (140px) and the commander portrait/comm box (160px).
         // DEBUG: revert before release — gate is normally cfg.level >= 4
-        // 2026-06-14 (PART 9): while the player holds a missile or one is in flight, suppress
-        // NEW powerup spawns (existing ones on screen stay collectible).
+        // 2026-06-16: while the player holds a missile or one is in flight, suppress ONLY a new
+        // missile spawn — not the whole powerup system. Previously missileBusy gated this entire
+        // block, so once a missile was collected (and the debug force-spawn drops one every level)
+        // quad/freeze/bomb stopped appearing entirely. Other types must keep dropping.
         const missileBusy = playerMissileInventory > 0 || activeMissile;
-        if (!missileBusy && powerups.length < POWERUP_MAX_ONSCREEN && cfg.level >= 1 && now >= nextBombPowerupAt) {
-          const puPt = randomPowerupPoint();
-          powerups.push({
-            type: pickPowerupForLevel(cfg),
-            x: puPt.x,
-            y: puPt.y,
-            r: 22,
-            spawnedAt: now,
-            opacity: 1.0,
-          });
-          playGameSfx("bling", 0.8);
-          // 2026-06-15: honor a fixed per-level cadence (cfg.powerupIntervalMs) when set.
-          nextBombPowerupAt = cfg.powerupIntervalMs
-            ? now + cfg.powerupIntervalMs
-            : now + BOMB_POWERUP_INTERVAL_MIN
-              + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
+        if (powerups.length < POWERUP_MAX_ONSCREEN && cfg.level >= 1 && now >= nextBombPowerupAt) {
+          const puType = pickPowerupForLevel(cfg);
+          if (puType === "missile" && missileBusy) {
+            // skip this missile roll while one is held/in flight; retry shortly with a fresh type.
+            nextBombPowerupAt = now + 1500;
+          } else {
+            spawnPowerupAt(puType, randomPowerupPoint());
+            playGameSfx("bling", 0.8);
+            // 2026-06-15: honor a fixed per-level cadence (cfg.powerupIntervalMs) when set.
+            nextBombPowerupAt = cfg.powerupIntervalMs
+              ? now + cfg.powerupIntervalMs
+              : now + BOMB_POWERUP_INTERVAL_MIN
+                + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
+          }
         }
 
         // DEBUG: revert before release — force one missile powerup at the start of each level
@@ -12795,9 +12928,11 @@ function initGalaxyCanvas() {
       return;
     }
     if (pu.type === "missile") {
-      // 2026-06-14: one pickup = a full pack of MAX missiles (the 3-rocket art), fired one at a
-      // time with a reload between shots. Powerup re-spawn is suppressed while any are stocked.
-      playerMissileInventory = MAX_MISSILE_INVENTORY;
+      // 2026-06-16: one pickup grants +1 missile by default (the rocket art), fired one at a time
+      // with a reload between shots. A powerup may override the grant via pu.missileCount (e.g. a
+      // level that hands out a full pack). Always capped at MAX_MISSILE_INVENTORY.
+      const grant = pu.missileCount || 1;
+      playerMissileInventory = Math.min(playerMissileInventory + grant, MAX_MISSILE_INVENTORY);
       updateHudMissileInventory();
       playGameSfx("pickup_weapon", 0.9);
       cssFlash("#ff4444", 0.2, 250);
@@ -13555,9 +13690,15 @@ function initGalaxyCanvas() {
     // on background, killing SFX — re-prime it here and resume any SPC line paused on hide.
     onAppForeground() {
       if (!stuntActive && !practiceEndless) return;
-      audioEngine.unlock?.();
-      audioEngine.loadMany?.(GAME_SFX);
-      if (_spcAudio) { try { _spcAudio.play().catch(() => {}); } catch {} }
+      // 2026-06-16: iOS releases the audio session during a speak-to-text / dictation pass and
+      // doesn't restore it instantly on foreground. Wait 300ms so the session is fully back before
+      // unlocking, then re-prime (loadMany) the SFX buffers iOS dropped, and resume any paused SPC line.
+      setTimeout(() => {
+        if (!stuntActive && !practiceEndless) return;
+        audioEngine.unlock?.();
+        audioEngine.loadMany?.(GAME_SFX);
+        if (_spcAudio) { try { _spcAudio.play().catch(() => {}); } catch {} }
+      }, 300);
     },
     triggerBoom() {
       // no-op in current arcade interaction model

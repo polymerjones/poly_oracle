@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import AVFoundation
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -7,7 +8,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // 2026-06-16: route audio through the "playback" category so Web Audio SFX keep playing
+        // when the hardware ringer/silent switch is off. The default "ambient"/"soloAmbient"
+        // category is silenced by that switch — that's why Stunt Mode had no SFX in silent mode.
+        // mixWithOthers keeps other apps' audio (e.g. music) playing alongside the game.
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, options: .mixWithOthers)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("AppDelegate: failed to set AVAudioSession category: \(error)")
+        }
         return true
     }
 

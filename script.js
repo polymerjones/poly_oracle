@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-17 16:49";
+const BUILD_TS = "2026-06-17 17:00";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -9671,7 +9671,7 @@ function initGalaxyCanvas() {
     landmine = null;
     placedBombs.length = 0; // 2026-06-10: placed bombs don't carry across levels/menu
     pendingExplosions.length = 0; // 2026-06-16: drop any queued chain detonations
-    commBoxController.setMuteCmdrVO(false); // 2026-06-17: un-mute CMDR voice when leaving L14
+    commBoxController.setMuteCmdrVO(false); // 2026-06-17: un-mute CMDR voice when leaving an SPC level (13/14)
     stopDangerLoop();
     landmineSpawnedThisLevel = false;
     // 2026-06-10: clear powerups, active effects, and aim state on level transitions / menu exit
@@ -10242,18 +10242,19 @@ function initGalaxyCanvas() {
     updateArcadeHud(now);
     showLevelIntro(cfg.level);
 
-    // 2026-06-17: only level 14 swaps the CMDR portrait for SPC (level 13 reverted to CMDR). On 14
-    // the same VO pool plays on SPC's face, but CMDR voice lines are muted (see muteCmdrVO below).
+    // 2026-06-17: levels 13 & 14 swap the CMDR portrait for SPC. SPC owns the comm box (her bonus
+    // VO pool fires via isSpcMode/_spcMode) and CMDR voice lines are muted (see muteCmdrVO below).
     // Every other level clears the override so CMDR is restored (handles in/out + retry/restart).
-    if (cfg.level === 14) {
+    const isSpcLevel = cfg.level === 13 || cfg.level === 14;
+    if (isSpcLevel) {
       commBoxController.setPortraitOverride(null, "SPC");
       commBoxController.setSpcFrame("idle_smile");
     } else {
       commBoxController.clearPortraitOverride();
     }
-    // 2026-06-17: silence CMDR voice on level 14 (SPC's face, no voice). Captions still type, all
-    // SFX/music unaffected. Reset to false on every level transition in clearGameplayEntities().
-    commBoxController.setMuteCmdrVO(cfg.level === 14);
+    // 2026-06-17: silence CMDR voice on the SPC levels (SPC's face, no CMDR voice). Captions still
+    // type, all SFX/music unaffected. Reset to false on every level transition in clearGameplayEntities().
+    commBoxController.setMuteCmdrVO(isSpcLevel);
 
     const levelNum = cfg.level;
     let levelStartVO = null;
@@ -10276,9 +10277,9 @@ function initGalaxyCanvas() {
     // 2026-06-17: delay the first VO 800ms so the level-intro animation finishes before SPC/CMDR
     // starts talking (the comm box was popping up before the level had visually settled).
     setTimeout(() => {
-      // 2026-06-17: level 14 — SPC owns the comm box and CMDR voice is muted, so greet the cadet
-      // with her own intro line ("Let's get after it, Cadet!") instead of the muted CMDR line.
-      const spcIntro = levelNum === 14
+      // 2026-06-17: levels 13 & 14 — SPC owns the comm box and CMDR voice is muted, so greet the
+      // cadet with her own intro line ("Let's get after it, Cadet!") instead of the muted CMDR line.
+      const spcIntro = (levelNum === 13 || levelNum === 14)
         ? commBoxController.spcBonusVoSrc("SPC_lets_get_after_it.mp3")
         : null;
       if (spcIntro) {

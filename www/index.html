@@ -321,7 +321,7 @@
 
       <!-- Portrait frame - always visible during gameplay -->
       <div id="commanderPortrait" style="
-        width:120px; height:120px;
+        width:120px; min-height:120px; max-height:180px;
         border: 1.5px solid #00d4d4;
         border-radius: 3px;
         overflow: hidden;
@@ -331,9 +331,9 @@
       ">
         <img id="commanderImg"
           src="commander/idle_commander.jpg"
-          style="width:100%; height:100%;
+          style="width:120px; height:auto; max-height:180px;
                  display:block; image-rendering:pixelated;
-                 object-fit:cover; object-position:top;"
+                 object-fit:cover; object-position:top center;"
           alt="Commander">
         <!-- CRT scanline overlay -->
         <div style="position:absolute;inset:0;

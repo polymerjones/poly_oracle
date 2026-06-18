@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-17 22:38";
+const BUILD_TS = "2026-06-18 09:03";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1421,7 +1421,9 @@ const commBoxController = (() => {
   // Without this, a comm interrupting mid-blink leaves the portrait stuck on the blink frame.
   let _spcBlinkTimeouts = [];
   // The base talking cycle (mouth-flap) when no expression hint is supplied.
-  const SPC_TALK_CYCLE = ["talk_calm", "smile_open", "talk_friendly"];
+  // 2026-06-18: phoneme cycling (NOT true lip-sync) — cycle mouth-shape frames while audio plays.
+  // Amplitude/AnalyserNode-driven lip-sync is a deferred post-ship upgrade.
+  const SPC_TALK_CYCLE = ["talk_calm", "talk_ah", "talk_mid", "talk_st", "talk_friendly"];
   // Expression hints flap between the emotion frame and a matching talk frame so the portrait
   // both holds the mood AND moves its mouth while the line plays. Single-entry sets are held.
   const SPC_EXPR_FLAP = {
@@ -1517,10 +1519,11 @@ const commBoxController = (() => {
     setSpcFrame(frames[0]);
     if (frames.length === 1) return; // held expression — no mouth flap
     let i = 0;
+    // 2026-06-18: ~120ms phoneme cycle while the line plays (cleared by spcSpeakEnd on audio end).
     _spcMouthFlap = setInterval(() => {
       i += 1;
       setSpcFrame(frames[i % frames.length]);
-    }, 150);
+    }, 120);
   }
 
   // End of a line (or whole queue): stop the flap, settle on the rest frame, resume blinking.
@@ -3725,6 +3728,12 @@ function closeGalaxyView() {
     if (oracleBgController) oracleBgController.start();
   }
   if (galaxyCanvasController) galaxyCanvasController.stop?.();
+  // 2026-06-18: the "← Oracle" back button bypassed tutorial/practice teardown — commBoxController.hide()
+  // only flushes the CMDR VO queue, leaving the SPC queue/audio playing and the portrait hijacked.
+  // Route a live tutorial/practice through the canonical teardown (cleanupTutorial + clearPortraitOverride).
+  if (galaxyCanvasController?.isTutorialActive?.() || galaxyCanvasController?.isPracticeEndless?.()) {
+    galaxyCanvasController.showModeSelect?.({ preserveArcade: false });
+  }
   commBoxController.hide(); // FIXED 2026-06-08: clear comm popup when returning to Oracle
   // 2026-06-09: portrait lock is now global (lockPortraitOrientation on startup); no per-view lock.
 }
@@ -10692,6 +10701,9 @@ function initGalaxyCanvas() {
       if (!_spcPlaying) return; // idempotent: orphaned timer / watchdog / onerror+onended race can't double-advance
       if (_spcTimer) { clearTimeout(_spcTimer); _spcTimer = null; }
       if (_spcAudioFxCleanup) { _spcAudioFxCleanup(); _spcAudioFxCleanup = null; }
+      // 2026-06-18: pause before nulling — a forced advance (watchdog/skip/fallback) must not
+      // leave the previous clip audible under the next line.
+      if (_spcAudio) { try { _spcAudio.pause(); } catch {} }
       _spcAudio = null;
       _spcPlaying = false;
       _spcAdvanceFn = null;
@@ -10712,7 +10724,6 @@ function initGalaxyCanvas() {
         _spcAudio.volume = 0.85;
         _spcAudio.playbackRate = SPC_VO_PLAYBACK_RATE;
         _spcAudioFxCleanup = applyCommRadioEffect(_spcAudio);
-        _spcAudio.onended = advance;
         _spcAudio.onerror = (e) => {
           // 2026-06-17: surface load failures on device — relative path is correct for
           // capacitor://localhost, so an error here means the file is missing from the bundle
@@ -10721,12 +10732,24 @@ function initGalaxyCanvas() {
           console.warn("[SPC] audio error", { key, src, code, e });
           advance();
         };
+        // 2026-06-18: 'onended' is the SOLE advance trigger — no more text-length timer racing
+        // (and cutting) the audio. Arm an iOS-safe fallback from the REAL clip duration once
+        // metadata loads, in case 'ended' never fires on device. The 8s watchdog (updateStunt)
+        // remains the last-resort backstop.
+        _spcAudio.onended = advance;
+        _spcAudio.onloadedmetadata = () => {
+          if (!_spcPlaying) return;
+          const d = _spcAudio && isFinite(_spcAudio.duration) ? _spcAudio.duration : 0;
+          if (d > 0) {
+            if (_spcTimer) clearTimeout(_spcTimer);
+            _spcTimer = setTimeout(advance, d * 1000 + 300);
+          }
+        };
         const p = _spcAudio.play();
         if (p && typeof p.catch === "function") p.catch((err) => {
           console.warn("[SPC] audio play() rejected", { key, src, err });
           _spcTimer = setTimeout(advance, dur);
         });
-        _spcTimer = setTimeout(advance, dur); // safety net if 'ended' never fires
       } catch { _spcTimer = setTimeout(advance, dur); }
     } else {
       _spcTimer = setTimeout(advance, dur);

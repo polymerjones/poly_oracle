@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Image Animation Tester</title>
+<style>
+  :root {
+    --bg: #10131a;
+    --panel: #181d27;
+    --panel2: #202736;
+    --text: #eef3ff;
+    --muted: #9aa8c0;
+    --accent: #75f7a1;
+    --warn: #ffcf6a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: radial-gradient(circle at top, #1a2638, var(--bg));
+    color: var(--text);
+  }
+  header {
+    padding: 18px 22px;
+    border-bottom: 1px solid #2a3345;
+    background: rgba(16,19,26,.85);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(10px);
+  }
+  h1 { margin: 0; font-size: 21px; }
+  .sub { color: var(--muted); margin-top: 4px; font-size: 14px; }
+  main {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 18px;
+    padding: 18px;
+  }
+  .panel {
+    background: rgba(24,29,39,.92);
+    border: 1px solid #2a3345;
+    border-radius: 14px;
+    padding: 14px;
+    box-shadow: 0 12px 30px rgba(0,0,0,.25);
+  }
+  .drop {
+    border: 2px dashed #52617a;
+    border-radius: 14px;
+    min-height: 150px;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    padding: 18px;
+    color: var(--muted);
+    background: rgba(255,255,255,.03);
+    cursor: pointer;
+  }
+  .drop.dragover {
+    border-color: var(--accent);
+    color: var(--text);
+    background: rgba(117,247,161,.08);
+  }
+  input[type=file] { display: none; }
+  .controls {
+    display: grid;
+    gap: 12px;
+    margin-top: 14px;
+  }
+  button, select, input[type=number], input[type=text] {
+    background: var(--panel2);
+    color: var(--text);
+    border: 1px solid #3a465c;
+    border-radius: 9px;
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row > * { flex: 1; }
+  label { color: var(--muted); font-size: 13px; display: block; margin-bottom: 5px; }
+  input[type=range] { width: 100%; }
+  .stage {
+    min-height: 620px;
+    display: grid;
+    place-items: center;
+    overflow: auto;
+  }
+  .previewWrap {
+    background:
+      linear-gradient(45deg, #222 25%, transparent 25%),
+      linear-gradient(-45deg, #222 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #222 75%),
+      linear-gradient(-45deg, transparent 75%, #222 75%);
+    background-size: 22px 22px;
+    background-position: 0 0, 0 11px, 11px -11px, -11px 0;
+    border: 1px solid #303a4e;
+    border-radius: 14px;
+    padding: 12px;
+  }
+  #preview {
+    display: block;
+    max-width: 75vw;
+    max-height: 76vh;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+  .thumbs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-top: 12px;
+    max-height: 320px;
+    overflow: auto;
+  }
+  .thumb {
+    border: 1px solid #3a465c;
+    border-radius: 8px;
+    padding: 4px;
+    background: #111720;
+    cursor: grab;
+    position: relative;
+  }
+  .thumb.active { outline: 2px solid var(--accent); }
+  .thumb img { width: 100%; display: block; image-rendering: pixelated; }
+  .thumb small {
+    display: block;
+    color: var(--muted);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 10px;
+    margin-top: 3px;
+  }
+  .setList {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .setBtn {
+    text-align: left;
+    padding: 9px 10px;
+  }
+  .setBtn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .hint {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.45;
+    margin-top: 10px;
+  }
+  .kbd {
+    color: var(--warn);
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Image Animation Tester</h1>
+  <div class="sub">Drop PNG, JPEG, or WebP frames, reorder them, save frame sets, preview loops. Works offline.</div>
+</header>
+
+<main>
+  <section class="panel">
+    <label for="fileInput" class="drop" id="dropZone">
+      <div>
+        <strong>Drop image frames here</strong><br>
+        or click to choose files<br><br>
+        <span class="hint">Tip: drag files in the order you want, or reorder thumbnails below.</span>
+      </div>
+    </label>
+    <input id="fileInput" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" multiple />
+
+    <div class="controls">
+      <div class="row">
+        <button id="playBtn">▶ Play</button>
+        <button id="prevBtn">◀ Prev</button>
+        <button id="nextBtn">Next ▶</button>
+      </div>
+
+      <div>
+        <label>FPS: <span id="fpsLabel">8</span></label>
+        <input id="fps" type="range" min="1" max="30" value="8">
+      </div>
+
+      <div class="row">
+        <button id="loopBtn">Loop: ON</button>
+        <button id="pingpongBtn">Ping-pong: OFF</button>
+      </div>
+
+      <div class="row">
+        <button id="sortBtn">Sort A→Z</button>
+        <button id="clearBtn">Clear</button>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>New set name</label>
+          <input id="setName" type="text" placeholder="blink, talk, damage..." />
+        </div>
+        <button id="saveSetBtn" style="margin-top:22px;">Save Set</button>
+      </div>
+
+      <div>
+        <label>Saved sets</label>
+        <div id="setList" class="setList"></div>
+      </div>
+
+      <div class="hint">
+        Shortcuts: <span class="kbd">Space</span> play/pause,
+        <span class="kbd">←</span>/<span class="kbd">→</span> frame step.
+        Drag thumbnails to reorder.
+      </div>
+    </div>
+
+    <div id="thumbs" class="thumbs"></div>
+  </section>
+
+  <section class="panel stage">
+    <div>
+      <div class="previewWrap">
+        <img id="preview" alt="Animation preview" />
+      </div>
+      <p id="status" class="hint">No frames loaded yet.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+let frames = [];
+let current = 0;
+let playing = false;
+let timer = null;
+let loop = true;
+let pingpong = false;
+let direction = 1;
+let savedSets = {};
+
+const fileInput = document.getElementById('fileInput');
+const dropZone = document.getElementById('dropZone');
+const preview = document.getElementById('preview');
+const thumbs = document.getElementById('thumbs');
+const status = document.getElementById('status');
+const playBtn = document.getElementById('playBtn');
+const fps = document.getElementById('fps');
+const fpsLabel = document.getElementById('fpsLabel');
+const loopBtn = document.getElementById('loopBtn');
+const pingpongBtn = document.getElementById('pingpongBtn');
+const setList = document.getElementById('setList');
+
+function loadFiles(fileList) {
+  const validExts = ['.png', '.jpg', '.jpeg', '.webp'];
+  const images = [...fileList].filter(f => {
+    const name = f.name.toLowerCase();
+    return f.type.startsWith('image/') || validExts.some(ext => name.endsWith(ext));
+  });
+  if (!images.length) return;
+
+  frames.forEach(f => URL.revokeObjectURL(f.url));
+  frames = images.map((file, index) => ({
+    name: file.name,
+    url: URL.createObjectURL(file),
+    order: index
+  }));
+  current = 0;
+  direction = 1;
+  render();
+}
+
+function render() {
+  if (!frames.length) {
+    preview.removeAttribute('src');
+    status.textContent = 'No frames loaded yet.';
+    thumbs.innerHTML = '';
+    return;
+  }
+  preview.src = frames[current].url;
+  status.textContent = `Frame ${current + 1} / ${frames.length} — ${frames[current].name}`;
+  renderThumbs();
+}
+
+function renderThumbs() {
+  thumbs.innerHTML = '';
+  frames.forEach((frame, i) => {
+    const div = document.createElement('div');
+    div.className = 'thumb' + (i === current ? ' active' : '');
+    div.draggable = true;
+    div.dataset.index = i;
+    div.innerHTML = `<img src="${frame.url}"><small>${i+1}. ${frame.name}</small>`;
+    div.onclick = () => { current = i; render(); };
+
+    div.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', i);
+    });
+    div.addEventListener('dragover', e => e.preventDefault());
+    div.addEventListener('drop', e => {
+      e.preventDefault();
+      const from = Number(e.dataTransfer.getData('text/plain'));
+      const to = i;
+      const moved = frames.splice(from, 1)[0];
+      frames.splice(to, 0, moved);
+      current = to;
+      render();
+    });
+
+    thumbs.appendChild(div);
+  });
+}
+
+function step() {
+  if (!frames.length) return;
+
+  if (pingpong) {
+    current += direction;
+    if (current >= frames.length) {
+      direction = -1;
+      current = frames.length - 2;
+    } else if (current < 0) {
+      direction = 1;
+      current = 1;
+      if (!loop) stop();
+    }
+  } else {
+    current++;
+    if (current >= frames.length) {
+      if (loop) current = 0;
+      else { current = frames.length - 1; stop(); }
+    }
+  }
+  render();
+}
+
+function play() {
+  if (!frames.length) return;
+  stop(false);
+  playing = true;
+  playBtn.textContent = '⏸ Pause';
+  timer = setInterval(step, 1000 / Number(fps.value));
+}
+
+function stop(updateButton = true) {
+  playing = false;
+  if (timer) clearInterval(timer);
+  timer = null;
+  if (updateButton) playBtn.textContent = '▶ Play';
+}
+
+function togglePlay() {
+  playing ? stop() : play();
+}
+
+function saveSet() {
+  const name = document.getElementById('setName').value.trim();
+  if (!name || !frames.length) return;
+  savedSets[name] = frames.map(f => ({ name: f.name, url: f.url }));
+  renderSets();
+}
+
+function renderSets() {
+  setList.innerHTML = '';
+  Object.keys(savedSets).forEach(name => {
+    const btn = document.createElement('button');
+    btn.className = 'setBtn';
+    btn.textContent = `${name} (${savedSets[name].length} frames)`;
+    btn.onclick = () => {
+      frames = savedSets[name].map(f => ({ ...f }));
+      current = 0;
+      stop();
+      render();
+    };
+    setList.appendChild(btn);
+  });
+}
+
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('dragover');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  loadFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', e => loadFiles(e.target.files));
+
+playBtn.onclick = togglePlay;
+document.getElementById('prevBtn').onclick = () => {
+  if (!frames.length) return;
+  current = (current - 1 + frames.length) % frames.length;
+  render();
+};
+document.getElementById('nextBtn').onclick = () => {
+  if (!frames.length) return;
+  current = (current + 1) % frames.length;
+  render();
+};
+fps.oninput = () => {
+  fpsLabel.textContent = fps.value;
+  if (playing) play();
+};
+loopBtn.onclick = () => {
+  loop = !loop;
+  loopBtn.textContent = `Loop: ${loop ? 'ON' : 'OFF'}`;
+};
+pingpongBtn.onclick = () => {
+  pingpong = !pingpong;
+  pingpongBtn.textContent = `Ping-pong: ${pingpong ? 'ON' : 'OFF'}`;
+};
+document.getElementById('sortBtn').onclick = () => {
+  frames.sort((a,b) => a.name.localeCompare(b.name, undefined, {numeric:true}));
+  current = 0;
+  render();
+};
+document.getElementById('clearBtn').onclick = () => {
+  stop();
+  frames.forEach(f => URL.revokeObjectURL(f.url));
+  frames = [];
+  current = 0;
+  render();
+};
+document.getElementById('saveSetBtn').onclick = saveSet;
+
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') {
+    e.preventDefault();
+    togglePlay();
+  }
+  if (e.key === 'ArrowLeft') document.getElementById('prevBtn').click();
+  if (e.key === 'ArrowRight') document.getElementById('nextBtn').click();
+});
+
+render();
+</script>
+</body>
+</html>

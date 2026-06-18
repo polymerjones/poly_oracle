@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-18 09:03";
+const BUILD_TS = "2026-06-18 09:16";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6352,9 +6352,12 @@ function initGalaxyCanvas() {
   let _spcAudioFxCleanup = null;
   const SPC_VO_PLAYBACK_RATE = 1.08;
   // 2026-06-17: per-line watchdog — if a line never fires its end/timer (iOS audio quirk), the
-  // updateStunt watchdog force-advances via _spcAdvanceFn after _spcLineStartedAt + 8s.
+  // updateStunt watchdog force-advances via _spcAdvanceFn after _spcLineStartedAt + _spcLineWatchdogMs.
+  // 2026-06-18: watchdog is now DYNAMIC — set from the real clip duration once metadata loads, so a
+  // long VO (>8s) is never guillotined mid-sentence (the old fixed 8s cut them off).
   let _spcLineStartedAt = 0;
   let _spcAdvanceFn = null;
+  let _spcLineWatchdogMs = 8000;
   // Tap-to-skip rework (2026-06-16): the skip hint is subtle + rare — only shown once SPC has been
   // chattering for >3s over a pending player action and the cadet hasn't just interacted.
   let _spcContinuousStartAt = 0;       // when SPC's current uninterrupted talking run began (0 = silent)
@@ -10716,6 +10719,7 @@ function initGalaxyCanvas() {
     };
     _spcAdvanceFn = advance;                 // watchdog target (see updateStunt)
     _spcLineStartedAt = performance.now();
+    _spcLineWatchdogMs = 8000;              // dynamic — tightened to real duration once metadata loads
     if (src) {
       try {
         _spcAudio = new Audio(src);
@@ -10732,22 +10736,32 @@ function initGalaxyCanvas() {
           console.warn("[SPC] audio error", { key, src, code, e });
           advance();
         };
-        // 2026-06-18: 'onended' is the SOLE advance trigger — no more text-length timer racing
-        // (and cutting) the audio. Arm an iOS-safe fallback from the REAL clip duration once
-        // metadata loads, in case 'ended' never fires on device. The 8s watchdog (updateStunt)
-        // remains the last-resort backstop.
-        _spcAudio.onended = advance;
-        _spcAudio.onloadedmetadata = () => {
-          if (!_spcPlaying) return;
-          const d = _spcAudio && isFinite(_spcAudio.duration) ? _spcAudio.duration : 0;
-          if (d > 0) {
-            if (_spcTimer) clearTimeout(_spcTimer);
-            _spcTimer = setTimeout(advance, d * 1000 + 300);
-          }
+        // 2026-06-18: iOS WKWebView does NOT reliably fire 'ended' on a media element routed
+        // through a Web Audio graph (applyCommRadioEffect). So the PRIMARY advance is a timer
+        // computed from the REAL clip duration, rate-adjusted to actual playtime. 'onended' stays
+        // as a nice-to-have early trigger when it does fire. Both go through the idempotent advance().
+        _spcAudio.onended = () => { console.log("[SPC] ended", key); advance(); };
+        const armFromDuration = () => {
+          if (!_spcPlaying || !_spcAudio) return;
+          const d = isFinite(_spcAudio.duration) ? _spcAudio.duration : 0;
+          if (d <= 0) return;
+          const playMs = (d / SPC_VO_PLAYBACK_RATE) * 1000; // 1.08x faster than recorded
+          if (_spcTimer) clearTimeout(_spcTimer);
+          _spcTimer = setTimeout(advance, playMs + 250);     // +250ms tail so we don't clip the end
+          _spcLineWatchdogMs = playMs + 2000;                // watchdog can't fire before the clip ends
+          console.log("[SPC] meta", key, "dur", d.toFixed(2), "-> advance in", Math.round(playMs + 250), "ms");
         };
+        _spcAudio.onloadedmetadata = armFromDuration;
+        // metadata may already be cached (loadedmetadata won't re-fire) — arm immediately if so
+        if (_spcAudio.readyState >= 1 && isFinite(_spcAudio.duration) && _spcAudio.duration > 0) armFromDuration();
+        // pre-metadata backstop: if metadata is slow to load, don't stall on the 8s watchdog;
+        // armFromDuration replaces this the instant duration is known.
+        _spcTimer = setTimeout(advance, 9000);
         const p = _spcAudio.play();
+        console.log("[SPC] play", key, src);
         if (p && typeof p.catch === "function") p.catch((err) => {
           console.warn("[SPC] audio play() rejected", { key, src, err });
+          if (_spcTimer) clearTimeout(_spcTimer);
           _spcTimer = setTimeout(advance, dur);
         });
       } catch { _spcTimer = setTimeout(advance, dur); }
@@ -11557,9 +11571,11 @@ function initGalaxyCanvas() {
     if (tutorialPaused) return; // frozen: no waiter resolution, no phase progress
     // Subtle, rare "TAP TO SKIP" hint — driven each frame off SPC/queue/waiter/interaction state.
     updateSkipHint(now);
-    // 2026-06-17: safety watchdog — if an SPC line never fires its end/timer (iOS audio quirk),
-    // force-advance after 8s so the tutorial can't hang on a single line (e.g. SPC_01 at intro).
-    if (_spcPlaying && _spcAdvanceFn && performance.now() - _spcLineStartedAt > 8000) _spcAdvanceFn();
+    // 2026-06-17: safety watchdog — if an SPC line never fires its end/timer, force-advance so the
+    // tutorial can't hang on a single line. 2026-06-18: _spcLineWatchdogMs is DYNAMIC (set from the
+    // real clip duration in pumpSpc), so a long VO is never cut off mid-sentence; only a genuinely
+    // stuck line (no metadata, default 8s) trips it.
+    if (_spcPlaying && _spcAdvanceFn && performance.now() - _spcLineStartedAt > _spcLineWatchdogMs) _spcAdvanceFn();
     if (_tutWaiters.length) {
       let resolvedAction = false;
       for (let i = _tutWaiters.length - 1; i >= 0; i -= 1) {

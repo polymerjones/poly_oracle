@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-17 18:00";
+const BUILD_TS = "2026-06-17 19:12";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -499,6 +499,7 @@ const MUSIC = {
   L10:     "assets/music/E1L10BOSS.mp3",        // level 10 boss
   PRACTICE: "assets/music/PRACTICE.mp3",
   TUTORIAL: "assets/music/Stroids_tutorial_instrumental.mp3",
+  ARCADE_MENU: "assets/music/STROIDS_THEME.mp3",
   L3_4:    "assets/music/Stroids_phonk_loop.mp3",
   L5_6:    "assets/music/Stroids_BASS_Phonk.mp3",
   L7_8:    "assets/music/Stroids_Phonk_2.mp3",
@@ -1083,6 +1084,7 @@ const commBoxController = (() => {
   let idleTimer = null;
   let tickerHideTimer = null;
   let voAudio = null;
+  let voAudioFxCleanup = null;
   let typingToken = 0;
   let mouthFlap = null;
   let tickerVisible = false;
@@ -1818,6 +1820,7 @@ const commBoxController = (() => {
     clearTimeout(tickerHideTimer);
     tickerHideTimer = null;
     if (voAudio) {
+      if (voAudioFxCleanup) { voAudioFxCleanup(); voAudioFxCleanup = null; }
       voAudio.pause();
       voAudio = null;
     }
@@ -1900,6 +1903,7 @@ const commBoxController = (() => {
       tickerHideTimer = null;
     }
     if (voAudio) {
+      if (voAudioFxCleanup) { voAudioFxCleanup(); voAudioFxCleanup = null; }
       voAudio.pause();
       voAudio = null;
     }
@@ -1921,8 +1925,11 @@ const commBoxController = (() => {
 
     let talkingEnded = false;
     const endTalking = () => {
+      if (triggerToken !== _voTriggerToken) return;
       if (talkingEnded) return;
       talkingEnded = true;
+      if (voAudioFxCleanup) { voAudioFxCleanup(); voAudioFxCleanup = null; }
+      voAudio = null;
       stopMouthFlap();
       tickIdle();
       tickerHideTimer = setTimeout(() => {
@@ -1955,9 +1962,12 @@ const commBoxController = (() => {
         };
         try {
           voAudio = new Audio(audioSrc);
+          voAudio.preload = "auto";
+          voAudio.playsInline = true;
           // 2026-06-17: L14 mutes CMDR voice (caption still types), but SPC's own bonus lines
           // (_spc) bypass the mute so the Specialist is actually heard on her level.
           voAudio.volume = (muteCmdrVO && !_spc) ? 0 : (_spc ? 0.85 : 0.7);
+          voAudioFxCleanup = applyCommRadioEffect(voAudio, { enabled: !(muteCmdrVO && !_spc) });
           voAudio.play().catch(() => {
             if (!audioFallbackTimer) audioFallbackTimer = setTimeout(endTalking, duration);
           });
@@ -2883,6 +2893,65 @@ const audioEngine = {
     return buffer.duration / Math.max(0.01, rate || 1);
   },
 };
+
+function makeCommRadioCurve(amount = 18) {
+  const samples = 256;
+  const curve = new Float32Array(samples);
+  const deg = Math.PI / 180;
+  for (let i = 0; i < samples; i += 1) {
+    const x = (i * 2) / samples - 1;
+    curve[i] = ((3 + amount) * x * 20 * deg) / (Math.PI + amount * Math.abs(x));
+  }
+  return curve;
+}
+
+function applyCommRadioEffect(audioNode, { enabled = true } = {}) {
+  if (!enabled || !audioNode) return null;
+  try {
+    const ctx = audioEngine.ensureContext?.();
+    if (!ctx || !audioEngine.masterGain) return null;
+    if (ctx.state !== "running") return null;
+    const source = ctx.createMediaElementSource(audioNode);
+    const highpass = ctx.createBiquadFilter();
+    const lowpass = ctx.createBiquadFilter();
+    const drive = ctx.createWaveShaper();
+    const compressor = ctx.createDynamicsCompressor();
+    const output = ctx.createGain();
+
+    highpass.type = "highpass";
+    highpass.frequency.value = 420;
+    highpass.Q.value = 0.7;
+    lowpass.type = "lowpass";
+    lowpass.frequency.value = 3600;
+    lowpass.Q.value = 0.9;
+    drive.curve = makeCommRadioCurve(14);
+    drive.oversample = "2x";
+    compressor.threshold.value = -24;
+    compressor.knee.value = 18;
+    compressor.ratio.value = 5;
+    compressor.attack.value = 0.004;
+    compressor.release.value = 0.12;
+    output.gain.value = 0.92;
+
+    source.connect(highpass);
+    highpass.connect(lowpass);
+    lowpass.connect(drive);
+    drive.connect(compressor);
+    compressor.connect(output);
+    output.connect(audioEngine.masterGain);
+
+    return () => {
+      try { source.disconnect(); } catch {}
+      try { highpass.disconnect(); } catch {}
+      try { lowpass.disconnect(); } catch {}
+      try { drive.disconnect(); } catch {}
+      try { compressor.disconnect(); } catch {}
+      try { output.disconnect(); } catch {}
+    };
+  } catch {
+    return null;
+  }
+}
 
 function saveBackgroundMusicState() {
   const htmlMusic = audioEngine.currentMusicHtml?.node
@@ -5562,6 +5631,7 @@ function renderLeaderboardRows(rows, highlightId = "") {
 
 async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubmit = false } = {}) {
   const closeText = afterSubmit ? "Done" : "Back";
+  galaxyCanvasController?.playArcadeMenuMusic?.();
   renderLeaderboardShell("POLYVERSE SCOREBOARD", `<p class="leaderboardSub">Loading global scores...</p>`);
   try {
     const rows = await fetchLeaderboardRows();
@@ -5600,6 +5670,7 @@ async function submitLeaderboardScore(initials, score) {
 
 function showInitialsEntry(score, runMsg = "") {
   const safeScore = Math.max(0, Math.floor(Number(score) || 0));
+  galaxyCanvasController?.playArcadeMenuMusic?.();
   const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
     <form id="initialsForm" class="initialsForm">
       <p class="leaderboardSub">Score ${safeScore}. Enter initials.${runMsg ? ` ${runMsg}` : ""}</p>
@@ -6263,6 +6334,8 @@ function initGalaxyCanvas() {
   let _spcPlaying = false;
   let _spcTimer = null;
   let _spcAudio = null;
+  let _spcAudioFxCleanup = null;
+  const SPC_VO_PLAYBACK_RATE = 1.08;
   // 2026-06-17: per-line watchdog — if a line never fires its end/timer (iOS audio quirk), the
   // updateStunt watchdog force-advances via _spcAdvanceFn after _spcLineStartedAt + 8s.
   let _spcLineStartedAt = 0;
@@ -6276,6 +6349,7 @@ function initGalaxyCanvas() {
   let _skipHintShown = false;          // is the hint currently faded-in?
   let _skipHintHideTimer = null;       // pending 500ms fade-out when SPC goes quiet
   let tutorialBlockPlasmaToss = false; // Phase 2: only the laser is taught — block net/toss
+  let tutorialSmallGrabHintEnabled = false; // True only during the dedicated toss instruction.
   let tutorialPaused = false;          // pause menu / app-switch
   let tutorialTimerRunning = false;    // intro: perimeter visibly counts down until timer powerup
   let tutorialTimerStartedAt = 0;
@@ -6741,6 +6815,13 @@ function initGalaxyCanvas() {
     if (nextUrl && nextUrl !== url) {
       audioEngine.loadMusicBuffer(nextUrl).catch(() => {});
     }
+  }
+
+  function playArcadeMenuMusic() {
+    audioEngine.unlock();
+    audioEngine.playMusic("ARCADE_MENU", MUSIC.ARCADE_MENU, { crossfadeMs: 250, volume: 1 });
+    audioEngine.loadMusicBuffer(getMusicForLevel(1)).catch(() => {});
+    audioEngine.loadMusicBuffer(getMusicForLevel(0)).catch(() => {});
   }
 
   function formatMs(ms) {
@@ -8629,7 +8710,11 @@ function initGalaxyCanvas() {
   // bonus lines stand in for the CMDR praise/timer/struggle lines. Each returns true when it has
   // handled the moment with an SPC line, so the caller skips its CMDR queueVO; returns false off
   // SPC levels so CMDR plays as before.
+  function suppressIncidentalVO() {
+    return stuntActive || practiceEndless;
+  }
   function queueSpcBonusVO(filename, opts = {}) {
+    if (suppressIncidentalVO()) return true;
     const src = commBoxController.spcBonusVoSrc(filename);
     if (!src) return false;
     commBoxController.queueVO({ audioSrc: src, _spc: true, priority: opts.priority });
@@ -10393,12 +10478,14 @@ function initGalaxyCanvas() {
   function openArcadeMenu() {
     setArcadeSubmenu("arcade");
     syncArcadeMenuButtons();
+    playArcadeMenuMusic();
   }
 
   function openArcadeLevelSelect() {
     if (!(DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon())) return;
     buildArcadeLevelSelect();
     setArcadeSubmenu("levels");
+    playArcadeMenuMusic();
   }
 
   function startArcadeAtLevel(levelNum) {
@@ -10572,8 +10659,12 @@ function initGalaxyCanvas() {
     _spcQueue = [];
     _spcPlaying = false;
     _spcContinuousStartAt = 0; // talking run ended
+    _spcAdvanceFn = null;
+    _spcLineStartedAt = 0;
     if (_spcTimer) { clearTimeout(_spcTimer); _spcTimer = null; }
+    if (_spcAudioFxCleanup) { _spcAudioFxCleanup(); _spcAudioFxCleanup = null; }
     if (_spcAudio) { try { _spcAudio.pause(); } catch {} _spcAudio = null; }
+    commBoxController.spcSpeakEnd?.();
   }
   function spcVO(key, text, frameHint) {
     _spcQueue.push({ key, text, frameHint });
@@ -10590,12 +10681,15 @@ function initGalaxyCanvas() {
     commBoxController.spcSpeakStart?.(frameHint); // animate the SPC portrait first so the mouth-flap starts immediately
     commBoxController.pinTicker(text); // types text + keeps ticker visible (cancels auto-hide)
     const src = spcVoSrc(key);
-    const dur = Math.max(1300, Math.min(5000, text.length * 46));
+    const dur = Math.max(1200, Math.min(4600, (text.length * 46) / SPC_VO_PLAYBACK_RATE));
     const advance = () => {
       if (!_spcPlaying) return; // idempotent: orphaned timer / watchdog / onerror+onended race can't double-advance
       if (_spcTimer) { clearTimeout(_spcTimer); _spcTimer = null; }
+      if (_spcAudioFxCleanup) { _spcAudioFxCleanup(); _spcAudioFxCleanup = null; }
       _spcAudio = null;
       _spcPlaying = false;
+      _spcAdvanceFn = null;
+      _spcLineStartedAt = 0;
       _spcLinesCompletedThisPhase += 1; // a full VO line just finished (gates the skip hint)
       // settle the portrait to idle (+ resume blink) only when nothing else is queued; a
       // following line starts its own mouth-flap immediately, so no idle flicker between lines.
@@ -10607,7 +10701,11 @@ function initGalaxyCanvas() {
     if (src) {
       try {
         _spcAudio = new Audio(src);
+        _spcAudio.preload = "auto";
+        _spcAudio.playsInline = true;
         _spcAudio.volume = 0.85;
+        _spcAudio.playbackRate = SPC_VO_PLAYBACK_RATE;
+        _spcAudioFxCleanup = applyCommRadioEffect(_spcAudio);
         _spcAudio.onended = advance;
         _spcAudio.onerror = advance; // failed/missing load → advance instead of hanging
         const p = _spcAudio.play();
@@ -10926,7 +11024,11 @@ function initGalaxyCanvas() {
     tutorialPaused = true;
     arcadePausedUntil = Infinity;          // freeze gameplay physics
     if (_spcTimer) { clearTimeout(_spcTimer); _spcTimer = null; }
-    if (_spcAudio) { try { _spcAudio.pause(); } catch {} }
+    if (_spcAudioFxCleanup) { _spcAudioFxCleanup(); _spcAudioFxCleanup = null; }
+    if (_spcAudio) { try { _spcAudio.pause(); } catch {} _spcAudio = null; }
+    _spcPlaying = false; // discard the interrupted line; queued narration resumes after Resume
+    _spcAdvanceFn = null;
+    _spcLineStartedAt = 0;
     _spcContinuousStartAt = 0; // restart the >3s talk window after resume
     commBoxController.spcSpeakEnd?.(); // settle the SPC portrait while paused (no flap behind overlay)
     hideSkipHint();
@@ -11212,20 +11314,25 @@ function initGalaxyCanvas() {
       showTaskInstruction("TAP AND HOLD A STROID — SWIPE TO TOSS");
       tutorialState.tossFailures = 0;
       const baseToss = tutorialEvents.toss || 0;
-      while ((tutorialEvents.toss || 0) <= baseToss) {
-        const baseFail = tutorialEvents.toss_fail || 0;
-        await waitFor(() =>
-          (tutorialEvents.toss || 0) > baseToss
-          || (tutorialEvents.toss_fail || 0) > baseFail
-          || tutorialAsteroidsAllCleared());
-        if ((tutorialEvents.toss || 0) > baseToss) break;
-        if ((tutorialEvents.toss_fail || 0) > baseFail) {
-          tutorialState.tossFailures += 1;
-          if (tutorialState.tossFailures === 1) spcVO("38", "You have to swipe or flick to toss it.", "idle_smirk");
-          else spcVO("39", "Give it a good flick, Cadet — put some effort in!", "idle_smirk");
-        } else {
-          spawnTutorialAsteroids(3, 3); // cleared them with the laser — give grabbable stroids back
+      tutorialSmallGrabHintEnabled = true;
+      try {
+        while ((tutorialEvents.toss || 0) <= baseToss) {
+          const baseFail = tutorialEvents.toss_fail || 0;
+          await waitFor(() =>
+            (tutorialEvents.toss || 0) > baseToss
+            || (tutorialEvents.toss_fail || 0) > baseFail
+            || tutorialAsteroidsAllCleared());
+          if ((tutorialEvents.toss || 0) > baseToss) break;
+          if ((tutorialEvents.toss_fail || 0) > baseFail) {
+            tutorialState.tossFailures += 1;
+            if (tutorialState.tossFailures === 1) spcVO("38", "You have to swipe or flick to toss it.", "idle_smirk");
+            else spcVO("39", "Give it a good flick, Cadet — put some effort in!", "idle_smirk");
+          } else {
+            spawnTutorialAsteroids(3, 3); // cleared them with the laser — give grabbable stroids back
+          }
         }
+      } finally {
+        tutorialSmallGrabHintEnabled = false;
       }
       hideTaskInstruction();
       spcVO("40", "Very good, Cadet.", "praise");
@@ -11371,6 +11478,7 @@ function initGalaxyCanvas() {
     for (const k of Object.keys(tutorialEvents)) delete tutorialEvents[k];
     tutorialFireBlocked = false;
     tutorialBlockPlasmaToss = false;
+    tutorialSmallGrabHintEnabled = false;
     tutorialState = {};
     try {
       for (tutorialPhase = 0; tutorialPhase < TUTORIAL_PHASES.length; tutorialPhase += 1) {
@@ -11446,6 +11554,7 @@ function initGalaxyCanvas() {
     for (const k of Object.keys(tutorialEvents)) delete tutorialEvents[k];
     tutorialFireBlocked = false;
     tutorialBlockPlasmaToss = false;
+    tutorialSmallGrabHintEnabled = false;
     tutorialPaused = false;
     tutorialTimerRunning = false;
     hideSkipHint();
@@ -11660,7 +11769,8 @@ function initGalaxyCanvas() {
       clearGameplayEntities();
       arcadeActive = false;
       arcadeResumeAvailable = false;
-      audioEngine.stopMusic();
+      if (gamePageActive) playArcadeMenuMusic();
+      else audioEngine.stopMusic();
       setGalaxyBackgroundDim(0);
       galaxyView?.classList.remove("level-10");
     }
@@ -11668,6 +11778,7 @@ function initGalaxyCanvas() {
     syncArcadeEntryLabel();
     setArcadeSubmenu(canPreserve && openArcadeMenu ? "arcade" : "root");
     syncArcadeMenuButtons();
+    if (!canPreserve) playArcadeMenuMusic();
     setGalaxyViewMode("menu");
     setMenuOverlayOpen(true);
     sim.maxAsteroids = capIOSNativeAsteroids(sim.width < 700 ? 80 : 120);
@@ -13662,9 +13773,9 @@ function initGalaxyCanvas() {
         const hitAsteroid = hitIndex >= 0 ? sim.asteroids[hitIndex] : null;
         if (hitAsteroid && hitAsteroid.kind >= 2 && startStroidToss(hitIndex, point, event.pointerId, now)) {
           mode = "stroidToss";
-        } else if ((stuntActive || practiceEndless) && hitAsteroid && hitAsteroid.kind === 1) {
-          // 2026-06-17: cadet tried to grab a small (kind-1) stroid — can't be tossed. Coach once
-          // per 8s so repeated taps don't spam SPC. The tap still falls through to fire the laser.
+        } else if (tutorialSmallGrabHintEnabled && hitAsteroid && hitAsteroid.kind === 1) {
+          // Coach this only during the stroid-toss lesson. Everywhere else, small-stroid taps
+          // fall through silently to the laser path so Training/Practice stay non-chatty.
           if (now - _spcGrabSmallAt > 8000) {
             _spcGrabSmallAt = now;
             spcVO("grab_small", "Smaller stroids cannot be grabbed, Cadet.", "idle_smirk");
@@ -13992,6 +14103,9 @@ function initGalaxyCanvas() {
     openArcadeLevelSelect() {
       openArcadeLevelSelect();
     },
+    playArcadeMenuMusic() {
+      playArcadeMenuMusic();
+    },
     startArcadeAtLevel(levelNum) {
       startArcadeAtLevel(levelNum);
     },
@@ -14034,7 +14148,11 @@ function initGalaxyCanvas() {
         if (!stuntActive && !practiceEndless) return;
         audioEngine.unlock?.();
         audioEngine.loadMany?.(GAME_SFX);
-        if (_spcAudio) { try { _spcAudio.play().catch(() => {}); } catch {} }
+        resizeGalaxyCanvas();
+        computePlayfield();
+        if (!galaxyRunning) startGalaxyLoop();
+        window.galaxyBackground?.show();
+        if (!tutorialPaused && _spcAudio) { try { _spcAudio.play().catch(() => {}); } catch {} }
       }, 300);
     },
     triggerBoom() {

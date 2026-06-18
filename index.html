@@ -359,7 +359,7 @@
         border:1.5px solid #00d4d4;
         border-radius:3px;
         display:flex; align-items:center;
-        padding:0 10px 0 8px;
+        padding:8px 10px 8px 8px;
         box-shadow:0 0 8px rgba(0,212,212,0.25);
         opacity:0; transform:translateX(-8px);
         transition:opacity 0.2s ease, transform 0.2s ease;
@@ -378,9 +378,10 @@
         <!-- Text area -->
         <div style="flex:1;overflow:hidden;">
           <div id="commanderTickerText"
-            style="font-family:monospace;font-size:10px;
+            style="font-family:monospace;font-size:15px;
               letter-spacing:1px;color:#00cccc;
-              line-height:1.5;"></div>
+              line-height:1.5;
+              word-break:break-word;overflow-wrap:break-word;"></div>
         </div>
         <!-- Signal bars -->
         <div id="commanderSigBars"

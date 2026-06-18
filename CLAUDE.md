@@ -54,8 +54,9 @@ Every item below must be resolved before App Store submission:
 
 - [ ] Record `SPC_01.mp3` … `SPC_70.mp3` → `vo/` folder (SPC is the female Specialist)
 - [x] SPC portrait: ✅ covered by 20 animated frames in `vo/spc_*.png` — static `spc_portrait.png` not needed
-- [ ] Once SPC audio is recorded, add its keys to the `SPC_VO_AVAILABLE` set in `script.js`
-      (currently empty → all tutorial lines are text-only captions)
+- [x] SPC audio recorded and keyed: ✅ `SPC_VO_AVAILABLE` is fully populated (86 keys, exact
+      1:1 match with the `vo/SPC_*.mp3` files — verified 2026-06-17). Merged tutorial captions
+      (e.g. `35-36`, `50-51`, `52-54`, `59-60`) intentionally fall back to text-only.
 - [ ] Verify all 10 tutorial phases advance correctly on device (laser, plasma, UFO, toss,
       landmine, bomb inventory, quad, freeze, missile → Practice handoff)
 - [ ] Confirm Stunt Mode → Practice unlocks only after training completes

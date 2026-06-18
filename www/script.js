@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-17 19:12";
+const BUILD_TS = "2026-06-17 22:38";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1046,6 +1046,7 @@ const commBoxController = (() => {
     idle_smile:    "vo/spc_idle_smile.png", // canonical rest pose (alias of idle)
     idle_neutral:  "vo/spc_idle_neutral.png",
     idle_smirk:    "vo/spc_idle_smirk.png",
+    idle_smirk2:   "vo/spc_idle_smirk2.png", // pursed-lips dry-wit smirk
     idle_gentle:   "vo/spc_idle_gentle.png",
     idle_soft:     "vo/spc_idle_soft.png",
     idle_warm:     "vo/spc_idle_warm.png",
@@ -1055,6 +1056,9 @@ const commBoxController = (() => {
     talk_happy:    "vo/spc_talk_happy.png",
     talk_smile:    "vo/spc_talk_smile.png",
     talk_neutral:  "vo/spc_talk_neutral.png",
+    talk_st:       "vo/spc_talk_st.png",  // phoneme: S/T mouth shape
+    talk_ah:       "vo/spc_talk_ah.png",  // phoneme: open AH vowel
+    talk_mid:      "vo/spc_talk_mid.png", // phoneme: mid/neutral open
     smile_wide:    "vo/spc_idle_smile_wide.png",
     smile_open:    "vo/spc_smile_open.png",
     laugh:         "vo/spc_laugh.png",
@@ -1062,6 +1066,8 @@ const commBoxController = (() => {
     alert:         "vo/spc_alert.png",
     blink:         "vo/spc_blink.png",
     blink_down:    "vo/spc_blink_down.png",
+    impressed_blink1: "vo/spc_impressed_blink1.png",
+    impressed_blink2: "vo/spc_impressed_blink2.png",
     shades:        "vo/spc_shades.png",
     shades_blink:  "vo/spc_shades_blink.png",
   };
@@ -10707,9 +10713,19 @@ function initGalaxyCanvas() {
         _spcAudio.playbackRate = SPC_VO_PLAYBACK_RATE;
         _spcAudioFxCleanup = applyCommRadioEffect(_spcAudio);
         _spcAudio.onended = advance;
-        _spcAudio.onerror = advance; // failed/missing load → advance instead of hanging
+        _spcAudio.onerror = (e) => {
+          // 2026-06-17: surface load failures on device — relative path is correct for
+          // capacitor://localhost, so an error here means the file is missing from the bundle
+          // or the codec/MIME failed to decode. Falls back to text-only caption (advance()).
+          const code = _spcAudio && _spcAudio.error ? _spcAudio.error.code : "?";
+          console.warn("[SPC] audio error", { key, src, code, e });
+          advance();
+        };
         const p = _spcAudio.play();
-        if (p && typeof p.catch === "function") p.catch(() => { _spcTimer = setTimeout(advance, dur); });
+        if (p && typeof p.catch === "function") p.catch((err) => {
+          console.warn("[SPC] audio play() rejected", { key, src, err });
+          _spcTimer = setTimeout(advance, dur);
+        });
         _spcTimer = setTimeout(advance, dur); // safety net if 'ended' never fires
       } catch { _spcTimer = setTimeout(advance, dur); }
     } else {
@@ -11309,8 +11325,7 @@ function initGalaxyCanvas() {
     } },
     { id: "toss", run: async () => {
       spawnTutorialAsteroids(3, 3);
-      spcVO("35", "Next, the stroid toss attack.", "talk_calm");
-      spcVO("36", "Tap and hold a stroid to grab it.", "talk_calm");
+      spcVO("35-36", "Next — the stroid toss. Tap and hold a stroid to grab it.", "talk_calm");
       showTaskInstruction("TAP AND HOLD A STROID — SWIPE TO TOSS");
       tutorialState.tossFailures = 0;
       const baseToss = tutorialEvents.toss || 0;
@@ -11364,18 +11379,15 @@ function initGalaxyCanvas() {
     } },
     { id: "bombInventory", run: async () => {
       spawnTutorialPowerup("bomb", tutZonePoint("center"));
-      spcVO("50", "Sometimes a bomb power-up appears on the field.", "talk_calm");
-      spcVO("51", "Tap it to add it to your HUD inventory.", "talk_calm");
+      spcVO("50-51", "Sometimes a bomb powerup appears — tap it to add it to your HUD.", "talk_calm");
       await waitPowerupCollected("bomb");
-      spcVO("52", "Tap the bomb icon in your HUD.", "talk_calm");
+      spcVO("52-54", "Tap the bomb icon in your HUD, then tap the screen to place it. Arm it and tap to detonate.", "talk_calm");
       showHudPointer("hudBombBtn", 6000);
       showTaskInstruction("TAP THE 💣 IN YOUR HUD");
       await waitFor(() => bombAimMode);
       hideHudPointer();
       hideTaskInstruction();
-      spcVO("53", "Now tap the screen to place it.", "talk_calm");
       await waitFor(() => placedBombs.length > 0);
-      spcVO("54", "Arm it, then tap again to detonate.", "talk_calm");
       await waitEvent("bomb");
       await clearTutorialField();
       await waitMs(350);
@@ -11400,10 +11412,9 @@ function initGalaxyCanvas() {
     } },
     { id: "freeze", run: async () => {
       spawnTutorialPowerup("snowflake", tutZonePoint("center"));
-      spcVO("59", "Pick up the freeze power-up.", "idle_gentle");
+      spcVO("59-60", "Pick up the freeze powerup and tap the freeze button on your HUD to activate it.", "idle_gentle");
       await waitPowerupCollected("snowflake");
       spawnTutorialAsteroids(3, 2);
-      spcVO("60", "Tap the freeze button on your HUD to activate it.", "idle_gentle");
       showHudPointer("hudFreezeBtn", 6000);
       showTaskInstruction("TAP ❄ IN YOUR HUD TO ACTIVATE");
       await waitEvent("freeze");

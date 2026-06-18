@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-18 09:38";
+const BUILD_TS = "2026-06-18 10:35";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1806,11 +1806,17 @@ const commBoxController = (() => {
     if (!hud) return;
     hud.style.display = "block";
     hudVisible = true;
-    setFrame(currentFrame || "idle");
-    // 2026-06-18: don't run the CMDR idle loop while SPC owns the portrait — tickIdle's idle/blink
-    // frames route through setFrame → spcSpeakEnd() and kill the SPC mouth-flap ~800ms into every
-    // line (freeze-to-idle). SPC drives its own blink via _spcStartBlink. L13/14 still settles via
-    // the explicit tickIdle() at the end of a CMDR VO line; normal CMDR mode is unchanged.
+    // 2026-06-18: while SPC owns the portrait, don't restore the CMDR frame here. currentFrame is
+    // stale at a non-talk frame ("idle") the whole time portraitOverride is set (setFrame early-
+    // returns under override without updating currentFrame), so setFrame(currentFrame) routes into
+    // the SPC branch → spcSpeakEnd() → kills the mouth-flap. pumpSpc() calls show() before EVERY
+    // line, so this tore the flap down on every line boundary (verified on-device). SPC manages its
+    // own frames; only restore the CMDR frame in normal mode.
+    if (!portraitOverride) setFrame(currentFrame || "idle");
+    // 2026-06-18: likewise don't run the CMDR idle loop while SPC owns the portrait — tickIdle's
+    // idle/blink frames route through setFrame → spcSpeakEnd() and kill the flap. SPC drives its own
+    // blink via _spcStartBlink. L13/14 still settles via the explicit tickIdle() at the end of a
+    // CMDR VO line; normal CMDR mode is unchanged.
     if (!portraitOverride) startIdle();
   }
 

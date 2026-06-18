@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-18 09:16";
+const BUILD_TS = "2026-06-18 09:38";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1569,6 +1569,10 @@ const commBoxController = (() => {
       // prefer the animated SPC idle frame when available; fall back to the static override src
       portrait.src = (spcImages.idle_smile && spcImages.idle_smile.src) ? spcImages.idle_smile.src : portraitOverride;
     }
+    // 2026-06-18: stop any already-running CMDR idle loop — its tickIdle() feeds idle/blink frames
+    // through setFrame → spcSpeakEnd() and would kill the SPC mouth-flap mid-line. SPC runs its own
+    // blink via _spcStartBlink. (show() also gates startIdle while portraitOverride is set.)
+    stopIdle();
     _spcStartBlink();
   }
 
@@ -1582,6 +1586,9 @@ const commBoxController = (() => {
     const cs = callsignEl();
     if (cs) cs.textContent = "CMDR";
     setFrame("idle");
+    // 2026-06-18: CMDR is back — resume its idle loop if the HUD is showing (mirrors the stopIdle in
+    // setPortraitOverride). startIdle() no-ops if already running.
+    if (hudVisible) startIdle();
   }
 
   function isVOActive() {
@@ -1800,7 +1807,11 @@ const commBoxController = (() => {
     hud.style.display = "block";
     hudVisible = true;
     setFrame(currentFrame || "idle");
-    startIdle();
+    // 2026-06-18: don't run the CMDR idle loop while SPC owns the portrait — tickIdle's idle/blink
+    // frames route through setFrame → spcSpeakEnd() and kill the SPC mouth-flap ~800ms into every
+    // line (freeze-to-idle). SPC drives its own blink via _spcStartBlink. L13/14 still settles via
+    // the explicit tickIdle() at the end of a CMDR VO line; normal CMDR mode is unchanged.
+    if (!portraitOverride) startIdle();
   }
 
   function hide() {

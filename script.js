@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-17 17:00";
+const BUILD_TS = "2026-06-17 18:00";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6263,6 +6263,10 @@ function initGalaxyCanvas() {
   let _spcPlaying = false;
   let _spcTimer = null;
   let _spcAudio = null;
+  // 2026-06-17: per-line watchdog — if a line never fires its end/timer (iOS audio quirk), the
+  // updateStunt watchdog force-advances via _spcAdvanceFn after _spcLineStartedAt + 8s.
+  let _spcLineStartedAt = 0;
+  let _spcAdvanceFn = null;
   // Tap-to-skip rework (2026-06-16): the skip hint is subtle + rare — only shown once SPC has been
   // chattering for >3s over a pending player action and the cadet hasn't just interacted.
   let _spcContinuousStartAt = 0;       // when SPC's current uninterrupted talking run began (0 = silent)
@@ -10583,11 +10587,12 @@ function initGalaxyCanvas() {
     // lines start immediately so the run is unbroken until the queue empties (see advance()).
     if (_spcContinuousStartAt === 0) _spcContinuousStartAt = performance.now();
     commBoxController.show();
+    commBoxController.spcSpeakStart?.(frameHint); // animate the SPC portrait first so the mouth-flap starts immediately
     commBoxController.pinTicker(text); // types text + keeps ticker visible (cancels auto-hide)
-    commBoxController.spcSpeakStart?.(frameHint); // animate the SPC portrait for this line
     const src = spcVoSrc(key);
     const dur = Math.max(1300, Math.min(5000, text.length * 46));
     const advance = () => {
+      if (!_spcPlaying) return; // idempotent: orphaned timer / watchdog / onerror+onended race can't double-advance
       if (_spcTimer) { clearTimeout(_spcTimer); _spcTimer = null; }
       _spcAudio = null;
       _spcPlaying = false;
@@ -10597,13 +10602,17 @@ function initGalaxyCanvas() {
       if (_spcQueue.length === 0) { commBoxController.spcSpeakEnd?.(); _spcContinuousStartAt = 0; }
       pumpSpc();
     };
+    _spcAdvanceFn = advance;                 // watchdog target (see updateStunt)
+    _spcLineStartedAt = performance.now();
     if (src) {
       try {
         _spcAudio = new Audio(src);
         _spcAudio.volume = 0.85;
         _spcAudio.onended = advance;
-        _spcAudio.play().catch(() => { _spcTimer = setTimeout(advance, dur); });
-        _spcTimer = setTimeout(advance, 12000); // safety net if 'ended' never fires
+        _spcAudio.onerror = advance; // failed/missing load → advance instead of hanging
+        const p = _spcAudio.play();
+        if (p && typeof p.catch === "function") p.catch(() => { _spcTimer = setTimeout(advance, dur); });
+        _spcTimer = setTimeout(advance, dur); // safety net if 'ended' never fires
       } catch { _spcTimer = setTimeout(advance, dur); }
     } else {
       _spcTimer = setTimeout(advance, dur);
@@ -10653,6 +10662,9 @@ function initGalaxyCanvas() {
   // timer line. Shown during the intro once SPC has described the timer; hidden when Phase 1 runs.
   let _timerArrowEl = null;
   function showTimerArrow() {
+    // 2026-06-17: timerArrow disabled — wrong on-device position; rebuild next session.
+    return;
+    // eslint-disable-next-line no-unreachable
     ensureTutorialPointerCss(); // provides the @keyframes tutorialPulse used by #timerArrow
     ensureTutorialChromeCss();
     if (!galaxyPlayCanvas) return;
@@ -11403,6 +11415,9 @@ function initGalaxyCanvas() {
     if (tutorialPaused) return; // frozen: no waiter resolution, no phase progress
     // Subtle, rare "TAP TO SKIP" hint — driven each frame off SPC/queue/waiter/interaction state.
     updateSkipHint(now);
+    // 2026-06-17: safety watchdog — if an SPC line never fires its end/timer (iOS audio quirk),
+    // force-advance after 8s so the tutorial can't hang on a single line (e.g. SPC_01 at intro).
+    if (_spcPlaying && _spcAdvanceFn && performance.now() - _spcLineStartedAt > 8000) _spcAdvanceFn();
     if (_tutWaiters.length) {
       let resolvedAction = false;
       for (let i = _tutWaiters.length - 1; i >= 0; i -= 1) {

@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-19 12:06";
+const BUILD_TS = "2026-06-19 13:37";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1427,6 +1427,16 @@ const commBoxController = (() => {
   // 2026-06-18: phoneme cycling (NOT true lip-sync) — cycle mouth-shape frames while audio plays.
   // Amplitude/AnalyserNode-driven lip-sync is a deferred post-ship upgrade.
   const SPC_TALK_CYCLE = ["talk_happy", "talk_mid", "talk_neutral", "talk_st"];
+  // Weighted random picker for default-mode flap. Expression-hinted flaps bypass this.
+  function _spcPickTalkFrame() {
+    const r = Math.random();
+    if (r < 0.22) return "talk_happy";
+    if (r < 0.44) return "talk_mid";
+    if (r < 0.66) return "talk_neutral";
+    if (r < 0.88) return "talk_st";
+    if (r < 0.98) return "idle_neutral"; // occasional closed-mouth rest beat
+    return "idle_gentle";                // rare blink-while-talking
+  }
   // Expression hints flap between the emotion frame and a matching talk frame so the portrait
   // both holds the mood AND moves its mouth while the line plays. Single-entry sets are held.
   // All mouth frames must exist on disk (talk_calm/friendly/ah/smile are missing — not used here).
@@ -1465,30 +1475,30 @@ const commBoxController = (() => {
   function _spcDoBlink() {
     if (!_spcMode || _spcSpeaking) return;
     const base = _spcRestFrame || "smile_wide";
-    const blinkFrame = base === "shades" ? "shades_blink"
-      : (Math.random() < 0.65 ? "blink" : "blink_down");
-    const blink = () => { if (_spcMode && !_spcSpeaking) setSpcFrame(blinkFrame); };
-    const rest = () => { if (_spcMode && !_spcSpeaking) setSpcFrame(base); };
     const at = (fn, t) => _spcBlinkTimeouts.push(setTimeout(fn, t)); // tracked so it's cancellable
+    const rest = () => { if (_spcMode && !_spcSpeaking) setSpcFrame(base); };
+    if (base === "shades") {
+      // shades_blink is a single composite frame — no mid/down split
+      const blink = () => { if (_spcMode && !_spcSpeaking) setSpcFrame("shades_blink"); };
+      const r = Math.random();
+      if (r < 0.6) { blink(); at(rest, 120); }
+      else if (r < 0.9) { blink(); at(rest, 120); at(blink, 220); at(rest, 340); }
+      else { blink(); at(rest, 120); at(blink, 200); at(rest, 320); at(blink, 400); at(rest, 520); }
+      return;
+    }
+    // Two-phase blink: "blink" (mid/half-closed, transition down) → "blink_down" (eyes fully closed).
+    const mid  = () => { if (_spcMode && !_spcSpeaking) setSpcFrame("blink"); };
+    const down = () => { if (_spcMode && !_spcSpeaking) setSpcFrame("blink_down"); };
     const r = Math.random();
     if (r < 0.6) {
-      // single (60%)
-      blink();
-      at(rest, 120);
+      // single (60%): mid→down→rest
+      mid(); at(down, 40); at(rest, 130);
     } else if (r < 0.9) {
       // double (30%)
-      blink();
-      at(rest, 120);
-      at(blink, 220);
-      at(rest, 340);
+      mid(); at(down, 40); at(rest, 130); at(mid, 230); at(down, 270); at(rest, 360);
     } else {
       // triple (10%)
-      blink();
-      at(rest, 120);
-      at(blink, 200);
-      at(rest, 320);
-      at(blink, 400);
-      at(rest, 520);
+      mid(); at(down, 40); at(rest, 130); at(mid, 230); at(down, 270); at(rest, 360); at(mid, 430); at(down, 470); at(rest, 560);
     }
   }
 
@@ -1527,8 +1537,12 @@ const commBoxController = (() => {
     let i = 0;
     // 2026-06-18: ~120ms phoneme cycle while the line plays (cleared by spcSpeakEnd on audio end).
     _spcMouthFlap = setInterval(() => {
-      i += 1;
-      setSpcFrame(frames[i % frames.length]);
+      if (frames === SPC_TALK_CYCLE) {
+        setSpcFrame(_spcPickTalkFrame());
+      } else {
+        i += 1;
+        setSpcFrame(frames[i % frames.length]);
+      }
     }, 120);
   }
 
@@ -6440,8 +6454,8 @@ function initGalaxyCanvas() {
   const SPC_VO_AVAILABLE = new Set([
     "01", "02", "03-04", "05-06a", "06b", "07", "08-09", "12", "13-14", "15-16", "15-16_release", "17", "17b", "18", "19",
     "20", "21", "22", "23", "24", "25", "26", "27", "28-30", "28-30_part2", "31", "32", "33",
-    "34", "35", "36", "37", "38", "39", "40", "41", "42-43", "44-45", "46", "47", "48", "49",
-    "50", "51", "52", "53", "54", "54_alt", "55-56", "57", "58", "59", "60", "61", "62",
+    "34", "35", "36", "35-36", "37", "38", "39", "40", "41", "42-43", "44-45", "46", "47", "48", "49",
+    "50", "51", "50-51", "52", "53", "54", "54_alt", "52-54", "55-56", "57", "58", "59", "60", "59-60", "61", "62",
     "62_part1", "63", "63b", "63b_part1", "63b_part2", "64", "65", "66", "67", "68", "69", "70",
     "amazing", "boom_like_that", "crushing_it", "freeze_toggle", "grab_small", "lets_get_after_it",
     "not_doing_hot", "peeing_pants", "show_boss", "there_you_go", "timer_warning",
@@ -8820,6 +8834,7 @@ function initGalaxyCanvas() {
   }
 
   function trackKillStreak() {
+    if (stuntActive) return;
     _streakCount++;
     clearTimeout(_streakTimer);
     _streakTimer = setTimeout(() => {
@@ -10880,9 +10895,6 @@ function initGalaxyCanvas() {
   // timer line. Shown during the intro once SPC has described the timer; hidden when Phase 1 runs.
   let _timerArrowEl = null;
   function showTimerArrow() {
-    // 2026-06-17: timerArrow disabled — wrong on-device position; rebuild next session.
-    return;
-    // eslint-disable-next-line no-unreachable
     ensureTutorialPointerCss(); // provides the @keyframes tutorialPulse used by #timerArrow
     ensureTutorialChromeCss();
     if (!galaxyPlayCanvas) return;
@@ -10893,8 +10905,8 @@ function initGalaxyCanvas() {
       document.body.appendChild(_timerArrowEl);
     }
     const rect = galaxyPlayCanvas.getBoundingClientRect();
-    const scaleY = galaxyPlayCanvas.height ? rect.height / galaxyPlayCanvas.height : 1;
-    const topY = rect.top + playfield.y * scaleY; // playfield coords are in canvas-buffer space
+    const scaleY = sim.height ? rect.height / sim.height : 1;
+    const topY = rect.top + playfield.y * scaleY;
     _timerArrowEl.style.left = "50%";
     _timerArrowEl.style.top = `${topY + 8}px`;
     _timerArrowEl.style.transform = "translateX(-50%)";
@@ -10918,8 +10930,8 @@ function initGalaxyCanvas() {
       document.body.appendChild(_plasmaArrowEl);
     }
     const rect = galaxyPlayCanvas.getBoundingClientRect();
-    const scaleX = galaxyPlayCanvas.width ? rect.width / galaxyPlayCanvas.width : 1;
-    const scaleY = galaxyPlayCanvas.height ? rect.height / galaxyPlayCanvas.height : 1;
+    const scaleX = sim.width  ? rect.width  / sim.width  : 1;
+    const scaleY = sim.height ? rect.height / sim.height : 1;
     const ix = rect.left + (sim.width - 28) * scaleX;
     const iy = rect.top + (sim.height - 28) * scaleY;
     _plasmaArrowEl.style.left = `${ix - 44}px`; // sit up-left of the indicator, glyph points into it
@@ -11322,7 +11334,6 @@ function initGalaxyCanvas() {
       await waitVOIdle();
     } },
     { id: "timer", run: async () => {
-      hideTimerArrow(); // Part 5: arrow's job is done once Phase 1 begins
       // The powerup appearing ends the cutscene: comm box docks to the bottom, arrows clear.
       commBoxController.setCommCenter(false);
       hideCommArrows();
@@ -11331,6 +11342,7 @@ function initGalaxyCanvas() {
       spawnTutorialPowerup("timer", tutZonePoint("center"));
       showTaskInstructionDeferred("TAP THE TIMER POWERUP");
       await waitPowerupCollected("timer");
+      hideTimerArrow(); // Part 5: hide once the cadet has actually collected the timer powerup
       hideTaskInstruction();
       // Collected: perimeter snapped back to full (collectPowerup) — now hold it there, paused.
       tutorialTimerRunning = false;
@@ -11345,10 +11357,12 @@ function initGalaxyCanvas() {
       spcVO("08-09", "These are the stroids — our job is to clear them from the Polyverse.", "talk_calm");
       spcVO("10-11", "Tap to fire your laser and blast the stroid and all its pieces.", "talk_calm");
       showTaskInstructionDeferred("TAP TO FIRE — DESTROY THE STROID");
+      const baseShots = tutorialEvents.shoot || 0;
+      waitFor(() => (tutorialEvents.shoot || 0) > baseShots)
+        .then(() => { if (stuntActive) showTaskInstruction("DESTROY ALL THE STROIDS"); })
+        .catch(() => {});
       await waitFor(tutorialAsteroidsAllCleared);
       hideTaskInstruction();
-      spcVO("12", "Fantastic, Cadet. You'll show these stroids who's boss.", "praise");
-      await waitVOIdle();
       await waitMs(700);
     } },
     { id: "plasma", run: async () => {
@@ -11413,11 +11427,9 @@ function initGalaxyCanvas() {
       spcVO("28-30", "So net the stroids when a UFO shows up, pop the UFO, and instantly get another net shot. Let's try it.");
       await clearTutorialField();
       spawnTutorialAsteroids(3, 2);
-      spawnTutorialUFO();
+      // Net step first — UFO withheld until the net lands so the sequence is taught in order.
       spcVO("31", "Use your plasma net on those stroids.", "talk_friendly");
-      showTaskInstructionDeferred("USE PLASMA NET FIRST — THEN SHOOT THE UFO");
-      // Part 7: net-then-UFO combo. The net must destroy a stroid BEFORE the UFO is killed. If the
-      // cadet pops the UFO early (laser), respawn it and re-run so the combo is actually practiced.
+      showTaskInstructionDeferred("NET THE STROIDS");
       tutorialState.plasmaMisses = 0;
       const baseComboPlasma = tutorialEvents.plasma || 0;
       for (;;) {
@@ -11425,31 +11437,22 @@ function initGalaxyCanvas() {
         await waitFor(() =>
           (tutorialEvents.plasma || 0) > baseComboPlasma
           || (tutorialEvents.plasma_miss || 0) > baseComboMiss
-          || !ufo
           || tutorialAsteroidsAllCleared());
-        if ((tutorialEvents.plasma || 0) > baseComboPlasma) break; // net landed — combo step 1 done
-        if (!ufo) {
-          // killed the UFO before the net — give it a beat, respawn, and gently re-run the combo
-          await waitMs(2000);
-          if (!stuntActive) return;
-          spawnTutorialUFO();
-          spcVO("31b", "Good shot — but try the plasma net first, then the UFO. Let's run it again.", "talk_calm");
-          if (tutorialAsteroidsAllCleared()) spawnTutorialAsteroids(3, 2);
-          rechargePlasmaNow();
-          continue;
-        }
+        if ((tutorialEvents.plasma || 0) > baseComboPlasma) break; // net landed ✓
         if ((tutorialEvents.plasma_miss || 0) > baseComboMiss) {
           tutorialState.plasmaMisses += 1;
           if (tutorialState.plasmaMisses === 1) spcVO("20", "Make sure the stroids are targeted first.", "alert");
           else spcVO("22", "Take your time — get them highlighted before you release.", "alert");
           rechargePlasmaNow();
         } else {
-          spawnTutorialAsteroids(3, 2); // field emptied with the laser — restock grabbable stroids
+          spawnTutorialAsteroids(3, 2); // field emptied with the laser — restock
           rechargePlasmaNow();
         }
       }
-      hideTaskInstruction(); // combo's net step landed
+      // Net confirmed — now the UFO appears
+      spawnTutorialUFO();
       spcVO("32", "Now destroy the UFO quickly!", "alert");
+      hideTaskInstruction();
       await waitFor(() => !ufo);
       spawnTutorialAsteroids(4, 2);
       spcVO("33", "Plasma recharged — make another net!");
@@ -11529,12 +11532,13 @@ function initGalaxyCanvas() {
     } },
     { id: "quadshot", run: async () => {
       spawnTutorialPowerup("quadshot", tutZonePoint("center"));
-      spcVO("55", "Throughout the missions, power-ups appear.", "talk_calm");
-      spcVO("56", "That's the quad shot power-up. Pick it up!", "talk_calm");
+      spcVO("55-56", "Throughout the missions, power-ups appear. That's the quad shot power-up. Pick it up!", "talk_calm");
       await waitPowerupCollected("quadshot");
       spawnTutorialAsteroids(3, 2);
       spcVO("57", "Blast those stroids with the quad shot!", "smile_open");
       showTaskInstructionDeferred("BLAST THE STROIDS");
+      await waitFor(tutorialAsteroidsAllCleared);
+      if (!stuntActive) return;
       while (performance.now() < quadShotUntil) {
         await waitFor(() => tutorialAsteroidsAllCleared() || performance.now() >= quadShotUntil);
         if (performance.now() >= quadShotUntil) break;
@@ -11556,9 +11560,26 @@ function initGalaxyCanvas() {
       hideHudPointer();
       hideTaskInstruction();
       spcVO("61", "Objects are frozen for a short time. Blast 'em!", "idle_gentle");
-      // 2026-06-17: explain the freeze toggle right after it activates, before the toss step.
       spcVO("freeze_toggle", "Freeze can be enabled and disabled by tapping the freeze icon on your HUD.", "idle_gentle");
+      await waitVOIdle();
+      await clearTutorialField();
+      await waitMs(350);
+    } },
+    { id: "freeze_toss", run: async () => {
+      spawnTutorialAsteroids(3, 2);
       spcVO("62", "Frozen stroids can be tossed too. Grab one and toss it.", "idle_gentle");
+      showTaskInstructionDeferred("GRAB AND TOSS A FROZEN STROID");
+      // If the freeze carried over from the activation step it's still live — skip straight to the
+      // toss loop. If it expired while Phase A was wrapping up, re-prompt with a fresh powerup.
+      if (performance.now() >= freezeUntil) {
+        if (!stuntActive) return;
+        spawnTutorialPowerup("snowflake", tutZonePoint("center"));
+        spcVO("63b", "Freeze expired — grab another one and try the toss.", "idle_gentle");
+        await waitPowerupCollected("snowflake");
+        showHudPointer("hudFreezeBtn", 6000);
+        await waitEvent("freeze");
+        hideHudPointer();
+      }
       tutorialState.frozenTossBase = tutorialEvents.toss || 0;
       while ((tutorialEvents.toss || 0) <= tutorialState.frozenTossBase) {
         await waitFor(() =>
@@ -11573,19 +11594,20 @@ function initGalaxyCanvas() {
           onFreezeStart(); // re-freeze with the full FX set (icy music filter + HUD glow)
           spcVO("63", "Good shooting — but try grabbing and tossing a frozen stroid.", "idle_gentle");
         } else {
-          // 2026-06-16: freeze expired before the cadet tossed one — wait a beat, drop a fresh
-          // freeze powerup at center and have them re-activate it (no soft-lock on timeout).
+          // freeze expired before the cadet tossed one — wait a beat, drop a fresh powerup
           await waitMs(1000);
           if (!stuntActive) return;
           spawnTutorialPowerup("snowflake", tutZonePoint("center"));
           if (tutorialAsteroidsAllCleared()) spawnTutorialAsteroids(3, 2);
           spcVO("63b", "Freeze expired — grab another one and try the toss.", "idle_gentle");
+          await waitPowerupCollected("snowflake");
+          showHudPointer("hudFreezeBtn", 6000);
           await waitEvent("freeze"); // re-arm freezeUntil before re-checking for the toss
+          hideHudPointer();
         }
       }
-      // 2026-06-15: the "toss" event fires the instant the stroid is flicked — playing the success
-      // line right then talks over the throw. Wait for the tossed stroid to actually resolve
-      // (collide + detonate, or self-destruct) so the cadet SEES the destruction first.
+      // "toss" event fires the instant the stroid is flicked — wait for it to fully resolve
+      // (collide + detonate, or self-destruct) so the cadet sees the destruction first.
       await waitFor(() => !sim.asteroids.some((a) => a.tossed));
       await waitMs(300); // let the blast read before SPC chimes in
       spcVO("64", "Very cool, Cadet.", "praise");

@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-18 19:10";
+const BUILD_TS = "2026-06-19 12:06";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1066,6 +1066,8 @@ const commBoxController = (() => {
     alert:         "vo/spc_alert.png",
     blink:         "vo/spc_blink.png",
     blink_down:    "vo/spc_blink_down.png",
+    impressed_smile:  "vo/spc_impressed_smile.png",
+    impressed_ah:     "vo/spc_impressed_ah.png",
     impressed_blink1: "vo/spc_impressed_blink1.png",
     impressed_blink2: "vo/spc_impressed_blink2.png",
     shades:        "vo/spc_shades.png",
@@ -1413,7 +1415,8 @@ const commBoxController = (() => {
   // 2026-06-16: SPC animated-portrait state. `_spcMode` is true while the SPC override owns the
   // portrait; speech runs a mouth-flap through talk frames, and an idle blink ticks between lines.
   let _spcMode = false;
-  let _spcRestFrame = "idle_smile";   // idle frame returned to after a line / blink
+  let _spcRestFrame = "smile_wide";    // idle frame returned to after a line / blink
+  let _spcLastFrameHint = null;        // frameHint of the most recently started line (for spcSpeakEnd)
   let _spcSpeaking = false;
   let _spcMouthFlap = null;
   let _spcBlinkTimer = null;
@@ -1423,17 +1426,18 @@ const commBoxController = (() => {
   // The base talking cycle (mouth-flap) when no expression hint is supplied.
   // 2026-06-18: phoneme cycling (NOT true lip-sync) — cycle mouth-shape frames while audio plays.
   // Amplitude/AnalyserNode-driven lip-sync is a deferred post-ship upgrade.
-  const SPC_TALK_CYCLE = ["talk_calm", "talk_ah", "talk_mid", "talk_st", "talk_friendly"];
+  const SPC_TALK_CYCLE = ["talk_happy", "talk_mid", "talk_neutral", "talk_st"];
   // Expression hints flap between the emotion frame and a matching talk frame so the portrait
   // both holds the mood AND moves its mouth while the line plays. Single-entry sets are held.
+  // All mouth frames must exist on disk (talk_calm/friendly/ah/smile are missing — not used here).
   const SPC_EXPR_FLAP = {
     praise:      ["praise", "talk_happy"],
-    smile_wide:  ["smile_wide", "talk_smile"],
+    smile_wide:  ["smile_wide", "talk_happy"],
     smile_open:  ["smile_open", "talk_happy"],
-    idle_smirk:  ["idle_smirk", "talk_calm"],
-    idle_gentle: ["idle_gentle", "talk_calm"],
-    idle_soft:   ["idle_soft", "talk_calm"],
-    idle_warm:   ["idle_warm", "talk_friendly"],
+    idle_smirk:  ["idle_smirk", "talk_neutral"],
+    idle_gentle: ["idle_gentle", "talk_neutral"],
+    idle_soft:   ["idle_soft", "talk_neutral"],
+    idle_warm:   ["idle_warm", "talk_happy"],
     alert:       ["alert", "talk_neutral"],
     laugh:       ["laugh", "talk_happy"],
     shades:      ["shades"], // held "cool" closing pose — no flap
@@ -1443,7 +1447,7 @@ const commBoxController = (() => {
   function setSpcFrame(key) {
     if (!_spcMode || !portrait) return;
     let img = spcImages[key];
-    if (!img || !img.src) img = spcImages.idle_smile; // default lookup falls back to the rest pose
+    if (!img || !img.src) img = spcImages.smile_wide; // default lookup falls back to the rest pose
     if (!img || !img.src) return;
     portrait.src = img.src;
   }
@@ -1460,8 +1464,9 @@ const commBoxController = (() => {
   // One blink "event" — weighted toward a single blink, occasionally a double/triple flutter.
   function _spcDoBlink() {
     if (!_spcMode || _spcSpeaking) return;
-    const base = _spcRestFrame || "idle_smile";
-    const blinkFrame = base === "shades" ? "shades_blink" : "blink";
+    const base = _spcRestFrame || "smile_wide";
+    const blinkFrame = base === "shades" ? "shades_blink"
+      : (Math.random() < 0.65 ? "blink" : "blink_down");
     const blink = () => { if (_spcMode && !_spcSpeaking) setSpcFrame(blinkFrame); };
     const rest = () => { if (_spcMode && !_spcSpeaking) setSpcFrame(base); };
     const at = (fn, t) => _spcBlinkTimeouts.push(setTimeout(fn, t)); // tracked so it's cancellable
@@ -1505,14 +1510,15 @@ const commBoxController = (() => {
     _spcStopBlink();
     _spcStopFlap();
     _spcSpeaking = true;
-    _spcRestFrame = "idle_smile"; // default rest; idle_* hints (below) make the mood linger after the line
+    _spcLastFrameHint = frameHint || null;
+    _spcRestFrame = "smile_wide"; // default rest; idle_* hints (below) make the mood linger after the line
     let frames;
     if (frameHint && SPC_EXPR_FLAP[frameHint]) {
       frames = SPC_EXPR_FLAP[frameHint];
       if (frameHint.indexOf("idle_") === 0 || frameHint === "shades") _spcRestFrame = frameHint;
     } else if (frameHint && spcImages[frameHint]) {
       // a talk_* (or other loaded) hint: lead the flap with it, then vary the mouth
-      frames = [frameHint, "talk_calm", "talk_friendly"];
+      frames = [frameHint, "talk_neutral", "talk_happy"];
     } else {
       frames = SPC_TALK_CYCLE;
     }
@@ -1530,8 +1536,32 @@ const commBoxController = (() => {
   function spcSpeakEnd() {
     _spcStopFlap();
     _spcSpeaking = false;
-    setSpcFrame(_spcRestFrame || "idle_smile");
-    _spcStartBlink();
+    const wasPraise = _spcLastFrameHint === "praise";
+    _spcLastFrameHint = null;
+    if (wasPraise) {
+      // Impressed end sequence: settle on a reaction frame, blink 2-4 times with the
+      // "impressed" blink pair, then return to default idle and resume normal blinking.
+      const settleFrame = Math.random() < 0.5 ? "impressed_smile" : "impressed_ah";
+      setSpcFrame(settleFrame);
+      const numBlinks = 2 + Math.floor(Math.random() * 3); // 2, 3, or 4
+      let delay = 400; // pause before first blink
+      for (let bi = 0; bi < numBlinks; bi += 1) {
+        const blinkFr = bi % 2 === 0 ? "impressed_blink1" : "impressed_blink2";
+        _spcBlinkTimeouts.push(setTimeout(() => { if (_spcMode) setSpcFrame(blinkFr); }, delay));
+        delay += 150;
+        _spcBlinkTimeouts.push(setTimeout(() => { if (_spcMode) setSpcFrame(settleFrame); }, delay));
+        delay += 300;
+      }
+      _spcBlinkTimeouts.push(setTimeout(() => {
+        if (!_spcMode) return;
+        _spcRestFrame = "smile_wide";
+        setSpcFrame("smile_wide");
+        _spcStartBlink();
+      }, delay + 150));
+    } else {
+      setSpcFrame(_spcRestFrame || "smile_wide");
+      _spcStartBlink();
+    }
   }
 
   // 2026-06-16: pin SPC to a held idle pose (e.g. "shades") with no dialogue and resume the
@@ -1541,7 +1571,7 @@ const commBoxController = (() => {
     if (!_spcMode) return;
     _spcStopFlap();
     _spcSpeaking = false;
-    _spcRestFrame = key || "idle_smile";
+    _spcRestFrame = key || "smile_wide";
     setSpcFrame(_spcRestFrame);
     _spcStartBlink();
   }
@@ -1560,14 +1590,14 @@ const commBoxController = (() => {
   function setPortraitOverride(src, callsign = "SPC") {
     portraitOverride = src || SPC_PLACEHOLDER;
     _spcMode = true;
-    _spcRestFrame = "idle_smile";
+    _spcRestFrame = "smile_wide";
     _spcSpeaking = false;
     const cs = callsignEl();
     if (cs) cs.textContent = callsign;
     if (portrait) {
       portrait.onerror = () => { portrait.onerror = null; portrait.src = SPC_PLACEHOLDER; };
       // prefer the animated SPC idle frame when available; fall back to the static override src
-      portrait.src = (spcImages.idle_smile && spcImages.idle_smile.src) ? spcImages.idle_smile.src : portraitOverride;
+      portrait.src = (spcImages.smile_wide && spcImages.smile_wide.src) ? spcImages.smile_wide.src : portraitOverride;
     }
     // 2026-06-18: stop any already-running CMDR idle loop — its tickIdle() feeds idle/blink frames
     // through setFrame → spcSpeakEnd() and would kill the SPC mouth-flap mid-line. SPC runs its own
@@ -2493,7 +2523,8 @@ const audioEngine = {
   ctx: null,
   masterGain: null,
   musicGain: null,
-  _freezeFilter: null, // 2026-06-17: highpass inserted between musicGain→masterGain during freeze
+  _freezeFilter: null,  // 2026-06-17: highpass (low-cut) in the freeze bandpass chain
+  _freezeFilter2: null, // 2026-06-17: lowpass (high-cut) in the freeze bandpass chain
   musicBuffers: new Map(),
   currentMusic: null,
   currentMusicHtml: null,
@@ -2878,32 +2909,41 @@ const audioEngine = {
     this.musicGain.gain.setValueAtTime(this.musicGain.gain.value, now);
     this.musicGain.gain.linearRampToValueAtTime(target, now + 0.12);
   },
-  // 2026-06-17: freeze music FX — splice a highpass filter into musicGain→masterGain so the
-  // music thins out (icy) while the field is frozen. Only the Web Audio path is filtered; the
-  // HTML-audio fallback (currentMusicHtml) plays direct and is unaffected (no native filter).
+  // 2026-06-17: freeze music FX — splice a bandpass chain (highpass 50Hz → lowpass 600Hz)
+  // into musicGain→masterGain so the music sounds icy/muffled while the field is frozen.
+  // Only the Web Audio path is filtered; the HTML-audio fallback is unaffected.
   applyFreezeFilter() {
     this.ensureMusic();
     if (!this.ctx || !this.musicGain || this._freezeFilter) return;
     const dest = this.masterGain || this.ctx.destination;
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = "highpass";
-    filter.frequency.value = 900;
-    filter.Q.value = 0.7;
-    filter.connect(dest);
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 50;
+    hp.Q.value = 0.7;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 600;
+    lp.Q.value = 0.7;
+    hp.connect(lp);
+    lp.connect(dest);
     try { this.musicGain.disconnect(dest); } catch { /* ignore */ }
-    this.musicGain.connect(filter);
-    this._freezeFilter = filter;
+    this.musicGain.connect(hp);
+    this._freezeFilter = hp;
+    this._freezeFilter2 = lp;
   },
   removeFreezeFilter() {
     if (!this._freezeFilter || !this.ctx || !this.musicGain) {
       this._freezeFilter = null;
+      this._freezeFilter2 = null;
       return;
     }
     const dest = this.masterGain || this.ctx.destination;
     try { this.musicGain.disconnect(this._freezeFilter); } catch { /* ignore */ }
     try { this._freezeFilter.disconnect(); } catch { /* ignore */ }
+    try { this._freezeFilter2?.disconnect(); } catch { /* ignore */ }
     this.musicGain.connect(dest);
     this._freezeFilter = null;
+    this._freezeFilter2 = null;
   },
   stopLoop(name) {
     const loop = this.loops.get(name);
@@ -6731,9 +6771,11 @@ function initGalaxyCanvas() {
   function updateHudFreezeInventory() {
     if (!hudFreezeBtn) return;
     const hasFreezes = playerFreezeInventory > 0;
+    const freezeIsActive = performance.now() < freezeUntil;
     hudFreezeBtn.style.display = "";
     hudFreezeBtn.textContent = `❄ \xD7${playerFreezeInventory}`;
-    hudFreezeBtn.disabled = !hasFreezes;
+    // Keep enabled while freeze is active so the player can tap to toggle it off.
+    hudFreezeBtn.disabled = !hasFreezes && !freezeIsActive;
     hudFreezeBtn.classList.toggle("has-freezes", hasFreezes);
   }
 
@@ -10372,7 +10414,7 @@ function initGalaxyCanvas() {
     const isSpcLevel = cfg.level === 13 || cfg.level === 14;
     if (isSpcLevel) {
       commBoxController.setPortraitOverride(null, "SPC");
-      commBoxController.setSpcFrame("idle_smile");
+      commBoxController.setSpcFrame("smile_wide");
     } else {
       commBoxController.clearPortraitOverride();
     }
@@ -10731,7 +10773,15 @@ function initGalaxyCanvas() {
       _spcLinesCompletedThisPhase += 1; // a full VO line just finished (gates the skip hint)
       // settle the portrait to idle (+ resume blink) only when nothing else is queued; a
       // following line starts its own mouth-flap immediately, so no idle flicker between lines.
-      if (_spcQueue.length === 0) { commBoxController.spcSpeakEnd?.(); _spcContinuousStartAt = 0; }
+      if (_spcQueue.length === 0) {
+        commBoxController.spcSpeakEnd?.();
+        _spcContinuousStartAt = 0;
+        if (_pendingTaskInstruction) {
+          const _pt = _pendingTaskInstruction;
+          _pendingTaskInstruction = null;
+          showTaskInstruction(_pt);
+        }
+      }
       pumpSpc();
     };
     _spcAdvanceFn = advance;                 // watchdog target (see updateStunt)
@@ -11013,6 +11063,7 @@ function initGalaxyCanvas() {
   // this never auto-hides — it persists until the action completes / the phase advances
   // (hideTaskInstruction) or the tutorial tears down. ──
   let _taskInstrEl = null;
+  let _pendingTaskInstruction = null; // text queued to show once SPC VO drains
   function _ensureTaskInstrEl() {
     if (_taskInstrEl) return _taskInstrEl;
     _taskInstrEl = document.createElement("div");
@@ -11043,13 +11094,45 @@ function initGalaxyCanvas() {
     const el = _ensureTaskInstrEl();
     if (!el) return;
     el.textContent = text;
-    // Short directives stay on one line; longer ones wrap (centered) instead of overflowing.
     el.style.whiteSpace = text.length > 22 ? "normal" : "nowrap";
     _positionTaskInstr();
-    el.style.display = "block";
+    const wasHidden = el.style.display === "none" || !el.style.display;
+    if (wasHidden) {
+      // Fade up from invisible, then strobe to keep drawing attention.
+      el.style.animation = "";
+      el.style.opacity = "0";
+      el.style.transition = "opacity 350ms ease";
+      el.style.display = "block";
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        el.style.opacity = "1";
+        setTimeout(() => {
+          el.style.transition = "";
+          el.style.animation = "taskInstrStrobe 1.4s ease-in-out infinite";
+        }, 380);
+      }));
+    } else {
+      el.style.display = "block"; // already visible — update text only, don't restart animation
+    }
+  }
+  // Show instruction deferred until SPC VO finishes; if already visible, update immediately.
+  function showTaskInstructionDeferred(text) {
+    if (_taskInstrEl && _taskInstrEl.style.display === "block") {
+      showTaskInstruction(text); // update visible instruction immediately
+    } else if (!_spcPlaying && _spcQueue.length === 0) {
+      showTaskInstruction(text); // VO is already idle — show immediately with fade
+    } else {
+      _pendingTaskInstruction = text; // will be shown when the VO queue drains
+    }
   }
   function hideTaskInstruction() {
-    if (_taskInstrEl) { _taskInstrEl.style.display = "none"; _taskInstrEl.textContent = ""; }
+    _pendingTaskInstruction = null;
+    if (_taskInstrEl) {
+      _taskInstrEl.style.display = "none";
+      _taskInstrEl.style.animation = "";
+      _taskInstrEl.style.opacity = "";
+      _taskInstrEl.style.transition = "";
+      _taskInstrEl.textContent = "";
+    }
   }
 
   // ── two neon arrows pointing at the (centered) comm box during the intro (#2) ──
@@ -11246,7 +11329,7 @@ function initGalaxyCanvas() {
       spcVO("05-06a", "Every so often a timer power-up appears. Grab it to buy time.", "talk_calm");
       spcVO("06b", "Tap it now.", "talk_calm");
       spawnTutorialPowerup("timer", tutZonePoint("center"));
-      showTaskInstruction("TAP THE TIMER POWERUP");
+      showTaskInstructionDeferred("TAP THE TIMER POWERUP");
       await waitPowerupCollected("timer");
       hideTaskInstruction();
       // Collected: perimeter snapped back to full (collectPowerup) — now hold it there, paused.
@@ -11261,7 +11344,7 @@ function initGalaxyCanvas() {
       spawnTutorialAsteroids(1, 3);
       spcVO("08-09", "These are the stroids — our job is to clear them from the Polyverse.", "talk_calm");
       spcVO("10-11", "Tap to fire your laser and blast the stroid and all its pieces.", "talk_calm");
-      showTaskInstruction("TAP TO FIRE — DESTROY THE STROID");
+      showTaskInstructionDeferred("TAP TO FIRE — DESTROY THE STROID");
       await waitFor(tutorialAsteroidsAllCleared);
       hideTaskInstruction();
       spcVO("12", "Fantastic, Cadet. You'll show these stroids who's boss.", "praise");
@@ -11319,7 +11402,7 @@ function initGalaxyCanvas() {
       spawnTutorialUFO();
       spcVO("23", "UFO spotted, Cadet!", "alert");
       spcVO("24", "Shoot it twice to take it out!", "alert");
-      showTaskInstruction("SHOOT THE UFO TWICE");
+      showTaskInstructionDeferred("SHOOT THE UFO TWICE");
       waitFor(() => ufo && ufo.hitCount >= 1)
         .then(() => { if (stuntActive) spcVO("25", "Direct hit! Do it again!", "praise"); })
         .catch(() => {});
@@ -11332,7 +11415,7 @@ function initGalaxyCanvas() {
       spawnTutorialAsteroids(3, 2);
       spawnTutorialUFO();
       spcVO("31", "Use your plasma net on those stroids.", "talk_friendly");
-      showTaskInstruction("USE PLASMA NET FIRST — THEN SHOOT THE UFO");
+      showTaskInstructionDeferred("USE PLASMA NET FIRST — THEN SHOOT THE UFO");
       // Part 7: net-then-UFO combo. The net must destroy a stroid BEFORE the UFO is killed. If the
       // cadet pops the UFO early (laser), respawn it and re-run so the combo is actually practiced.
       tutorialState.plasmaMisses = 0;
@@ -11378,7 +11461,7 @@ function initGalaxyCanvas() {
     { id: "toss", run: async () => {
       spawnTutorialAsteroids(3, 3);
       spcVO("35-36", "Next — the stroid toss. Tap and hold a stroid to grab it.", "talk_calm");
-      showTaskInstruction("TAP AND HOLD A STROID — SWIPE TO TOSS");
+      showTaskInstructionDeferred("TAP AND HOLD A STROID — SWIPE TO TOSS");
       tutorialState.tossFailures = 0;
       const baseToss = tutorialEvents.toss || 0;
       tutorialSmallGrabHintEnabled = true;
@@ -11411,7 +11494,7 @@ function initGalaxyCanvas() {
       spawnTutorialLandmine(tutZonePoint("center"));
       spcVO("42-43", "When you see a bomb, tap it to arm it — you can also grab and toss bombs like stroids.", "talk_calm");
       spcVO("44-45", "The bomb explodes soon, but to detonate it yourself, just tap it again.", "talk_calm");
-      showTaskInstruction("TAP THE BOMB TO ARM IT");
+      showTaskInstructionDeferred("TAP THE BOMB TO ARM IT");
       tutorialState.mineTapBase = tutorialEvents.mine_tap || 0;
       for (;;) {
         await waitFor(() => !landmine);
@@ -11435,7 +11518,7 @@ function initGalaxyCanvas() {
       await waitPowerupCollected("bomb");
       spcVO("52-54", "Tap the bomb icon in your HUD, then tap the screen to place it. Arm it and tap to detonate.", "talk_calm");
       showHudPointer("hudBombBtn", 6000);
-      showTaskInstruction("TAP THE 💣 IN YOUR HUD");
+      showTaskInstructionDeferred("TAP THE 💣 IN YOUR HUD");
       await waitFor(() => bombAimMode);
       hideHudPointer();
       hideTaskInstruction();
@@ -11451,7 +11534,7 @@ function initGalaxyCanvas() {
       await waitPowerupCollected("quadshot");
       spawnTutorialAsteroids(3, 2);
       spcVO("57", "Blast those stroids with the quad shot!", "smile_open");
-      showTaskInstruction("BLAST THE STROIDS");
+      showTaskInstructionDeferred("BLAST THE STROIDS");
       while (performance.now() < quadShotUntil) {
         await waitFor(() => tutorialAsteroidsAllCleared() || performance.now() >= quadShotUntil);
         if (performance.now() >= quadShotUntil) break;
@@ -11468,7 +11551,7 @@ function initGalaxyCanvas() {
       await waitPowerupCollected("snowflake");
       spawnTutorialAsteroids(3, 2);
       showHudPointer("hudFreezeBtn", 6000);
-      showTaskInstruction("TAP ❄ IN YOUR HUD TO ACTIVATE");
+      showTaskInstructionDeferred("TAP ❄ IN YOUR HUD TO ACTIVATE");
       await waitEvent("freeze");
       hideHudPointer();
       hideTaskInstruction();
@@ -11516,11 +11599,11 @@ function initGalaxyCanvas() {
       await waitPowerupCollected("missile");
       spcVO("66", "Tap the missile weapon in the HUD to arm a missile.", "alert");
       showHudPointer("hudMissileBtn", 6000);
-      showTaskInstruction("TAP 🚀 IN YOUR HUD");
+      showTaskInstructionDeferred("TAP 🚀 IN YOUR HUD");
       await waitFor(() => missileAimMode);
       hideHudPointer();
       spcVO("67", "Now tap to set a target and watch the destruction.", "alert");
-      showTaskInstruction("TAP THE SCREEN TO SET YOUR TARGET");
+      showTaskInstructionDeferred("TAP THE SCREEN TO SET YOUR TARGET");
       await waitFor(() => activeMissile);
       hideTaskInstruction();
       await waitFor(() => !activeMissile);

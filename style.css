@@ -1887,7 +1887,7 @@ select:focus-visible {
   height: 26px;
   margin-left: -13px;
   margin-top: -13px;
-  z-index: 2;
+  z-index: 4;
   pointer-events: none;
   display: none;
   border: 2.4px solid rgba(255, 62, 62, 0.95);
@@ -2498,4 +2498,9 @@ select:focus-visible {
   .arcadeTimerGhost {
     text-shadow: none;
   }
+}
+
+@keyframes taskInstrStrobe {
+  0%, 100% { opacity: 0.95; }
+  50% { opacity: 0.35; }
 }

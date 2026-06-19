@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-18 10:35";
+const BUILD_TS = "2026-06-18 19:10";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6398,7 +6398,7 @@ function initGalaxyCanvas() {
   // 2026-06-17: SPC VO is recorded — register every vo/SPC_*.mp3 (key = filename minus the
   // SPC_ prefix and .mp3 suffix, e.g. SPC_08-09.mp3 → "08-09"). spcVoSrc() plays vo/SPC_<key>.mp3.
   const SPC_VO_AVAILABLE = new Set([
-    "01", "07", "08-09", "12", "13-14", "15-16", "15-16_release", "17", "17b", "18", "19",
+    "01", "02", "03-04", "05-06a", "06b", "07", "08-09", "12", "13-14", "15-16", "15-16_release", "17", "17b", "18", "19",
     "20", "21", "22", "23", "24", "25", "26", "27", "28-30", "28-30_part2", "31", "32", "33",
     "34", "35", "36", "37", "38", "39", "40", "41", "42-43", "44-45", "46", "47", "48", "49",
     "50", "51", "52", "53", "54", "54_alt", "55-56", "57", "58", "59", "60", "61", "62",
@@ -11234,9 +11234,7 @@ function initGalaxyCanvas() {
       tutorialFireBlocked = true;
       spcVO("01", "Hi there Cadet, welcome to the Polyverse simulator.", "talk_friendly");
       spcVO("02", "Let me show you the ropes before the real battle.", "talk_friendly");
-      spcVO("03", "First — the perimeter timer.", "talk_friendly");
-      spcVO("04a", "That line around the screen edges", "talk_friendly");
-      spcVO("04b", "shows how long you have to clear the field.", "talk_friendly");
+      spcVO("03-04", "First — the perimeter timer. That line around the screen edges shows how long you have to clear the field.", "talk_friendly");
       showTimerArrow(); // Part 5: point at the perimeter timer while SPC describes it
       await waitVOIdle();
     } },
@@ -11245,8 +11243,8 @@ function initGalaxyCanvas() {
       // The powerup appearing ends the cutscene: comm box docks to the bottom, arrows clear.
       commBoxController.setCommCenter(false);
       hideCommArrows();
-      spcVO("05", "Every so often a timer power-up appears.", "talk_calm");
-      spcVO("06", "Grab it to buy time. Tap it now.", "talk_calm");
+      spcVO("05-06a", "Every so often a timer power-up appears. Grab it to buy time.", "talk_calm");
+      spcVO("06b", "Tap it now.", "talk_calm");
       spawnTutorialPowerup("timer", tutZonePoint("center"));
       showTaskInstruction("TAP THE TIMER POWERUP");
       await waitPowerupCollected("timer");

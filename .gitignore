@@ -17,3 +17,6 @@ www/script.js.bak
 www/vo/
 *.wav
 spc_mug/
+
+# Local screen recordings / demo overlays (not for the repo)
+www/*.mov

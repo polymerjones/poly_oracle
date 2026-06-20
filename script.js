@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-20 12:00";
+const BUILD_TS = "2026-06-20 10:26";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1661,7 +1661,10 @@ const commBoxController = (() => {
         ticker.style.transition =
           "left .55s ease, top .55s ease, bottom .55s ease, opacity .2s ease, transform .2s ease";
         ticker.style.left = "-70px"; // (120/2) - (260/2): center the 260px ticker under the 120px portrait
-        ticker.style.top = "132px";  // 12px gap below the 120px-tall portrait
+        // 2026-06-20 (Item 3b): derive the gap from the portrait's rendered height (SPC frame caps
+        // at max-height:180px → 192px) instead of hardcoding, so it tracks the portrait. Fall back
+        // to 180 if the image hasn't laid out yet (offsetHeight 0) so we never collapse to 12px.
+        ticker.style.top = `${(portrait?.offsetHeight || 180) + 12}px`;
         ticker.style.bottom = "auto";
       }
     } else {
@@ -1775,32 +1778,77 @@ const commBoxController = (() => {
     return ["talk1", "talk2"];
   }
 
+  // 2026-06-20 (Item 5): parse **bold** markers into visible-text segments. The marker chars are
+  // NOT visible and never enter the char-by-char slice math, so the type-on reveal can't land
+  // mid-tag. Marker-free strings collapse to a single non-bold segment (zero change for CMDR/etc.).
+  function parseTickerSegments(str) {
+    const segs = [];
+    const re = /\*\*([^*]+)\*\*/g;
+    let last = 0, m;
+    while ((m = re.exec(str))) {
+      if (m.index > last) segs.push({ text: str.slice(last, m.index), bold: false });
+      segs.push({ text: m[1], bold: true });
+      last = m.index + m[0].length;
+    }
+    if (last < str.length) segs.push({ text: str.slice(last), bold: false });
+    if (segs.length === 0) segs.push({ text: str, bold: false });
+    return segs;
+  }
+
   function typeText(lines) {
     if (!tickerText) return;
     const token = ++typingToken;
-    const text = Array.isArray(lines) ? lines.join(" ") : (lines || "");
+    const raw = Array.isArray(lines) ? lines.join(" ") : (lines || "");
+    const segments = parseTickerSegments(raw);
+    const total = segments.reduce((n, s) => n + s.text.length, 0);
     tickerText.innerHTML = "";
     let i = 0;
     // Part 2: the printtext SFX fires once at the START of the type-on animation (not the end),
     // at 80% of its prior volume (0.5 → 0.4) so it underscores the line beginning to print.
-    if (text) { try { window.playGameSfx?.("printtext", 0.4); } catch {} }
+    if (total) { try { window.playGameSfx?.("printtext", 0.4); } catch {} }
+
+    // Build HTML for the first n VISIBLE chars. Bold runs are wrapped in <b>…</b> within this single
+    // build (always balanced — never mid-tag); the n-th char gets the glowing lead style, earlier
+    // chars the dim color (same look as the prior clean typewriter).
+    function render(n) {
+      let out = "";
+      let shown = 0;
+      for (const seg of segments) {
+        if (shown >= n) break;
+        const take = Math.min(seg.text.length, n - shown);
+        const chunk = seg.text.slice(0, take);
+        const start = shown;
+        shown += take;
+        const leadHere = (n - 1) >= start && (n - 1) < start + take;
+        let html;
+        if (leadHere) {
+          const rest = chunk.slice(0, -1);
+          const lead = chunk.slice(-1);
+          html =
+            `<span style="color:#00d4d4">${rest}</span>` +
+            `<span style="color:#00ffee;text-shadow:0 0 6px #00ffee">${lead}</span>`;
+        } else {
+          html = `<span style="color:#00d4d4">${chunk}</span>`;
+        }
+        out += seg.bold ? `<b>${html}</b>` : html;
+      }
+      tickerText.innerHTML = out;
+    }
 
     function step() {
       if (token !== typingToken) return;
-      if (i <= text.length) {
-        // 2026-06-15: clean typewriter — type the text on in order with just a glowing leading
-        // character. (Was prepending the newest char + trailing GLITCH blocks, which read as
-        // "dancing" junk characters at the start of every line.)
-        const typed = text.slice(0, i);
-        const lead = typed.slice(-1) || "";
-        const rest = typed.slice(0, -1);
-        tickerText.innerHTML =
-          `<span style="color:#00d4d4">${rest}</span>` +
-          `<span style="color:#00ffee;text-shadow:0 0 6px #00ffee">${lead}</span>`;
+      if (i <= total) {
+        render(i);
         i++;
         setTimeout(step, 22 + Math.random() * 18);
       } else {
-        tickerText.innerHTML = `<span style="color:#00cccc">${text}</span>`;
+        // final static state: full text, dim color, bold runs wrapped
+        let out = "";
+        for (const seg of segments) {
+          const html = `<span style="color:#00cccc">${seg.text}</span>`;
+          out += seg.bold ? `<b>${html}</b>` : html;
+        }
+        tickerText.innerHTML = out;
       }
     }
     step();
@@ -6467,7 +6515,7 @@ function initGalaxyCanvas() {
   // 2026-06-17: SPC VO is recorded — register every vo/SPC_*.mp3 (key = filename minus the
   // SPC_ prefix and .mp3 suffix, e.g. SPC_08-09.mp3 → "08-09"). spcVoSrc() plays vo/SPC_<key>.mp3.
   const SPC_VO_AVAILABLE = new Set([
-    "01", "02", "03-04", "05-06a", "06b", "07", "08-09", "12", "13-14", "15-16", "15-16_release", "17", "17b", "18", "19",
+    "01", "02", "03-04", "05-06a", "06b", "07", "08", "08b", "08c", "12", "13-14", "15-16", "15-16_release", "17", "17b", "18", "19",
     "20", "21", "22", "23", "24", "25", "26", "27", "28-30", "28-30_part2", "31", "32", "33",
     "34", "35", "36", "35-36", "37", "38", "39", "40", "41", "42-43", "44-45", "46", "47", "48", "49",
     "50", "51", "50-51", "52", "53", "54", "54_alt", "52-54", "55-56", "57", "58", "59", "60", "59-60", "61", "62",
@@ -9153,7 +9201,9 @@ function initGalaxyCanvas() {
     playGameSfx(Math.random() < 0.5 ? "plasmarecharged" : "plasmarecharged1", 1.0);
     playGameSfx("blip", 0.36); // 2026-06-17: -40% so the gun-cock recharge sound stays dominant
     commBoxController.reactTo("plasma_recharged");
-    if (now - lastPlasmaRechargedVoAt > 20000) {
+    if (now - lastPlasmaRechargedVoAt > 20000 && !suppressIncidentalVO()) {
+      // 2026-06-20 (Item 4a): never schedule the orphan recharge-VO timer during training/practice —
+      // those modes drive their own VO and the stray timer leaked into the CMDR menu on exit.
       lastPlasmaRechargedVoAt = now;
       function fireRechargeComm() {
         // FIXED 2026-06-08: bail if UFO kill reset cooldownUntil to 0 after this was scheduled
@@ -11236,6 +11286,37 @@ function initGalaxyCanvas() {
   }
 
   // ── tutorial entity helpers (Part 5) ──────────────────────────────────────
+  // 2026-06-20 (Item 3a): the comm box docks bottom-left during tutorial gameplay. Compute its
+  // footprint in sim/world coords so random stroid spawns can avoid warping in under it (where
+  // they'd be hidden + hard to reach). World coords ≈ CSS px from the canvas origin (see
+  // getPointerWorld), so map the DOM rect by subtracting the canvas rect and scaling. Returns null
+  // when the comm box isn't laid out.
+  function commBoxExclusionSim() {
+    const hudEl = document.getElementById("commanderHUD");
+    if (!galaxyPlayCanvas || !hudEl || hudEl.offsetParent === null) return null;
+    const cr = galaxyPlayCanvas.getBoundingClientRect();
+    if (cr.width <= 0 || cr.height <= 0) return null;
+    const sx = sim.width / cr.width;   // client px -> sim px (≈1)
+    const sy = sim.height / cr.height;
+    const tickerEl = document.getElementById("commanderTicker");
+    const rects = [hudEl.getBoundingClientRect()];
+    if (tickerEl && tickerEl.classList.contains("ticker-visible")) rects.push(tickerEl.getBoundingClientRect());
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const r of rects) {
+      if (r.width <= 0 || r.height <= 0) continue;
+      left = Math.min(left, r.left); top = Math.min(top, r.top);
+      right = Math.max(right, r.right); bottom = Math.max(bottom, r.bottom);
+    }
+    if (!Number.isFinite(left)) return null;
+    const pad = 48; // asteroid radius + breathing room
+    return {
+      x: (left - cr.left) * sx - pad,
+      y: (top - cr.top) * sy - pad,
+      w: (right - left) * sx + pad * 2,
+      h: (bottom - top) * sy + pad * 2,
+    };
+  }
+
   function tutZonePoint(zone) {
     const cx = playfield.x + playfield.w / 2;
     const cy = playfield.y + playfield.h / 2;
@@ -11244,11 +11325,19 @@ function initGalaxyCanvas() {
     }
     if (zone === "center") return { x: cx, y: cy };
     // default ("random"): scatter in the central ~55% of the playfield, never on the edges —
-    // tutorial stroids should be easy to see and reach.
-    return {
+    // tutorial stroids should be easy to see and reach. Reject samples that land in the comm-box
+    // footprint (Item 3a) and resample; fall back to the upper-central band if every try collides.
+    const excl = commBoxExclusionSim();
+    const sample = () => ({
       x: cx + (Math.random() - 0.5) * playfield.w * 0.55,
       y: cy + (Math.random() - 0.5) * playfield.h * 0.5,
-    };
+    });
+    const inExcl = (p) => excl && p.x >= excl.x && p.x <= excl.x + excl.w && p.y >= excl.y && p.y <= excl.y + excl.h;
+    for (let tries = 0; tries < 16; tries += 1) {
+      const p = sample();
+      if (!inExcl(p)) return p;
+    }
+    return { x: cx + (Math.random() - 0.5) * playfield.w * 0.55, y: cy - playfield.h * 0.25 };
   }
   function spawnTutorialAsteroids(count, kind = 2, options = {}) {
     const refs = [];
@@ -11331,7 +11420,7 @@ function initGalaxyCanvas() {
       if ((tutorialEvents.plasma_miss || 0) > baseMiss) {
         tutorialState.plasmaMisses = (tutorialState.plasmaMisses || 0) + 1;
         if (tutorialState.plasmaMisses === 1) {
-          spcVO("20", "Make sure the stroids are targeted first.", "alert");
+          spcVO("20", "Make sure the **Stroids** are targeted first.", "alert");
           spcVO("21", "Try it again.", "alert");
         } else {
           spcVO("22", "Take your time — get them highlighted before you release.", "alert");
@@ -11375,8 +11464,8 @@ function initGalaxyCanvas() {
       tutorialFireBlocked = false;
       tutorialBlockPlasmaToss = true; // only the laser this step
       spawnTutorialAsteroids(1, 3);
-      spcVO("08-09", "These are the stroids — our job is to clear them from the Polyverse.", "talk_calm");
-      spcVO("10-11", "Tap to fire your laser and blast the stroid and all its pieces.", "talk_calm");
+      spcVO("08", "These are the **Stroids** — our job is to clear them from the Polyverse.", "talk_friendly");
+      spcVO("08b", "Tap to fire your laser and blast the **Stroid** and all its pieces.", "talk_calm");
       showTaskInstructionDeferred("TAP TO FIRE — DESTROY THE STROID");
       const baseShots = tutorialEvents.shoot || 0;
       waitFor(() => (tutorialEvents.shoot || 0) > baseShots)
@@ -11384,13 +11473,16 @@ function initGalaxyCanvas() {
         .catch(() => {});
       await waitFor(tutorialAsteroidsAllCleared);
       hideTaskInstruction();
+      // Praise fires only once the objective is met (all stroids cleared), not before.
+      spcVO("08c", "Fantastic, Cadet — you'll show these **Stroids** who's boss.", "praise");
+      await waitVOIdle();
       await waitMs(700);
     } },
     { id: "plasma", run: async () => {
       tutorialBlockPlasmaToss = false; // net + toss unlocked from here on
       spawnTutorialAsteroids(2, 2);
-      spcVO("13-14", "Next up — the plasma net. Tap, drag and hold to set it.");
-      spcVO("15-16", "When stroids glow they're targeted. Release to fire.");
+      spcVO("13-14", "Next up — the **Plasma Net**. Tap, drag and hold to set it.");
+      spcVO("15-16", "When **Stroids** glow they're targeted. Release to fire.");
       // Part 3 (2026-06-17): two-stage objective — set, then release. The phase's onUpdate hook
       // (below) keeps the text in sync with plasmaCage.active each frame, so it re-arms back to
       // "TAP AND DRAG" whenever a gesture resets (miss/cancel/fire) instead of sticking on RELEASE.
@@ -11445,11 +11537,11 @@ function initGalaxyCanvas() {
       hideTaskInstruction();
       spcVO("26", "Wow, there you go.", "laugh");
       spcVO("27", "Destroying a UFO instantly recharges your plasma.");
-      spcVO("28-30", "So net the stroids when a UFO shows up, pop the UFO, and instantly get another net shot. Let's try it.");
+      spcVO("28-30", "So net the **Stroids** when a UFO shows up, pop the UFO, and instantly get another net shot. Let's try it.");
       await clearTutorialField();
       spawnTutorialAsteroids(3, 2);
       // Net step first — UFO withheld until the net lands so the sequence is taught in order.
-      spcVO("31", "Use your plasma net on those stroids.", "talk_friendly");
+      spcVO("31", "Use your **Plasma Net** on those **Stroids**.", "talk_friendly");
       showTaskInstructionDeferred("NET THE STROIDS");
       tutorialState.plasmaMisses = 0;
       const baseComboPlasma = tutorialEvents.plasma || 0;
@@ -11462,7 +11554,7 @@ function initGalaxyCanvas() {
         if ((tutorialEvents.plasma || 0) > baseComboPlasma) break; // net landed ✓
         if ((tutorialEvents.plasma_miss || 0) > baseComboMiss) {
           tutorialState.plasmaMisses += 1;
-          if (tutorialState.plasmaMisses === 1) spcVO("20", "Make sure the stroids are targeted first.", "alert");
+          if (tutorialState.plasmaMisses === 1) spcVO("20", "Make sure the **Stroids** are targeted first.", "alert");
           else spcVO("22", "Take your time — get them highlighted before you release.", "alert");
           rechargePlasmaNow();
         } else {
@@ -11484,7 +11576,7 @@ function initGalaxyCanvas() {
     } },
     { id: "toss", run: async () => {
       spawnTutorialAsteroids(3, 3);
-      spcVO("35-36", "Next — the stroid toss. Tap and hold a stroid to grab it.", "talk_calm");
+      spcVO("35-36", "Next — the **Stroid Toss**. Tap and hold a **Stroid** to grab it.", "talk_calm");
       showTaskInstructionDeferred("TAP AND HOLD A STROID — SWIPE TO TOSS");
       tutorialState.tossFailures = 0;
       const baseToss = tutorialEvents.toss || 0;
@@ -11516,7 +11608,7 @@ function initGalaxyCanvas() {
     } },
     { id: "landmine", run: async () => {
       spawnTutorialLandmine(tutZonePoint("center"));
-      spcVO("42-43", "When you see a bomb, tap it to arm it — you can also grab and toss bombs like stroids.", "talk_calm");
+      spcVO("42-43", "When you see a bomb, tap it to arm it — you can also grab and toss bombs like **Stroids**.", "talk_calm");
       spcVO("44-45", "The bomb explodes soon, but to detonate it yourself, just tap it again.", "talk_calm");
       showTaskInstructionDeferred("TAP THE BOMB TO ARM IT");
       tutorialState.mineTapBase = tutorialEvents.mine_tap || 0;
@@ -11553,10 +11645,10 @@ function initGalaxyCanvas() {
     } },
     { id: "quadshot", run: async () => {
       spawnTutorialPowerup("quadshot", tutZonePoint("center"));
-      spcVO("55-56", "Throughout the missions, power-ups appear. That's the quad shot power-up. Pick it up!", "talk_calm");
+      spcVO("55-56", "Throughout the missions, power-ups appear. That's the **Quad Shot** power-up. Pick it up!", "talk_calm");
       await waitPowerupCollected("quadshot");
       spawnTutorialAsteroids(3, 2);
-      spcVO("57", "Blast those stroids with the quad shot!", "smile_open");
+      spcVO("57", "Blast those **Stroids** with the **Quad Shot**!", "smile_open");
       showTaskInstructionDeferred("BLAST THE STROIDS");
       await waitFor(tutorialAsteroidsAllCleared);
       if (!stuntActive) return;
@@ -11588,7 +11680,7 @@ function initGalaxyCanvas() {
     } },
     { id: "freeze_toss", run: async () => {
       spawnTutorialAsteroids(3, 2);
-      spcVO("62", "Frozen stroids can be tossed too. Grab one and toss it.", "idle_gentle");
+      spcVO("62", "Frozen **Stroids** can be tossed too. Grab one and toss it.", "idle_gentle");
       showTaskInstructionDeferred("GRAB AND TOSS A FROZEN STROID");
       // If the freeze carried over from the activation step it's still live — skip straight to the
       // toss loop. If it expired while Phase A was wrapping up, re-prompt with a fresh powerup.
@@ -11613,7 +11705,7 @@ function initGalaxyCanvas() {
           spawnTutorialAsteroids(3, 2);
           freezeUntil = performance.now() + FREEZE_DURATION_MS;
           onFreezeStart(); // re-freeze with the full FX set (icy music filter + HUD glow)
-          spcVO("63", "Good shooting — but try grabbing and tossing a frozen stroid.", "idle_gentle");
+          spcVO("63", "Good shooting — but try grabbing and tossing a frozen **Stroid**.", "idle_gentle");
         } else {
           // freeze expired before the cadet tossed one — wait a beat, drop a fresh powerup
           await waitMs(1000);
@@ -11752,6 +11844,7 @@ function initGalaxyCanvas() {
     hideTaskInstruction();
     hideCommArrows();
     commBoxController.setExclusiveSpeaker(false);
+    commBoxController.stopVO(); // 2026-06-20 (Item 4b): flush any in-flight/queued VO on every tutorial exit path
     commBoxController.setCommCenter(false); // dock back to bottom-left
     commBoxController.hideTicker();
     commBoxController.clearPortraitOverride();
@@ -13969,7 +14062,7 @@ function initGalaxyCanvas() {
           // fall through silently to the laser path so Training/Practice stay non-chatty.
           if (now - _spcGrabSmallAt > 8000) {
             _spcGrabSmallAt = now;
-            spcVO("grab_small", "Smaller stroids cannot be grabbed, Cadet.", "idle_smirk");
+            spcVO("grab_small", "Smaller **Stroids** cannot be grabbed, Cadet.", "idle_smirk");
           }
         }
       }

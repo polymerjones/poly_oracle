@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-20 10:26";
+const BUILD_TS = "2026-06-20 10:54";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1441,7 +1441,11 @@ const commBoxController = (() => {
   // both holds the mood AND moves its mouth while the line plays. Single-entry sets are held.
   // All mouth frames must exist on disk (talk_calm/friendly/ah/smile are missing — not used here).
   const SPC_EXPR_FLAP = {
-    praise:      ["praise", "talk_happy"],
+    // 2026-06-20 (Item 6): praise was a 2-frame ["praise","talk_happy"] loop — too fast at 125ms and
+    // the brow delta between the two frames read as erratic eyebrows. Give it the same closed-mouth
+    // multi-frame treatment the talk_* hints use: hold the impressed/happy brow, open the mouth, then
+    // rest closed before reopening, so the talking reads naturally into the impressed end-settle.
+    praise:      ["praise", "talk_happy", "impressed_smile", "impressed_smile", "talk_happy"],
     smile_wide:  ["smile_wide", "talk_happy"],
     smile_open:  ["smile_open", "talk_happy"],
     idle_smirk:  ["idle_smirk", "talk_neutral"],
@@ -1454,11 +1458,16 @@ const commBoxController = (() => {
   };
 
   // Part 4: set a single SPC frame directly (no-op unless SPC owns the portrait + frame loaded).
+  // 2026-06-20 (Items 4/5): treat a *failed-to-load* frame as missing too. A broken Image still
+  // has a truthy .src, so the old `!img.src` guard let setSpcFrame assign a 404'd URL — which
+  // tripped portrait.onerror → SPC_PLACEHOLDER (the teal "SPC" box). Detecting `complete &&
+  // naturalWidth === 0` makes any absent frame fall back to the rest pose instead.
+  const _spcImgBroken = (img) => !img || !img.src || (img.complete && img.naturalWidth === 0);
   function setSpcFrame(key) {
     if (!_spcMode || !portrait) return;
     let img = spcImages[key];
-    if (!img || !img.src) img = spcImages.smile_wide; // default lookup falls back to the rest pose
-    if (!img || !img.src) return;
+    if (_spcImgBroken(img)) img = spcImages.smile_wide; // missing/broken frame → rest pose
+    if (_spcImgBroken(img)) return;
     portrait.src = img.src;
   }
 
@@ -6516,6 +6525,7 @@ function initGalaxyCanvas() {
   // SPC_ prefix and .mp3 suffix, e.g. SPC_08-09.mp3 → "08-09"). spcVoSrc() plays vo/SPC_<key>.mp3.
   const SPC_VO_AVAILABLE = new Set([
     "01", "02", "03-04", "05-06a", "06b", "07", "08", "08b", "08c", "12", "13-14", "15-16", "15-16_release", "17", "17b", "18", "19",
+    "one_of_our_most_useful_weapons_plasma_net", "to_fire_a_plasma_net_tap_and_drag",
     "20", "21", "22", "23", "24", "25", "26", "27", "28-30", "28-30_part2", "31", "32", "33",
     "34", "35", "36", "35-36", "37", "38", "39", "40", "41", "42-43", "44-45", "46", "47", "48", "49",
     "50", "51", "50-51", "52", "53", "54", "54_alt", "52-54", "55-56", "57", "58", "59", "60", "59-60", "61", "62",
@@ -11447,7 +11457,7 @@ function initGalaxyCanvas() {
       // The powerup appearing ends the cutscene: comm box docks to the bottom, arrows clear.
       commBoxController.setCommCenter(false);
       hideCommArrows();
-      spcVO("05-06a", "Every so often a timer power-up appears. Grab it to buy time.", "talk_calm");
+      spcVO("05-06a", "Every so often a **Timer** power-up appears. Grab it to buy time.", "talk_calm");
       spcVO("06b", "Tap it now.", "talk_calm");
       spawnTutorialPowerup("timer", tutZonePoint("center"));
       showTaskInstructionDeferred("TAP THE TIMER POWERUP");
@@ -11481,8 +11491,13 @@ function initGalaxyCanvas() {
     { id: "plasma", run: async () => {
       tutorialBlockPlasmaToss = false; // net + toss unlocked from here on
       spawnTutorialAsteroids(2, 2);
-      spcVO("13-14", "Next up — the **Plasma Net**. Tap, drag and hold to set it.");
+      spcVO("one_of_our_most_useful_weapons_plasma_net", "One of our most useful weapons is the **Plasma Net**.");
+      spcVO("to_fire_a_plasma_net_tap_and_drag", "To fire a **Plasma Net**, tap and drag a net across the screen.");
       spcVO("15-16", "When **Stroids** glow they're targeted. Release to fire.");
+      // 2026-06-20: hold the objective text until the intro VO finishes (deferred-until-VO-idle,
+      // same as the other steps) — the onUpdate hook below is gated on plasmaObjectiveMode, so we
+      // only arm it after the lines drain instead of letting it flash up under the narration.
+      await waitVOIdle();
       // Part 3 (2026-06-17): two-stage objective — set, then release. The phase's onUpdate hook
       // (below) keeps the text in sync with plasmaCage.active each frame, so it re-arms back to
       // "TAP AND DRAG" whenever a gesture resets (miss/cancel/fire) instead of sticking on RELEASE.

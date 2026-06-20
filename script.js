@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-19 13:37";
+const BUILD_TS = "2026-06-20 12:00";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1527,15 +1527,18 @@ const commBoxController = (() => {
       frames = SPC_EXPR_FLAP[frameHint];
       if (frameHint.indexOf("idle_") === 0 || frameHint === "shades") _spcRestFrame = frameHint;
     } else if (frameHint && spcImages[frameHint]) {
-      // a talk_* (or other loaded) hint: lead the flap with it, then vary the mouth
-      frames = [frameHint, "talk_neutral", "talk_happy"];
+      // a talk_* (or other loaded) hint: lead with it, vary the mouth, include a closed-mouth rest beat.
+      // idle_neutral is repeated so the closed mouth holds for 2 ticks (~250ms) — a single 125ms tick
+      // is too brief to read clearly as "mouth closed".
+      frames = [frameHint, "talk_neutral", "idle_neutral", "idle_neutral", "talk_happy"];
     } else {
       frames = SPC_TALK_CYCLE;
     }
     setSpcFrame(frames[0]);
     if (frames.length === 1) return; // held expression — no mouth flap
     let i = 0;
-    // 2026-06-18: ~120ms phoneme cycle while the line plays (cleared by spcSpeakEnd on audio end).
+    // 2026-06-20: ~125ms (8fps) phoneme cycle while the line plays (cleared by spcSpeakEnd on audio end).
+    // Was 120ms — slowed slightly so the flap reads as natural speech rather than a fast flutter.
     _spcMouthFlap = setInterval(() => {
       if (frames === SPC_TALK_CYCLE) {
         setSpcFrame(_spcPickTalkFrame());
@@ -1543,7 +1546,7 @@ const commBoxController = (() => {
         i += 1;
         setSpcFrame(frames[i % frames.length]);
       }
-    }, 120);
+    }, 125);
   }
 
   // End of a line (or whole queue): stop the flap, settle on the rest frame, resume blinking.
@@ -1672,6 +1675,17 @@ const commBoxController = (() => {
         ticker.style.bottom = "0";
       }
     }
+  }
+
+  // 2026-06-20: dim/hide the comm box while a pause overlay is up. The comm box is z-index:9000
+  // (above the arcade pause overlay), so on the first training step — where setCommCenter(true)
+  // centers it — the centered portrait paints OVER the "Resume" button, hiding it. Fading the HUD
+  // to opacity:0 lets the overlay/Resume button read cleanly; resume restores it. Opacity (not
+  // display:none) preserves the centered/docked layout so no position state needs tracking.
+  function setHudDimmed(on) {
+    if (!hud) return;
+    hud.style.transition = "opacity .2s ease";
+    hud.style.opacity = on ? "0" : "1";
   }
 
   function setFrame(key) {
@@ -2130,6 +2144,7 @@ const commBoxController = (() => {
     spcSpeakEnd,
     setExclusiveSpeaker,
     setCommCenter,
+    setHudDimmed,
     isVOActive,
     setDamageState,
     reactTo,
@@ -10895,6 +10910,10 @@ function initGalaxyCanvas() {
   // timer line. Shown during the intro once SPC has described the timer; hidden when Phase 1 runs.
   let _timerArrowEl = null;
   function showTimerArrow() {
+    // 2026-06-20: temporarily disabled. The static "↑" points at the timer line conceptually wrong;
+    // it needs a redesign as a comet/dot travelling ALONG the perimeter timer (separate future task).
+    // No-op for now — hideTimerArrow() stays safe to call (it just no-ops when nothing is shown).
+    return;
     ensureTutorialPointerCss(); // provides the @keyframes tutorialPulse used by #timerArrow
     ensureTutorialChromeCss();
     if (!galaxyPlayCanvas) return;
@@ -10906,7 +10925,7 @@ function initGalaxyCanvas() {
     }
     const rect = galaxyPlayCanvas.getBoundingClientRect();
     const scaleY = sim.height ? rect.height / sim.height : 1;
-    const topY = rect.top + playfield.y * scaleY;
+    const topY = rect.top + 2.5 * scaleY; // timer line draws at canvas-space y=2.5 (inset), not playfield.y
     _timerArrowEl.style.left = "50%";
     _timerArrowEl.style.top = `${topY + 8}px`;
     _timerArrowEl.style.transform = "translateX(-50%)";
@@ -11196,6 +11215,7 @@ function initGalaxyCanvas() {
     _spcLineStartedAt = 0;
     _spcContinuousStartAt = 0; // restart the >3s talk window after resume
     commBoxController.spcSpeakEnd?.(); // settle the SPC portrait while paused (no flap behind overlay)
+    commBoxController.setHudDimmed?.(true); // fade the comm box so it can't paint over the Resume button
     hideSkipHint();
     showArcadeOverlay("TRAINING PAUSED", "Double-tap or swipe down to resume", 0, {
       buttonText: "Resume",
@@ -11208,6 +11228,7 @@ function initGalaxyCanvas() {
     if (!tutorialPaused) return;
     tutorialPaused = false;
     hideArcadeOverlay();
+    commBoxController.setHudDimmed?.(false); // restore the comm box after the pause overlay clears
     arcadePausedUntil = performance.now();
     // skip hint re-appears on its own via updateSkipHint() once conditions are met again
     _spcPlaying = false;

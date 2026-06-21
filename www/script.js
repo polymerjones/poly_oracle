@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-21 12:33";
+const BUILD_TS = "2026-06-21 13:10";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2165,8 +2165,20 @@ const commBoxController = (() => {
     if (on) { _voQueue.length = 0; }
   }
 
+  // 2026-06-21 (Item 1b): level-end VO lock. From the "level complete" trigger until the next
+  // level actually starts, the ONLY line allowed through is the single levelcomplete praise —
+  // every incidental line (plasma recharged, UFO spotted, ambient praise, queue stragglers, and
+  // any scheduled-timer VO that fires during the scorecard) is dropped at this chokepoint.
+  let _levelEndLock = false;
+  function setLevelEndLock(on) {
+    _levelEndLock = !!on;
+    if (on) { _voQueue.length = 0; } // flush incidental stragglers queued before the level ended
+  }
+
   function queueVO(options = {}) {
     if (_exclusiveSpeaker && !options._spc) return;
+    // Level-end window: let only the one levelcomplete praise speak (see setLevelEndLock).
+    if (_levelEndLock && options.event !== "levelcomplete") return;
     const highPriority = options.priority === "high";
     if (highPriority) {
       _voQueue.length = 0;
@@ -2207,6 +2219,7 @@ const commBoxController = (() => {
     spcSpeakStart,
     spcSpeakEnd,
     setExclusiveSpeaker,
+    setLevelEndLock,
     setCommCenter,
     setHudDimmed,
     isVOActive,
@@ -9997,6 +10010,43 @@ function initGalaxyCanvas() {
   }
 
   let _lsrStylesInjected = false;
+  let _lvlTransWatch = null;
+
+  function startLevelTransitionWatch(levelIndex) {
+    if (_lvlTransWatch?.reportTimer) clearTimeout(_lvlTransWatch.reportTimer);
+    _lvlTransWatch = {
+      startedAt: performance.now(),
+      levelIndex,
+      overBudgetFrames: 0,
+      droppedFrames: 0,
+      worstFrameMs: 0,
+      reportTimer: null,
+    };
+    console.log(`[lvltrans] frame watcher start levelIndex=${levelIndex}`);
+  }
+
+  function sampleLevelTransitionFrame(dt, now) {
+    const watch = _lvlTransWatch;
+    if (!watch || dt <= 32) return;
+    watch.overBudgetFrames += 1;
+    watch.droppedFrames += Math.max(1, Math.round(dt / (1000 / 60)) - 1);
+    watch.worstFrameMs = Math.max(watch.worstFrameMs, dt);
+    console.log(`[lvltrans] slow frame dt=${dt.toFixed(1)}ms elapsed=${(now - watch.startedAt).toFixed(1)}ms`);
+  }
+
+  function scheduleLevelTransitionReport(delayMs = 500) {
+    const watch = _lvlTransWatch;
+    if (!watch) return;
+    watch.reportTimer = setTimeout(() => {
+      if (_lvlTransWatch !== watch) return;
+      console.log(
+        `[lvltrans] frame watcher report elapsed=${(performance.now() - watch.startedAt).toFixed(1)}ms `
+        + `worst=${watch.worstFrameMs.toFixed(1)}ms over32=${watch.overBudgetFrames} dropped=${watch.droppedFrames}`,
+      );
+      _lvlTransWatch = null;
+    }, delayMs);
+  }
+
   function ensureLsrStyles() {
     if (_lsrStylesInjected) return;
     _lsrStylesInjected = true;
@@ -10052,6 +10102,7 @@ function initGalaxyCanvas() {
     `;
     overlay.appendChild(panel);
     (galaxyView || document.body).appendChild(overlay);
+    console.log(`[lvltrans] scorecard overlay appeared level=${levelNum}`);
 
     // FIX 2026-06-09: make sure a UFO doesn't linger behind the scorecard
     // 2026-06-13: clear ALL gameplay entities (asteroids, flames, powerups, particles, mines…)
@@ -10094,6 +10145,7 @@ function initGalaxyCanvas() {
     function dismiss() {
       if (dismissed) return;
       dismissed = true;
+      console.log(`[lvltrans] scorecard dismiss elapsed=${(performance.now() - shownAt).toFixed(1)}ms`);
       // FIX 2026-06-09: restore music to its pre-scorecard level as gameplay resumes
       rampScorecardMusic(scorecardMusicGainBefore, scorecardMusicHtmlVolBefore);
       stopWriteLoop();
@@ -10182,8 +10234,14 @@ function initGalaxyCanvas() {
   }
 
   function levelComplete() {
+    console.log(`[lvltrans] levelComplete entry levelIndex=${currentLevelIndex}`);
+    startLevelTransitionWatch(currentLevelIndex);
     arcadeActive = false;
     retryPending = false;
+    // 2026-06-21 (Item 1b): lock the comm box to a single praise line for the whole level-end
+    // window (scorecard → next level start). Set BEFORE the levelcomplete VO is queued below so
+    // that one line passes; everything else is suppressed. Cleared in startLevel().
+    commBoxController.setLevelEndLock(true);
     stopWarningState();
     arcadeResumeAvailable = false;
     syncArcadeEntryLabel();
@@ -10232,6 +10290,8 @@ function initGalaxyCanvas() {
       });
       return;
     }
+    // Final level has no following startLevel(); cover the win transition, then retire the watcher.
+    scheduleLevelTransitionReport(3500);
     const _winNow = performance.now();
     if (gameTimer.running) {
       const _lvMs = _winNow - gameTimer.startedAt;
@@ -10407,8 +10467,11 @@ function initGalaxyCanvas() {
   }
 
   function startLevel(idx) {
+    const _lvlTransStartAt = performance.now();
+    console.log(`[lvltrans] startLevel entry requestedIndex=${idx}`);
     stuntActive = false; // a real arcade level is never a stunt session
     practiceEndless = false; // ...nor an endless practice session (Stunt Practice re-sets this after)
+    commBoxController.setLevelEndLock(false); // 2026-06-21 (Item 1b): next level live — end the level-end VO lock
     const safeIdx = clamp(idx, 0, ARCADE_LEVELS.length - 1);
     audioEngine.unlock?.();
     audioEngine.loadMany?.(GAME_SFX);
@@ -10465,6 +10528,7 @@ function initGalaxyCanvas() {
     if (currentLevelIndex > 0) {
       window.galaxyBackground?.triggerWarp();
     }
+    console.log(`[lvltrans] after triggerWarp invoked=${currentLevelIndex > 0}`);
     playArcadeMusicForLevel(cfg.level);
     if (cfg.level === 10) {
       playGameSfx("lastlevelstart", 0.96);
@@ -10472,6 +10536,8 @@ function initGalaxyCanvas() {
     // 2026-06-15: early levels felt empty when every starting asteroid entered from the rim.
     // Seed a share of them in the interior (clear of the center ship) so the field reads full
     // from the first second. Tapers to 0 once the later levels are naturally busy.
+    const _spawnWorkStartAt = performance.now();
+    console.log(`[lvltrans] before synchronous spawn work level=${cfg.level} startSpawn=${cfg.startSpawn} mines=${cfg.mineLaunch ? (cfg.mineCount || 1) : 0}`);
     const interiorShare = cfg.level <= 2 ? 0.5 : cfg.level <= 4 ? 0.35 : 0;
     for (let i = 0; i < cfg.startSpawn; i += 1) {
       const p = Math.random() < interiorShare ? randomInteriorPoint() : randomPerimeterPoint();
@@ -10501,6 +10567,7 @@ function initGalaxyCanvas() {
       // main loop keeps the chain-reaction field replenished after the opening salvo clears).
       nextMineRespawnAt = now + 20000 + Math.random() * 10000;
     }
+    console.log(`[lvltrans] after synchronous spawn work duration=${(performance.now() - _spawnWorkStartAt).toFixed(1)}ms asteroids=${sim.asteroids.length} mines=${placedBombs.length}`);
 
     // TODO: waves — see Level 11 wave system for pattern (cfg.waves not yet wired)
 
@@ -10582,6 +10649,8 @@ function initGalaxyCanvas() {
       }
       setTimeout(fireSecondVO, 800);
     }
+    console.log(`[lvltrans] end startLevel duration=${(performance.now() - _lvlTransStartAt).toFixed(1)}ms level=${cfg.level}`);
+    scheduleLevelTransitionReport();
   }
 
   function startArcadeFromSave() {
@@ -10831,12 +10900,12 @@ function initGalaxyCanvas() {
   function waitPowerupCollected(type) {
     return waitFor(() => !powerups.some((p) => p.type === type));
   }
-  function abortTutorialAsync() {
+  function abortTutorialAsync({ preserveSpc = false } = {}) {
     _tutWaiters.forEach((w) => { try { w.reject(TUT_ABORT); } catch {} });
     _tutWaiters = [];
     _tutTimers.forEach((t) => { clearTimeout(t.id); try { t.reject(TUT_ABORT); } catch {} });
     _tutTimers = [];
-    spcFlush();
+    if (!preserveSpc) spcFlush();
   }
 
   // ── SPC voice (Part 3) — captions pinned to the comm ticker; lines advance on a tight timer
@@ -11871,11 +11940,17 @@ function initGalaxyCanvas() {
       await waitFor(() => !activeMissile);
       spcVO("68", "Excellent work, Cadet.", "laugh");
       spcVO("69", "This concludes our training for today.", "praise");
+      // 2026-06-21 (Item 3): persist completion HERE, the moment training is functionally done —
+      // not only inside endTutorial() after the outro hold. Previously the unlock key was written
+      // only after the trailing hold, so bailing during that silent window left Practice locked.
+      // endTutorial() still writes it too (idempotent).
+      try { localStorage.setItem(STUNT_TRAINING_DONE_KEY, "1"); } catch {}
       await waitVOIdle();
       await waitMs(350);
       spcVO("70", "Go practice if you like — the Polyverse awaits.", "shades");
-      await waitVOIdle();
-      await waitMs(15000); // 2026-06-17 (Part 8): hold the outro line on-screen 15s before Practice starts
+      // Practice goes live as this final line starts. Preserve SPC's active audio/caption during
+      // the state handoff; a timer docks/hides the caption after the requested outro hold.
+      startStuntPractice({ fromTutorial: true, preserveSpcOutro: true });
     } },
   ];
 
@@ -11977,6 +12052,27 @@ function initGalaxyCanvas() {
     commBoxController.clearPortraitOverride();
   }
 
+  // Tutorial → Practice needs the state/UI teardown above without touching the active SPC line.
+  // In particular, do not stop VO, hide the ticker, change comm position, or clear the portrait.
+  function cleanupTutorialStateForPractice() {
+    _tutRunToken += 1;
+    abortTutorialAsync({ preserveSpc: true });
+    hideHudPointer();
+    hideTimerArrow();
+    hidePlasmaRechargeArrow();
+    tutorialPhase = -1;
+    tutorialState = {};
+    for (const k of Object.keys(tutorialEvents)) delete tutorialEvents[k];
+    tutorialFireBlocked = false;
+    tutorialBlockPlasmaToss = false;
+    tutorialSmallGrabHintEnabled = false;
+    tutorialPaused = false;
+    tutorialTimerRunning = false;
+    hideSkipHint();
+    hideTaskInstruction();
+    hideCommArrows();
+  }
+
   function exitStuntMode() {
     cleanupTutorial();
     stuntActive = false;
@@ -12007,8 +12103,9 @@ function initGalaxyCanvas() {
   // We pin the level-4 spawn config (currentLevelIndex = 3) so the endless update block reads a
   // moderate-density cfg (continuous spawnEveryMs trickle; L1/L2 have spawnEveryMs:0 → empty), but
   // we copy those values directly instead of calling startLevel()/startArcadeAtLevel().
-  function startStuntPractice({ fromTutorial = false } = {}) {
-    cleanupTutorial();          // tears down tutorial UI/state (also restores CMDR — re-pinned below)
+  function startStuntPractice({ fromTutorial = false, preserveSpcOutro = false } = {}) {
+    if (preserveSpcOutro) cleanupTutorialStateForPractice();
+    else cleanupTutorial();
     stuntActive = false;
 
     // ── full gameplay reset (mirrors startArcadeNew minus its startArcadeAtLevel(1) launch) ──
@@ -12074,9 +12171,11 @@ function initGalaxyCanvas() {
     // 2026-06-16: Practice shows SPC's mug only — no ticker text, no CMDR voice lines. Exclusive
     // speaker drops every non-SPC queueVO so gameplay praise/reactions stay silent throughout.
     commBoxController.setExclusiveSpeaker(true);
-    commBoxController.setCommCenter(false);
-    commBoxController.hideTicker();
-    commBoxController.setSpcIdle("shades");
+    if (!preserveSpcOutro) {
+      commBoxController.setCommCenter(false);
+      commBoxController.hideTicker();
+      commBoxController.setSpcIdle("shades");
+    }
 
     // ── open the field: level-4 spawn config, endless, NO transition animation ──
     const cfg = ARCADE_LEVELS[3]; // level 4: spawnEveryMs 2000, maxOnScreen 12, all sizes
@@ -12109,6 +12208,15 @@ function initGalaxyCanvas() {
     practiceThemeIndex = 1;
     nextThemeCycleAt = nowP + 45000;
     if (hudLevel) hudLevel.textContent = "PRACTICE";
+
+    if (preserveSpcOutro) {
+      setTimeout(() => {
+        if (!practiceEndless) return;
+        commBoxController.setCommCenter(false);
+        commBoxController.hideTicker();
+        commBoxController.setSpcIdle("shades");
+      }, 10000);
+    }
   }
 
   function startPracticeMode() {
@@ -12153,6 +12261,7 @@ function initGalaxyCanvas() {
     hideArcadeOverlay();
     retryPending = false;
     stopWarningState();
+    commBoxController.setLevelEndLock(false); // 2026-06-21 (Item 1b): never carry the level-end VO lock into menus (e.g. the final-level win path bypasses startLevel)
     // 2026-06-13: leaving Stunt Mode by any path is always a clean exit — never preserve it as a
     // resumable arcade session, and clear the flag so a later real game runs its level logic.
     if (stuntActive) {
@@ -13572,6 +13681,7 @@ function initGalaxyCanvas() {
       return;
     }
     const rawDt = sim.last ? now - sim.last : 16;
+    sampleLevelTransitionFrame(rawDt, now);
     const dt = Math.min(rawDt, 33);
     sim.last = now;
     update(dt, now);

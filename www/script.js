@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-20 18:36";
+const BUILD_TS = "2026-06-20 21:30";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6498,6 +6498,10 @@ function initGalaxyCanvas() {
   let _spcAudio = null;
   let _spcAudioFxCleanup = null;
   const SPC_VO_PLAYBACK_RATE = 1.08;
+  // 2026-06-20: tail padding added AFTER the rate-adjusted clip length before advancing. Now that
+  // the timer is anchored to actual playback start (the 'playing' event), this is true post-audio
+  // padding — bumped 250→450ms to absorb iOS media-start jitter. Tune after device testing.
+  const SPC_VO_TAIL_MS = 450;
   // 2026-06-17: per-line watchdog — if a line never fires its end/timer (iOS audio quirk), the
   // updateStunt watchdog force-advances via _spcAdvanceFn after _spcLineStartedAt + _spcLineWatchdogMs.
   // 2026-06-18: watchdog is now DYNAMIC — set from the real clip duration once metadata loads, so a
@@ -10902,29 +10906,68 @@ function initGalaxyCanvas() {
         // computed from the REAL clip duration, rate-adjusted to actual playtime. 'onended' stays
         // as a nice-to-have early trigger when it does fire. Both go through the idempotent advance().
         _spcAudio.onended = () => { console.log("[SPC] ended", key); advance(); };
-        const armFromDuration = () => {
-          if (!_spcPlaying || !_spcAudio) return;
-          const d = isFinite(_spcAudio.duration) ? _spcAudio.duration : 0;
-          if (d <= 0) return;
-          const playMs = (d / SPC_VO_PLAYBACK_RATE) * 1000; // 1.08x faster than recorded
-          if (_spcTimer) clearTimeout(_spcTimer);
-          _spcTimer = setTimeout(advance, playMs + 250);     // +250ms tail so we don't clip the end
-          _spcLineWatchdogMs = playMs + 2000;                // watchdog can't fire before the clip ends
-          console.log("[SPC] meta", key, "dur", d.toFixed(2), "-> advance in", Math.round(playMs + 250), "ms");
+
+        // 2026-06-20: anchor the advance timer to ACTUAL playback start, not metadata-load.
+        // Previously the timer was armed in onloadedmetadata, which fires (and starts counting)
+        // before play() produces audible output; on iOS, createMediaElementSource adds real start
+        // latency, so the fixed tail was eaten before sound began and nearly every clip lost its
+        // last word. Now: compute playMs at metadata, but ARM the timer only when playback truly
+        // begins — the 'playing' event (primary) or the play() promise resolving (backup), once.
+        let _spcPlayMs = 0;            // rate-adjusted real playtime (ms), known at metadata
+        let _armedPlayTimer = false;   // idempotent: arm the precise timer exactly once
+        let _playStartedAt = 0;        // perf clock at audible start (rate-honoring probe)
+
+        const computePlayMs = () => {
+          const d = isFinite(_spcAudio?.duration) ? _spcAudio.duration : 0;
+          if (d <= 0) return 0;
+          _spcPlayMs = (d / SPC_VO_PLAYBACK_RATE) * 1000; // 1.08x faster than recorded
+          _spcLineWatchdogMs = _spcPlayMs + 2000;         // watchdog can't fire before the clip ends
+          return _spcPlayMs;
         };
-        _spcAudio.onloadedmetadata = armFromDuration;
-        // metadata may already be cached (loadedmetadata won't re-fire) — arm immediately if so
-        if (_spcAudio.readyState >= 1 && isFinite(_spcAudio.duration) && _spcAudio.duration > 0) armFromDuration();
-        // pre-metadata backstop: if metadata is slow to load, don't stall on the 8s watchdog;
-        // armFromDuration replaces this the instant duration is known.
+
+        const armPlayTimer = () => {
+          if (_armedPlayTimer || !_spcPlaying || !_spcAudio) return;
+          _armedPlayTimer = true;
+          _playStartedAt = performance.now();
+          const playMs = _spcPlayMs > 0 ? _spcPlayMs : computePlayMs();
+          if (_spcTimer) clearTimeout(_spcTimer);          // drop the coarse pre-start backstop
+          const ms = (playMs > 0 ? playMs : dur) + SPC_VO_TAIL_MS; // dur = text-length fallback
+          _spcTimer = setTimeout(advance, ms);
+          console.log("[SPC] playing", key, "playMs", Math.round(playMs), "-> advance in", Math.round(ms), "ms");
+        };
+
+        // Metadata: pre-compute playMs (do NOT arm the timer here anymore).
+        _spcAudio.onloadedmetadata = () => { if (_spcPlaying) computePlayMs(); };
+        if (_spcAudio.readyState >= 1 && isFinite(_spcAudio.duration) && _spcAudio.duration > 0) computePlayMs();
+
+        // PRIMARY anchor: 'playing' fires when audible output actually begins (survives Web Audio routing).
+        _spcAudio.onplaying = armPlayTimer;
+
+        // Diagnostic (#3): confirm playbackRate=1.08 is actually honored through MediaElementSource.
+        // Compare media currentTime vs wall-clock once we're a little way in (≈1.08 honored, ≈1.0 ignored).
+        _spcAudio.ontimeupdate = () => {
+          if (!_playStartedAt || !_spcAudio) return;
+          const ct = _spcAudio.currentTime || 0;
+          if (ct < 0.5) return;
+          const wall = (performance.now() - _playStartedAt) / 1000;
+          if (wall > 0.05) console.log("[SPC] rate-check", key, "observed", (ct / wall).toFixed(3), "expected", SPC_VO_PLAYBACK_RATE);
+          _spcAudio.ontimeupdate = null; // one-shot
+        };
+
+        // Pre-START backstop: if neither 'playing' nor play() resolves, don't stall on the 8s
+        // watchdog. armPlayTimer() replaces this with the precise timer the instant playback starts.
         _spcTimer = setTimeout(advance, 9000);
         const p = _spcAudio.play();
         console.log("[SPC] play", key, src);
-        if (p && typeof p.catch === "function") p.catch((err) => {
-          console.warn("[SPC] audio play() rejected", { key, src, err });
-          if (_spcTimer) clearTimeout(_spcTimer);
-          _spcTimer = setTimeout(advance, dur);
-        });
+        if (p && typeof p.then === "function") {
+          // SECONDARY anchor: play() resolving also means playback began (covers iOS cases where
+          // 'playing' is unreliable). Idempotent with onplaying via _armedPlayTimer.
+          p.then(armPlayTimer).catch((err) => {
+            console.warn("[SPC] audio play() rejected", { key, src, err });
+            if (_spcTimer) clearTimeout(_spcTimer);
+            _spcTimer = setTimeout(advance, dur);
+          });
+        }
       } catch { _spcTimer = setTimeout(advance, dur); }
     } else {
       _spcTimer = setTimeout(advance, dur);

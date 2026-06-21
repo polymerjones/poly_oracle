@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-21 13:10";
+const BUILD_TS = "2026-06-21 13:31";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6542,9 +6542,15 @@ function initGalaxyCanvas() {
   let tutorialTimerRunning = false;    // intro: perimeter visibly counts down until timer powerup
   let tutorialTimerStartedAt = 0;
   // Stunt → Practice: endless arcade gameplay (no timer, no level-complete, score not submitted).
+  const PRACTICE_ASTEROID_SPRITE_KEYS = ["roid01", "roid02", "roid03", "hotroid01"];
+  const PRACTICE_ASTEROID_UNLOCK_MS = 25000;
+  const PRACTICE_THEME_INTERVAL_MS = 30000;
+  const PRACTICE_POWERUP_INTERVAL_MS = 8000;
+  const PRACTICE_POWERUP_POOL = ["bomb", "bomb", "missile", "quadshot", "snowflake"];
   let practiceEndless = false;
+  let practiceStartedAt = 0;
   let nextPracticeMineAt = 0; // Part 8: practice drops a fresh landmine on this 60s cadence
-  // Practice background theme cycling: blend to the next level's color theme every 45s.
+  // Practice background theme cycling: blend to the next level's color theme every 30s.
   let practiceThemeIndex = 1; // starts on the L1 theme; cycles 1→2→…→15→1
   let nextThemeCycleAt = 0;
   // SPC_xx.mp3 audio is recorded later; until a key is listed here, the line is text-only.
@@ -7729,7 +7735,7 @@ function initGalaxyCanvas() {
     sim.warpRings.push(ring);
   }
 
-  function spawnAsteroid(x, y, kind = 3, warp = true) {
+  function spawnAsteroid(x, y, kind = 3, warp = true, spriteKeyOverride = null) {
     if (sim.asteroids.length >= sim.maxAsteroids) return null;
     const a = getAsteroid();
     const r = kind === 3 ? 26 + Math.random() * 12 : kind === 2 ? 18 + Math.random() * 8 : 10 + Math.random() * 6;
@@ -7749,7 +7755,7 @@ function initGalaxyCanvas() {
     a.mass = r * r;
     a.kind = kind;
     const levelNum = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
-    a.spriteKey = getAsteroidSpriteKeyForLevel(levelNum);
+    a.spriteKey = spriteKeyOverride || getAsteroidSpriteKeyForLevel(levelNum);
     a.rot = Math.random() * Math.PI * 2;
     a.spin = (Math.random() - 0.5) * 0.06;
     a.shape = makeShape(8 + Math.floor(Math.random() * 4));
@@ -7775,6 +7781,18 @@ function initGalaxyCanvas() {
       return kinds[(Math.random() * kinds.length) | 0];
     }
     return 3;
+  }
+
+  // Practice rotates asteroid ART independently of numeric kind, which remains size/physics only.
+  // Unlock one additional sprite every 25 seconds, then pick uniformly from all unlocked art.
+  function pickPracticeAsteroidSpriteKey(now = performance.now()) {
+    const elapsedMs = Math.max(0, now - practiceStartedAt);
+    const unlockedKindCount = clamp(
+      1 + Math.floor(elapsedMs / PRACTICE_ASTEROID_UNLOCK_MS),
+      1,
+      PRACTICE_ASTEROID_SPRITE_KEYS.length,
+    );
+    return PRACTICE_ASTEROID_SPRITE_KEYS[(Math.random() * unlockedKindCount) | 0];
   }
 
   function spawnLandmine() {
@@ -9026,6 +9044,7 @@ function initGalaxyCanvas() {
     const wasKind = a.kind;
     const baseX = a.x;
     const baseY = a.y;
+    const parentSpriteKey = a.spriteKey;
     const parentSpeed = Math.sqrt(a.vx * a.vx + a.vy * a.vy);
     addArcadeScore(arcadeMultiplierPoints(wasKind >= 2 ? 25 : 10));
     releaseAsteroid(a);
@@ -9035,7 +9054,13 @@ function initGalaxyCanvas() {
       const childCount = wasKind === 3 ? (3 + Math.floor(Math.random() * 3)) : (2 + Math.floor(Math.random() * 2));
       const spawnSplitChild = () => {
         if (sim.asteroids.length >= sim.maxAsteroids) return false;
-        const child = spawnAsteroid(baseX, baseY, wasKind - 1, false);
+        const child = spawnAsteroid(
+          baseX,
+          baseY,
+          wasKind - 1,
+          false,
+          practiceEndless ? parentSpriteKey : null,
+        );
         if (!child) return false;
         const boost = 1.5 + Math.random() * 0.7;
         child.vx += (child.vx / Math.max(1, Math.abs(child.vx))) * parentSpeed * 0.2 * boost;
@@ -9052,7 +9077,7 @@ function initGalaxyCanvas() {
     const bigBlast = wasKind === 3;
     const mediumBlast = wasKind === 2;
     const ttlScale = bigBlast ? 1.4 : mediumBlast ? 1.18 : 1;
-    spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale, wasKind, a.spriteKey);
+    spawnExplosion(baseX, baseY, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale, wasKind, parentSpriteKey);
     addFrozenShatterFx(baseX, baseY);
     triggerAsteroidSizeFeedback(wasKind);
     const baseBoomVol = wasKind === 3 ? 0.9 : wasKind === 2 ? 0.92 : 0.78;
@@ -11604,10 +11629,14 @@ function initGalaxyCanvas() {
       tutorialFireBlocked = false;
       tutorialBlockPlasmaToss = true; // only the laser this step
       spawnTutorialAsteroids(1, 3);
+      const baseShots = tutorialEvents.shoot || 0;
       spcVO("08", "These are the **Stroids** — our job is to clear them from the Polyverse.", "talk_friendly");
       spcVO("08b", "Tap to fire your laser and blast the **Stroid** and all its pieces.", "talk_calm");
       showTaskInstructionDeferred("TAP TO FIRE — DESTROY THE STROID");
-      const baseShots = tutorialEvents.shoot || 0;
+      await waitVOIdle();
+      await waitMs(800);
+      if (!stuntActive) return;
+      commBoxController.hide();
       waitFor(() => (tutorialEvents.shoot || 0) > baseShots)
         .then(() => { if (stuntActive) showTaskInstruction("DESTROY ALL THE STROIDS"); })
         .catch(() => {});
@@ -12182,6 +12211,7 @@ function initGalaxyCanvas() {
     currentLevelIndex = 3;        // the endless update block reads ARCADE_LEVELS[currentLevelIndex]
     clearGameplayEntities();      // clear the field (asteroids, mines, ufo, powerups, fx)
     const nowP = performance.now();
+    practiceStartedAt = nowP;
     levelDurationMs = cfg.time * 1000; // HUD timer label; the endless loop holds it full each frame
     levelEndsAt = Infinity;            // (re-pinned to now+levelDurationMs by the endless update block)
     levelRunStartAt = nowP;
@@ -12202,11 +12232,11 @@ function initGalaxyCanvas() {
     practiceEndless = true;
     arcadeUfoSpawnAt = nowP + 30000;   // first UFO ~30s in (then respawns 45s after each kill)
     nextPracticeMineAt = nowP + 60000; // first landmine at 60s, every 60s after
-    // Practice powerups: first drop at 8s, then a steady 12s cadence (see the endless update block).
+    // Practice powerups: first drop at 8s, then a steady 8s cadence (see the endless update block).
     nextBombPowerupAt = nowP + 8000;
-    // Background theme cycling: hold L1 theme, blend to the next every 45s.
+    // Background theme cycling: hold L1 theme, blend to the next every 30s.
     practiceThemeIndex = 1;
-    nextThemeCycleAt = nowP + 45000;
+    nextThemeCycleAt = nowP + PRACTICE_THEME_INTERVAL_MS;
     if (hudLevel) hudLevel.textContent = "PRACTICE";
 
     if (preserveSpcOutro) {
@@ -12448,11 +12478,11 @@ function initGalaxyCanvas() {
           spawnLandmine();
           nextPracticeMineAt = now + 60000;
         }
-        // Theme cycle every 45s — setTheme() crossfades via its own blend/tgt system.
+        // Theme cycle every 30s — setTheme() crossfades via its own blend/tgt system.
         if (now >= nextThemeCycleAt) {
           practiceThemeIndex = (practiceThemeIndex % 15) + 1;
           window.galaxyBackground?.setTheme(practiceThemeIndex);
-          nextThemeCycleAt = now + 45000;
+          nextThemeCycleAt = now + PRACTICE_THEME_INTERVAL_MS;
         }
       }
       // 2026-06-21: a RUNNING freeze drains the bank and pauses the level clock — shift every time
@@ -12488,7 +12518,13 @@ function initGalaxyCanvas() {
         if (cfg.spawnEveryMs > 0 && spawnQueue > 0 && now >= nextSpawnAt) {
           if (sim.asteroids.length < maxOnScreen) {
             const p = randomPerimeterPoint();
-            spawnAsteroid(p.x, p.y, pickAsteroidKind(cfg), true);
+            spawnAsteroid(
+              p.x,
+              p.y,
+              pickAsteroidKind(cfg),
+              true,
+              practiceEndless ? pickPracticeAsteroidSpriteKey(now) : null,
+            );
             spawnQueue -= 1;
             spawnedTotal += 1;
             nextSpawnAt += cfg.spawnEveryMs;
@@ -12500,7 +12536,13 @@ function initGalaxyCanvas() {
         // Keep gameplay visually alive between stagger waves.
         if (cfg.spawnEveryMs > 0 && spawnQueue > 0 && sim.asteroids.length === 0) {
           const p = randomPerimeterPoint();
-          spawnAsteroid(p.x, p.y, pickAsteroidKind(cfg), true);
+          spawnAsteroid(
+            p.x,
+            p.y,
+            pickAsteroidKind(cfg),
+            true,
+            practiceEndless ? pickPracticeAsteroidSpriteKey(now) : null,
+          );
           spawnQueue -= 1;
           spawnedTotal += 1;
           nextSpawnAt = Math.max(nextSpawnAt, now + Math.max(350, cfg.spawnEveryMs));
@@ -12608,17 +12650,17 @@ function initGalaxyCanvas() {
         // quad/freeze/bomb stopped appearing entirely. Other types must keep dropping.
         const missileBusy = playerMissileInventory > 0 || activeMissile;
         if (powerups.length < POWERUP_MAX_ONSCREEN && cfg.level >= 1 && now >= nextBombPowerupAt) {
-          const puType = pickPowerupForLevel(cfg);
+          const puType = practiceEndless ? pick(PRACTICE_POWERUP_POOL) : pickPowerupForLevel(cfg);
           if (puType === "missile" && missileBusy) {
             // skip this missile roll while one is held/in flight; retry shortly with a fresh type.
             nextBombPowerupAt = now + 1500;
           } else {
             spawnPowerupAt(puType, randomPowerupPoint());
             playGameSfx("bling", 0.8);
-            // Practice mode: steady 12s cadence (overrides any level config). Otherwise
+            // Practice mode: steady 8s cadence with its own weapon-focused pool. Otherwise
             // 2026-06-15: honor a fixed per-level cadence (cfg.powerupIntervalMs) when set.
             nextBombPowerupAt = practiceEndless
-              ? now + 12000
+              ? now + PRACTICE_POWERUP_INTERVAL_MS
               : cfg.powerupIntervalMs
                 ? now + cfg.powerupIntervalMs
                 : now + BOMB_POWERUP_INTERVAL_MIN

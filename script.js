@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-20 10:54";
+const BUILD_TS = "2026-06-20 18:36";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1829,15 +1829,19 @@ const commBoxController = (() => {
         const start = shown;
         shown += take;
         const leadHere = (n - 1) >= start && (n - 1) < start + take;
+        // 2026-06-20 redesign: white fill on the new dark panel (the cyan glow is
+        // inherited from #commanderTickerText in CSS); bold weapon names get pure
+        // white + extra glow via #commanderTickerText b. Lead char keeps a bright pop.
+        const bodyColor = seg.bold ? "#ffffff" : "#EFFFFF";
         let html;
         if (leadHere) {
           const rest = chunk.slice(0, -1);
           const lead = chunk.slice(-1);
           html =
-            `<span style="color:#00d4d4">${rest}</span>` +
-            `<span style="color:#00ffee;text-shadow:0 0 6px #00ffee">${lead}</span>`;
+            `<span style="color:${bodyColor}">${rest}</span>` +
+            `<span style="color:#ffffff;text-shadow:0 0 8px #00ffee">${lead}</span>`;
         } else {
-          html = `<span style="color:#00d4d4">${chunk}</span>`;
+          html = `<span style="color:${bodyColor}">${chunk}</span>`;
         }
         out += seg.bold ? `<b>${html}</b>` : html;
       }
@@ -1851,10 +1855,10 @@ const commBoxController = (() => {
         i++;
         setTimeout(step, 22 + Math.random() * 18);
       } else {
-        // final static state: full text, dim color, bold runs wrapped
+        // final static state: full text, white fill (cyan glow from CSS), bold runs wrapped
         let out = "";
         for (const seg of segments) {
-          const html = `<span style="color:#00cccc">${seg.text}</span>`;
+          const html = `<span style="color:${seg.bold ? "#ffffff" : "#EFFFFF"}">${seg.text}</span>`;
           out += seg.bold ? `<b>${html}</b>` : html;
         }
         tickerText.innerHTML = out;

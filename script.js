@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-20 21:53";
+const BUILD_TS = "2026-06-21 11:35";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -978,6 +978,9 @@ const hudScore = document.getElementById("hudScore");
 const hudGameTimer = document.getElementById("hudGameTimer");
 const hudBombBtn = document.getElementById("hudBombBtn");
 const hudFreezeBtn = document.getElementById("hudFreezeBtn");
+// 2026-06-21: debounce the freeze HUD button so a fast double-tap can't toggle
+// freeze on-then-off and waste a charge (guards the shared toggleFreezeFromInventory path).
+let _lastFreezeToggleAt = 0;
 const hudMissileBtn = document.getElementById("hudMissileBtn");
 const hudMissileCount = document.getElementById("hudMissileCount");
 const hudMissileReload = document.getElementById("hudMissileReload");
@@ -3465,6 +3468,9 @@ function addListeners() {
   }
   if (hudFreezeBtn) {
     hudFreezeBtn.addEventListener("click", () => {
+      const nowF = performance.now();
+      if (nowF - _lastFreezeToggleAt < 500) return; // 500ms debounce
+      _lastFreezeToggleAt = nowF;
       galaxyCanvasController?.activateFreeze?.();
     });
   }

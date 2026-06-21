@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-20 21:30";
+const BUILD_TS = "2026-06-20 21:53";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -11514,7 +11514,7 @@ function initGalaxyCanvas() {
       // Collected: perimeter snapped back to full (collectPowerup) — now hold it there, paused.
       tutorialTimerRunning = false;
       _timerRemainingMs = levelDurationMs;
-      spcVO("07", "Great! From here the timer's paused while you train.", "talk_calm");
+      spcVO("07", "Great! From here, the timer is paused while you train.", "talk_calm");
       await waitVOIdle();
     } },
     { id: "laser", run: async () => {
@@ -11554,13 +11554,19 @@ function initGalaxyCanvas() {
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(2, 2));
       tutorialState.plasmaObjectiveMode = null;
       hideTaskInstruction(); // net fired successfully
-      spcVO("17", "NICE! Great work, Cadet.", "praise");
+      spcVO("17", "Great work, Cadet!", "praise");
       spcVO("18", "Now let the plasma recharge and do it again!", "talk_friendly");
-      showPlasmaRechargeArrow(); // Part 4: point at the recharge indicator while it refills
+      // 2026-06-20 (Item 1): hold the recharge arrow until the praise + recharge VO drains
+      // (deferred-until-VO-idle) so it no longer pops up over the "Great work, Cadet!" line.
+      await waitVOIdle();
       // Wait for the real cooldown to elapse (not the in-drag `charged` flag, which a new drag
-      // would satisfy instantly) so the recharge lesson actually plays out.
-      await waitFor(() => performance.now() >= plasmaCage.cooldownUntil);
-      hidePlasmaRechargeArrow();
+      // would satisfy instantly) so the recharge lesson actually plays out. Guarded so the arrow
+      // never flashes for a frame if the cooldown already lapsed while the VO played.
+      if (performance.now() < plasmaCage.cooldownUntil) {
+        showPlasmaRechargeArrow(); // Part 4: point at the recharge indicator while it refills
+        await waitFor(() => performance.now() >= plasmaCage.cooldownUntil);
+        hidePlasmaRechargeArrow();
+      }
       spcVO("19", "Plasma is recharged.");
       spawnTutorialAsteroids(3, 2);
       // second round — re-run the two-stage objective (same onUpdate-driven re-arming text)
@@ -11570,7 +11576,7 @@ function initGalaxyCanvas() {
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(3, 2));
       tutorialState.plasmaObjectiveMode = null;
       hideTaskInstruction();
-      spcVO("17b", "NICE! Great work, Cadet.", "praise");
+      spcVO("17b", "Great work, Cadet!", "praise");
       await clearTutorialField();
       await waitMs(350);
     },
@@ -11599,7 +11605,7 @@ function initGalaxyCanvas() {
       hideTaskInstruction();
       spcVO("26", "Wow, there you go.", "laugh");
       spcVO("27", "Destroying a UFO instantly recharges your plasma.");
-      spcVO("28-30", "So net the **Stroids** when a UFO shows up, pop the UFO, and instantly get another net shot. Let's try it.");
+      spcVO("28-30", "So net the **Stroids** when a UFO shows up.");
       await clearTutorialField();
       spawnTutorialAsteroids(3, 2);
       // Net step first — UFO withheld until the net lands so the sequence is taught in order.
@@ -11670,7 +11676,7 @@ function initGalaxyCanvas() {
     } },
     { id: "landmine", run: async () => {
       spawnTutorialLandmine(tutZonePoint("center"));
-      spcVO("42-43", "When you see a bomb, tap it to arm it — you can also grab and toss bombs like **Stroids**.", "talk_calm");
+      spcVO("42-43", "When you see a bomb, tap it to arm it.", "talk_calm");
       spcVO("44-45", "The bomb explodes soon, but to detonate it yourself, just tap it again.", "talk_calm");
       showTaskInstructionDeferred("TAP THE BOMB TO ARM IT");
       tutorialState.mineTapBase = tutorialEvents.mine_tap || 0;
@@ -11694,31 +11700,55 @@ function initGalaxyCanvas() {
       spawnTutorialPowerup("bomb", tutZonePoint("center"));
       spcVO("50-51", "Sometimes a bomb powerup appears — tap it to add it to your HUD.", "talk_calm");
       await waitPowerupCollected("bomb");
-      spcVO("52-54", "Tap the bomb icon in your HUD, then tap the screen to place it. Arm it and tap to detonate.", "talk_calm");
+
+      // 2026-06-20 (Item 5): the old all-at-once "52-54" line is replaced by 4 action-gated steps.
+      // Step 1 — arm via the HUD bomb icon (enters bomb-aim mode).
+      spcVO("52", "When you see a bomb, tap it to arm it.", "talk_calm");
       showHudPointer("hudBombBtn", 6000);
       showTaskInstructionDeferred("TAP THE 💣 IN YOUR HUD");
       await waitFor(() => bombAimMode);
       hideHudPointer();
       hideTaskInstruction();
+
+      // Step 2 — place it on the field (the next tap drops the bomb).
+      spcVO("53", "Now tap the screen where you want to place it.", "talk_calm");
+      showTaskInstructionDeferred("TAP TO PLACE THE BOMB");
       await waitFor(() => placedBombs.length > 0);
+      hideTaskInstruction();
+
+      // Step 3 — arm the placed bomb. AUDIO TODO: no VO recorded yet for this line — the unknown
+      // key falls back to a text-only caption (spcVoSrc returns null). Record SPC for "Tap the
+      // bomb to arm it." and add the key to SPC_VO_AVAILABLE when available.
+      spcVO("arm_placed_bomb", "Tap the bomb to arm it.", "talk_calm");
+      showTaskInstructionDeferred("TAP THE BOMB TO ARM IT");
+      await waitFor(() => placedBombs.some((b) => b.phase === "player_armed"));
+      hideTaskInstruction();
+
+      // Step 4 — detonate it (tap the armed bomb again). "bomb" event fires on detonation.
+      spcVO("54", "To detonate it yourself, tap it again.", "talk_calm");
+      showTaskInstructionDeferred("TAP THE BOMB AGAIN TO DETONATE");
       await waitEvent("bomb");
+      hideTaskInstruction();
       await clearTutorialField();
       await waitMs(350);
     } },
     { id: "quadshot", run: async () => {
       spawnTutorialPowerup("quadshot", tutZonePoint("center"));
-      spcVO("55-56", "Throughout the missions, power-ups appear. That's the **Quad Shot** power-up. Pick it up!", "talk_calm");
+      spcVO("55-56", "That's the **Quad Shot** power-up. Pick it up!", "talk_calm");
       await waitPowerupCollected("quadshot");
       spawnTutorialAsteroids(3, 2);
       spcVO("57", "Blast those **Stroids** with the **Quad Shot**!", "smile_open");
       showTaskInstructionDeferred("BLAST THE STROIDS");
       await waitFor(tutorialAsteroidsAllCleared);
       if (!stuntActive) return;
+      // 2026-06-20 (Item 8): "Keep firing" used to fire every restock loop (3-4x for a fast
+      // player). Gate it to exactly once per training session.
+      let keepFiringSaid = false;
       while (performance.now() < quadShotUntil) {
         await waitFor(() => tutorialAsteroidsAllCleared() || performance.now() >= quadShotUntil);
         if (performance.now() >= quadShotUntil) break;
         spawnTutorialAsteroids(3, 2);
-        spcVO("58", "Keep firing, Cadet!", "smile_open");
+        if (!keepFiringSaid) { spcVO("58", "Keep firing, Cadet!", "smile_open"); keepFiringSaid = true; }
       }
       hideTaskInstruction();
       await clearTutorialField();
@@ -11726,9 +11756,13 @@ function initGalaxyCanvas() {
     } },
     { id: "freeze", run: async () => {
       spawnTutorialPowerup("snowflake", tutZonePoint("center"));
-      spcVO("59-60", "Pick up the freeze powerup and tap the freeze button on your HUD to activate it.", "idle_gentle");
+      // 2026-06-20 (Item 9): split the combined 59-60 line so the "tap the freeze button" guidance
+      // only plays AFTER the powerup is actually collected (was telling the cadet to activate it
+      // before they'd even picked it up).
+      spcVO("59", "Pick up the freeze powerup.", "idle_gentle");
       await waitPowerupCollected("snowflake");
       spawnTutorialAsteroids(3, 2);
+      spcVO("60", "Tap the freeze button on your HUD to activate it.", "idle_gentle");
       showHudPointer("hudFreezeBtn", 6000);
       showTaskInstructionDeferred("TAP ❄ IN YOUR HUD TO ACTIVATE");
       await waitEvent("freeze");

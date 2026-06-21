@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-21 13:31";
+const BUILD_TS = "2026-06-21 13:50";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -985,6 +985,7 @@ const hudMissileBtn = document.getElementById("hudMissileBtn");
 const hudMissileCount = document.getElementById("hudMissileCount");
 const hudMissileReload = document.getElementById("hudMissileReload");
 const hudQuadBadge = document.getElementById("hudQuadBadge");
+const hudQuadTime = document.getElementById("hudQuadTime");
 
 function formatRunTime(ms) {
   const s = Math.floor(ms / 1000);
@@ -6933,16 +6934,17 @@ function initGalaxyCanvas() {
     }
   }
 
-  // 2026-06-10: quadshot HUD badge — violet Q with seconds remaining while the effect runs.
+  // Quadshot HUD badge — existing powerup art with seconds remaining while the effect runs.
   // Called every update frame; only touches the DOM when the displayed second changes.
   function updateHudQuadBadge() {
     if (!hudQuadBadge) return;
     const remaining = quadShotUntil - performance.now();
     const active = remaining > 0;
     hudQuadBadge.classList.toggle("active", active);
-    if (active) {
-      const label = `Q ${Math.ceil(remaining / 1000)}s`;
-      if (hudQuadBadge.textContent !== label) hudQuadBadge.textContent = label;
+    hudQuadBadge.setAttribute("aria-hidden", active ? "false" : "true");
+    if (active && hudQuadTime) {
+      const label = `${Math.ceil(remaining / 1000)}s`;
+      if (hudQuadTime.textContent !== label) hudQuadTime.textContent = label;
     }
   }
 
@@ -12463,6 +12465,9 @@ function initGalaxyCanvas() {
     // levelComplete, no game-over) while leaving the gameplayAllowed physics/input block active.
     if (stuntActive) updateStunt(now);
 
+    // Arcade, endless Practice, and Training all use quadShotUntil as the active-effect source.
+    if (engineMode === "arcade" && arcadeActive) updateHudQuadBadge();
+
     if (engineMode === "arcade" && arcadeActive && !stuntActive) {
       const cfg = ARCADE_LEVELS[currentLevelIndex];
       // 2026-06-15 (Part 9): Practice is endless — hold the timer full, suppress the low-timer
@@ -12706,7 +12711,6 @@ function initGalaxyCanvas() {
           });
           playGameSfx("blip", 0.8);
         }
-        updateHudQuadBadge();
         updateHudMissileInventory();
       }
 

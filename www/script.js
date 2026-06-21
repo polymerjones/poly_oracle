@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-21 12:25";
+const BUILD_TS = "2026-06-21 12:33";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -7323,6 +7323,7 @@ function initGalaxyCanvas() {
     a._coldTossSession = 0;
     delete a._preTossVx;
     delete a._preTossVy;
+    delete a._tutLaserBoosted; // tutorial laser-phase low-count speed boost flag (must not persist on pool reuse)
     sim.asteroidPool.push(a);
   }
 
@@ -11547,6 +11548,20 @@ function initGalaxyCanvas() {
       spcVO("08c", "Fantastic, Cadet — you'll show these **Stroids** who's boss.", "praise");
       await waitVOIdle();
       await waitMs(700);
+    },
+    // 2026-06-21 (Item 2): when the field thins to its last 1-2 stroids, a slow drifter can crawl
+    // behind the comm box and look like the game has hung. Give each surviving stroid a one-time
+    // 1.5x speed nudge so it clears the comm-box footprint quickly. Per-asteroid flag (cleared on
+    // pool release) means it scales each piece exactly once, never frame-over-frame. Laser phase
+    // only — no effect on arcade/practice or any other tutorial step.
+    onUpdate: () => {
+      if (sim.asteroids.length > 2) return;
+      for (const a of sim.asteroids) {
+        if (a._tutLaserBoosted) continue;
+        a._tutLaserBoosted = true;
+        a.vx *= 1.5;
+        a.vy *= 1.5;
+      }
     } },
     { id: "plasma", run: async () => {
       tutorialBlockPlasmaToss = false; // net + toss unlocked from here on

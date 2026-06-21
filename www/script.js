@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-21 11:35";
+const BUILD_TS = "2026-06-21 12:25";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6588,13 +6588,17 @@ function initGalaxyCanvas() {
     missile: "#ffd700", // gold ring glow
   };
   let quadShotUntil = 0;
-  let freezeUntil = 0;
   const QUADSHOT_SEEK_RADIUS = 120;
   // 2026-06-10: freeze is now a collectible inventory item activated from the HUD (like bombs)
   let playerFreezeInventory = 0;
   const MAX_FREEZE_INVENTORY = 3;
   const FREEZE_DURATION_MS = 12000;
-  let _freezeWasActive = false; // edge-detects freeze expiry for the unfreeze sound
+  // 2026-06-21: freeze is a PAUSABLE TIMER, not an on/off toggle. Spending one charge banks
+  // FREEZE_DURATION_MS of freeze time; tapping pauses (time stays banked) / resumes (no new charge);
+  // the freeze fully ends only when the bank drains to 0 (auto-expiry) or the level resets.
+  let _freezeBankMs = 0;        // remaining banked freeze time (ms); 0 == nothing to resume
+  let _freezeActive = false;    // true == freeze running (clock paused); false == paused or empty
+  let _freezeSessionId = 0;     // bumped only on a fresh activation (NOT on resume) — cold-toss gliders
   let goldbarsForceSpawnedThisLevel = false; // DEBUG: revert before release
   let bombAimMode = false;
   // 2026-06-14: homing missile powerup — inventory, targeting + single in-flight missile.
@@ -6872,11 +6876,10 @@ function initGalaxyCanvas() {
   function updateHudFreezeInventory() {
     if (!hudFreezeBtn) return;
     const hasFreezes = playerFreezeInventory > 0;
-    const freezeIsActive = performance.now() < freezeUntil;
     hudFreezeBtn.style.display = "";
     hudFreezeBtn.textContent = `❄ \xD7${playerFreezeInventory}`;
-    // Keep enabled while freeze is active so the player can tap to toggle it off.
-    hudFreezeBtn.disabled = !hasFreezes && !freezeIsActive;
+    // Keep enabled while there's banked time to pause/resume, even with empty inventory.
+    hudFreezeBtn.disabled = !hasFreezes && _freezeBankMs <= 0;
     hudFreezeBtn.classList.toggle("has-freezes", hasFreezes);
   }
 
@@ -7317,7 +7320,7 @@ function initGalaxyCanvas() {
     a.tossed = false;
     a.tossedAt = 0;
     a._stroidHeld = false;
-    a._coldTossUntil = 0;
+    a._coldTossSession = 0;
     delete a._preTossVx;
     delete a._preTossVy;
     sim.asteroidPool.push(a);
@@ -8516,9 +8519,9 @@ function initGalaxyCanvas() {
       delete entity._preTossVy;
       // 2026-06-13: a cold drift released DURING a snowflake freeze must still glide (it's a
       // deliberate player action, like a flicked toss flying through a frozen field) instead of
-      // hanging motionless. Capture the current freeze's end so it glides through THIS freeze only;
-      // a later freeze (freezeUntil jumps past this stamp) re-freezes it like any normal drifter.
-      entity._coldTossUntil = freezeUntil;
+      // hanging motionless. Tag it with the current freeze session so it glides through THIS freeze
+      // only (pause/resume keep the same session); a brand-new freeze (new session id) re-freezes it.
+      entity._coldTossSession = _freezeSessionId;
       playGameSfx(Math.random() < 0.5 ? "stroidthrow1" : "stroidthrow2", 0.5);
       resetStroidToss();
       return true;
@@ -8650,12 +8653,13 @@ function initGalaxyCanvas() {
   }
 
   // 2026-06-13: while the field is frozen, idle stroids are stationary and resolveAsteroidCollisions
-  // is skipped — so a cold-drift toss gliding through (see _coldTossUntil) would silently OVERLAP a
+  // is skipped — so a cold-drift toss gliding through (see _coldTossSession) would silently OVERLAP a
   // frozen rock. Instead, shatter BOTH on the ice: freeze_explode + ice flash + ice particles.
   function updateColdTossFreezeCollision(now) {
     for (let i = 0; i < sim.asteroids.length; i += 1) {
       const g = sim.asteroids[i];
-      if (g.tossed || !g._coldTossUntil || now >= g._coldTossUntil) continue; // not a live cold glider
+      // not a live cold glider: needs an active freeze AND a session tag matching the current freeze
+      if (g.tossed || !_freezeActive || g._coldTossSession !== _freezeSessionId) continue;
       for (let j = 0; j < sim.asteroids.length; j += 1) {
         const other = sim.asteroids[j];
         if (!other || other === g) continue;
@@ -9427,8 +9431,8 @@ function initGalaxyCanvas() {
 
     let color = remaining <= 5000 ? "#ff4444" : remaining <= 10000 ? "#ffaa00" : _levelPrimaryColor;
     // 2026-06-10: freeze strobe — alternate white at ~3Hz while frozen, theme color returns
-    // automatically when freezeUntil lapses.
-    if (now < freezeUntil && Math.floor(now / 167) % 2 === 0) color = "#ffffff";
+    // automatically when the freeze pauses/ends.
+    if (_freezeActive && Math.floor(now / 167) % 2 === 0) color = "#ffffff";
     timerPerimeterCtx.strokeStyle = color;
     if (!isIOSNative) {
       timerPerimeterCtx.shadowColor = color;
@@ -9947,10 +9951,11 @@ function initGalaxyCanvas() {
     // 2026-06-10: clear powerups, active effects, and aim state on level transitions / menu exit
     powerups.length = 0;
     quadShotUntil = 0;
-    freezeUntil = 0;
-    _freezeWasActive = false; // no unfreeze sound on level transitions / menu exit
-    // 2026-06-17: tear down the freeze toggle's lingering FX (icy music filter + HUD glow) so a
-    // level that ends mid-freeze doesn't carry them into the next screen.
+    // 2026-06-21: discard any banked freeze on level transition (bank does NOT persist across
+    // levels). Silent — no unfreeze SFX on a level/menu change — but still tear down the lingering
+    // FX (icy music filter + HUD glow) so a level that ends mid-freeze doesn't carry them forward.
+    _freezeBankMs = 0;
+    _freezeActive = false;
     audioEngine.removeFreezeFilter();
     hudFreezeBtn?.classList.remove("hudFreezeBtn--active");
     goldbarsForceSpawnedThisLevel = false;
@@ -10627,7 +10632,8 @@ function initGalaxyCanvas() {
     // 2026-06-10: reset powerup + active effect state
     powerups.length = 0;
     quadShotUntil = 0;
-    freezeUntil = 0;
+    _freezeBankMs = 0;
+    _freezeActive = false;
     playerFreezeInventory = 0;
     updateHudFreezeInventory();
     updateHudQuadBadge();
@@ -10710,7 +10716,8 @@ function initGalaxyCanvas() {
     playerBombInventory = 0;
     playerFreezeInventory = 0;
     quadShotUntil = 0;
-    freezeUntil = 0;
+    _freezeBankMs = 0;
+    _freezeActive = false;
     bombAimMode = false;
     hudBombBtn?.classList.remove("hudBombBtn--aiming");
     // 2026-06-14: keep the missile button grayed/empty in Stunt Mode
@@ -11784,9 +11791,10 @@ function initGalaxyCanvas() {
       spawnTutorialAsteroids(3, 2);
       spcVO("62", "Frozen **Stroids** can be tossed too. Grab one and toss it.", "idle_gentle");
       showTaskInstructionDeferred("GRAB AND TOSS A FROZEN STROID");
-      // If the freeze carried over from the activation step it's still live — skip straight to the
-      // toss loop. If it expired while Phase A was wrapping up, re-prompt with a fresh powerup.
-      if (performance.now() >= freezeUntil) {
+      // If freeze time carried over from the activation step (bank still has time, whether running
+      // or paused) — skip straight to the toss loop. Only re-prompt with a fresh powerup when the
+      // bank is fully empty.
+      if (_freezeBankMs <= 0) {
         if (!stuntActive) return;
         spawnTutorialPowerup("snowflake", tutZonePoint("center"));
         spcVO("63b", "Freeze expired — grab another one and try the toss.", "idle_gentle");
@@ -11800,12 +11808,14 @@ function initGalaxyCanvas() {
         await waitFor(() =>
           (tutorialEvents.toss || 0) > tutorialState.frozenTossBase
           || tutorialAsteroidsAllCleared()
-          || performance.now() >= freezeUntil); // freeze lapsed OR player manually unfroze (freezeUntil → 0)
+          || _freezeBankMs <= 0); // bank fully drained (a pause keeps time banked — lesson continues)
         if ((tutorialEvents.toss || 0) > tutorialState.frozenTossBase) break;
         if (tutorialAsteroidsAllCleared()) {
           // cleared the field with the laser — restock + re-freeze so the toss can be practiced
           spawnTutorialAsteroids(3, 2);
-          freezeUntil = performance.now() + FREEZE_DURATION_MS;
+          _freezeBankMs = FREEZE_DURATION_MS; // fresh full bank, running
+          _freezeActive = true;
+          _freezeSessionId++; // new session so prior gliders re-freeze
           onFreezeStart(); // re-freeze with the full FX set (icy music filter + HUD glow)
           spcVO("63", "Good shooting — but try grabbing and tossing a frozen **Stroid**.", "idle_gentle");
         } else {
@@ -11817,7 +11827,7 @@ function initGalaxyCanvas() {
           spcVO("63b", "Freeze expired — grab another one and try the toss.", "idle_gentle");
           await waitPowerupCollected("snowflake");
           showHudPointer("hudFreezeBtn", 6000);
-          await waitEvent("freeze"); // re-arm freezeUntil before re-checking for the toss
+          await waitEvent("freeze"); // re-arm the freeze bank before re-checking for the toss
           hideHudPointer();
         }
       }
@@ -11994,7 +12004,8 @@ function initGalaxyCanvas() {
     arcadeScore = 0;
     playerBombInventory = 0;
     quadShotUntil = 0;
-    freezeUntil = 0;
+    _freezeBankMs = 0;
+    _freezeActive = false;
     playerFreezeInventory = 0;
     playerMissileInventory = 0;
     missileReloadUntil = 0;
@@ -12320,18 +12331,22 @@ function initGalaxyCanvas() {
           nextThemeCycleAt = now + 45000;
         }
       }
-      // 2026-06-10: an active freeze pauses the level clock — shift every time anchor by dt
-      // each frozen frame so remaining/elapsed (and the perimeter line) hold their position.
-      const frozenNow = now < freezeUntil;
-      if (frozenNow) {
-        levelEndsAt += dt;
-        levelRunStartAt += dt;
-        if (Number.isFinite(nextSpawnAt)) nextSpawnAt += dt;
-        if (nextMineRespawnAt) nextMineRespawnAt += dt; // 2026-06-16: hold mine drip during freeze
-      } else if (_freezeWasActive) {
-        onFreezeEnd(false); // freeze auto-lapsed — unfreeze sfx, drop music filter + HUD glow
+      // 2026-06-21: a RUNNING freeze drains the bank and pauses the level clock — shift every time
+      // anchor by dt each frozen frame so remaining/elapsed (and the perimeter line) hold. dt is
+      // clamped to 33ms upstream (script.js Math.min(rawDt,33)), so a huge dt on foreground return
+      // can't nuke the bank in one frame. When the bank hits 0, auto-end silently. A PAUSE leaves
+      // _freezeActive=false with bank intact — the clock simply resumes ticking (no special case).
+      if (_freezeActive) {
+        _freezeBankMs -= dt;
+        if (_freezeBankMs <= 0) {
+          endFreeze(false); // bank drained — silent unfreeze (drops music filter + HUD glow)
+        } else {
+          levelEndsAt += dt;
+          levelRunStartAt += dt;
+          if (Number.isFinite(nextSpawnAt)) nextSpawnAt += dt;
+          if (nextMineRespawnAt) nextMineRespawnAt += dt; // 2026-06-16: hold mine drip during freeze
+        }
       }
-      _freezeWasActive = frozenNow;
       const remainingMs = levelEndsAt - now;
       updateArcadeHud(now);
 
@@ -12610,7 +12625,7 @@ function initGalaxyCanvas() {
 
       // 2026-06-10: snowflake freeze — entity positions hold but rotation keeps running.
       // Firing, the level timer, and powerup expiry are deliberately not frozen.
-      const simFrozen = now < freezeUntil;
+      const simFrozen = _freezeActive;
       for (let i = 0; i < sim.asteroids.length; i += 1) {
         const a = sim.asteroids[i];
         // 2026-06-11: a tossed (flaming) stroid is NEVER held — held and tossed are mutually
@@ -12631,8 +12646,8 @@ function initGalaxyCanvas() {
         // 2026-06-11: a tossed stroid keeps flying during a freeze (player action) — you can
         // hurl one through the frozen field and shatter it. Only idle drift is frozen.
         // 2026-06-13: a cold-drift toss (no flick) released during this same freeze also keeps
-        // gliding — _coldTossUntil holds the releasing freeze's end (see slowTossFallback).
-        if (simFrozen && !a.tossed && !(a._coldTossUntil && now < a._coldTossUntil)) continue;
+        // gliding — _coldTossSession tags the releasing freeze session (see slowTossFallback).
+        if (simFrozen && !a.tossed && !(a._coldTossSession === _freezeSessionId)) continue;
         a.x += a.vx * (dt / 1000);
         a.y += a.vy * (dt / 1000);
         if (engineMode === "practice") wrapEntityToCanvas(a);
@@ -12850,7 +12865,7 @@ function initGalaxyCanvas() {
     // 2026-06-11: trail EVERY in-flight tossed asteroid (multiple can be airborne at once).
     // While a freeze is active the trail is ice particles instead of flames; the colour is
     // fixed at spawn so a particle keeps its look as it fades.
-    const frozen = now < freezeUntil;
+    const frozen = _freezeActive;
     const palette = frozen ? FLAME_ICE_COLORS : FLAME_COLORS;
     for (let ai = 0; ai < sim.asteroids.length; ai += 1) {
       const tossed = sim.asteroids[ai];
@@ -12914,7 +12929,7 @@ function initGalaxyCanvas() {
   function drawTossedFireFx(tctx) {
     if (!tctx) return;
     const nowF = performance.now();
-    const frozen = nowF < freezeUntil;
+    const frozen = _freezeActive;
     tctx.save();
     tctx.globalCompositeOperation = "lighter";
     // plume blobs (drawn first so they sit behind the stroid)
@@ -13051,7 +13066,7 @@ function initGalaxyCanvas() {
   // the overlay because asteroids render through PIXI on device (the 2D multiply-tint path
   // never runs there), so tinting individual asteroids isn't reliable.
   function drawFreezeOverlay(tctx) {
-    if (!tctx || performance.now() >= freezeUntil) return;
+    if (!tctx || !_freezeActive) return;
     tctx.save();
     tctx.fillStyle = "rgba(136,221,255,0.12)";
     tctx.fillRect(0, 0, sim.width, sim.height);
@@ -13752,7 +13767,7 @@ function initGalaxyCanvas() {
 
   // 2026-06-17: all the freeze-ON effects (flash, shake, sfx, icy music highpass, HUD active
   // glow). Kept stuntNotify OUT of here so internal tutorial re-freezes can reuse it without
-  // firing a spurious "freeze" tutorial event.
+  // firing a spurious "freeze" tutorial event. Used for BOTH first activation and resume.
   function onFreezeStart() {
     cssFlash("#88ddff", 0.25, 300);
     cssShake(0.8);
@@ -13760,31 +13775,55 @@ function initGalaxyCanvas() {
     audioEngine.applyFreezeFilter();
     if (hudFreezeBtn) hudFreezeBtn.classList.add("hudFreezeBtn--active");
   }
-  // 2026-06-17: all the freeze-OFF effects. Called both on manual toggle-off and on auto-expiry.
-  // Clears freezeUntil + the edge-detect latch so the update-loop doesn't double-fire. manual
-  // taps play the unfreeze sound a touch louder than a silent auto-lapse.
-  function onFreezeEnd(manual) {
-    freezeUntil = 0;
-    _freezeWasActive = false;
+  // 2026-06-21: the freeze-OFF *effects only* (unfreeze sfx, drop music filter + HUD glow) — no
+  // state change. Fired on every PAUSE and on the silent auto-expiry/full-clear. `manual` plays
+  // the unfreeze sound a touch louder than a silent auto-lapse.
+  function freezePauseFx(manual) {
     playGameSfx("unfreeze", manual ? 0.9 : 0.85);
     audioEngine.removeFreezeFilter();
     if (hudFreezeBtn) hudFreezeBtn.classList.remove("hudFreezeBtn--active");
   }
-
-  // 2026-06-17: player-activated freeze TOGGLE (HUD ❄ button). Tap while frozen → unfreeze
-  // immediately; tap while not frozen (and stocked) → freeze for up to FREEZE_DURATION_MS (the
-  // update loop auto-unfreezes via onFreezeEnd when freezeUntil lapses).
-  function toggleFreezeFromInventory() {
-    const nowF = performance.now();
-    if (nowF < freezeUntil) {
-      // currently frozen — manual unfreeze
-      onFreezeEnd(true);
+  // 2026-06-21: fully end a freeze — drains the bank to 0 and runs the OFF effects. Called on
+  // auto-expiry (bank hit 0) and on every level-end/reset path. Idempotent: a no-op if nothing
+  // is banked/active, so reset sites can call it unconditionally.
+  function endFreeze(manual) {
+    if (_freezeBankMs <= 0 && !_freezeActive) {
+      _freezeBankMs = 0;
+      _freezeActive = false;
       return;
     }
+    _freezeBankMs = 0;
+    _freezeActive = false;
+    freezePauseFx(manual);
+  }
+
+  // 2026-06-21: player-tapped HUD ❄ button — freeze is a PAUSABLE TIMER, not a toggle.
+  //  • running    → PAUSE: stop the clock, bank the remaining time, run OFF fx. No charge change.
+  //  • paused w/ bank → RESUME: restart the clock, run ON fx. No charge consumed.
+  //  • empty bank + stocked → ACTIVATE: spend 1 charge, bank FREEZE_DURATION_MS, new session, ON fx.
+  // The update loop auto-ends (silent) when the bank drains to 0.
+  function toggleFreezeFromInventory() {
+    if (_freezeActive) {
+      // running → pause; keep the remaining bank for a later resume.
+      _freezeActive = false;
+      freezePauseFx(true);
+      updateHudFreezeInventory();
+      return;
+    }
+    if (_freezeBankMs > 0) {
+      // paused with time banked → resume without spending a charge.
+      _freezeActive = true;
+      onFreezeStart();
+      updateHudFreezeInventory();
+      return;
+    }
+    // empty bank → fresh activation from inventory.
     if (playerFreezeInventory <= 0) return;
     playerFreezeInventory--;
+    _freezeBankMs = FREEZE_DURATION_MS;
+    _freezeActive = true;
+    _freezeSessionId++; // new session so prior cold-toss gliders re-freeze
     updateHudFreezeInventory();
-    freezeUntil = nowF + FREEZE_DURATION_MS;
     onFreezeStart();
     stuntNotify("freeze");
   }
@@ -14063,7 +14102,7 @@ function initGalaxyCanvas() {
   // 2026-06-10: frozen-asteroid destruction — glass-break layer over the normal boom plus
   // ice debris. Runs for any destruction path while a freeze is active.
   function addFrozenShatterFx(x, y, playSound = true) {
-    if (performance.now() >= freezeUntil) return;
+    if (!_freezeActive) return;
     if (playSound) playGameSfx("freeze_explode", 0.9);
     const count = 8 + Math.floor(Math.random() * 5);
     for (let i = 0; i < count; i += 1) {

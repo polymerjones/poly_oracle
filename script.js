@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-22 11:44";
+const BUILD_TS = "2026-06-22 11:59";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1163,11 +1163,14 @@ const menuLogoWarp = (() => {
       });
     }
 
-    // 2) periodic specular gleam sweeping across the chrome (every ~3.6s)
-    const GLEAM_PERIOD = 3.6;
-    const gp = (t % GLEAM_PERIOD) / GLEAM_PERIOD;
-    if (gp < 0.34) {
-      const sweep = gp / 0.34; // 0..1 across the logo
+    // 2) periodic specular gleam sweeping across the chrome — first sweep at ~10s, then every
+    // ~25s, each lasting ~1.6s (a slow, occasional "big shine" rather than a constant glint)
+    const GLEAM_FIRST = 10; // seconds before the first sweep
+    const GLEAM_EVERY = 25; // seconds between sweeps thereafter
+    const GLEAM_DUR = 1.6; // seconds the sweep takes to cross
+    const gleamT = t >= GLEAM_FIRST ? (t - GLEAM_FIRST) % GLEAM_EVERY : -1;
+    if (gleamT >= 0 && gleamT < GLEAM_DUR) {
+      const sweep = gleamT / GLEAM_DUR; // 0..1 across the logo
       const bandCx = (-0.3 + sweep * 1.6) * w; // band travels past both edges
       const bandW = w * 0.26;
       const intensity = Math.sin(sweep * Math.PI); // fade in/out at the ends
@@ -4181,10 +4184,20 @@ function closeGalaxyView() {
   galaxyView.setAttribute("aria-hidden", "true");
   oracleView.hidden = false;
   document.body.style.overflow = "";
-  // 2026-06-22: force the Oracle bg video visible on return — it was paused on entering the galaxy
-  // view, and on some runs it came back at opacity:0 (black). Resetting opacity here is a cheap
-  // belt-and-suspenders alongside the controller restart below.
-  if (oracleBgVideo) oracleBgVideo.style.opacity = "";
+  // 2026-06-22: restore the Oracle bg video on return. Opacity alone wasn't enough — on iOS the
+  // WKWebView drops the paused video's decoded frame while it's hidden behind the galaxy view, so
+  // it comes back black. Clear the fade-in opacity AND force a clean replay (reload only if the
+  // media element actually lost its data), then let the controller's watchdog keep it alive.
+  if (oracleBgVideo) {
+    oracleBgVideo.style.opacity = "";
+    try {
+      if (oracleBgVideo.readyState < 2) oracleBgVideo.load();
+      const pr = oracleBgVideo.play();
+      if (pr && typeof pr.catch === "function") pr.catch(() => {});
+    } catch {
+      // ignore — controller.start() below also retries via its watchdog
+    }
+  }
   if (!prefersReducedMotion) {
     if (oracleBgController) oracleBgController.start();
   }

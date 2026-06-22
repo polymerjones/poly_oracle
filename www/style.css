@@ -2477,12 +2477,14 @@ select:focus-visible {
 
 /* 2026-06-22: standalone bottom-screen level title — lingers then very slowly fades. Sits in the
    lower third, pointer-events:none, NOT inside the dimming intro overlay, so gameplay shows
-   through and taps pass to the playfield. */
+   through and taps pass to the playfield. Anchored ABOVE the commander HUD (fixed bottom:40px,
+   ~190px-tall portrait → top ~230px from bottom) so the title never collides with the comm
+   box/speech bubble that's on-screen at level start. max() keeps the clearance on short screens. */
 .levelTitleBanner {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 16%;
+  bottom: max(34%, 250px);
   z-index: 4;
   text-align: center;
   pointer-events: none;

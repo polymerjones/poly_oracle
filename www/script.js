@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-22 14:36";
+const BUILD_TS = "2026-06-22 15:07";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -3240,6 +3240,21 @@ const audioEngine = {
   async playMusic(key, url, { crossfadeMs = 250, volume = 1 } = {}) {
     if (!url) return;
     this.ensureMusic();
+    // 2026-06-22: in-flight guard. currentMusic/currentMusicHtml aren't set until the awaits below
+    // resolve, so two calls for the same key in quick succession both used to slip past the
+    // same-key checks and start two sources (the menu-theme double-start). Track the pending key so
+    // a concurrent same-key call is a no-op until the first finishes.
+    if (this._pendingMusicKey === key) return;
+    if (this.currentMusic && this.currentMusic.key === key) return;
+    if (this.currentMusicHtml && this.currentMusicHtml.key === key) return;
+    this._pendingMusicKey = key;
+    try {
+      return await this._playMusicInner(key, url, { crossfadeMs, volume });
+    } finally {
+      if (this._pendingMusicKey === key) this._pendingMusicKey = null;
+    }
+  },
+  async _playMusicInner(key, url, { crossfadeMs = 250, volume = 1 } = {}) {
     if (!this.unlocked) {
       try {
         await this.unlock();
@@ -12786,7 +12801,10 @@ function initGalaxyCanvas() {
     syncArcadeEntryLabel();
     setArcadeSubmenu(canPreserve && openArcadeMenu ? "arcade" : "root");
     syncArcadeMenuButtons();
-    if (!canPreserve) playArcadeMenuMusic();
+    // 2026-06-22: menu music is already handled in the non-preserve branch above (play if on the
+    // game page, else stop). A second playArcadeMenuMusic() here double-started the theme — the
+    // first call took the HTML fallback while the buffer loaded, then this one restarted it from 0
+    // via the WebAudio path (~1s in). Removed; the else branch is the single source of truth.
     setGalaxyViewMode("menu");
     // 2026-06-22: replay the STROIDS logo warp-in on a FRESH menu entry only — not when pausing a
     // live arcade game into the menu. The warp's per-frame raster pass (54 sliced draws + ghosts)

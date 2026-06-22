@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-22 10:51";
+const BUILD_TS = "2026-06-22 11:44";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -966,6 +966,7 @@ const menuLogoWarp = (() => {
   if (!menuLogoCanvas) return noop;
   const ctx = menuLogoCanvas.getContext("2d");
   if (!ctx) return noop;
+  const SUPPORTS_CONIC = typeof ctx.createConicGradient === "function";
 
   const img = new Image();
   let imgReady = false;
@@ -1071,7 +1072,149 @@ const menuLogoWarp = (() => {
     } else {
       drawSharp(); // guarantee a clean final frame
       rafId = 0;
+      startIdle(); // hand off to the continuous "living logo" shimmer
     }
+  }
+
+  // ── continuous "living logo" idle shimmer (runs after the warp resolves) ──────────────
+  // The source art is a single flattened PNG (chrome text baked over a nebula swirl), so the
+  // layers can't be moved geometrically. Instead we fake separate-layer life with masked
+  // additive light: a slow conic "energy" rotation around the swirl + a specular gleam that
+  // sweeps the chrome + twinkling sparkles. Every effect is clipped to the logo's alpha via an
+  // offscreen mask canvas, so nothing paints into the empty corners. Throttled to ~30fps and
+  // stopped whenever the Select Mode menu isn't on screen (see stop() callers).
+  let maskCanvas = null;
+  let maskCtx = null;
+  let idleRunning = false;
+  let idleStartTs = 0;
+  let idleLastDraw = 0;
+  // angle around center, radius factor, size factor, twinkle phase
+  const SPARKLES = [
+    [-0.35, 0.46, 1.0, 0.0],
+    [0.55, 0.50, 0.8, 1.7],
+    [1.7, 0.30, 0.7, 3.1],
+    [2.7, 0.46, 0.9, 0.8],
+    [3.5, 0.40, 0.7, 2.2],
+    [4.6, 0.49, 0.85, 4.0],
+    [5.5, 0.33, 0.6, 5.2],
+  ];
+
+  function ensureMask(w, h) {
+    if (!maskCanvas) {
+      maskCanvas = document.createElement("canvas");
+      maskCtx = maskCanvas.getContext("2d");
+    }
+    if (maskCanvas.width !== w || maskCanvas.height !== h) {
+      maskCanvas.width = w;
+      maskCanvas.height = h;
+    }
+    return maskCtx;
+  }
+
+  // paint fillFn(mctx) clipped to the logo's alpha shape, then add it onto the main canvas
+  function addMaskedLight(w, h, alpha, fillFn) {
+    const mctx = ensureMask(w, h);
+    mctx.globalCompositeOperation = "source-over";
+    mctx.globalAlpha = 1;
+    mctx.clearRect(0, 0, w, h);
+    mctx.drawImage(img, 0, 0, w, h); // establish the logo's alpha shape
+    mctx.globalCompositeOperation = "source-in"; // subsequent paint is clipped to that shape
+    fillFn(mctx);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(maskCanvas, 0, 0, w, h);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function idleFrame(ts) {
+    if (!idleRunning) return;
+    if (!idleStartTs) idleStartTs = ts;
+    if (ts - idleLastDraw < 32) { // ~30fps — smooth for slow shimmer, half the draw cost
+      rafId = requestAnimationFrame(idleFrame);
+      return;
+    }
+    idleLastDraw = ts;
+    const t = (ts - idleStartTs) / 1000;
+    const { w, h } = sizeCanvas();
+    const cx = w / 2;
+    const cy = h * 0.42;
+
+    // base logo
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+
+    // 1) slow conic "energy" rotating around the swirl (continuous, subtle)
+    if (SUPPORTS_CONIC) {
+      const ang = (t * 0.5) % (Math.PI * 2); // ~12s per rotation
+      addMaskedLight(w, h, 0.16, (mctx) => {
+        const g = mctx.createConicGradient(ang, cx, cy);
+        g.addColorStop(0.0, "rgba(170,140,255,0)");
+        g.addColorStop(0.12, "rgba(190,170,255,0.9)");
+        g.addColorStop(0.24, "rgba(170,140,255,0)");
+        g.addColorStop(0.5, "rgba(120,200,255,0)");
+        g.addColorStop(0.62, "rgba(150,210,255,0.85)");
+        g.addColorStop(0.74, "rgba(120,200,255,0)");
+        g.addColorStop(1.0, "rgba(170,140,255,0)");
+        mctx.fillStyle = g;
+        mctx.fillRect(0, 0, w, h);
+      });
+    }
+
+    // 2) periodic specular gleam sweeping across the chrome (every ~3.6s)
+    const GLEAM_PERIOD = 3.6;
+    const gp = (t % GLEAM_PERIOD) / GLEAM_PERIOD;
+    if (gp < 0.34) {
+      const sweep = gp / 0.34; // 0..1 across the logo
+      const bandCx = (-0.3 + sweep * 1.6) * w; // band travels past both edges
+      const bandW = w * 0.26;
+      const intensity = Math.sin(sweep * Math.PI); // fade in/out at the ends
+      addMaskedLight(w, h, 0.55 * intensity, (mctx) => {
+        const g = mctx.createLinearGradient(bandCx - bandW, 0, bandCx + bandW, h * 0.3);
+        g.addColorStop(0.0, "rgba(255,255,255,0)");
+        g.addColorStop(0.5, "rgba(255,250,235,0.95)");
+        g.addColorStop(1.0, "rgba(255,255,255,0)");
+        mctx.fillStyle = g;
+        mctx.fillRect(0, 0, w, h);
+      });
+    }
+
+    // 3) twinkling sparkles on the ring
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < SPARKLES.length; i++) {
+      const [a, rf, sf, ph] = SPARKLES[i];
+      const tw = 0.5 + 0.5 * Math.sin(t * 2.4 + ph);
+      const alpha = tw * tw * 0.9;
+      if (alpha < 0.02) continue;
+      const sx = cx + Math.cos(a) * w * rf;
+      const sy = cy + Math.sin(a) * h * rf * 0.92;
+      const r = w * 0.012 * sf * (0.6 + 0.7 * tw);
+      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
+      g.addColorStop(0, `rgba(255,255,255,${alpha})`);
+      g.addColorStop(0.4, `rgba(200,220,255,${alpha * 0.6})`);
+      g.addColorStop(1, "rgba(160,180,255,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+
+    rafId = requestAnimationFrame(idleFrame);
+  }
+
+  function startIdle() {
+    if (prefersReducedMotion) {
+      drawSharp();
+      return;
+    }
+    idleRunning = true;
+    idleStartTs = 0;
+    idleLastDraw = 0;
+    rafId = requestAnimationFrame(idleFrame);
   }
 
   function play() {
@@ -1079,16 +1222,22 @@ const menuLogoWarp = (() => {
       pendingPlay = true;
       return;
     }
+    stop();
     if (prefersReducedMotion) {
       drawSharp();
       return;
     }
-    if (rafId) cancelAnimationFrame(rafId);
     startTs = 0;
     rafId = requestAnimationFrame(frame);
   }
 
-  return { play, drawSharp };
+  function stop() {
+    idleRunning = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+  }
+
+  return { play, drawSharp, stop };
 })();
 
 const btnArcade = document.getElementById("btnArcade");
@@ -4027,6 +4176,7 @@ function closeGalaxyView() {
   menuOverlayOpen = false;
   audioEngine.stopMusic();
   stopGalaxyBackground();
+  menuLogoWarp.stop(); // stop the logo idle shimmer when returning to the Oracle
   galaxyView.hidden = true;
   galaxyView.setAttribute("aria-hidden", "true");
   oracleView.hidden = false;
@@ -7026,6 +7176,8 @@ function initGalaxyCanvas() {
     }
     if (galaxyModeSelect) galaxyModeSelect.setAttribute("aria-hidden", mode === "menu" ? "false" : "true");
     if (arcadeHud) arcadeHud.setAttribute("aria-hidden", mode === "arcade" ? "false" : "true");
+    // halt the logo's idle shimmer rAF whenever we leave the Select Mode menu (save battery)
+    if (mode !== "menu") menuLogoWarp.stop();
   }
 
   function renderLives() {

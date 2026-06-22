@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-21 20:25";
+const BUILD_TS = "2026-06-21 21:01";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6539,6 +6539,10 @@ function initGalaxyCanvas() {
   let _skipHintHideTimer = null;       // pending 500ms fade-out when SPC goes quiet
   let tutorialBlockPlasmaToss = false; // Phase 2: only the laser is taught — block net/toss
   let tutorialSmallGrabHintEnabled = false; // True only during the dedicated toss instruction.
+  // 2026-06-21: bombInventory phase — a tutorial-placed bomb must NOT auto-arm/auto-detonate.
+  // It stays "spawned" until the cadet taps it to arm it, so the "TAP THE BOMB TO ARM IT" step
+  // can't strand the player in purgatory waiting for a player_armed that auto-detonation skipped.
+  let tutorialPlacedBombNoAutoArm = false;
   let tutorialPaused = false;          // pause menu / app-switch
   let tutorialTimerRunning = false;    // intro: perimeter visibly counts down until timer powerup
   let tutorialTimerStartedAt = 0;
@@ -6564,6 +6568,7 @@ function initGalaxyCanvas() {
     "34", "35", "36", "35-36", "37", "38", "39", "40", "41", "42-43", "44-45", "46", "47", "48", "49",
     "50", "51", "50-51", "52", "53", "54", "54_alt", "52-54", "55-56", "57", "58", "59", "60", "59-60", "61", "62",
     "thats_the_quad_shot_pick_it_up", "but_to_detonate_it_yourself_just_tap_it_again",
+    "tap_the_bomb_icon_hud",
     "62_part1", "63", "63b", "63b_part1", "63b_part2", "64", "65", "66", "67", "68", "69", "70",
     "amazing", "boom_like_that", "crushing_it", "freeze_toggle", "grab_small", "lets_get_after_it",
     "not_doing_hot", "peeing_pants", "show_boss", "there_you_go", "timer_warning",
@@ -7855,7 +7860,9 @@ function initGalaxyCanvas() {
     const r = 14;
     const px = clamp(x, playfield.x + r, playfield.x + playfield.w - r);
     const py = clamp(y, playfield.y + r, playfield.y + playfield.h - r);
-    placedBombs.push(createMineEntity(px, py));
+    const placed = createMineEntity(px, py);
+    if (tutorialPlacedBombNoAutoArm) placed.noAutoArm = true; // tutorial: wait for the cadet to tap-arm it
+    placedBombs.push(placed);
     playerBombInventory--;
     updateHudBombInventory();
     playGameSfx("blip1", 0.85);
@@ -9808,7 +9815,7 @@ function initGalaxyCanvas() {
       }
     }
 
-    if (mine.phase === "spawned" && now - mine.spawnedAt >= 10000) {
+    if (mine.phase === "spawned" && !mine.noAutoArm && now - mine.spawnedAt >= 10000) {
       mine.phase = "armed";
       mine.armedAt = now;
       playGameSfx("landmine_arm", 0.96);
@@ -11835,10 +11842,15 @@ function initGalaxyCanvas() {
       await waitPowerupCollected("bomb");
 
       // 2026-06-20 (Item 5): the old all-at-once "52-54" line is replaced by 4 action-gated steps.
-      // Step 1 — arm via the HUD bomb icon (enters bomb-aim mode).
-      spcVO("52", "When you see a bomb, tap it to arm it.", "talk_calm");
-      showHudPointer("hudBombBtn", 6000);
-      showTaskInstructionDeferred("TAP THE 💣 IN YOUR HUD");
+      // 2026-06-21: a tutorial-placed bomb must wait for the cadet to tap-arm it (no auto-arm /
+      // auto-detonate) so Step 3 can't strand the player. Flag is cleared in cleanupTutorial().
+      tutorialPlacedBombNoAutoArm = true;
+      // Step 1 — tap the HUD bomb icon (enters bomb-aim mode). 2026-06-21: this step is about the
+      // HUD icon, not arming — corrected text + dedicated SPC recording (vo/SPC_tap_the_bomb_icon_hud.mp3).
+      // The old "52" recording said "tap it to arm it", which now fits Step 3.
+      spcVO("tap_the_bomb_icon_hud", "Tap the bomb icon on your HUD.", "talk_calm");
+      showHudPointer("hudBombBtn", 0); // persist the arrow until the icon is tapped
+      showTaskInstructionDeferred("TAP THE 💣 ICON ON YOUR HUD");
       await waitFor(() => bombAimMode);
       hideHudPointer();
       hideTaskInstruction();
@@ -11849,10 +11861,11 @@ function initGalaxyCanvas() {
       await waitFor(() => placedBombs.length > 0);
       hideTaskInstruction();
 
-      // Step 3 — arm the placed bomb. AUDIO TODO: no VO recorded yet for this line — the unknown
-      // key falls back to a text-only caption (spcVoSrc returns null). Record SPC for "Tap the
-      // bomb to arm it." and add the key to SPC_VO_AVAILABLE when available.
-      spcVO("arm_placed_bomb", "Tap the bomb to arm it.", "talk_calm");
+      // Step 3 — arm the placed bomb by tapping it. 2026-06-21: reuse the recorded "52" VO
+      // ("When you see a bomb, tap it to arm it.") here — it fits tapping the placed bomb, and
+      // fixes the previously-missing VO on this step. The bomb stays "spawned" (noAutoArm) until
+      // the cadet taps it, so this waitFor can't hang on an auto-detonated bomb.
+      spcVO("52", "When you see a bomb, tap it to arm it.", "talk_calm");
       showTaskInstructionDeferred("TAP THE BOMB TO ARM IT");
       await waitFor(() => placedBombs.some((b) => b.phase === "player_armed"));
       hideTaskInstruction();
@@ -12076,6 +12089,7 @@ function initGalaxyCanvas() {
     tutorialFireBlocked = false;
     tutorialBlockPlasmaToss = false;
     tutorialSmallGrabHintEnabled = false;
+    tutorialPlacedBombNoAutoArm = false;
     tutorialPaused = false;
     tutorialTimerRunning = false;
     hideSkipHint();
@@ -12102,6 +12116,7 @@ function initGalaxyCanvas() {
     tutorialFireBlocked = false;
     tutorialBlockPlasmaToss = false;
     tutorialSmallGrabHintEnabled = false;
+    tutorialPlacedBombNoAutoArm = false;
     tutorialPaused = false;
     tutorialTimerRunning = false;
     hideSkipHint();
@@ -14781,7 +14796,7 @@ function initGalaxyCanvas() {
         updateHudMissileInventory();
       }
       updateHudBombInventory(); // suppress/restore the attention pulse based on aim state
-      if (bombAimMode) playGameSfx("blip", 0.6);
+      if (bombAimMode) playGameSfx("item_pickup2", 0.85); // 2026-06-21: crunchier bomb-arm cue
     },
     // 2026-06-17: HUD freeze button — toggle freeze on/off (tap to freeze, tap again to unfreeze)
     activateFreeze() {

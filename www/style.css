@@ -2475,6 +2475,42 @@ select:focus-visible {
   color: #d4e2ff;
 }
 
+/* 2026-06-22: standalone bottom-screen level title — lingers then very slowly fades. Sits in the
+   lower third, pointer-events:none, NOT inside the dimming intro overlay, so gameplay shows
+   through and taps pass to the playfield. */
+.levelTitleBanner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 16%;
+  z-index: 4;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  padding: 0 18px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-size: clamp(1.1rem, 4.6vw, 1.9rem);
+  color: #eaf3ff;
+  text-shadow: 0 0 10px rgba(140, 210, 255, 0.55), 0 0 28px rgba(90, 170, 255, 0.4);
+}
+.levelTitleBanner.show {
+  animation: levelTitleIn 600ms cubic-bezier(.2, .9, .3, 1) both;
+}
+.levelTitleBanner.show.fadeOut {
+  /* very slow fade-out so the title drifts away rather than blinking off */
+  animation: levelTitleOut 2800ms ease forwards;
+}
+@keyframes levelTitleIn {
+  from { opacity: 0; transform: translateY(12px); letter-spacing: 0.4em; }
+  to   { opacity: 1; transform: none; letter-spacing: 0.22em; }
+}
+@keyframes levelTitleOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
 .arcadeOverlayBtn {
   margin-top: 16px;
   min-height: 44px;

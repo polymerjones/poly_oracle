@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-22 14:20";
+const BUILD_TS = "2026-06-22 14:36";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -566,6 +566,10 @@ const REVEAL_VARIANT_SFX = [
 ];
 const REVEAL_POOL_SFX = ["reveal1_pool", "reveal2_pool", "reveal3_pool", "reveal4_pool"];
 const ARCADE_OVERLAY_FADE_MS = 500;
+// 2026-06-22: standalone bottom-screen level title — lingers, then a very slow fade. Lives
+// outside the dimming intro overlay (pointer-events:none) so it never covers/blocks gameplay.
+const LEVEL_TITLE_HOLD_MS = 3600;
+const LEVEL_TITLE_FADE_MS = 2800;
 const REVEAL = {
   TAP_BURST_MS: 1500,
   TAP_INTERVAL_MS_START: 60,
@@ -589,28 +593,28 @@ const SFX = {
 const ARCADE_LEVELS = [
   // 2026-06-15: early levels bumped denser (were 2/3/7/9 to-clear) so the opening doesn't read
   // empty. L1/L2 have no trickle (spawnEveryMs 0), so totalToClear MUST equal startSpawn there.
-  { level: 1, time: 48, totalToClear: 4, startSpawn: 4, spawnEveryMs: 0, maxOnScreen: 12 },
-  { level: 2, time: 50, totalToClear: 6, startSpawn: 6, spawnEveryMs: 0, maxOnScreen: 12 },
-  { level: 3, time: 52, totalToClear: 10, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12 },
-  { level: 4, time: 54, totalToClear: 12, startSpawn: 6, spawnEveryMs: 2000, maxOnScreen: 12 },
-  { level: 5, time: 56, totalToClear: 13, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12,
+  { level: 1, label: "FIRST LIGHT", time: 48, totalToClear: 4, startSpawn: 4, spawnEveryMs: 0, maxOnScreen: 12 },
+  { level: 2, label: "SHAKE DOWN", time: 50, totalToClear: 6, startSpawn: 6, spawnEveryMs: 0, maxOnScreen: 12 },
+  { level: 3, label: "EYES UP", time: 52, totalToClear: 10, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12 },
+  { level: 4, label: "DEBRIS RUN", time: 54, totalToClear: 12, startSpawn: 6, spawnEveryMs: 2000, maxOnScreen: 12 },
+  { level: 5, label: "HEAVY METAL", time: 56, totalToClear: 13, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12,
     guaranteedSpawn: [{ type: "bomb", atMs: 8000 }, { type: "bomb", atMs: 18000 }] }, // 2026-06-17: two early bomb drops
-  { level: 6, time: 58, totalToClear: 14, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13,
+  { level: 6, label: "THE SWARM", time: 58, totalToClear: 14, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13,
     musicVolume: 1.15 }, // 2026-06-17: +15% music gain for this level
-  { level: 7, time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
-  { level: 8, time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14 },
-  { level: 9, time: 68, totalToClear: 21, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14,
+  { level: 7, label: "DEEP FIELD", time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
+  { level: 8, label: "COLD FRONT", time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14 },
+  { level: 9, label: "DANGER CLOSE", time: 68, totalToClear: 21, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14,
     guaranteedSpawn: [
       { type: "bomb", atMs: 8000 },
       { type: "bomb", atMs: 20000 },
       { type: "quadshot", atMs: 12000 },
     ] }, // 2026-06-17: two bombs + a quadshot near the start
-  { level: 10, time: 75, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14,
+  { level: 10, label: "RED HORIZON", time: 75, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14,
     powerupOverride: ["freeze", "goldbars", "bomb"] }, // 2026-06-16: boss-level support kit
   // 2026-06-15: second act — the run no longer ends at level 10. Levels 11-15 reuse the
   // level-10 boss music + background (musicForLevel/bgKeyForLevel both clamp at >=10) and the
   // hotroid sprites, ramping density/time. "YOU WIN" now fires after clearing level 15.
-  { level: 11, time: 78, totalToClear: 27, startSpawn: 7, spawnEveryMs: 1350, maxOnScreen: 15,
+  { level: 11, label: "AFTERSHOCK", time: 78, totalToClear: 27, startSpawn: 7, spawnEveryMs: 1350, maxOnScreen: 15,
     guaranteedSpawn: [{ type: "quadshot", atMs: 12000 }] }, // 2026-06-16: early quadshot drop
   // 2026-06-15: levels 12-15 are the "second act" with per-level mechanics. New config fields
   // (asteroidKinds, asteroidSpeedMult, mineLaunch/mineCount/mineFuseMs, noUfo, ufoSpawnAt,
@@ -6867,6 +6871,7 @@ function initGalaxyCanvas() {
   let worldLockWidth = 0;
   let worldLockHeight = 0;
   let overlayTimer = null;
+  let levelTitleTimer = null; // 2026-06-22: bottom-screen level-title hold/fade timer
   let bgPreRolledForLevel = false;
 
   let arcadeActive = false;
@@ -7672,6 +7677,7 @@ function initGalaxyCanvas() {
   }
 
   function hideArcadeOverlay() {
+    hideLevelTitleBanner(); // 2026-06-22: never leave a level title lingering over a menu/quit
     if (!arcadeOverlay || !arcadeOverlayText) return;
     if (overlayTimer) {
       clearTimeout(overlayTimer);
@@ -7701,9 +7707,11 @@ function initGalaxyCanvas() {
     arcadeOverlay.setAttribute("aria-hidden", "false");
     arcadeOverlayBtn.style.display = "none";
     if (arcadeOverlayBtnSecondary) arcadeOverlayBtnSecondary.style.display = "none";
-    // 2026-06-15: show the level's label (e.g. "BOOM CADET") under the LEVEL number when set.
+    // 2026-06-22: the level title (e.g. "RED HORIZON") no longer rides under the dimming intro
+    // overlay — it shows as a standalone bottom banner that lingers and slow-fades on its own.
     const introCfg = ARCADE_LEVELS.find((l) => l.level === levelNum);
-    arcadeOverlaySub.textContent = introCfg?.label || "";
+    arcadeOverlaySub.textContent = "";
+    showLevelTitleBanner(introCfg?.label || "");
     arcadeOverlayText.textContent = `LEVEL ${levelNum}`;
     arcadeOverlayText.classList.remove("fadeOut");
     void arcadeOverlayText.offsetWidth;
@@ -7719,6 +7727,37 @@ function initGalaxyCanvas() {
         overlayTimer = null;
       }, ARCADE_OVERLAY_FADE_MS);
     }, 400);
+  }
+
+  // 2026-06-22: standalone bottom-screen level title. Slides in, holds, then a very slow fade.
+  // pointer-events:none + outside the dimming intro overlay, so it never blocks/covers gameplay.
+  function showLevelTitleBanner(label) {
+    const el = document.getElementById("levelTitleBanner");
+    if (!el) return;
+    if (levelTitleTimer) { clearTimeout(levelTitleTimer); levelTitleTimer = null; }
+    el.classList.remove("show", "fadeOut");
+    if (!label) { el.textContent = ""; el.setAttribute("aria-hidden", "true"); return; }
+    el.textContent = label;
+    void el.offsetWidth; // restart the entrance animation
+    el.classList.add("show");
+    el.setAttribute("aria-hidden", "false");
+    levelTitleTimer = setTimeout(() => {
+      el.classList.add("fadeOut");
+      levelTitleTimer = setTimeout(() => {
+        el.classList.remove("show", "fadeOut");
+        el.setAttribute("aria-hidden", "true");
+        levelTitleTimer = null;
+      }, LEVEL_TITLE_FADE_MS);
+    }, LEVEL_TITLE_HOLD_MS);
+  }
+
+  function hideLevelTitleBanner() {
+    if (levelTitleTimer) { clearTimeout(levelTitleTimer); levelTitleTimer = null; }
+    const el = document.getElementById("levelTitleBanner");
+    if (!el) return;
+    el.classList.remove("show", "fadeOut");
+    el.textContent = "";
+    el.setAttribute("aria-hidden", "true");
   }
 
   function getAsteroid() {

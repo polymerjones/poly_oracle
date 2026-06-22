@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-22 10:39";
+const BUILD_TS = "2026-06-22 10:51";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -4031,6 +4031,10 @@ function closeGalaxyView() {
   galaxyView.setAttribute("aria-hidden", "true");
   oracleView.hidden = false;
   document.body.style.overflow = "";
+  // 2026-06-22: force the Oracle bg video visible on return — it was paused on entering the galaxy
+  // view, and on some runs it came back at opacity:0 (black). Resetting opacity here is a cheap
+  // belt-and-suspenders alongside the controller restart below.
+  if (oracleBgVideo) oracleBgVideo.style.opacity = "";
   if (!prefersReducedMotion) {
     if (oracleBgController) oracleBgController.start();
   }
@@ -7007,8 +7011,6 @@ function initGalaxyCanvas() {
       hideEl(galaxyTopbar);
       hideEl(galaxyHint);
       setMenuOverlayOpen(true);
-      // replay the STROIDS logo warp-in every time the Select Mode menu is entered
-      menuLogoWarp.play();
     } else if (mode === "arcade") {
       hideEl(galaxyModeSelect);
       showEl(arcadeHud);
@@ -10853,6 +10855,9 @@ function initGalaxyCanvas() {
       setMenuOverlayOpen(false);
       setGalaxyViewMode("arcade");
       setGalaxyTool("draw");
+      // 2026-06-22: the comm box was hidden when we paused into the menu (showModeSelect preserve
+      // branch) — bring it back on resume so the commander HUD reappears with the live game.
+      commBoxController.show();
       resizeGalaxyCanvas();
       computePlayfield();
       setTimeout(computePlayfield, 50);
@@ -12486,6 +12491,12 @@ function initGalaxyCanvas() {
       pausedLevelRemainingMs = Math.max(0, levelEndsAt - now);
       pausedLandmineRemainingMs = getLandmineRemainingMs(now);
       arcadeResumeAvailable = true;
+      // 2026-06-22: pausing a live game into the menu must silence + hide the commander, mirroring
+      // the training pause — otherwise CMDR VO keeps talking over the Select Mode menu. Physics is
+      // already frozen here (engineMode flips to "menu" below, gating gameplay). Restored on resume
+      // via startArcadeFromSave -> commBoxController.show().
+      commBoxController.stopVO();
+      commBoxController.hide();
     } else {
       commBoxController.hide();
       commBoxController.clearPortraitOverride(); // 2026-06-16: clean exit restores CMDR (SPC owns L13/14)
@@ -12503,6 +12514,10 @@ function initGalaxyCanvas() {
     syncArcadeMenuButtons();
     if (!canPreserve) playArcadeMenuMusic();
     setGalaxyViewMode("menu");
+    // 2026-06-22: replay the STROIDS logo warp-in on a FRESH menu entry only — not when pausing a
+    // live arcade game into the menu. The warp's per-frame raster pass (54 sliced draws + ghosts)
+    // fought the still-running game loop on device, presenting as a brief freeze.
+    if (!canPreserve) menuLogoWarp.play();
     setMenuOverlayOpen(true);
     sim.maxAsteroids = capIOSNativeAsteroids(sim.width < 700 ? 80 : 120);
     setGalaxyTool("draw");

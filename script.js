@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-22 11:59";
+const BUILD_TS = "2026-06-22 13:58";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1655,7 +1655,7 @@ const commBoxController = (() => {
     "vo-lets_show_em_whos_boss_get_out_of_here.mp3": "LET'S SHOW 'EM WHO'S BOSS.",
     "vo-lets_show_the_polyverse_that_you_are_a_force_to_be_reckoned_with.mp3": "SHOW THE POLYVERSE YOU'RE A FORCE.",
     "vo-lets_show_up_and_show_em_whos_boss_kid.mp3": "SHOW 'EM WHO'S BOSS, KID.",
-    "vo-nice_victory.mp3": "NICE VICTORY.",
+    "vo-nice_victory.mp3": "NICE!",
     "vo-nice.mp3": "NICE.",
     "vo-nice2.mp3": "NICE.",
     "vo-nice_shot_cadet.mp3": "NICE SHOT, CADET.",
@@ -1917,6 +1917,8 @@ const commBoxController = (() => {
     const cs = callsignEl();
     if (cs) cs.textContent = callsign;
     if (portrait) {
+      // SPC is tall (600×913) — restore the default contain/min-height box.
+      portrait.classList.remove("commPortraitImg--commander");
       portrait.onerror = () => { portrait.onerror = null; portrait.src = SPC_PLACEHOLDER; };
       // prefer the animated SPC idle frame when available; fall back to the static override src
       portrait.src = (spcImages.smile_wide && spcImages.smile_wide.src) ? spcImages.smile_wide.src : portraitOverride;
@@ -1934,7 +1936,11 @@ const commBoxController = (() => {
     _spcSpeaking = false;
     _spcStopFlap();
     _spcStopBlink();
-    if (portrait) portrait.onerror = null;
+    if (portrait) {
+      portrait.onerror = null;
+      // back to the square 64×64 commander — hug the mug, no empty backing.
+      portrait.classList.add("commPortraitImg--commander");
+    }
     const cs = callsignEl();
     if (cs) cs.textContent = "CMDR";
     setFrame("idle");
@@ -2429,6 +2435,14 @@ const commBoxController = (() => {
     if (_voQueueTimer) {
       clearTimeout(_voQueueTimer);
       _voQueueTimer = null;
+    }
+    // 2026-06-22: a queued line can carry a playGuard predicate, evaluated at play time (after the
+    // ~600ms queue gap). If it no longer holds — e.g. the UFO the line announces was already killed
+    // — skip this line and immediately drain the next queued one so the queue never stalls.
+    if (options.playGuard && !options.playGuard()) {
+      if (_voQueue.length > 0) { playVONow(_voQueue.shift()); return; }
+      _voPlaying = false;
+      return;
     }
     const playToken = ++_voPlayToken;
     _voPlaying = true;
@@ -3317,18 +3331,29 @@ const audioEngine = {
     const dest = this.masterGain || this.ctx.destination;
     const hp = this.ctx.createBiquadFilter();
     hp.type = "highpass";
-    hp.frequency.value = 50;
-    hp.Q.value = 0.7;
+    hp.frequency.value = 80;
+    hp.Q.value = 0.9;
     const lp = this.ctx.createBiquadFilter();
     lp.type = "lowpass";
-    lp.frequency.value = 600;
-    lp.Q.value = 0.7;
+    // 2026-06-22: more dramatic freeze — push the cutoff down hard and add resonance so
+    // the track sounds plunged underwater/frozen, not just gently muffled.
+    lp.frequency.value = 320;
+    lp.Q.value = 6;
     hp.connect(lp);
     lp.connect(dest);
     try { this.musicGain.disconnect(dest); } catch { /* ignore */ }
     this.musicGain.connect(hp);
     this._freezeFilter = hp;
     this._freezeFilter2 = lp;
+    // Duck the music so the freeze lands as a dramatic dip, then it swells back on thaw.
+    try {
+      const g = this.musicGain.gain;
+      const t = this.ctx.currentTime;
+      this._musicGainBeforeFreeze = g.value;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
+      g.linearRampToValueAtTime(g.value * 0.45, t + 0.35);
+    } catch { /* ignore */ }
   },
   removeFreezeFilter() {
     if (!this._freezeFilter || !this.ctx || !this.musicGain) {
@@ -3336,6 +3361,16 @@ const audioEngine = {
       this._freezeFilter2 = null;
       return;
     }
+    // Un-duck: swell the music back to its pre-freeze level.
+    try {
+      const g = this.musicGain.gain;
+      const t = this.ctx.currentTime;
+      const target = this._musicGainBeforeFreeze != null ? this._musicGainBeforeFreeze : g.value;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
+      g.linearRampToValueAtTime(target, t + 0.4);
+    } catch { /* ignore */ }
+    this._musicGainBeforeFreeze = null;
     const dest = this.masterGain || this.ctx.destination;
     try { this.musicGain.disconnect(this._freezeFilter); } catch { /* ignore */ }
     try { this._freezeFilter.disconnect(); } catch { /* ignore */ }
@@ -3823,6 +3858,21 @@ function addListeners() {
   }
   if (btnArcadeLevelBack) {
     btnArcadeLevelBack.addEventListener("click", () => galaxyCanvasController?.openArcadeMenu?.());
+  }
+  // 2026-06-22: unified select feedback for every mode button — a short blip + a quick "pop"
+  // so menu taps feel responsive. Delegated on the menu container so it covers the root, arcade,
+  // and stunt sub-panels in one place. Locked/disabled cards stay silent and still.
+  if (galaxyModeSelect) {
+    galaxyModeSelect.addEventListener("click", (e) => {
+      const btn = e.target?.closest?.(".modeBtn");
+      if (!btn || !galaxyModeSelect.contains(btn)) return;
+      if (btn.disabled || btn.classList.contains("locked") || btn.classList.contains("is-disabled")) return;
+      audioEngine.play("blip1", { volume: 0.5 });
+      btn.classList.remove("modeBtn--pop");
+      void btn.offsetWidth; // restart the animation on rapid re-taps
+      btn.classList.add("modeBtn--pop");
+      btn.addEventListener("animationend", () => btn.classList.remove("modeBtn--pop"), { once: true });
+    });
   }
   if (openContact && contactModal) {
     openContact.addEventListener("click", () => {
@@ -6895,6 +6945,9 @@ function initGalaxyCanvas() {
   let levelEndsAt = 0;
   let levelDurationMs = 0;
   let levelRunStartAt = 0;
+  // 2026-06-22: hold any forced level-start powerup spawn for a few seconds so the
+  // player gets their bearings before the missile pickup appears.
+  const LEVEL_START_SPAWN_DELAY_MS = 5000;
   let arcadePausedUntil = 0;
   let nextSpawnAt = Infinity;
   let spawnQueue = 0;
@@ -7227,6 +7280,10 @@ function initGalaxyCanvas() {
     // Keep enabled while there's banked time to pause/resume, even with empty inventory.
     hudFreezeBtn.disabled = !hasFreezes && _freezeBankMs <= 0;
     hudFreezeBtn.classList.toggle("has-freezes", hasFreezes);
+    // 2026-06-22: truly-out state (no charges, not running, nothing banked) gets a distinct
+    // depleted look so the player can read "no freeze left" at a glance, not just "×0".
+    const isEmpty = !hasFreezes && !_freezeActive && _freezeBankMs <= 0;
+    hudFreezeBtn.classList.toggle("is-empty", isEmpty);
   }
 
   // 2026-06-14: homing missile inventory button — count, gray/active/pulse states, plus a
@@ -8236,9 +8293,12 @@ function initGalaxyCanvas() {
     if (!stuntActive) {
       commBoxController.reactTo("ufo");
       // FIXED 2026-06-08: removed priority:"high" so UFO comm queues rather than cutting current comm
+      // 2026-06-22: drop the callout at play time if the UFO is already dead (killed during the
+      // ~600ms queue gap) — no point announcing a UFO the player just destroyed.
       commBoxController.queueVO({
         audioSrc: commBoxController.commVoSrc("vo-ufo_spotted_takeemout.mp3"),
         event: "ufo",
+        playGuard: () => !!(ufo && ufo.alive),
       });
     }
     addWarpRing(x, y, "rgba(160,255,255,1)");
@@ -13025,7 +13085,8 @@ function initGalaxyCanvas() {
 
         // DEBUG: revert before release — force one missile powerup at the start of each level
         // so the homing missile is easy to test (mirrors the goldbars force-spawn below).
-        if (!missileForceSpawnedThisLevel && missileUnlocked(cfg.level) && !missileBusy
+        if (!missileForceSpawnedThisLevel && elapsedMs >= LEVEL_START_SPAWN_DELAY_MS
+            && missileUnlocked(cfg.level) && !missileBusy
             && (!cfg.powerupOverride || cfg.powerupOverride.includes("missile"))
             && !powerups.some((p) => p.type === "missile")) {
           missileForceSpawnedThisLevel = true;

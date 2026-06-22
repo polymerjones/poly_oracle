@@ -1786,6 +1786,22 @@ select:focus-visible {
   background: linear-gradient(125deg, rgba(123, 226, 255, 0.9), rgba(246, 167, 255, 0.88));
   color: #0a1734;
   font-weight: 700;
+  transition: transform 90ms ease, box-shadow 120ms ease, filter 120ms ease;
+}
+
+/* 2026-06-22: press + select feedback for mode buttons. :active gives an instant
+   pressed-in feel; .modeBtn--pop (added in JS on select) plays a quick lit "pop". */
+.modeBtn:not(:disabled):not(.locked):active {
+  transform: scale(0.95);
+  filter: brightness(1.06);
+}
+.modeBtn--pop {
+  animation: modeBtnPop 220ms ease-out;
+}
+@keyframes modeBtnPop {
+  0%   { transform: scale(0.95); box-shadow: 0 0 0 rgba(168, 236, 255, 0); }
+  45%  { transform: scale(1.06); box-shadow: 0 0 16px rgba(168, 236, 255, 0.75); }
+  100% { transform: scale(1);    box-shadow: 0 0 0 rgba(168, 236, 255, 0); }
 }
 
 .modeBtn:disabled,
@@ -2075,6 +2091,15 @@ select:focus-visible {
 .hudFreezeBtn.has-freezes {
   opacity: 1;
   box-shadow: 0 0 10px rgba(136, 221, 255, 0.55);
+}
+/* 2026-06-22: depleted — no charges left. Grayscale kills the ice-blue tint so the
+   snowflake reads as "spent", with no glow and a muted border. Clearly not tappable. */
+.hudFreezeBtn.is-empty {
+  opacity: 0.3;
+  filter: grayscale(1);
+  box-shadow: none;
+  border-color: rgba(120, 140, 150, 0.4);
+  cursor: default;
 }
 /* 2026-06-17: freeze toggle ON — button glows brightly so the player knows freeze is active
    and can be tapped again to unfreeze. */
@@ -2536,8 +2561,9 @@ select:focus-visible {
 }
 
 /* Portrait — fixed 125px wide / 190px min-height floor (anchored to the old
-   120-wide / 180-max norm). object-fit:contain so SPC (600×913, tall) and the
-   square 64×64 commander both render undistorted (no squash/crop). */
+   120-wide / 180-max norm). object-fit:contain so SPC (600×913, tall) renders
+   undistorted (no squash/crop). The 64×64 square commander gets its own modifier
+   (.commPortraitImg--commander) so its box hugs the mug (no empty backing above). */
 .commPortraitFrame {
   width: fit-content;
 }
@@ -2552,6 +2578,14 @@ select:focus-visible {
   object-position: center bottom;
   image-rendering: pixelated;
   background: #020d0d;
+}
+/* 2026-06-22: square the box to the 64×64 commander mug — drop the tall min-height
+   floor so .commPortraitFrame (fit-content) hugs the image with no empty space above.
+   Square→square so object-fit is moot (no distortion). SPC keeps the default rule. */
+.commPortraitImg--commander {
+  height: 125px;
+  min-height: 0;
+  object-fit: cover;
 }
 .commScanline {
   position: absolute;

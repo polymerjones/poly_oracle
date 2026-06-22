@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-22 15:07";
+const BUILD_TS = "2026-06-22 15:57";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6960,6 +6960,8 @@ function initGalaxyCanvas() {
     "50", "51", "50-51", "52", "53", "54", "54_alt", "52-54", "55-56", "57", "58", "59", "60", "59-60", "61", "62",
     "thats_the_quad_shot_pick_it_up", "but_to_detonate_it_yourself_just_tap_it_again",
     "tap_the_bomb_icon_hud",
+    // 2026-06-22: corrected single-purpose recordings (drop the matching vo/SPC_*.mp3 in to enable).
+    "blast_those_stroids_with_the_quad_shot", "tap_freeze_on_hud_to_activate_it", "pick_up_the_missile_cadet",
     "62_part1", "63", "63b", "63b_part1", "63b_part2", "64", "65", "66", "67", "68", "69", "70",
     "amazing", "boom_like_that", "crushing_it", "freeze_toggle", "grab_small", "lets_get_after_it",
     "not_doing_hot", "peeing_pants", "show_boss", "there_you_go", "timer_warning",
@@ -11382,6 +11384,18 @@ function initGalaxyCanvas() {
   function waitPowerupCollected(type) {
     return waitFor(() => !powerups.some((p) => p.type === type));
   }
+  // 2026-06-22 (Item 2): fire-and-forget — clear the comm box a beat after the current VO drains,
+  // so a gameplay step gets the full playfield (like the "destroy the stroids" step) without the
+  // phase awaiting it. Abort-safe: the abortable waiters reject on teardown and are swallowed.
+  function hideCommsAfterVO(extraMs = 1000) {
+    (async () => {
+      try {
+        await waitVOIdle();
+        await waitMs(extraMs);
+        if (stuntActive) commBoxController.hide();
+      } catch { /* aborted on teardown */ }
+    })();
+  }
   function abortTutorialAsync({ preserveSpc = false } = {}) {
     _tutWaiters.forEach((w) => { try { w.reject(TUT_ABORT); } catch {} });
     _tutWaiters = [];
@@ -11792,6 +11806,7 @@ function initGalaxyCanvas() {
     const r = hudEl.getBoundingClientRect();
     if (!r.width) return;
     _taskInstrEl.style.top = `${r.top - 8}px`;
+    _positionDemoOverlay(); // keep the demo clip stacked above the banner when both are up
   }
   function showTaskInstruction(text) {
     const el = _ensureTaskInstrEl();
@@ -11836,6 +11851,57 @@ function initGalaxyCanvas() {
       _taskInstrEl.style.transition = "";
       _taskInstrEl.textContent = "";
     }
+  }
+
+  // ── plasma-net demo overlay (2026-06-22): a looping clip showing the tap-and-drag gesture,
+  // floated just ABOVE the objective banner during the first plasma lesson. Hidden the instant
+  // the cadet starts drawing a net. Muted/looping, pointer-events:none so it never eats taps. ──
+  let _demoOverlayEl = null;
+  function _ensureDemoOverlayEl() {
+    if (_demoOverlayEl) return _demoOverlayEl;
+    const v = document.createElement("video");
+    v.id = "tutorialDemoOverlay";
+    v.src = "assets/video/plasma_net_demonstration_overlay.mov";
+    v.muted = true;
+    v.loop = true;
+    v.playsInline = true;
+    v.setAttribute("playsinline", "");
+    v.setAttribute("muted", "");
+    v.setAttribute("aria-hidden", "true");
+    v.style.cssText =
+      "position:fixed;z-index:9996;display:none;pointer-events:none;left:50%;"
+      + "transform:translate(-50%,-100%);width:min(72vw,300px);height:auto;"
+      + "border-radius:10px;opacity:0;transition:opacity 300ms ease;"
+      + "box-shadow:0 0 18px rgba(0,255,204,0.45);";
+    document.body.appendChild(v);
+    _demoOverlayEl = v;
+    return v;
+  }
+  // Rest the overlay's bottom just above the objective banner (or the HUD if the banner is hidden).
+  function _positionDemoOverlay() {
+    if (!_demoOverlayEl || _demoOverlayEl.style.display === "none") return;
+    let topRef;
+    if (_taskInstrEl && _taskInstrEl.style.display === "block") {
+      topRef = _taskInstrEl.getBoundingClientRect().top;
+    } else {
+      const hudEl = document.getElementById("commanderHUD");
+      const r = hudEl && hudEl.getBoundingClientRect();
+      topRef = r && r.height ? r.top - 8 : window.innerHeight * 0.72;
+    }
+    _demoOverlayEl.style.top = `${topRef - 10}px`;
+  }
+  function showPlasmaDemoOverlay() {
+    const v = _ensureDemoOverlayEl();
+    v.style.display = "block";
+    _positionDemoOverlay();
+    try { v.currentTime = 0; const p = v.play(); if (p && p.catch) p.catch(() => {}); } catch {}
+    requestAnimationFrame(() => requestAnimationFrame(() => { v.style.opacity = "1"; }));
+  }
+  function hidePlasmaDemoOverlay() {
+    if (!_demoOverlayEl) return;
+    _demoOverlayEl.style.opacity = "0";
+    _demoOverlayEl.style.display = "none";
+    try { _demoOverlayEl.pause(); } catch {}
   }
 
   // ── two neon arrows pointing at the (centered) comm box during the intro (#2) ──
@@ -12128,14 +12194,24 @@ function initGalaxyCanvas() {
       // same as the other steps) — the onUpdate hook below is gated on plasmaObjectiveMode, so we
       // only arm it after the lines drain instead of letting it flash up under the narration.
       await waitVOIdle();
+      // 2026-06-22 (Item 1): clear the comm box once the intro VO drains — same as the laser step —
+      // so the cadet has the full playfield. The demo overlay then floats above the objective banner.
+      if (!stuntActive) return;
+      commBoxController.hide();
       // Part 3 (2026-06-17): two-stage objective — set, then release. The phase's onUpdate hook
       // (below) keeps the text in sync with plasmaCage.active each frame, so it re-arms back to
       // "TAP AND DRAG" whenever a gesture resets (miss/cancel/fire) instead of sticking on RELEASE.
       tutorialState.plasmaObjectiveMode = "setfire";
       tutorialState.plasmaObjectiveShown = "";
       tutorialState.plasmaMisses = 0;
+      // 2026-06-22 (Item 1): demo clip above the objective; the onUpdate hook hides it the instant
+      // a net drag begins (plasmaCage.active). Only for the first lesson round.
+      tutorialState.plasmaDemoShown = true;
+      showPlasmaDemoOverlay();
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(2, 2));
       tutorialState.plasmaObjectiveMode = null;
+      tutorialState.plasmaDemoShown = false;
+      hidePlasmaDemoOverlay();
       hideTaskInstruction(); // net fired successfully
       spcVO("17", "Great work, Cadet!", "praise");
       spcVO("18", "Now let the plasma recharge and do it again!", "talk_friendly");
@@ -12166,6 +12242,11 @@ function initGalaxyCanvas() {
     // Drive the objective text off plasmaCage.active each frame while a "setfire" round is live,
     // so it re-arms to "TAP AND DRAG" whenever the gesture resets (Part 3 fix, 2026-06-17).
     onUpdate: () => {
+      // 2026-06-22 (Item 1): the moment the cadet starts drawing a net, retire the demo overlay.
+      if (tutorialState.plasmaDemoShown && plasmaCage.active) {
+        tutorialState.plasmaDemoShown = false;
+        hidePlasmaDemoOverlay();
+      }
       if (tutorialState.plasmaObjectiveMode !== "setfire") return;
       const want = plasmaCage.active
         ? "RELEASE TO FIRE PLASMA NET"
@@ -12193,7 +12274,8 @@ function initGalaxyCanvas() {
       spawnTutorialAsteroids(3, 2);
       // Net step first — UFO withheld until the net lands so the sequence is taught in order.
       spcVO("31", "Use your **Plasma Net** on those **Stroids**.", "talk_friendly");
-      showTaskInstructionDeferred("NET THE STROIDS");
+      showTaskInstructionDeferred("TAP AND DRAG TO MAKE A PLASMA NET");
+      hideCommsAfterVO(); // 2026-06-22 (Item 2): comms clear ~1s after the VO finishes
       tutorialState.plasmaMisses = 0;
       const baseComboPlasma = tutorialEvents.plasma || 0;
       for (;;) {
@@ -12219,8 +12301,13 @@ function initGalaxyCanvas() {
       hideTaskInstruction();
       await waitFor(() => !ufo);
       spawnTutorialAsteroids(4, 2);
-      spcVO("33", "Plasma recharged — make another net!");
+      spcVO("33", "Plasma recharged — make another net!", "talk_friendly");
+      // 2026-06-22 (Item 2): this follow-up net had no objective text — restore it, and clear the
+      // comm box a beat after the VO so the cadet has the field (no demo overlay on this one).
+      showTaskInstructionDeferred("TAP AND DRAG TO MAKE A PLASMA NET");
+      hideCommsAfterVO();
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(4, 2));
+      hideTaskInstruction();
       spcVO("34", "Nice work, Cadet. You learn fast.", "praise");
       await clearTutorialField();
       await waitMs(350);
@@ -12258,6 +12345,7 @@ function initGalaxyCanvas() {
       await waitMs(900);
     } },
     { id: "landmine", run: async () => {
+      await waitVOIdle(); // 2026-06-22 (Item 4): let the prior praise finish before the bomb appears
       spawnTutorialLandmine(tutZonePoint("center"));
       spcVO("42-43", "When you see a bomb, tap it to arm it.", "talk_calm");
       spcVO("44-45", "The bomb explodes soon,", "talk_calm");
@@ -12281,6 +12369,7 @@ function initGalaxyCanvas() {
       await waitMs(350);
     } },
     { id: "bombInventory", run: async () => {
+      await waitVOIdle(); // 2026-06-22 (Item 4): let the prior praise finish before the powerup appears
       spawnTutorialPowerup("bomb", tutZonePoint("center"));
       spcVO("50-51", "Sometimes a bomb powerup appears — tap it to add it to your HUD.", "talk_calm");
       await waitPowerupCollected("bomb");
@@ -12323,28 +12412,35 @@ function initGalaxyCanvas() {
       await waitMs(350);
     } },
     { id: "quadshot", run: async () => {
+      await waitVOIdle(); // 2026-06-22 (Item 4): hold the powerup until the prior praise finishes
       spawnTutorialPowerup("quadshot", tutZonePoint("center"));
       spcVO("thats_the_quad_shot_pick_it_up", "That's the **Quad Shot** power-up. Pick it up!", "talk_calm");
       await waitPowerupCollected("quadshot");
+      // 2026-06-22: NO quad timer during training — keep it active for the whole lesson so an
+      // idle cadet can't have it expire under them and get forced to finish with the plain laser.
+      quadShotUntil = performance.now() + 600000;
       spawnTutorialAsteroids(3, 2);
-      spcVO("57", "Blast those **Stroids** with the **Quad Shot**!", "smile_open");
-      showTaskInstructionDeferred("BLAST THE STROIDS");
-      await waitFor(tutorialAsteroidsAllCleared);
-      if (!stuntActive) return;
-      // 2026-06-20 (Item 8): "Keep firing" used to fire every restock loop (3-4x for a fast
-      // player). Gate it to exactly once per training session.
+      // 2026-06-22 (Item 6): the recorded "57" clip actually re-said "That's the quad shot" — use the
+      // corrected, dedicated recording (vo/SPC_blast_those_stroids_with_the_quad_shot.mp3).
+      spcVO("blast_those_stroids_with_the_quad_shot", "Blast those **Stroids** with the **Quad Shot**!", "smile_open");
+      showTaskInstructionDeferred("BLAST THE STROIDS WITH THE QUAD SHOT");
+      // Two satisfying volleys, then move on — bounded by rounds (not a timer) so it can't strand.
       let keepFiringSaid = false;
-      while (performance.now() < quadShotUntil) {
-        await waitFor(() => tutorialAsteroidsAllCleared() || performance.now() >= quadShotUntil);
-        if (performance.now() >= quadShotUntil) break;
-        spawnTutorialAsteroids(3, 2);
-        if (!keepFiringSaid) { spcVO("58", "Keep firing, Cadet!", "smile_open"); keepFiringSaid = true; }
+      for (let round = 0; round < 2; round += 1) {
+        await waitFor(tutorialAsteroidsAllCleared);
+        if (!stuntActive) return;
+        if (round < 1) {
+          spawnTutorialAsteroids(3, 2);
+          if (!keepFiringSaid) { spcVO("58", "Keep firing, Cadet!", "smile_open"); keepFiringSaid = true; }
+        }
       }
+      quadShotUntil = 0; // lesson done — let the quad effect end before the field clears
       hideTaskInstruction();
       await clearTutorialField();
       await waitMs(350);
     } },
     { id: "freeze", run: async () => {
+      await waitVOIdle(); // 2026-06-22 (Item 4): hold the powerup until the prior praise finishes
       spawnTutorialPowerup("snowflake", tutZonePoint("center"));
       // 2026-06-20 (Item 9): split the combined 59-60 line so the "tap the freeze button" guidance
       // only plays AFTER the powerup is actually collected (was telling the cadet to activate it
@@ -12352,7 +12448,9 @@ function initGalaxyCanvas() {
       spcVO("59", "Pick up the freeze powerup.", "idle_soft");
       await waitPowerupCollected("snowflake");
       spawnTutorialAsteroids(3, 2);
-      spcVO("60", "Tap the freeze button on your HUD to activate it.", "idle_soft");
+      // 2026-06-22 (Item 8): the recorded "60" clip played the wrong line — use the corrected,
+      // dedicated recording (vo/SPC_tap_freeze_on_hud_to_activate_it.mp3).
+      spcVO("tap_freeze_on_hud_to_activate_it", "Tap the freeze button on your HUD to activate it.", "idle_soft");
       showHudPointer("hudFreezeBtn", 6000);
       showTaskInstructionDeferred("TAP ❄ IN YOUR HUD TO ACTIVATE");
       await waitEvent("freeze");
@@ -12417,9 +12515,11 @@ function initGalaxyCanvas() {
       await waitMs(350);
     } },
     { id: "missile", run: async () => {
+      await waitVOIdle(); // 2026-06-22 (Item 4): hold the powerup until the prior praise finishes
       spawnTutorialPowerup("missile", tutZonePoint("center"));
       spawnTutorialAsteroids(4, 2);
-      spcVO("65", "Pick up the missiles, Cadet.", "talk_calm");
+      // 2026-06-22 (Item 9): singular — one missile pickup (vo/SPC_pick_up_the_missile_cadet.mp3).
+      spcVO("pick_up_the_missile_cadet", "Pick up the missile, Cadet.", "talk_calm");
       await waitPowerupCollected("missile");
       spcVO("66", "Tap the missile weapon in the HUD to arm a missile.", "alert");
       showHudPointer("hudMissileBtn", 6000);
@@ -12432,7 +12532,9 @@ function initGalaxyCanvas() {
       hideTaskInstruction();
       await waitFor(() => !activeMissile);
       spcVO("68", "Excellent work, Cadet.", "laugh");
-      spcVO("69", "This concludes our training for today.", "praise");
+      // 2026-06-22 (Item 10): SPC dons the "shades" closing pose (with its blink) the moment the
+      // sign-off line begins, and holds it through the final "go practice" line below.
+      spcVO("69", "This concludes our training for today.", "shades");
       // 2026-06-21 (Item 3): persist completion HERE, the moment training is functionally done —
       // not only inside endTutorial() after the outro hold. Previously the unlock key was written
       // only after the trailing hold, so bailing during that silent window left Practice locked.
@@ -12538,6 +12640,7 @@ function initGalaxyCanvas() {
     tutorialTimerRunning = false;
     hideSkipHint();
     hideTaskInstruction();
+    hidePlasmaDemoOverlay(); // 2026-06-22 (Item 1): never leave the demo clip on screen post-teardown
     hideCommArrows();
     commBoxController.setExclusiveSpeaker(false);
     commBoxController.stopVO(); // 2026-06-20 (Item 4b): flush any in-flight/queued VO on every tutorial exit path
@@ -12565,6 +12668,7 @@ function initGalaxyCanvas() {
     tutorialTimerRunning = false;
     hideSkipHint();
     hideTaskInstruction();
+    hidePlasmaDemoOverlay(); // 2026-06-22 (Item 1): never leave the demo clip on screen post-teardown
     hideCommArrows();
   }
 
@@ -14298,7 +14402,8 @@ function initGalaxyCanvas() {
         }
         // 2026-06-14: each cluster shot fires its own report so quadshot sounds like a burst
         // (was silent past the first tap). Budget-exempt above so they layer instead of dropping.
-        playGameSfx("advfire", 0.6, { important: true });
+        // 2026-06-22: trimmed 0.6 → 0.42 — layered bursts were a touch too loud.
+        playGameSfx("advfire", 0.42, { important: true });
         if (resolveShotAt(ex, ey, now, isTouch)) extraHit = true;
       }
     }

@@ -1691,6 +1691,33 @@ select:focus-visible {
   opacity: 0.45;
 }
 
+.menuLogoWrap {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: -2px 0 0;
+  pointer-events: none;
+}
+
+.menuLogoCanvas {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  aspect-ratio: 1136 / 912;
+  /* soft purple/blue glow that lingers after the warp-in resolves */
+  filter: drop-shadow(0 0 16px rgba(140, 116, 255, 0.45))
+    drop-shadow(0 0 34px rgba(96, 132, 255, 0.22));
+}
+
+/* keep the logo compact when vertical room is tight (landscape / short phones) */
+@media (max-height: 560px) {
+  .menuLogoCanvas {
+    max-width: 220px;
+  }
+}
+
 .galaxyModeTitle {
   font-size: 1.05rem;
   letter-spacing: 0.06em;

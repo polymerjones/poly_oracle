@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-21 21:01";
+const BUILD_TS = "2026-06-21 21:15";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -865,6 +865,141 @@ function capIOSNativeAsteroids(value) {
   return isIOSNative ? Math.min(safeValue, IOS_NATIVE_MAX_ASTEROIDS) : safeValue;
 }
 
+// STROIDS menu logo "warp-in": a retro SNES/Genesis raster-distortion reveal. The logo
+// materializes out of horizontal raster bars (per-row X displacement + scanline wobble +
+// a chromatic shimmer ghost) rather than sliding/scaling in, then resolves perfectly sharp
+// with a residual glow (the glow is a static CSS drop-shadow on the canvas). Lightweight:
+// one sliced drawImage pass + two ghost draws per frame for ~1.1s, then it stops.
+const menuLogoWarp = (() => {
+  const noop = { play() {}, drawSharp() {} };
+  if (!menuLogoCanvas) return noop;
+  const ctx = menuLogoCanvas.getContext("2d");
+  if (!ctx) return noop;
+
+  const img = new Image();
+  let imgReady = false;
+  let pendingPlay = false;
+  img.onload = () => {
+    imgReady = true;
+    if (pendingPlay) {
+      pendingPlay = false;
+      play();
+    }
+  };
+  img.src = "assets/stroids_menu_logo.png";
+
+  const DURATION = 1150;
+  let rafId = 0;
+  let startTs = 0;
+
+  function sizeCanvas() {
+    const rect = menuLogoCanvas.getBoundingClientRect();
+    const dpr = nativeCanvasDpr();
+    const w = Math.max(1, Math.round(rect.width * dpr));
+    const h = Math.max(1, Math.round(rect.height * dpr));
+    if (menuLogoCanvas.width !== w || menuLogoCanvas.height !== h) {
+      menuLogoCanvas.width = w;
+      menuLogoCanvas.height = h;
+    }
+    return { w, h };
+  }
+
+  function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  function drawSharp() {
+    if (!imgReady) return;
+    const { w, h } = sizeCanvas();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+  }
+
+  function frame(ts) {
+    if (!startTs) startTs = ts;
+    const elapsed = ts - startTs;
+    const p = Math.min(1, elapsed / DURATION);
+    const { w, h } = sizeCanvas();
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, w, h);
+
+    if (!imgReady) {
+      rafId = requestAnimationFrame(frame);
+      return;
+    }
+
+    // opacity climbs in after a faint-shimmer beat (~8%) and is fully solid by ~80%
+    const reveal = easeOutCubic(Math.min(1, Math.max(0, (p - 0.08) / 0.72)));
+    // all distortion decays to exactly 0 at p === 1 so the final state is dead sharp
+    const decay = Math.pow(1 - p, 1.6);
+    const maxShift = w * 0.1 * decay; // horizontal raster-bar displacement
+    const t = elapsed / 1000;
+
+    const sliceCount = 54;
+    const sliceH = h / sliceCount;
+    const srcSliceH = img.height / sliceCount;
+
+    for (let i = 0; i < sliceCount; i++) {
+      const ph = i / sliceCount;
+      // layered sines => unstable "reality resolving" raster wobble
+      const dx =
+        Math.sin(ph * 22 + t * 14) * maxShift +
+        Math.sin(ph * 7 + t * 9) * maxShift * 0.5;
+      // per-row opacity flicker, strongest early, gone by the end
+      const flick = 1 - decay * 0.5 * (0.5 + 0.5 * Math.sin(ph * 40 + t * 30));
+      ctx.globalAlpha = reveal * Math.max(0, Math.min(1, flick));
+      ctx.drawImage(
+        img,
+        0,
+        i * srcSliceH,
+        img.width,
+        srcSliceH + 1,
+        dx,
+        i * sliceH,
+        w,
+        sliceH + 1
+      );
+    }
+
+    // chromatic shimmer: additive ghosts split left/right, fading with the distortion
+    if (decay > 0.02) {
+      const chroma = w * 0.018 * decay;
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = reveal * decay * 0.5;
+      ctx.drawImage(img, -chroma, 0, w, h);
+      ctx.drawImage(img, chroma, 0, w, h);
+      ctx.globalCompositeOperation = "source-over";
+    }
+
+    ctx.globalAlpha = 1;
+
+    if (p < 1) {
+      rafId = requestAnimationFrame(frame);
+    } else {
+      drawSharp(); // guarantee a clean final frame
+      rafId = 0;
+    }
+  }
+
+  function play() {
+    if (!imgReady) {
+      pendingPlay = true;
+      return;
+    }
+    if (prefersReducedMotion) {
+      drawSharp();
+      return;
+    }
+    if (rafId) cancelAnimationFrame(rafId);
+    startTs = 0;
+    rafId = requestAnimationFrame(frame);
+  }
+
+  return { play, drawSharp };
+})();
+
 const state = {
   selectedMode: "classic",
   selectedPack: "classic",
@@ -951,6 +1086,7 @@ const clearGalaxy = document.getElementById("clearGalaxy");
 const galaxyPlayCanvas = document.getElementById("galaxyPlayCanvas");
 const canvasCrosshair = document.getElementById("canvasCrosshair");
 const galaxyModeSelect = document.getElementById("galaxyModeSelect");
+const menuLogoCanvas = document.getElementById("menuLogoCanvas");
 const btnArcade = document.getElementById("btnArcade");
 const btnPractice = document.getElementById("btnPractice");
 const btnGalaxyBack = document.getElementById("btnGalaxyBack");
@@ -6859,6 +6995,8 @@ function initGalaxyCanvas() {
       hideEl(galaxyTopbar);
       hideEl(galaxyHint);
       setMenuOverlayOpen(true);
+      // replay the STROIDS logo warp-in every time the Select Mode menu is entered
+      menuLogoWarp.play();
     } else if (mode === "arcade") {
       hideEl(galaxyModeSelect);
       showEl(arcadeHud);

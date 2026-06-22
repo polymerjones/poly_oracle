@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-21 20:15";
+const BUILD_TS = "2026-06-21 20:25";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6563,6 +6563,7 @@ function initGalaxyCanvas() {
     "20", "21", "22", "23", "24", "25", "26", "27", "28-30", "28-30_part2", "31", "32", "33",
     "34", "35", "36", "35-36", "37", "38", "39", "40", "41", "42-43", "44-45", "46", "47", "48", "49",
     "50", "51", "50-51", "52", "53", "54", "54_alt", "52-54", "55-56", "57", "58", "59", "60", "59-60", "61", "62",
+    "thats_the_quad_shot_pick_it_up", "but_to_detonate_it_yourself_just_tap_it_again",
     "62_part1", "63", "63b", "63b_part1", "63b_part2", "64", "65", "66", "67", "68", "69", "70",
     "amazing", "boom_like_that", "crushing_it", "freeze_toggle", "grab_small", "lets_get_after_it",
     "not_doing_hot", "peeing_pants", "show_boss", "there_you_go", "timer_warning",
@@ -11707,7 +11708,7 @@ function initGalaxyCanvas() {
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(3, 2));
       tutorialState.plasmaObjectiveMode = null;
       hideTaskInstruction();
-      spcVO("17b", "Great work, Cadet!", "praise");
+      spcVO("17b", "Nice! Great work, Cadet.", "praise");
       await clearTutorialField();
       await waitMs(350);
     },
@@ -11808,7 +11809,8 @@ function initGalaxyCanvas() {
     { id: "landmine", run: async () => {
       spawnTutorialLandmine(tutZonePoint("center"));
       spcVO("42-43", "When you see a bomb, tap it to arm it.", "talk_calm");
-      spcVO("44-45", "The bomb explodes soon, but to detonate it yourself, just tap it again.", "talk_calm");
+      spcVO("44-45", "The bomb explodes soon,", "talk_calm");
+      spcVO("but_to_detonate_it_yourself_just_tap_it_again", "but to detonate it yourself, just tap it again.", "talk_calm");
       showTaskInstructionDeferred("TAP THE BOMB TO ARM IT");
       tutorialState.mineTapBase = tutorialEvents.mine_tap || 0;
       for (;;) {
@@ -11865,7 +11867,7 @@ function initGalaxyCanvas() {
     } },
     { id: "quadshot", run: async () => {
       spawnTutorialPowerup("quadshot", tutZonePoint("center"));
-      spcVO("55-56", "That's the **Quad Shot** power-up. Pick it up!", "talk_calm");
+      spcVO("thats_the_quad_shot_pick_it_up", "That's the **Quad Shot** power-up. Pick it up!", "talk_calm");
       await waitPowerupCollected("quadshot");
       spawnTutorialAsteroids(3, 2);
       spcVO("57", "Blast those **Stroids** with the **Quad Shot**!", "smile_open");
@@ -11890,24 +11892,24 @@ function initGalaxyCanvas() {
       // 2026-06-20 (Item 9): split the combined 59-60 line so the "tap the freeze button" guidance
       // only plays AFTER the powerup is actually collected (was telling the cadet to activate it
       // before they'd even picked it up).
-      spcVO("59", "Pick up the freeze powerup.", "idle_gentle");
+      spcVO("59", "Pick up the freeze powerup.", "idle_soft");
       await waitPowerupCollected("snowflake");
       spawnTutorialAsteroids(3, 2);
-      spcVO("60", "Tap the freeze button on your HUD to activate it.", "idle_gentle");
+      spcVO("60", "Tap the freeze button on your HUD to activate it.", "idle_soft");
       showHudPointer("hudFreezeBtn", 6000);
       showTaskInstructionDeferred("TAP ❄ IN YOUR HUD TO ACTIVATE");
       await waitEvent("freeze");
       hideHudPointer();
       hideTaskInstruction();
-      spcVO("61", "Objects are frozen for a short time. Blast 'em!", "idle_gentle");
-      spcVO("freeze_toggle", "Freeze can be enabled and disabled by tapping the freeze icon on your HUD.", "idle_gentle");
+      spcVO("61", "Objects are frozen for a short time. Blast 'em!", "idle_soft");
+      spcVO("freeze_toggle", "Freeze can be enabled and disabled by tapping the freeze icon on your HUD.", "idle_soft");
       await waitVOIdle();
       await clearTutorialField();
       await waitMs(350);
     } },
     { id: "freeze_toss", run: async () => {
       spawnTutorialAsteroids(3, 2);
-      spcVO("62", "Frozen **Stroids** can be tossed too. Grab one and toss it.", "idle_gentle");
+      spcVO("62", "Frozen **Stroids** can be tossed too. Grab one and toss it.", "idle_soft");
       showTaskInstructionDeferred("GRAB AND TOSS A FROZEN STROID");
       // If freeze time carried over from the activation step (bank still has time, whether running
       // or paused) — skip straight to the toss loop. Only re-prompt with a fresh powerup when the
@@ -11915,7 +11917,7 @@ function initGalaxyCanvas() {
       if (_freezeBankMs <= 0) {
         if (!stuntActive) return;
         spawnTutorialPowerup("snowflake", tutZonePoint("center"));
-        spcVO("63b", "Freeze expired — grab another one and try the toss.", "idle_gentle");
+        spcVO("63b", "Freeze expired — grab another one and try the toss.", "idle_soft");
         await waitPowerupCollected("snowflake");
         showHudPointer("hudFreezeBtn", 6000);
         await waitEvent("freeze");
@@ -11935,14 +11937,14 @@ function initGalaxyCanvas() {
           _freezeActive = true;
           _freezeSessionId++; // new session so prior gliders re-freeze
           onFreezeStart(); // re-freeze with the full FX set (icy music filter + HUD glow)
-          spcVO("63", "Good shooting — but try grabbing and tossing a frozen **Stroid**.", "idle_gentle");
+          spcVO("63", "Good shooting — but try grabbing and tossing a frozen **Stroid**.", "idle_soft");
         } else {
           // freeze expired before the cadet tossed one — wait a beat, drop a fresh powerup
           await waitMs(1000);
           if (!stuntActive) return;
           spawnTutorialPowerup("snowflake", tutZonePoint("center"));
           if (tutorialAsteroidsAllCleared()) spawnTutorialAsteroids(3, 2);
-          spcVO("63b", "Freeze expired — grab another one and try the toss.", "idle_gentle");
+          spcVO("63b", "Freeze expired — grab another one and try the toss.", "idle_soft");
           await waitPowerupCollected("snowflake");
           showHudPointer("hudFreezeBtn", 6000);
           await waitEvent("freeze"); // re-arm the freeze bank before re-checking for the toss

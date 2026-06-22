@@ -41,6 +41,9 @@ const galaxyBackground = (() => {
     { ox: 1.60, oy: 0.38, r: 28, z: 0.018, col: [35, 10, 60], atmo: [80, 0, 160], ring: false, tile: false, moon: true, b: 4, cr: [] },
     { ox: 1.85, oy: 0.72, r: 42, z: 0.19, col: [28, 10, 48], atmo: [90, 0, 170], ring: false, tile: true, moon: false, b: 5, cr: [] },
   ];
+  // 2026-06-22: PDEFS never mutates, so its z-order is fixed — sort once instead of allocating a
+  // fresh copy and re-sorting every frame in the draw loop (60 needless allocs/sec, always on).
+  const PDEFS_SORTED = [...PDEFS].sort((a, b) => a.z - b.z);
 
   const GAS_CLOUDS = [
     { ox: 2.30, oy: 0.72, rBase: 260, z: 0.30, ci: 0, phase: 0, ps: 0.35, sx: 1.4, sy: 0.85 },
@@ -528,7 +531,7 @@ const galaxyBackground = (() => {
     [s1, s2, s3, s4, s5, s6].forEach((layer) => drawStarLayer(layer, st, sc));
     debris.forEach((d) => drawDebrisShape(d, st, warpMult));
 
-    [...PDEFS].sort((a, b) => a.z - b.z).forEach((def) => {
+    PDEFS_SORTED.forEach((def) => {
       const p = pShift(def.ox * W, def.oy * H, def.z);
       if (def.tile) {
         const mg = def.r * 3;

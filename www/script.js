@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-22 13:58";
+const BUILD_TS = "2026-06-22 14:20";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -548,6 +548,12 @@ function getMusicForLevel(level) {
 
 const DEBUG_FORCE_LEVEL_SELECT = true; // 2026-06-09: re-enabled for debugging
 const DEBUG_SHOW_LEVEL_DROPDOWN = false;
+// 2026-06-22: gate the verbose level-transition / SPC-VO diagnostics. Default OFF so shipped
+// builds pay nothing (the per-slow-frame [lvltrans] log otherwise fires DURING janky frames).
+// Flip DEBUG_LVLTRANS true to profile a transition: reproduce L9→L10 / L13→L14 with the console
+// open and read the `worst=…ms over32=… dropped=…` watcher report.
+const DEBUG_LVLTRANS = false;
+const DEBUG_SPC_VO = false;
 let canvasFlash = null;
 const REVEAL_VARIANT_SFX = [
   "newreveal001",
@@ -10427,6 +10433,10 @@ function initGalaxyCanvas() {
   let _lsrStylesInjected = false;
   let _lvlTransWatch = null;
 
+  // 2026-06-22: gated diagnostic loggers — no-ops in shipped builds (see DEBUG_LVLTRANS).
+  const lvlTrace = (...a) => { if (DEBUG_LVLTRANS) console.log(...a); };
+  const spcTrace = (...a) => { if (DEBUG_SPC_VO) console.log(...a); };
+
   function startLevelTransitionWatch(levelIndex) {
     if (_lvlTransWatch?.reportTimer) clearTimeout(_lvlTransWatch.reportTimer);
     _lvlTransWatch = {
@@ -10437,7 +10447,7 @@ function initGalaxyCanvas() {
       worstFrameMs: 0,
       reportTimer: null,
     };
-    console.log(`[lvltrans] frame watcher start levelIndex=${levelIndex}`);
+    lvlTrace(`[lvltrans] frame watcher start levelIndex=${levelIndex}`);
   }
 
   function sampleLevelTransitionFrame(dt, now) {
@@ -10446,7 +10456,7 @@ function initGalaxyCanvas() {
     watch.overBudgetFrames += 1;
     watch.droppedFrames += Math.max(1, Math.round(dt / (1000 / 60)) - 1);
     watch.worstFrameMs = Math.max(watch.worstFrameMs, dt);
-    console.log(`[lvltrans] slow frame dt=${dt.toFixed(1)}ms elapsed=${(now - watch.startedAt).toFixed(1)}ms`);
+    lvlTrace(`[lvltrans] slow frame dt=${dt.toFixed(1)}ms elapsed=${(now - watch.startedAt).toFixed(1)}ms`);
   }
 
   function scheduleLevelTransitionReport(delayMs = 500) {
@@ -10454,7 +10464,7 @@ function initGalaxyCanvas() {
     if (!watch) return;
     watch.reportTimer = setTimeout(() => {
       if (_lvlTransWatch !== watch) return;
-      console.log(
+      lvlTrace(
         `[lvltrans] frame watcher report elapsed=${(performance.now() - watch.startedAt).toFixed(1)}ms `
         + `worst=${watch.worstFrameMs.toFixed(1)}ms over32=${watch.overBudgetFrames} dropped=${watch.droppedFrames}`,
       );
@@ -10517,7 +10527,7 @@ function initGalaxyCanvas() {
     `;
     overlay.appendChild(panel);
     (galaxyView || document.body).appendChild(overlay);
-    console.log(`[lvltrans] scorecard overlay appeared level=${levelNum}`);
+    lvlTrace(`[lvltrans] scorecard overlay appeared level=${levelNum}`);
 
     // FIX 2026-06-09: make sure a UFO doesn't linger behind the scorecard
     // 2026-06-13: clear ALL gameplay entities (asteroids, flames, powerups, particles, mines…)
@@ -10560,7 +10570,7 @@ function initGalaxyCanvas() {
     function dismiss() {
       if (dismissed) return;
       dismissed = true;
-      console.log(`[lvltrans] scorecard dismiss elapsed=${(performance.now() - shownAt).toFixed(1)}ms`);
+      lvlTrace(`[lvltrans] scorecard dismiss elapsed=${(performance.now() - shownAt).toFixed(1)}ms`);
       // FIX 2026-06-09: restore music to its pre-scorecard level as gameplay resumes
       rampScorecardMusic(scorecardMusicGainBefore, scorecardMusicHtmlVolBefore);
       stopWriteLoop();
@@ -10649,7 +10659,7 @@ function initGalaxyCanvas() {
   }
 
   function levelComplete() {
-    console.log(`[lvltrans] levelComplete entry levelIndex=${currentLevelIndex}`);
+    lvlTrace(`[lvltrans] levelComplete entry levelIndex=${currentLevelIndex}`);
     startLevelTransitionWatch(currentLevelIndex);
     arcadeActive = false;
     retryPending = false;
@@ -10883,7 +10893,7 @@ function initGalaxyCanvas() {
 
   function startLevel(idx) {
     const _lvlTransStartAt = performance.now();
-    console.log(`[lvltrans] startLevel entry requestedIndex=${idx}`);
+    lvlTrace(`[lvltrans] startLevel entry requestedIndex=${idx}`);
     stuntActive = false; // a real arcade level is never a stunt session
     practiceEndless = false; // ...nor an endless practice session (Stunt Practice re-sets this after)
     commBoxController.setLevelEndLock(false); // 2026-06-21 (Item 1b): next level live — end the level-end VO lock
@@ -10943,7 +10953,7 @@ function initGalaxyCanvas() {
     if (currentLevelIndex > 0) {
       window.galaxyBackground?.triggerWarp();
     }
-    console.log(`[lvltrans] after triggerWarp invoked=${currentLevelIndex > 0}`);
+    lvlTrace(`[lvltrans] after triggerWarp invoked=${currentLevelIndex > 0}`);
     playArcadeMusicForLevel(cfg.level);
     if (cfg.level === 10) {
       playGameSfx("lastlevelstart", 0.96);
@@ -10952,7 +10962,7 @@ function initGalaxyCanvas() {
     // Seed a share of them in the interior (clear of the center ship) so the field reads full
     // from the first second. Tapers to 0 once the later levels are naturally busy.
     const _spawnWorkStartAt = performance.now();
-    console.log(`[lvltrans] before synchronous spawn work level=${cfg.level} startSpawn=${cfg.startSpawn} mines=${cfg.mineLaunch ? (cfg.mineCount || 1) : 0}`);
+    lvlTrace(`[lvltrans] before synchronous spawn work level=${cfg.level} startSpawn=${cfg.startSpawn} mines=${cfg.mineLaunch ? (cfg.mineCount || 1) : 0}`);
     const interiorShare = cfg.level <= 2 ? 0.5 : cfg.level <= 4 ? 0.35 : 0;
     for (let i = 0; i < cfg.startSpawn; i += 1) {
       const p = Math.random() < interiorShare ? randomInteriorPoint() : randomPerimeterPoint();
@@ -10982,7 +10992,7 @@ function initGalaxyCanvas() {
       // main loop keeps the chain-reaction field replenished after the opening salvo clears).
       nextMineRespawnAt = now + 20000 + Math.random() * 10000;
     }
-    console.log(`[lvltrans] after synchronous spawn work duration=${(performance.now() - _spawnWorkStartAt).toFixed(1)}ms asteroids=${sim.asteroids.length} mines=${placedBombs.length}`);
+    lvlTrace(`[lvltrans] after synchronous spawn work duration=${(performance.now() - _spawnWorkStartAt).toFixed(1)}ms asteroids=${sim.asteroids.length} mines=${placedBombs.length}`);
 
     // TODO: waves — see Level 11 wave system for pattern (cfg.waves not yet wired)
 
@@ -11064,7 +11074,7 @@ function initGalaxyCanvas() {
       }
       setTimeout(fireSecondVO, 800);
     }
-    console.log(`[lvltrans] end startLevel duration=${(performance.now() - _lvlTransStartAt).toFixed(1)}ms level=${cfg.level}`);
+    lvlTrace(`[lvltrans] end startLevel duration=${(performance.now() - _lvlTransStartAt).toFixed(1)}ms level=${cfg.level}`);
     scheduleLevelTransitionReport();
   }
 
@@ -11406,7 +11416,7 @@ function initGalaxyCanvas() {
         // through a Web Audio graph (applyCommRadioEffect). So the PRIMARY advance is a timer
         // computed from the REAL clip duration, rate-adjusted to actual playtime. 'onended' stays
         // as a nice-to-have early trigger when it does fire. Both go through the idempotent advance().
-        _spcAudio.onended = () => { console.log("[SPC] ended", key); advance(); };
+        _spcAudio.onended = () => { spcTrace("[SPC] ended", key); advance(); };
 
         // 2026-06-20: anchor the advance timer to ACTUAL playback start, not metadata-load.
         // Previously the timer was armed in onloadedmetadata, which fires (and starts counting)
@@ -11434,7 +11444,7 @@ function initGalaxyCanvas() {
           if (_spcTimer) clearTimeout(_spcTimer);          // drop the coarse pre-start backstop
           const ms = (playMs > 0 ? playMs : dur) + SPC_VO_TAIL_MS; // dur = text-length fallback
           _spcTimer = setTimeout(advance, ms);
-          console.log("[SPC] playing", key, "playMs", Math.round(playMs), "-> advance in", Math.round(ms), "ms");
+          spcTrace("[SPC] playing", key, "playMs", Math.round(playMs), "-> advance in", Math.round(ms), "ms");
         };
 
         // Metadata: pre-compute playMs (do NOT arm the timer here anymore).
@@ -11451,7 +11461,7 @@ function initGalaxyCanvas() {
           const ct = _spcAudio.currentTime || 0;
           if (ct < 0.5) return;
           const wall = (performance.now() - _playStartedAt) / 1000;
-          if (wall > 0.05) console.log("[SPC] rate-check", key, "observed", (ct / wall).toFixed(3), "expected", SPC_VO_PLAYBACK_RATE);
+          if (wall > 0.05) spcTrace("[SPC] rate-check", key, "observed", (ct / wall).toFixed(3), "expected", SPC_VO_PLAYBACK_RATE);
           _spcAudio.ontimeupdate = null; // one-shot
         };
 
@@ -11459,7 +11469,7 @@ function initGalaxyCanvas() {
         // watchdog. armPlayTimer() replaces this with the precise timer the instant playback starts.
         _spcTimer = setTimeout(advance, 9000);
         const p = _spcAudio.play();
-        console.log("[SPC] play", key, src);
+        spcTrace("[SPC] play", key, src);
         if (p && typeof p.then === "function") {
           // SECONDARY anchor: play() resolving also means playback began (covers iOS cases where
           // 'playing' is unreliable). Idempotent with onplaying via _armedPlayTimer.

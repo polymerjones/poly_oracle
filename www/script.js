@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-21 21:15";
+const BUILD_TS = "2026-06-22 09:03";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -865,11 +865,102 @@ function capIOSNativeAsteroids(value) {
   return isIOSNative ? Math.min(safeValue, IOS_NATIVE_MAX_ASTEROIDS) : safeValue;
 }
 
+const state = {
+  selectedMode: "classic",
+  selectedPack: "classic",
+  selectedVoice: "",
+  userVoiceOverride: false,
+  whisper: false,
+  minimal: false,
+  randomVoiceEachReveal: false,
+  multiVoiceQA: false,
+  verboseDetails: false,
+  chaosThemeEnabled: false,
+  themePalette: null,
+  vaultFilter: "all",
+  vaultSearch: "",
+  vault: [],
+  currentAnswer: null,
+  flip: false,
+  settingsOpen: false,
+  isRevealing: false,
+  sessionTapCount: 0,
+  chaosShiftCount: 0,
+  tapTimestamps: [],
+  galaxyTool: "draw",
+  practiceTool: "pencil",
+  voiceReadsAnswer: true,
+};
+
+const stage = document.getElementById("stage");
+const orb = document.getElementById("orb");
+const flash = document.getElementById("flash");
+const mist = document.getElementById("mist");
+const sparkles = document.getElementById("sparkles");
+const revealAudio = document.getElementById("revealAudio");
+const orbTapAudio = document.getElementById("orbTapAudio");
+const revealFxVideo = document.getElementById("revealFxVideo");
+const oracleBgVideo = document.getElementById("oracleBgVideo");
+const bgStack = document.getElementById("bgStack");
+const bgVideoA = document.getElementById("bgA");
+const bgVideoB = document.getElementById("bgB");
+const bgTint = document.getElementById("bgTint");
+const questionInput = document.getElementById("question");
+const askButton = document.getElementById("ask");
+
+const answerBox = document.getElementById("answer");
+const answerCard = document.getElementById("answerCard");
+const answerSimple = document.getElementById("answerSimple");
+const answerPolarity = document.getElementById("answerPolarity");
+const answerText = document.getElementById("answerText");
+const answerMicro = document.getElementById("answerMicro");
+const answerMeta = document.getElementById("answerMeta");
+const flipAnswer = document.getElementById("flipAnswer");
+const favoriteAnswer = document.getElementById("favoriteAnswer");
+const shareAnswer = document.getElementById("shareAnswer");
+
+const openSettings = document.getElementById("openSettings");
+const closeSettings = document.getElementById("closeSettings");
+const settingsPanel = document.getElementById("settingsPanel");
+const settingsBackdrop = document.getElementById("settingsBackdrop");
+const modeButtons = Array.from(document.querySelectorAll(".segment-btn[data-mode]"));
+const packSelect = document.getElementById("packSelect");
+const whisperModeToggle = document.getElementById("whisperMode");
+const minimalModeToggle = document.getElementById("minimalMode");
+const randomVoiceEachRevealToggle = document.getElementById("randomVoiceEachReveal");
+const multiVoiceQAToggle = document.getElementById("multiVoiceQA");
+const verboseDetailsToggle = document.getElementById("verboseDetails");
+const randomVoiceNow = document.getElementById("randomVoiceNow");
+const voiceSelect = document.getElementById("voiceSelect");
+const previewVoice = document.getElementById("previewVoice");
+const previewVoiceStop = document.getElementById("previewVoiceStop");
+const voicePersona = document.getElementById("voicePersona");
+const openVault = document.getElementById("openVault");
+const clearHistory = document.getElementById("clearHistory");
+const resetThemeButton = document.getElementById("resetTheme");
+const firstRunHint = document.getElementById("firstRunHint");
+const chaosToast = document.getElementById("chaosToast");
+const titleSparkles = document.getElementById("titleSparkles");
+const oracleView = document.getElementById("oracleView");
+const galaxyView = document.getElementById("galaxyView");
+const openGalaxy = document.getElementById("openGalaxy");
+const closeGalaxy = document.getElementById("closeGalaxy");
+const toolDraw = document.getElementById("toolDraw");
+const toolBoom = document.getElementById("toolBoom");
+const clearGalaxy = document.getElementById("clearGalaxy");
+const galaxyPlayCanvas = document.getElementById("galaxyPlayCanvas");
+const canvasCrosshair = document.getElementById("canvasCrosshair");
+const galaxyModeSelect = document.getElementById("galaxyModeSelect");
+const menuLogoCanvas = document.getElementById("menuLogoCanvas");
+
 // STROIDS menu logo "warp-in": a retro SNES/Genesis raster-distortion reveal. The logo
 // materializes out of horizontal raster bars (per-row X displacement + scanline wobble +
 // a chromatic shimmer ghost) rather than sliding/scaling in, then resolves perfectly sharp
 // with a residual glow (the glow is a static CSS drop-shadow on the canvas). Lightweight:
 // one sliced drawImage pass + two ghost draws per frame for ~1.1s, then it stops.
+// 2026-06-22: this IIFE MUST stay AFTER `const menuLogoCanvas` above — it reads that binding at
+// module-eval time, so declaring it earlier (the original bug) threw a TDZ ReferenceError that
+// aborted the whole script (dead UI, no galaxy bg). Keep it here, after the DOM lookups.
 const menuLogoWarp = (() => {
   const noop = { play() {}, drawSharp() {} };
   if (!menuLogoCanvas) return noop;
@@ -1000,93 +1091,6 @@ const menuLogoWarp = (() => {
   return { play, drawSharp };
 })();
 
-const state = {
-  selectedMode: "classic",
-  selectedPack: "classic",
-  selectedVoice: "",
-  userVoiceOverride: false,
-  whisper: false,
-  minimal: false,
-  randomVoiceEachReveal: false,
-  multiVoiceQA: false,
-  verboseDetails: false,
-  chaosThemeEnabled: false,
-  themePalette: null,
-  vaultFilter: "all",
-  vaultSearch: "",
-  vault: [],
-  currentAnswer: null,
-  flip: false,
-  settingsOpen: false,
-  isRevealing: false,
-  sessionTapCount: 0,
-  chaosShiftCount: 0,
-  tapTimestamps: [],
-  galaxyTool: "draw",
-  practiceTool: "pencil",
-  voiceReadsAnswer: true,
-};
-
-const stage = document.getElementById("stage");
-const orb = document.getElementById("orb");
-const flash = document.getElementById("flash");
-const mist = document.getElementById("mist");
-const sparkles = document.getElementById("sparkles");
-const revealAudio = document.getElementById("revealAudio");
-const orbTapAudio = document.getElementById("orbTapAudio");
-const revealFxVideo = document.getElementById("revealFxVideo");
-const oracleBgVideo = document.getElementById("oracleBgVideo");
-const bgStack = document.getElementById("bgStack");
-const bgVideoA = document.getElementById("bgA");
-const bgVideoB = document.getElementById("bgB");
-const bgTint = document.getElementById("bgTint");
-const questionInput = document.getElementById("question");
-const askButton = document.getElementById("ask");
-
-const answerBox = document.getElementById("answer");
-const answerCard = document.getElementById("answerCard");
-const answerSimple = document.getElementById("answerSimple");
-const answerPolarity = document.getElementById("answerPolarity");
-const answerText = document.getElementById("answerText");
-const answerMicro = document.getElementById("answerMicro");
-const answerMeta = document.getElementById("answerMeta");
-const flipAnswer = document.getElementById("flipAnswer");
-const favoriteAnswer = document.getElementById("favoriteAnswer");
-const shareAnswer = document.getElementById("shareAnswer");
-
-const openSettings = document.getElementById("openSettings");
-const closeSettings = document.getElementById("closeSettings");
-const settingsPanel = document.getElementById("settingsPanel");
-const settingsBackdrop = document.getElementById("settingsBackdrop");
-const modeButtons = Array.from(document.querySelectorAll(".segment-btn[data-mode]"));
-const packSelect = document.getElementById("packSelect");
-const whisperModeToggle = document.getElementById("whisperMode");
-const minimalModeToggle = document.getElementById("minimalMode");
-const randomVoiceEachRevealToggle = document.getElementById("randomVoiceEachReveal");
-const multiVoiceQAToggle = document.getElementById("multiVoiceQA");
-const verboseDetailsToggle = document.getElementById("verboseDetails");
-const randomVoiceNow = document.getElementById("randomVoiceNow");
-const voiceSelect = document.getElementById("voiceSelect");
-const previewVoice = document.getElementById("previewVoice");
-const previewVoiceStop = document.getElementById("previewVoiceStop");
-const voicePersona = document.getElementById("voicePersona");
-const openVault = document.getElementById("openVault");
-const clearHistory = document.getElementById("clearHistory");
-const resetThemeButton = document.getElementById("resetTheme");
-const firstRunHint = document.getElementById("firstRunHint");
-const chaosToast = document.getElementById("chaosToast");
-const titleSparkles = document.getElementById("titleSparkles");
-const oracleView = document.getElementById("oracleView");
-const galaxyView = document.getElementById("galaxyView");
-const openGalaxy = document.getElementById("openGalaxy");
-const closeGalaxy = document.getElementById("closeGalaxy");
-const toolDraw = document.getElementById("toolDraw");
-const toolBoom = document.getElementById("toolBoom");
-const clearGalaxy = document.getElementById("clearGalaxy");
-const galaxyPlayCanvas = document.getElementById("galaxyPlayCanvas");
-const canvasCrosshair = document.getElementById("canvasCrosshair");
-const galaxyModeSelect = document.getElementById("galaxyModeSelect");
-const menuLogoCanvas = document.getElementById("menuLogoCanvas");
 const btnArcade = document.getElementById("btnArcade");
 const btnPractice = document.getElementById("btnPractice");
 const btnGalaxyBack = document.getElementById("btnGalaxyBack");
@@ -6046,12 +6050,20 @@ function initBackgroundVideos() {
   oracleBgController = createLoopVideoController(oracleBgVideo);
 
   // FIXED 2026-06-08: fade in oracle bg video after first frame to prevent black flash
+  // FIXED 2026-06-22: the <video> has autoplay+preload, so it can already be ready (readyState>=2)
+  // by the time these listeners attach — in which case canplay/loadeddata already fired and the
+  // {once} listeners never run, leaving opacity:0 (background invisible on first launch until a
+  // later navigation re-fires an event). Reset opacity immediately when it's already ready.
   if (oracleBgVideo) {
     const onVideoReady = () => {
       oracleBgVideo.style.opacity = "";
     };
-    oracleBgVideo.addEventListener("canplay", onVideoReady, { once: true });
-    oracleBgVideo.addEventListener("loadeddata", onVideoReady, { once: true });
+    if (oracleBgVideo.readyState >= 2) {
+      onVideoReady();
+    } else {
+      oracleBgVideo.addEventListener("canplay", onVideoReady, { once: true });
+      oracleBgVideo.addEventListener("loadeddata", onVideoReady, { once: true });
+    }
   }
 
   if (!DISABLE_VIDEO_BG) {

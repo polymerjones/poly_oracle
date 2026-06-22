@@ -178,7 +178,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-21 13:50";
+const BUILD_TS = "2026-06-21 20:15";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6897,7 +6897,10 @@ function initGalaxyCanvas() {
     if (!hudFreezeBtn) return;
     const hasFreezes = playerFreezeInventory > 0;
     hudFreezeBtn.style.display = "";
-    hudFreezeBtn.textContent = `❄ \xD7${playerFreezeInventory}`;
+    // Freeze active takes precedence over inventory count: show "❄ ON" while
+    // running (still tappable to unfreeze). Falls back to the inventory count
+    // when inactive — including the paused-with-bank state, matching the glow.
+    hudFreezeBtn.textContent = _freezeActive ? "❄ ON" : `❄ \xD7${playerFreezeInventory}`;
     // Keep enabled while there's banked time to pause/resume, even with empty inventory.
     hudFreezeBtn.disabled = !hasFreezes && _freezeBankMs <= 0;
     hudFreezeBtn.classList.toggle("has-freezes", hasFreezes);

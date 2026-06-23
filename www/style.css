@@ -1711,6 +1711,18 @@ select:focus-visible {
   /* soft purple/blue glow that lingers after the warp-in resolves */
   filter: drop-shadow(0 0 16px rgba(140, 116, 255, 0.45))
     drop-shadow(0 0 34px rgba(96, 132, 255, 0.22));
+  /* 2026-06-22 (19:21 notes #8): very subtle "breathing" scale so the logo has gentle life
+     if you look right at it. Canvas-internal warp/shimmer is unaffected (CSS transform only
+     scales the rendered output). transform-origin defaults to center. */
+  transform-origin: center;
+  animation: menuLogoBreathe 5.5s ease-in-out infinite;
+}
+@keyframes menuLogoBreathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.025); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .menuLogoCanvas { animation: none; }
 }
 
 /* keep the logo compact when vertical room is tight (landscape / short phones) */

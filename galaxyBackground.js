@@ -72,6 +72,11 @@ const galaxyBackground = (() => {
   let curTheme = THEMES[0];
   let tgtTheme = THEMES[0];
   let blend = 1;
+  // 2026-06-22 (19:21 notes #6): the blend/tgtTheme machinery existed but was never wired into the
+  // renderer, so setTheme() hard-cut between themes. dispTheme is the per-frame interpolated theme the
+  // renderer actually reads; setTheme(level, true) now starts a ~2.4s crossfade (subtle dissolve).
+  let dispTheme = THEMES[0];
+  const BLEND_STEP = 0.007; // per-frame blend advance (~2.4s dissolve at 60fps)
   let _planetLevel = 1; // 2026-06-09: current level, drives per-level planet color
   let scrollX = 0;
   let scrollY = 0;
@@ -109,6 +114,35 @@ const galaxyBackground = (() => {
   function ra(arr, a) {
     if (!arr) return "rgba(0,0,0,0)";
     return `rgba(${arr[0] | 0},${arr[1] | 0},${arr[2] | 0},${a})`;
+  }
+
+  // ── theme crossfade helpers (2026-06-22, notes #6) ──────────────────────────────
+  function _hexToRgb(h) {
+    const n = parseInt(String(h).replace("#", ""), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function _lerpRgb(a, b, t) {
+    return [
+      (a[0] + (b[0] - a[0]) * t) | 0,
+      (a[1] + (b[1] - a[1]) * t) | 0,
+      (a[2] + (b[2] - a[2]) * t) | 0,
+    ];
+  }
+  function _lerpRgbList(A, B, t) {
+    const len = Math.max(A.length, B.length);
+    const out = [];
+    for (let i = 0; i < len; i++) out.push(_lerpRgb(A[i % A.length], B[i % B.length], t));
+    return out;
+  }
+  // Interpolate two THEME entries by t (0 = a, 1 = b). sky is a hex string → returned as "rgb(...)".
+  function blendThemes(a, b, t) {
+    const sky = _lerpRgb(_hexToRgb(a.sky), _hexToRgb(b.sky), t);
+    return {
+      sky: `rgb(${sky[0]},${sky[1]},${sky[2]})`,
+      star: _lerpRgb(a.star, b.star, t),
+      neb: _lerpRgbList(a.neb, b.neb, t),
+      gas: _lerpRgbList(a.gas || [], b.gas || [], t),
+    };
   }
 
   function pShift(ox, oy, z) {
@@ -300,7 +334,7 @@ const galaxyBackground = (() => {
     const r = gc.rBase * (0.88 + pulse * 0.12);
     const sx = gc.sx || 1;
     const sy = gc.sy || 1;
-    const gas = curTheme.gas || [[0, 140, 160], [0, 80, 120], [20, 60, 100]];
+    const gas = dispTheme.gas || [[0, 140, 160], [0, 80, 120], [20, 60, 100]];
     const col0 = gas[gc.ci % gas.length];
     const col1 = gas[(gc.ci + 1) % gas.length];
     const col2 = gas[(gc.ci + 2) % gas.length];
@@ -436,9 +470,11 @@ const galaxyBackground = (() => {
     t += 0.01;
 
     if (blend < 1) {
-      blend = Math.min(1, blend + 0.007);
+      blend = Math.min(1, blend + BLEND_STEP);
       if (blend >= 1) curTheme = tgtTheme;
     }
+    // The renderer reads dispTheme: the live crossfade while blend < 1, else the settled theme.
+    dispTheme = blend < 1 ? blendThemes(curTheme, tgtTheme, blend) : curTheme;
 
     let warpMult = 1;
     if (warping) {
@@ -480,12 +516,12 @@ const galaxyBackground = (() => {
     scrollX += velX * warpMult;
     scrollY += velY * warpMult;
 
-    const st = curTheme.star;
+    const st = dispTheme.star;
     const sc = `rgb(${st[0]},${st[1]},${st[2]})`;
-    cx.fillStyle = curTheme.sky;
+    cx.fillStyle = dispTheme.sky;
     cx.fillRect(0, 0, W, H);
 
-    const nc0 = curTheme.neb[0];
+    const nc0 = dispTheme.neb[0];
     const vg = cx.createRadialGradient(VPX, VPY, 0, VPX, VPY, H * 0.65);
     vg.addColorStop(0, `rgba(${nc0[0]},${nc0[1]},${nc0[2]},0.25)`);
     vg.addColorStop(0.5, `rgba(${nc0[0]},${nc0[1]},${nc0[2]},0.12)`);
@@ -511,7 +547,7 @@ const galaxyBackground = (() => {
     cx.globalAlpha = 1;
 
     nebDefs.forEach((n, i) => {
-      const nc = curTheme.neb[i % curTheme.neb.length];
+      const nc = dispTheme.neb[i % dispTheme.neb.length];
       const p = pShift(n.ox, n.oy, n.z);
       const nx = wrap(p.x, W + 300) - 150;
       const ny = wrap(p.y, H + 150) - 75;
@@ -560,7 +596,7 @@ const galaxyBackground = (() => {
       const ty = s.y - s.vy * 10;
       const g = cx.createLinearGradient(tx, ty, s.x, s.y);
       g.addColorStop(0, "transparent");
-      g.addColorStop(1, ra(curTheme.star, a));
+      g.addColorStop(1, ra(dispTheme.star, a));
       cx.strokeStyle = g;
       cx.lineWidth = 1.5;
       cx.beginPath();
@@ -647,6 +683,7 @@ const galaxyBackground = (() => {
     scrollY = H / 2;
     curTheme = THEMES[0];
     tgtTheme = THEMES[0];
+    dispTheme = THEMES[0];
     blend = 1;
     if (shootInterval) clearInterval(shootInterval);
     shootInterval = setInterval(() => {
@@ -680,15 +717,24 @@ const galaxyBackground = (() => {
     canvas.height = h;
   }
 
-  function setTheme(levelNum) {
+  function setTheme(levelNum, dissolve = false) {
     _planetLevel = levelNum; // 2026-06-09: keep planet color in sync with the level
     // 2026-06-15: clamp to the full THEMES range (was 9) so levels 11-15 get their own themes.
     const idx = Math.min(THEMES.length - 1, Math.max(0, levelNum - 1));
     if (idx === themeIdx && blend >= 1) return;
-    curTheme = THEMES[idx];
-    tgtTheme = THEMES[idx];
     themeIdx = idx;
-    blend = 1;
+    if (dissolve) {
+      // 2026-06-22 (notes #6): crossfade — keep the currently displayed theme as the blend source and
+      // ease toward the new one. Finish any in-flight blend first so a mid-fade retarget stays clean.
+      if (blend < 1) curTheme = tgtTheme;
+      tgtTheme = THEMES[idx];
+      blend = 0;
+    } else {
+      curTheme = THEMES[idx];
+      tgtTheme = THEMES[idx];
+      dispTheme = THEMES[idx];
+      blend = 1;
+    }
   }
 
   function setLevel(levelNum) {

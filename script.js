@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-22 19:31";
+const BUILD_TS = "2026-06-22 21:08";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -370,6 +370,8 @@ const GAME_SFX = {
   crunch: "gamesfx/crunch.mp3", // stroid grab + bomb grab
   pickup_gold: "gamesfx/pickup_gold.mp3",
   bling: "gamesfx/bling.mp3", // powerup appears
+  menu_hit: "gamesfx/menu_hit1.mp3", // mode-menu button select (forward)
+  menu_back: "gamesfx/menu_back_hit.mp3", // mode-menu "← Back" button
   pickup_weapon: "gamesfx/pickup_weapon.mp3", // layered on quadshot pickup
   weaponclick_pickupbomb: "gamesfx/weaponclick_pickupbomb.mp3", // layered on bomb pickup
   // 2026-06-14: homing missile powerup sound pack
@@ -1763,6 +1765,10 @@ const commBoxController = (() => {
     alert:       ["alert", "talk_neutral"],
     laugh:       ["laugh", "talk_happy"],
     shades:      ["shades"], // held "cool" closing pose — no flap
+    // 2026-06-22 (19:21 notes #5): the closing "go practice" line should actually TALK (warm sign-off)
+    // and then settle BACK to the shades pose — so it flaps with talk frames but rests on "shades"
+    // (rest-frame override lives in spcSpeakStart). Previously the line used the no-flap "shades" hold.
+    shades_outro: ["talk_friendly", "talk_neutral", "talk_happy", "talk_calm"],
   };
 
   // Part 4: set a single SPC frame directly (no-op unless SPC owns the portrait + frame loaded).
@@ -1840,9 +1846,18 @@ const commBoxController = (() => {
     _spcLastFrameHint = frameHint || null;
     _spcRestFrame = "smile_wide"; // default rest; idle_* hints (below) make the mood linger after the line
     let frames;
-    if (frameHint && SPC_EXPR_FLAP[frameHint]) {
+    let randomMouth = false; // drive the mouth via _spcPickTalkFrame() instead of a fixed loop
+    if (frameHint === "talk_explain") {
+      // 2026-06-22 (19:21 notes #3): long explanatory lines (e.g. the perimeter-timer intro) looked
+      // robotic with the fixed 5-frame talk loop — the repeat is obvious over a long sentence and
+      // especially in the large centered cutscene layout. Lead with a friendly expression, then drive
+      // the mouth with the randomized natural talk cycle so it never reads as a tight loop.
+      frames = ["talk_friendly"];
+      randomMouth = true;
+    } else if (frameHint && SPC_EXPR_FLAP[frameHint]) {
       frames = SPC_EXPR_FLAP[frameHint];
       if (frameHint.indexOf("idle_") === 0 || frameHint === "shades") _spcRestFrame = frameHint;
+      else if (frameHint === "shades_outro") _spcRestFrame = "shades"; // talk, then settle back to shades
     } else if (frameHint && spcImages[frameHint]) {
       // a talk_* (or other loaded) hint: lead with it, vary the mouth, include a closed-mouth rest beat.
       // idle_neutral is repeated so the closed mouth holds for 2 ticks (~250ms) — a single 125ms tick
@@ -1852,12 +1867,12 @@ const commBoxController = (() => {
       frames = SPC_TALK_CYCLE;
     }
     setSpcFrame(frames[0]);
-    if (frames.length === 1) return; // held expression — no mouth flap
+    if (frames.length === 1 && !randomMouth) return; // held expression — no mouth flap
     let i = 0;
     // 2026-06-20: ~125ms (8fps) phoneme cycle while the line plays (cleared by spcSpeakEnd on audio end).
     // Was 120ms — slowed slightly so the flap reads as natural speech rather than a fast flutter.
     _spcMouthFlap = setInterval(() => {
-      if (frames === SPC_TALK_CYCLE) {
+      if (frames === SPC_TALK_CYCLE || randomMouth) {
         setSpcFrame(_spcPickTalkFrame());
       } else {
         i += 1;
@@ -3886,20 +3901,38 @@ function addListeners() {
   if (btnArcadeLevelBack) {
     btnArcadeLevelBack.addEventListener("click", () => galaxyCanvasController?.openArcadeMenu?.());
   }
-  // 2026-06-22: unified select feedback for every mode button — a short blip + a quick "pop"
-  // so menu taps feel responsive. Delegated on the menu container so it covers the root, arcade,
-  // and stunt sub-panels in one place. Locked/disabled cards stay silent and still.
+  // 2026-06-22 (19:21 notes #1+#2): unified press feedback + a ~1/3s pause before the menu actually
+  // navigates, so the pressed button's yellow flash is visible on THIS page before the panel swaps
+  // (previously the flash landed on the next page's button because nav happened instantly). Forward
+  // taps (.modeBtn) play the new menu-hit sound; "← Back" taps (.modeBackBtn) play the back sound.
+  // Implemented as a single CAPTURE-phase listener that intercepts the first click, plays feedback,
+  // then re-dispatches the click after the pause so each button's own navigation handler runs
+  // untouched. Locked/disabled cards stay silent; extra taps during the pause are ignored.
+  const MENU_PRESS_DELAY = 320;
   if (galaxyModeSelect) {
+    let menuNavPending = false;
     galaxyModeSelect.addEventListener("click", (e) => {
-      const btn = e.target?.closest?.(".modeBtn");
+      const btn = e.target?.closest?.(".modeBtn, .modeBackBtn");
       if (!btn || !galaxyModeSelect.contains(btn)) return;
       if (btn.disabled || btn.classList.contains("locked") || btn.classList.contains("is-disabled")) return;
-      audioEngine.play("bling", { volume: 0.6 });
-      btn.classList.remove("modeBtn--select");
-      void btn.offsetWidth; // restart the animation on rapid re-taps
-      btn.classList.add("modeBtn--select");
-      btn.addEventListener("animationend", () => btn.classList.remove("modeBtn--select"), { once: true });
-    });
+      if (btn._menuNavReplay) { btn._menuNavReplay = false; return; } // the delayed replay — let it through
+      e.stopImmediatePropagation();
+      if (menuNavPending) return; // ignore extra taps while the press-pause is running
+      menuNavPending = true;
+      const isBack = btn.classList.contains("modeBackBtn");
+      audioEngine.play(isBack ? "menu_back" : "menu_hit", { volume: 0.6 });
+      if (!isBack) {
+        btn.classList.remove("modeBtn--select");
+        void btn.offsetWidth; // restart the flash on rapid re-taps
+        btn.classList.add("modeBtn--select");
+        btn.addEventListener("animationend", () => btn.classList.remove("modeBtn--select"), { once: true });
+      }
+      setTimeout(() => {
+        menuNavPending = false;
+        btn._menuNavReplay = true;
+        btn.click(); // replay → capture lets it through → the button's nav handler fires
+      }, MENU_PRESS_DELAY);
+    }, true); // capture: runs before the buttons' own navigation handlers
   }
   if (openContact && contactModal) {
     openContact.addEventListener("click", () => {
@@ -6946,7 +6979,12 @@ function initGalaxyCanvas() {
   // Stunt → Practice: endless arcade gameplay (no timer, no level-complete, score not submitted).
   const PRACTICE_ASTEROID_SPRITE_KEYS = ["roid01", "roid02", "roid03", "hotroid01"];
   const PRACTICE_ASTEROID_UNLOCK_MS = 25000;
-  const PRACTICE_THEME_INTERVAL_MS = 30000;
+  // 2026-06-22 (19:21 notes #6): backgrounds cycle a little faster (was 30s) and now crossfade
+  // (setTheme dissolve flag). PRACTICE_PERIMETER_HUE_PERIOD_MS is a continuous hue sweep for the
+  // perimeter line in endless Practice — "almost as fast" as the bg cadence so the border drifts
+  // through colors alongside the changing backgrounds.
+  const PRACTICE_THEME_INTERVAL_MS = 18000;
+  const PRACTICE_PERIMETER_HUE_PERIOD_MS = 16000;
   const PRACTICE_POWERUP_INTERVAL_MS = 8000;
   const PRACTICE_POWERUP_POOL = ["bomb", "bomb", "missile", "quadshot", "snowflake"];
   let practiceEndless = false;
@@ -6966,6 +7004,7 @@ function initGalaxyCanvas() {
     "50", "51", "50-51", "52", "53", "54", "54_alt", "52-54", "55-56", "57", "58", "59", "60", "59-60", "61", "62",
     "thats_the_quad_shot_pick_it_up", "but_to_detonate_it_yourself_just_tap_it_again",
     "tap_the_bomb_icon_hud",
+    "bomb_now_tap_the_screen_where_you_want_to_place_it",
     // 2026-06-22: corrected single-purpose recordings (drop the matching vo/SPC_*.mp3 in to enable).
     "blast_those_stroids_with_the_quad_shot", "tap_freeze_on_hud_to_activate_it", "pick_up_the_missile_cadet",
     "62_part1", "63", "63b", "63b_part1", "63b_part2", "64", "65", "66", "67", "68", "69", "70",
@@ -9927,6 +9966,13 @@ function initGalaxyCanvas() {
     timerPerimeterCtx.strokeRect(x, y, w, h);
 
     let color = remaining <= 5000 ? "#ff4444" : remaining <= 10000 ? "#ffaa00" : _levelPrimaryColor;
+    // 2026-06-22 (19:21 notes #6): in endless Practice the timer is always "full", so instead of a
+    // static primary color the perimeter slowly drifts through the spectrum (continuous hue sweep)
+    // alongside the cycling backgrounds. Warning/strobe overrides below still take precedence.
+    if (practiceEndless && remaining > 10000) {
+      const hue = ((now % PRACTICE_PERIMETER_HUE_PERIOD_MS) / PRACTICE_PERIMETER_HUE_PERIOD_MS) * 360;
+      color = `hsl(${hue.toFixed(1)}, 85%, 62%)`;
+    }
     // 2026-06-10: freeze strobe — alternate white at ~3Hz while frozen, theme color returns
     // automatically when the freeze pauses/ends.
     if (_freezeActive && Math.floor(now / 167) % 2 === 0) color = "#ffffff";
@@ -12150,7 +12196,7 @@ function initGalaxyCanvas() {
       tutorialFireBlocked = true;
       spcVO("01", "Hi there Cadet, welcome to the Polyverse simulator.", "talk_friendly");
       spcVO("02", "Let me show you the ropes before the real battle.", "talk_friendly");
-      spcVO("03-04", "First — the perimeter timer. That line around the screen edges shows how long you have to clear the field.", "talk_friendly");
+      spcVO("03-04", "First — the perimeter timer. That line around the screen edges shows how long you have to clear the field.", "talk_explain");
       showTimerArrow(); // Part 5: point at the perimeter timer while SPC describes it
       await waitVOIdle();
     } },
@@ -12412,7 +12458,10 @@ function initGalaxyCanvas() {
       hideTaskInstruction();
 
       // Step 2 — place it on the field (the next tap drops the bomb).
-      spcVO("53", "Now tap the screen where you want to place it.", "talk_calm");
+      // 2026-06-22 (19:21 notes #4): the old "53" recording played the wrong line ("tap the bomb on
+      // your HUD") here — the cadet has already tapped the HUD icon by this point. Use the dedicated
+      // "now tap the screen where you want to place it" recording instead.
+      spcVO("bomb_now_tap_the_screen_where_you_want_to_place_it", "Now tap the screen where you want to place it.", "talk_calm");
       showTaskInstructionDeferred("TAP TO PLACE THE BOMB");
       await waitFor(() => placedBombs.length > 0);
       hideTaskInstruction();
@@ -12565,7 +12614,7 @@ function initGalaxyCanvas() {
       try { localStorage.setItem(STUNT_TRAINING_DONE_KEY, "1"); } catch {}
       await waitVOIdle();
       await waitMs(350);
-      spcVO("70", "Go practice if you like — the Polyverse awaits.", "shades");
+      spcVO("70", "Go practice if you like — the Polyverse awaits.", "shades_outro");
       // Practice goes live as this final line starts. Preserve SPC's active audio/caption during
       // the state handoff; a timer docks/hides the caption after the requested outro hold.
       startStuntPractice({ fromTutorial: true, preserveSpcOutro: true });
@@ -13087,10 +13136,10 @@ function initGalaxyCanvas() {
           spawnLandmine();
           nextPracticeMineAt = now + 60000;
         }
-        // Theme cycle every 30s — setTheme() crossfades via its own blend/tgt system.
+        // Theme cycle — setTheme(_, true) now actually crossfades (subtle dissolve, ~2.4s).
         if (now >= nextThemeCycleAt) {
           practiceThemeIndex = (practiceThemeIndex % 15) + 1;
-          window.galaxyBackground?.setTheme(practiceThemeIndex);
+          window.galaxyBackground?.setTheme(practiceThemeIndex, true);
           nextThemeCycleAt = now + PRACTICE_THEME_INTERVAL_MS;
         }
       }

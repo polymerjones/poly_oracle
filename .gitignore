@@ -20,3 +20,6 @@ spc_mug/
 
 # Local screen recordings / demo overlays (not for the repo)
 www/*.mov
+
+# Throwaway UI prototypes (kept locally, not for the repo)
+prototypes/

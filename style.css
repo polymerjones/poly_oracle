@@ -2113,6 +2113,19 @@ select:focus-visible {
   border-color: rgba(120, 140, 150, 0.4);
   cursor: default;
 }
+/* 2026-06-23: paused-with-bank — freeze was activated then paused, so it's still resumable even
+   though inventory reads 0. Stay lit with a SOFT PULSING cyan glow (distinct from the bright solid
+   --active "running" state and the grayed is-empty state) so the player sees freeze is left to tap. */
+.hudFreezeBtn.freeze-paused {
+  opacity: 1;
+  filter: none;
+  border-color: rgba(136, 221, 255, 0.85);
+  animation: freezePausedPulse 1.4s ease-in-out infinite;
+}
+@keyframes freezePausedPulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(136, 221, 255, 0.4); }
+  50% { box-shadow: 0 0 14px rgba(136, 221, 255, 0.85); }
+}
 /* 2026-06-17: freeze toggle ON — button glows brightly so the player knows freeze is active
    and can be tapped again to unfreeze. */
 .hudFreezeBtn--active {

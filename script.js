@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-22 21:08";
+const BUILD_TS = "2026-06-23 10:46";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -5379,7 +5379,7 @@ function scheduleRubHaptic() {
 let orbRub2Audio = null;
 let orbRub2FadeTimer = null;
 let orbRub2Active = false;
-const orbRub2TargetVol = () => (state.whisper ? 0.063 : 0.154); // 2026-06-17: -30% on the rub layer
+const orbRub2TargetVol = () => (state.whisper ? 0.041 : 0.10); // 2026-06-23: another ~35% down on the rub layer
 const ORB_RUB2_FADE_IN_MS = 750;
 const ORB_RUB2_FADE_OUT_MS = 950;
 
@@ -7001,7 +7001,11 @@ function initGalaxyCanvas() {
     "one_of_our_most_useful_weapons_plasma_net", "to_fire_a_plasma_net_tap_and_drag",
     "20", "21", "22", "23", "24", "25", "26", "27", "28-30", "28-30_part2", "31", "32", "33",
     "34", "35", "36", "35-36", "37", "38", "39", "40", "41", "42-43", "44-45", "46", "47", "48", "49",
-    "50", "51", "50-51", "52", "53", "54", "54_alt", "52-54", "55-56", "57", "58", "59", "60", "59-60", "61", "62",
+    // 2026-06-23: standalone "52" OMITTED on purpose — vo/SPC_52.mp3 is a mislabeled recording
+    // that actually says "Tap the bomb icon on your HUD", not "tap it to arm it". The arm step
+    // (bombInventory Step 3) requests "52" but now falls back to its text caption only. mp3 left
+    // in vo/ for reference; supply a correct recording and re-add "52" here to restore the voice.
+    "50", "51", "50-51", "53", "54", "54_alt", "52-54", "55-56", "57", "58", "59", "60", "59-60", "61", "62",
     "thats_the_quad_shot_pick_it_up", "but_to_detonate_it_yourself_just_tap_it_again",
     "tap_the_bomb_icon_hud",
     "bomb_now_tap_the_screen_where_you_want_to_place_it",
@@ -7346,13 +7350,21 @@ function initGalaxyCanvas() {
     if (!hudFreezeBtn) return;
     const hasFreezes = playerFreezeInventory > 0;
     hudFreezeBtn.style.display = "";
-    // Freeze active takes precedence over inventory count: show "❄ ON" while
-    // running (still tappable to unfreeze). Falls back to the inventory count
-    // when inactive — including the paused-with-bank state, matching the glow.
-    hudFreezeBtn.textContent = _freezeActive ? "❄ ON" : `❄ \xD7${playerFreezeInventory}`;
+    // 2026-06-23: freeze is a pausable banked timer, so inventory can read 0 while a paused
+    // freeze is still resumable. That state used to show a dead-looking "❄ ×0"; show a paused
+    // glyph + lit pulsing glow instead so the player knows there's freeze left to tap.
+    const pausedWithBank = !_freezeActive && _freezeBankMs > 0;
+    // Freeze active takes precedence: "❄ ON" while running (still tappable to unfreeze);
+    // "❄ ❚❚" while paused-with-bank; otherwise the inventory count.
+    hudFreezeBtn.textContent = _freezeActive
+      ? "❄ ON"
+      : pausedWithBank
+        ? "❄ ❚❚"
+        : `❄ \xD7${playerFreezeInventory}`;
     // Keep enabled while there's banked time to pause/resume, even with empty inventory.
     hudFreezeBtn.disabled = !hasFreezes && _freezeBankMs <= 0;
     hudFreezeBtn.classList.toggle("has-freezes", hasFreezes);
+    hudFreezeBtn.classList.toggle("freeze-paused", pausedWithBank);
     // 2026-06-22: truly-out state (no charges, not running, nothing banked) gets a distinct
     // depleted look so the player can read "no freeze left" at a glance, not just "×0".
     const isEmpty = !hasFreezes && !_freezeActive && _freezeBankMs <= 0;
@@ -8416,13 +8428,14 @@ function initGalaxyCanvas() {
     return Math.hypot(ufo.x - x, ufo.y - y) <= ufo.r + 10;
   }
 
-  function hitUfo() {
+  function hitUfo(forceKill = false) {
     if (!ufo || !ufo.alive) return;
     const x = ufo.x;
     const y = ufo.y;
     ufo.hitCount += 1;
     shotsHit += 1;
-    if (ufo.hitCount === 1) {
+    // 2026-06-23: forceKill (quadshot) skips the first-hit damage beat so the UFO dies on one shot.
+    if (ufo.hitCount === 1 && !forceKill) {
       ufo.damagedAt = performance.now();
       playGameSfx("ufo_hit1", 0.72);
       return;
@@ -12449,7 +12462,6 @@ function initGalaxyCanvas() {
       tutorialPlacedBombNoAutoArm = true;
       // Step 1 — tap the HUD bomb icon (enters bomb-aim mode). 2026-06-21: this step is about the
       // HUD icon, not arming — corrected text + dedicated SPC recording (vo/SPC_tap_the_bomb_icon_hud.mp3).
-      // The old "52" recording said "tap it to arm it", which now fits Step 3.
       spcVO("tap_the_bomb_icon_hud", "Tap the bomb icon on your HUD.", "talk_calm");
       showHudPointer("hudBombBtn", 0); // persist the arrow until the icon is tapped
       showTaskInstructionDeferred("TAP THE 💣 ICON ON YOUR HUD");
@@ -12466,10 +12478,11 @@ function initGalaxyCanvas() {
       await waitFor(() => placedBombs.length > 0);
       hideTaskInstruction();
 
-      // Step 3 — arm the placed bomb by tapping it. 2026-06-21: reuse the recorded "52" VO
-      // ("When you see a bomb, tap it to arm it.") here — it fits tapping the placed bomb, and
-      // fixes the previously-missing VO on this step. The bomb stays "spawned" (noAutoArm) until
-      // the cadet taps it, so this waitFor can't hang on an auto-detonated bomb.
+      // Step 3 — arm the placed bomb by tapping it. 2026-06-23: TEXT-ONLY for now. The "52"
+      // recording (vo/SPC_52.mp3) is mislabeled — it actually says "Tap the bomb icon on your
+      // HUD", so it played the wrong line right after the bomb was placed. Key "52" is no longer
+      // in SPC_VO_AVAILABLE, so this caption shows with no audio. The bomb stays "spawned"
+      // (noAutoArm) until the cadet taps it, so this waitFor can't hang on an auto-detonated bomb.
       spcVO("52", "When you see a bomb, tap it to arm it.", "talk_calm");
       showTaskInstructionDeferred("TAP THE BOMB TO ARM IT");
       await waitFor(() => placedBombs.some((b) => b.phase === "player_armed"));
@@ -14499,22 +14512,29 @@ function initGalaxyCanvas() {
       });
     }
     shotsFired += 1;
+    // 2026-06-23: while quadshot is active, bombs and UFOs die in one hit — the bomb skips its
+    // arming step and detonates on the spot, the UFO is destroyed on the first hit — to sell the
+    // "powerful weapon" illusion. quadShotUntil is in scope, so this covers both the original tap
+    // and the seeking burst shots. Non-quad shots keep the normal arm-then-detonate / 2-hit flow.
+    const quadActive = performance.now() < quadShotUntil;
     if (landmine && isPointOnMine(landmine, sx, sy)) {
       triggerCrosshairFire();
       stuntNotify("mine_tap"); // tutorial Phase 6: player engaged the bomb (arm / detonate)
-      armLandmine();
+      if (quadActive) explodeLandmine();
+      else armLandmine();
       return true;
     }
     // 2026-06-10: placed bombs use the same tap behavior (spawned → arm, armed → detonate)
     const tappedBomb = placedBombs.find((b) => isPointOnMine(b, sx, sy));
     if (tappedBomb) {
       triggerCrosshairFire();
-      armMineEntity(tappedBomb, (opts) => explodePlacedBomb(tappedBomb, opts));
+      if (quadActive) explodePlacedBomb(tappedBomb);
+      else armMineEntity(tappedBomb, (opts) => explodePlacedBomb(tappedBomb, opts));
       return true;
     }
     if (ufo && isPointOnUfo(sx, sy)) {
       triggerCrosshairFire();
-      hitUfo();
+      hitUfo(quadActive);
       return true;
     }
     const hitIndex = findHitAsteroidIndex(sx, sy);

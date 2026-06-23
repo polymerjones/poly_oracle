@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-23 10:46";
+const BUILD_TS = "2026-06-23 16:17";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -597,24 +597,31 @@ const SFX = {
 const ARCADE_LEVELS = [
   // 2026-06-15: early levels bumped denser (were 2/3/7/9 to-clear) so the opening doesn't read
   // empty. L1/L2 have no trickle (spawnEveryMs 0), so totalToClear MUST equal startSpawn there.
-  { level: 1, label: "FIRST LIGHT", time: 48, totalToClear: 4, startSpawn: 4, spawnEveryMs: 0, maxOnScreen: 12 },
+  { level: 1, label: "First Flight", time: 48, totalToClear: 4, startSpawn: 4, spawnEveryMs: 0, maxOnScreen: 12 },
   { level: 2, label: "SHAKE DOWN", time: 50, totalToClear: 6, startSpawn: 6, spawnEveryMs: 0, maxOnScreen: 12 },
   { level: 3, label: "Blue Moon", time: 52, totalToClear: 10, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12 },
-  { level: 4, label: "DEBRIS RUN", time: 54, totalToClear: 12, startSpawn: 6, spawnEveryMs: 2000, maxOnScreen: 12 },
+  { level: 4, label: "DEBRIS RUN", time: 54, totalToClear: 12, startSpawn: 6, spawnEveryMs: 2000, maxOnScreen: 12,
+    // 2026-06-23: ambient silver debris trickles in throughout — bonus targets/hazards that do NOT
+    // count toward the clear quota (spawned with .ambient = true; see the debris block in update()).
+    debrisField: { intervalMs: 1500, maxDebris: 4 } },
   { level: 5, label: "HEAVY METAL", time: 56, totalToClear: 13, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12,
-    guaranteedSpawn: [{ type: "bomb", atMs: 8000 }, { type: "bomb", atMs: 18000 }] }, // 2026-06-17: two early bomb drops
+    // 2026-06-23: missile unlocks at L5 — drop one near the end (~10s before the timer expires).
+    guaranteedSpawn: [{ type: "bomb", atMs: 8000 }, { type: "bomb", atMs: 18000 }, { type: "missile", atMs: 46000 }] },
   { level: 6, label: "THE SWARM", time: 58, totalToClear: 14, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13,
+    spriteKey: "roid01", // 2026-06-23: silver stroids for the whole level
     musicVolume: 1.15 }, // 2026-06-17: +15% music gain for this level
-  { level: 7, label: "DEEP FIELD", time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
+  { level: 7, label: "Into The Deep", time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
   { level: 8, label: "COLD FRONT", time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14 },
   { level: 9, label: "DANGER CLOSE", time: 68, totalToClear: 21, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14,
+    spriteKey: "roid01", // 2026-06-23: silver stroids for the whole level
     guaranteedSpawn: [
       { type: "bomb", atMs: 8000 },
       { type: "bomb", atMs: 20000 },
       { type: "quadshot", atMs: 12000 },
     ] }, // 2026-06-17: two bombs + a quadshot near the start
   { level: 10, label: "RED HORIZON", time: 75, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14,
-    powerupOverride: ["freeze", "goldbars", "bomb"] }, // 2026-06-16: boss-level support kit
+    powerupOverride: ["freeze", "goldbars", "bomb"], // 2026-06-16: boss-level support kit
+    guaranteedSpawn: [{ type: "freeze", atMs: 37000 }] }, // 2026-06-23: guaranteed freeze around the half-way mark
   // 2026-06-15: second act — the run no longer ends at level 10. Levels 11-15 reuse the
   // level-10 boss music + background (musicForLevel/bgKeyForLevel both clamp at >=10) and the
   // hotroid sprites, ramping density/time. "YOU WIN" now fires after clearing level 15.
@@ -633,6 +640,7 @@ const ARCADE_LEVELS = [
     spawnEveryMs: 8000,
     maxOnScreen: 10,
     asteroidKinds: [3, 3, 2],   // large + medium only — tight clusters
+    spriteMix: [["roid01", 5], ["hotroid01", 1]], // 2026-06-23: mostly silver, a select few red
     noUfo: false,
     ufoSpawnAt: 25,             // UFO arrives mid-level to disrupt chains
     mineLaunch: true,
@@ -1401,6 +1409,11 @@ const commBoxController = (() => {
   let damageState = "normal";
   let idleTimer = null;
   let tickerHideTimer = null;
+  // 2026-06-23: true while an SPC (Stunt Mode) caption owns the ticker. SPC captions are pinned and
+  // must NOT be wiped by the shared CMDR auto-hide timer (endTalking) — that's what made the comm
+  // box vanish mid-line during the plasma-net praise step. CMDR play never pins, so this stays false
+  // there and the auto-hide behaves exactly as before. Set by pinTicker, cleared by hideTicker.
+  let spcTickerActive = false;
   let voAudio = null;
   let voAudioFxCleanup = null;
   let typingToken = 0;
@@ -2210,6 +2223,7 @@ const commBoxController = (() => {
   // stunt loop re-pin the line if anything (e.g. a future VO ending) hides it.
   function pinTicker(text) {
     if (tickerHideTimer) { clearTimeout(tickerHideTimer); tickerHideTimer = null; }
+    spcTickerActive = true; // SPC owns the ticker now — guards against the CMDR auto-hide (see endTalking)
     showTicker();
     typeText(text);
   }
@@ -2220,6 +2234,7 @@ const commBoxController = (() => {
 
   function hideTicker() {
     if (!ticker) return;
+    spcTickerActive = false; // a genuine hide releases SPC ownership
     ticker.classList.remove("ticker-visible");
     tickerVisible = false;
     if (tickerText) tickerText.innerHTML = "";
@@ -2407,7 +2422,10 @@ const commBoxController = (() => {
       stopMouthFlap();
       tickIdle();
       tickerHideTimer = setTimeout(() => {
-        hideTicker();
+        // 2026-06-23: never let a stale CMDR auto-hide wipe a live SPC caption (the plasma-net
+        // praise line vanished mid-VO). SPC drives its own caption lifecycle; only auto-hide here
+        // when SPC doesn't own the ticker.
+        if (!spcTickerActive) hideTicker();
         finish();
       }, 1800); // Part 3: +50% so captions linger longer before auto-hiding
     };
@@ -7027,6 +7045,7 @@ function initGalaxyCanvas() {
   const LEVEL_START_SPAWN_DELAY_MS = 5000;
   let arcadePausedUntil = 0;
   let nextSpawnAt = Infinity;
+  let nextDebrisAt = Infinity; // 2026-06-23: L4 ambient debris-field spawn clock (cfg.debrisField)
   let spawnQueue = 0;
   let totalToSpawn = 0;
   let spawnedTotal = 0;
@@ -7893,6 +7912,9 @@ function initGalaxyCanvas() {
 
   function getAsteroidTintForLevel(level) {
     if (level <= 2)  return null;
+    // 2026-06-23: silver-stroid levels render the natural blue-grey roid01 (and L12's few red
+    // hotroids) untinted — a teal/gold/cyan multiply would discolor the "silver" read.
+    if (level === 6 || level === 9 || level === 12) return null;
     if (level <= 4)  return "rgba(200,80,40,0.18)";
     if (level <= 6)  return "rgba(0,180,160,0.18)";
     if (level <= 8)  return "rgba(140,60,200,0.18)";
@@ -7907,6 +7929,22 @@ function initGalaxyCanvas() {
   }
 
   function getAsteroidSpriteKeyForLevel(levelNum) {
+    // 2026-06-23: per-level sprite overrides off the level config — cfg.spriteKey forces one sprite
+    // for the whole level (silver L6/L9); cfg.spriteMix = [[key, weight], …] picks weighted-random
+    // (L12 = mostly silver roid01 with a select few red hotroid01). Falls through to range defaults.
+    const _cfg = engineMode === "arcade" ? ARCADE_LEVELS.find((l) => l.level === levelNum) : null;
+    if (_cfg?.spriteMix) {
+      const mix = _cfg.spriteMix;
+      let total = 0;
+      for (let i = 0; i < mix.length; i += 1) total += mix[i][1];
+      let roll = Math.random() * total;
+      for (let i = 0; i < mix.length; i += 1) {
+        roll -= mix[i][1];
+        if (roll < 0) return mix[i][0];
+      }
+      return mix[0][0];
+    }
+    if (_cfg?.spriteKey) return _cfg.spriteKey;
     if (levelNum >= 10) return "hotroid01";
     if (levelNum >= 7) return "roid03";
     if (levelNum >= 4) return "roid02";
@@ -8258,6 +8296,10 @@ function initGalaxyCanvas() {
     a.r = r;
     a.mass = r * r;
     a.kind = kind;
+    // 2026-06-23: reset the ambient flag every spawn — pooled asteroids reuse objects, so a stale
+    // .ambient from a previous L4 debris piece must not leak onto a real asteroid. The L4 debris
+    // spawner sets .ambient = true on its returned piece (see the debris block in update()).
+    a.ambient = false;
     const levelNum = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
     a.spriteKey = spriteKeyOverride || getAsteroidSpriteKeyForLevel(levelNum);
     a.rot = Math.random() * Math.PI * 2;
@@ -8275,6 +8317,17 @@ function initGalaxyCanvas() {
       addWarpRing(x, y);
     }
     return a;
+  }
+
+  // 2026-06-23: count only the asteroids that count toward clearing the level — L4 debris pieces
+  // (.ambient) are bonus targets/hazards and must be excluded from the spawn-capacity gate, the
+  // keep-alive check, and the level-complete emptiness test so they never stall progress.
+  function nonAmbientAsteroidCount() {
+    let n = 0;
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      if (!sim.asteroids[i].ambient) n += 1;
+    }
+    return n;
   }
 
   // 2026-06-15: pick a spawn kind from cfg.asteroidKinds (repeats in the array act as weights,
@@ -11042,12 +11095,17 @@ function initGalaxyCanvas() {
     spawnedTotal = 0;
     spawnQueue = Math.max(0, cfg.totalToClear - cfg.startSpawn);
     maxOnScreen = capIOSNativeAsteroids(cfg.maxOnScreen);
-    sim.maxAsteroids = capIOSNativeAsteroids(cfg.maxOnScreen);
+    // 2026-06-23: give the L4 debris field its own headroom in the hard cap so ambient debris never
+    // starves the real-asteroid trickle (the trickle gate is keyed on nonAmbientAsteroidCount).
+    sim.maxAsteroids = capIOSNativeAsteroids(cfg.maxOnScreen)
+      + (cfg.debrisField ? (cfg.debrisField.maxDebris || 4) : 0);
     levelDurationMs = cfg.time * 1000;
     levelRunStartAt = now + 400;
     arcadePausedUntil = levelRunStartAt;
     levelEndsAt = levelRunStartAt + levelDurationMs;
     nextSpawnAt = cfg.spawnEveryMs > 0 ? levelRunStartAt + cfg.spawnEveryMs : Infinity;
+    // 2026-06-23: L4 ambient debris field — first piece a touch after the level settles.
+    nextDebrisAt = cfg.debrisField ? levelRunStartAt + (cfg.debrisField.intervalMs || 1500) : Infinity;
     // 2026-06-15: cfg.powerupIntervalMs gives a level a fixed powerup cadence (e.g. L14 every 10s);
     // otherwise fall back to the default randomized bomb-powerup interval.
     nextBombPowerupAt = cfg.powerupIntervalMs
@@ -13187,7 +13245,7 @@ function initGalaxyCanvas() {
 
       if (arcadeActive && now >= arcadePausedUntil) {
         if (cfg.spawnEveryMs > 0 && spawnQueue > 0 && now >= nextSpawnAt) {
-          if (sim.asteroids.length < maxOnScreen) {
+          if (nonAmbientAsteroidCount() < maxOnScreen) {
             const p = randomPerimeterPoint();
             spawnAsteroid(
               p.x,
@@ -13205,7 +13263,7 @@ function initGalaxyCanvas() {
         }
 
         // Keep gameplay visually alive between stagger waves.
-        if (cfg.spawnEveryMs > 0 && spawnQueue > 0 && sim.asteroids.length === 0) {
+        if (cfg.spawnEveryMs > 0 && spawnQueue > 0 && nonAmbientAsteroidCount() === 0) {
           const p = randomPerimeterPoint();
           spawnAsteroid(
             p.x,
@@ -13217,6 +13275,24 @@ function initGalaxyCanvas() {
           spawnQueue -= 1;
           spawnedTotal += 1;
           nextSpawnAt = Math.max(nextSpawnAt, now + Math.max(350, cfg.spawnEveryMs));
+        }
+
+        // 2026-06-23: L4 ambient debris field — small silver (roid01) debris trickles in throughout
+        // as bonus targets/hazards. Flagged .ambient so it doesn't count toward the clear quota
+        // (nonAmbientAsteroidCount) and isn't tinted by the level color. Capped low so it never
+        // crowds the real-asteroid spawn budget.
+        if (cfg.debrisField && now >= nextDebrisAt) {
+          const df = cfg.debrisField;
+          let ambientLive = 0;
+          for (let di = 0; di < sim.asteroids.length; di += 1) {
+            if (sim.asteroids[di].ambient) ambientLive += 1;
+          }
+          if (ambientLive < (df.maxDebris || 4)) {
+            const dp = randomPerimeterPoint();
+            const debris = spawnAsteroid(dp.x, dp.y, 1, true, "roid01");
+            if (debris) debris.ambient = true;
+          }
+          nextDebrisAt = now + (df.intervalMs || 1500);
         }
 
         // 2026-06-16: recurring mid-level mine drops on mineLaunch levels (L12/L13/L15). Only
@@ -13386,7 +13462,7 @@ function initGalaxyCanvas() {
         arcadeUfoSpawnAt = 0;
       }
 
-      if (!practiceEndless && spawnQueue === 0 && spawnedTotal >= totalToSpawn && sim.asteroids.length === 0) {
+      if (!practiceEndless && spawnQueue === 0 && spawnedTotal >= totalToSpawn && nonAmbientAsteroidCount() === 0) {
         levelComplete();
       }
 
@@ -14088,7 +14164,8 @@ function initGalaxyCanvas() {
         ctx.rotate(a.rot);
         ctx.drawImage(sprite, -a.r, -a.r, d, d);
         ctx.restore();
-        const _tint = getAsteroidTintForLevel(_levelNum);
+        // 2026-06-23: ambient L4 debris keeps its natural silver — skip the level color multiply.
+        const _tint = a.ambient ? null : getAsteroidTintForLevel(_levelNum);
         if (_tint) {
           ctx.save();
           ctx.globalCompositeOperation = "multiply";

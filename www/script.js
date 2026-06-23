@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-23 16:17";
+const BUILD_TS = "2026-06-23 16:27";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -496,6 +496,10 @@ const BOMB_POWERUP_INTERVAL_MIN = 25000;
 const BOMB_POWERUP_INTERVAL_MAX = 35000;
 const BOMB_POWERUP_LIFETIME_MS = 10000;
 const MUSIC_MAX_GAIN = 1.0; // 2026-06-10: was 0.9, bumped to full
+// 2026-06-23 PERF: max decoded music tracks kept in memory (see audioEngine._evictMusicBuffers).
+// 4 = currently-playing + prefetched next + a little slack, so normal level progression never
+// re-decodes the track it just left. Each entry is ~40-60MB of PCM, so this caps audio at ~200MB.
+const MUSIC_BUFFER_CACHE_MAX = 4;
 const MUSIC = {
   L1_3:    "assets/music/E1L1-3.mp3",          // levels 1-2
   // L4_7: "assets/music/E1L4-7.mp3",          // retired - replaced by phonk series
@@ -3260,16 +3264,39 @@ const audioEngine = {
   async loadMusicBuffer(url) {
     this.ensureMusic();
     if (!this.ctx) return null;
-    if (this.musicBuffers.has(url)) return this.musicBuffers.get(url);
+    if (this.musicBuffers.has(url)) {
+      // 2026-06-23: LRU touch — re-insert so the most-recently-used tracks survive eviction.
+      const cached = this.musicBuffers.get(url);
+      this.musicBuffers.delete(url);
+      this.musicBuffers.set(url, cached);
+      return cached;
+    }
     try {
       const response = await fetch(url);
       if (!response.ok) return null;
       const arr = await response.arrayBuffer();
       const decoded = await this.ctx.decodeAudioData(arr.slice(0));
       this.musicBuffers.set(url, decoded);
+      this._evictMusicBuffers();
       return decoded;
     } catch {
       return null;
+    }
+  },
+  // 2026-06-23 PERF: decodeAudioData expands an MP3 to raw 32-bit float PCM (~40-60MB per ~3min
+  // stereo loop), and the cache used to hold EVERY track played for the whole session. Climbing
+  // levels 1→12 thus pinned ~500MB+ of decoded audio, starving iOS and turning every allocating
+  // action (explosions, shrapnel, toss) into a GC stall — while level-select straight to 12 stayed
+  // smooth (only ~2 tracks decoded). Cap the cache to the working set (current + prefetched next +
+  // slack), LRU-evicted, and never drop the track that's actually playing. Evicted tracks simply
+  // re-decode on demand; the one-level look-ahead prefetch keeps the next one warm.
+  _evictMusicBuffers() {
+    const protectedUrls = new Set([this.currentMusic?.url, this.currentMusicHtml?.url]);
+    // Map preserves insertion order → iterate oldest-first, drop until within the cap.
+    for (const key of this.musicBuffers.keys()) {
+      if (this.musicBuffers.size <= MUSIC_BUFFER_CACHE_MAX) break;
+      if (protectedUrls.has(key)) continue;
+      this.musicBuffers.delete(key);
     }
   },
   async playMusic(key, url, { crossfadeMs = 250, volume = 1 } = {}) {

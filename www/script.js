@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-23 16:27";
+const BUILD_TS = "2026-06-23 16:40";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -608,7 +608,7 @@ const ARCADE_LEVELS = [
     // 2026-06-23: ambient silver debris trickles in throughout — bonus targets/hazards that do NOT
     // count toward the clear quota (spawned with .ambient = true; see the debris block in update()).
     debrisField: { intervalMs: 1500, maxDebris: 4 } },
-  { level: 5, label: "HEAVY METAL", time: 56, totalToClear: 13, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12,
+  { level: 5, label: "Emotions Heavy", time: 56, totalToClear: 13, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12,
     // 2026-06-23: missile unlocks at L5 — drop one near the end (~10s before the timer expires).
     guaranteedSpawn: [{ type: "bomb", atMs: 8000 }, { type: "bomb", atMs: 18000 }, { type: "missile", atMs: 46000 }] },
   { level: 6, label: "THE SWARM", time: 58, totalToClear: 14, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13,
@@ -637,7 +637,7 @@ const ARCADE_LEVELS = [
   // waves are declared but NOT yet wired — see the TODO stubs in startLevel/setupUfoSpawnForLevel.
   {
     level: 12,
-    label: "BOOM CADET",
+    label: "MAKE IT BOOM",
     time: 55,
     totalToClear: 18,
     startSpawn: 6,
@@ -679,6 +679,7 @@ const ARCADE_LEVELS = [
     spawnEveryMs: 4000,
     maxOnScreen: 20,
     asteroidKinds: [1],          // ONLY kind 1 small asteroids
+    spriteKey: "roidneon",       // 2026-06-23: code-generated neon skin (black/green/purple gradient map)
     asteroidSpeedMult: 1.6,      // 60% faster
     noUfo: true,
     noLandmines: true,
@@ -6941,6 +6942,49 @@ function initGalaxyCanvas() {
     asteroidSprites[key] = img;
   });
 
+  // 2026-06-23: L14 ("roidneon") gets a code-generated skin instead of a painted asset — a tritone
+  // luminance gradient map over roid01: black shadows -> neon-green mids -> purple highlights, exactly
+  // the look asked for. Built once into an offscreen canvas, then baked to an Image so the renderer's
+  // .complete/.naturalWidth checks and the asteroidSprites lookup all work unchanged. If roid01 isn't
+  // decoded yet we defer to its load; if the canvas reads back tainted we bail and L14 falls back to
+  // the normal sprite. Tweak the three ramp stops below to retune the colors.
+  function buildNeonAsteroidSprite() {
+    const base = asteroidSprites.roid01;
+    if (!base || !base.complete || !base.naturalWidth) return false;
+    const w = base.naturalWidth;
+    const h = base.naturalHeight;
+    const cv = document.createElement("canvas");
+    cv.width = w;
+    cv.height = h;
+    const c = cv.getContext("2d");
+    if (!c) return false;
+    c.drawImage(base, 0, 0);
+    let data;
+    try { data = c.getImageData(0, 0, w, h); } catch { return false; } // tainted-canvas guard
+    const px = data.data;
+    const SHADOW = [4, 0, 10];     // near-black (a faint violet so shadows aren't dead flat)
+    const MID = [57, 255, 20];     // neon green
+    const HI = [168, 70, 255];     // purple highlight
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i + 3] === 0) continue; // keep fully-transparent pixels (silhouette + AA edges intact)
+      const L = (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]) / 255;
+      let a0; let a1; let t;
+      if (L < 0.5) { a0 = SHADOW; a1 = MID; t = L / 0.5; }
+      else { a0 = MID; a1 = HI; t = (L - 0.5) / 0.5; }
+      px[i] = a0[0] + (a1[0] - a0[0]) * t;
+      px[i + 1] = a0[1] + (a1[1] - a0[1]) * t;
+      px[i + 2] = a0[2] + (a1[2] - a0[2]) * t;
+    }
+    c.putImageData(data, 0, 0);
+    const out = new Image();
+    out.src = cv.toDataURL("image/png");
+    asteroidSprites.roidneon = out;
+    return true;
+  }
+  if (!buildNeonAsteroidSprite()) {
+    asteroidSprites.roid01.addEventListener("load", buildNeonAsteroidSprite, { once: true });
+  }
+
   // 2026-06-10: powerup sprites (256px source, transparent bg, baked-in glow) — drawn ~56px.
   // The bomb powerup keeps its canvas-drawn ring + glyph for now.
   const POWERUP_SPRITE_SIZE = 56;
@@ -7940,8 +7984,9 @@ function initGalaxyCanvas() {
   function getAsteroidTintForLevel(level) {
     if (level <= 2)  return null;
     // 2026-06-23: silver-stroid levels render the natural blue-grey roid01 (and L12's few red
-    // hotroids) untinted — a teal/gold/cyan multiply would discolor the "silver" read.
-    if (level === 6 || level === 9 || level === 12) return null;
+    // hotroids) untinted — a teal/gold/cyan multiply would discolor the "silver" read. L14 uses the
+    // code-generated neon skin with its colors already baked in, so it stays untinted too.
+    if (level === 6 || level === 9 || level === 12 || level === 14) return null;
     if (level <= 4)  return "rgba(200,80,40,0.18)";
     if (level <= 6)  return "rgba(0,180,160,0.18)";
     if (level <= 8)  return "rgba(140,60,200,0.18)";

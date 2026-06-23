@@ -1790,18 +1790,18 @@ select:focus-visible {
 }
 
 /* 2026-06-22: press + select feedback for mode buttons. :active gives an instant
-   pressed-in feel; .modeBtn--pop (added in JS on select) plays a quick lit "pop". */
+   pressed-in feel; .modeBtn--select (added in JS on tap) plays a yellow flashing highlight. */
 .modeBtn:not(:disabled):not(.locked):active {
   transform: scale(0.95);
   filter: brightness(1.06);
 }
-.modeBtn--pop {
-  animation: modeBtnPop 220ms ease-out;
+.modeBtn--select {
+  animation: modeBtnSelect 230ms ease-out 2;
 }
-@keyframes modeBtnPop {
-  0%   { transform: scale(0.95); box-shadow: 0 0 0 rgba(168, 236, 255, 0); }
-  45%  { transform: scale(1.06); box-shadow: 0 0 16px rgba(168, 236, 255, 0.75); }
-  100% { transform: scale(1);    box-shadow: 0 0 0 rgba(168, 236, 255, 0); }
+@keyframes modeBtnSelect {
+  0%   { box-shadow: 0 0 0 rgba(255, 220, 60, 0);                                                      filter: brightness(1); }
+  50%  { box-shadow: 0 0 22px 5px rgba(255, 220, 60, 0.95), inset 0 0 10px rgba(255, 240, 150, 0.85);  filter: brightness(1.2); }
+  100% { box-shadow: 0 0 0 rgba(255, 220, 60, 0);                                                      filter: brightness(1); }
 }
 
 .modeBtn:disabled,
@@ -2480,6 +2480,25 @@ select:focus-visible {
    through and taps pass to the playfield. Anchored ABOVE the commander HUD (fixed bottom:40px,
    ~190px-tall portrait → top ~230px from bottom) so the title never collides with the comm
    box/speech bubble that's on-screen at level start. max() keeps the clearance on short screens. */
+/* 2026-06-22: Level 3 "Blue Moon" backdrop prop — sits above the bg video, below the HUD.
+   Hidden by default; revealed only while the gameplay view carries .level-3 (set in startLevel). */
+.l3Moon {
+  display: none;
+  position: absolute;
+  top: 12%;
+  right: 14%;
+  width: clamp(84px, 22vw, 132px);
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 35%, #cfe8ff, #6fa8e0 55%, #2c4f80);
+  box-shadow: 0 0 40px rgba(120, 180, 255, 0.6), inset -8px -10px 22px rgba(16, 32, 64, 0.55);
+  pointer-events: none;
+  z-index: 1;
+}
+.galaxy-view.level-3 .l3Moon {
+  display: block;
+}
+
 .levelTitleBanner {
   position: absolute;
   left: 0;
@@ -2502,15 +2521,15 @@ select:focus-visible {
 }
 .levelTitleBanner.show.fadeOut {
   /* very slow fade-out so the title drifts away rather than blinking off */
-  animation: levelTitleOut 2800ms ease forwards;
+  animation: levelTitleOut 4200ms ease forwards;
 }
 @keyframes levelTitleIn {
   from { opacity: 0; transform: translateY(12px); letter-spacing: 0.4em; }
-  to   { opacity: 1; transform: none; letter-spacing: 0.22em; }
+  to   { opacity: 0.9; transform: none; letter-spacing: 0.22em; }
 }
 @keyframes levelTitleOut {
-  from { opacity: 1; }
-  to   { opacity: 0; }
+  from { opacity: 0.9; }
+  to   { opacity: 0.05; }
 }
 
 .arcadeOverlayBtn {

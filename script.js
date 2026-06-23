@@ -83,11 +83,13 @@ async function initMediaSession() {
   return _mediaSessionInitPromise;
 }
 
-async function updateMediaSessionLevel(levelNum) {
+async function updateMediaSessionLevel(levelNum, levelLabel) {
   if (!_mediaSession) return;
   try {
+    // 2026-06-22: "L2 - SHAKE DOWN" style now-playing title (level number + name).
+    const title = levelLabel ? `L${levelNum} - ${levelLabel}` : `L${levelNum}`;
     await _mediaSession.setMetadata({
-      title: `Poly Oracle - Level ${levelNum}`,
+      title,
       artist: "POLYVERSE",
       album: "Arcade Mode",
       artwork: [{
@@ -178,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-22 15:57";
+const BUILD_TS = "2026-06-22 19:31";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -568,8 +570,8 @@ const REVEAL_POOL_SFX = ["reveal1_pool", "reveal2_pool", "reveal3_pool", "reveal
 const ARCADE_OVERLAY_FADE_MS = 500;
 // 2026-06-22: standalone bottom-screen level title — lingers, then a very slow fade. Lives
 // outside the dimming intro overlay (pointer-events:none) so it never covers/blocks gameplay.
-const LEVEL_TITLE_HOLD_MS = 3600;
-const LEVEL_TITLE_FADE_MS = 2800;
+const LEVEL_TITLE_HOLD_MS = 2600; // 2026-06-22: fade starts ~1s earlier
+const LEVEL_TITLE_FADE_MS = 4200; // 2026-06-22: longer, stretched dim-out (matches CSS levelTitleOut)
 const REVEAL = {
   TAP_BURST_MS: 1500,
   TAP_INTERVAL_MS_START: 60,
@@ -595,7 +597,7 @@ const ARCADE_LEVELS = [
   // empty. L1/L2 have no trickle (spawnEveryMs 0), so totalToClear MUST equal startSpawn there.
   { level: 1, label: "FIRST LIGHT", time: 48, totalToClear: 4, startSpawn: 4, spawnEveryMs: 0, maxOnScreen: 12 },
   { level: 2, label: "SHAKE DOWN", time: 50, totalToClear: 6, startSpawn: 6, spawnEveryMs: 0, maxOnScreen: 12 },
-  { level: 3, label: "EYES UP", time: 52, totalToClear: 10, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12 },
+  { level: 3, label: "Blue Moon", time: 52, totalToClear: 10, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12 },
   { level: 4, label: "DEBRIS RUN", time: 54, totalToClear: 12, startSpawn: 6, spawnEveryMs: 2000, maxOnScreen: 12 },
   { level: 5, label: "HEAVY METAL", time: 56, totalToClear: 13, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12,
     guaranteedSpawn: [{ type: "bomb", atMs: 8000 }, { type: "bomb", atMs: 18000 }] }, // 2026-06-17: two early bomb drops
@@ -3892,11 +3894,11 @@ function addListeners() {
       const btn = e.target?.closest?.(".modeBtn");
       if (!btn || !galaxyModeSelect.contains(btn)) return;
       if (btn.disabled || btn.classList.contains("locked") || btn.classList.contains("is-disabled")) return;
-      audioEngine.play("blip1", { volume: 0.5 });
-      btn.classList.remove("modeBtn--pop");
+      audioEngine.play("bling", { volume: 0.6 });
+      btn.classList.remove("modeBtn--select");
       void btn.offsetWidth; // restart the animation on rapid re-taps
-      btn.classList.add("modeBtn--pop");
-      btn.addEventListener("animationend", () => btn.classList.remove("modeBtn--pop"), { once: true });
+      btn.classList.add("modeBtn--select");
+      btn.addEventListener("animationend", () => btn.classList.remove("modeBtn--select"), { once: true });
     });
   }
   if (openContact && contactModal) {
@@ -6913,6 +6915,10 @@ function initGalaxyCanvas() {
   // the timer is anchored to actual playback start (the 'playing' event), this is true post-audio
   // padding — bumped 250→450ms to absorb iOS media-start jitter. Tune after device testing.
   const SPC_VO_TAIL_MS = 450;
+  // 2026-06-22: minimum on-screen time per caption. Guards against a short/force-advanced line
+  // (e.g. an audio load failure that advances instantly) being overwritten by the next line
+  // before it can be read — the "show you the ropes" line was vanishing this way.
+  const SPC_MIN_CAPTION_MS = 900;
   // 2026-06-17: per-line watchdog — if a line never fires its end/timer (iOS audio quirk), the
   // updateStunt watchdog force-advances via _spcAdvanceFn after _spcLineStartedAt + _spcLineWatchdogMs.
   // 2026-06-18: watchdog is now DYNAMIC — set from the real clip duration once metadata loads, so a
@@ -10798,7 +10804,7 @@ function initGalaxyCanvas() {
     // 2026-06-12: "YOU WIN" celebration — screen-wide boom barrage + bold slam-in text held
     // over the still-running level-10 music (ducked), then hand off to the score/initials screen.
     playWinSequence(() => {
-      galaxyView?.classList.remove("level-10");
+      galaxyView?.classList.remove("level-10", "level-3");
       audioEngine.stopMusic();
       stopGalaxyBackground();
       if (arcadeScore > 0) {
@@ -10960,8 +10966,9 @@ function initGalaxyCanvas() {
     const cfg = ARCADE_LEVELS[safeIdx];
     const now = performance.now();
     setSavedArcadeLevel(cfg.level);
-    initMediaSession().then(() => updateMediaSessionLevel(cfg.level));
+    initMediaSession().then(() => updateMediaSessionLevel(cfg.level, cfg.label));
     galaxyView?.classList.toggle("level-10", cfg.level === 10);
+    galaxyView?.classList.toggle("level-3", cfg.level === 3); // 2026-06-22: "Blue Moon" backdrop prop
     applyLevelTheme(cfg.level);
 
     clearGameplayEntities();
@@ -11300,7 +11307,7 @@ function initGalaxyCanvas() {
     syncArcadeEntryLabel();
     setGalaxyViewMode("arcade");
     setGalaxyTool("draw");
-    galaxyView?.classList.remove("level-10");
+    galaxyView?.classList.remove("level-10", "level-3");
     resetArcadeTimerVisuals();
     clearGameplayEntities();
     setGalaxyBackgroundForLevel(1);
@@ -11438,6 +11445,16 @@ function initGalaxyCanvas() {
     const dur = Math.max(1200, Math.min(4600, (text.length * 46) / SPC_VO_PLAYBACK_RATE));
     const advance = () => {
       if (!_spcPlaying) return; // idempotent: orphaned timer / watchdog / onerror+onended race can't double-advance
+      // 2026-06-22: hold a caption for a minimum readable window before handing off to the next
+      // queued line, so a short or force-advanced line is never overwritten before it's seen.
+      if (_spcQueue.length > 0 && _spcLineStartedAt > 0) {
+        const shown = performance.now() - _spcLineStartedAt;
+        if (shown < SPC_MIN_CAPTION_MS) {
+          if (_spcTimer) clearTimeout(_spcTimer);
+          _spcTimer = setTimeout(advance, SPC_MIN_CAPTION_MS - shown);
+          return;
+        }
+      }
       if (_spcTimer) { clearTimeout(_spcTimer); _spcTimer = null; }
       if (_spcAudioFxCleanup) { _spcAudioFxCleanup(); _spcAudioFxCleanup = null; }
       // 2026-06-18: pause before nulling — a forced advance (watchdog/skip/fallback) must not
@@ -11478,7 +11495,13 @@ function initGalaxyCanvas() {
           // or the codec/MIME failed to decode. Falls back to text-only caption (advance()).
           const code = _spcAudio && _spcAudio.error ? _spcAudio.error.code : "?";
           console.warn("[SPC] audio error", { key, src, code, e });
-          advance();
+          // 2026-06-22: don't advance instantly on a load/decode failure — that lets the next
+          // line overwrite this caption before it's readable (the "show you the ropes" bug).
+          // Fall back to the text-length timer so the caption stays up like the no-audio path.
+          if (_spcPlaying) {
+            if (_spcTimer) clearTimeout(_spcTimer);
+            _spcTimer = setTimeout(advance, dur);
+          }
         };
         // 2026-06-18: iOS WKWebView does NOT reliably fire 'ended' on a media element routed
         // through a Web Audio graph (applyCommRadioEffect). So the PRIMARY advance is a timer
@@ -12748,7 +12771,7 @@ function initGalaxyCanvas() {
       setMenuOverlayOpen(false);
       setGalaxyViewMode("arcade");
       setGalaxyTool("draw");
-      galaxyView?.classList.remove("level-10");
+      galaxyView?.classList.remove("level-10", "level-3");
       resizeGalaxyCanvas();
       computePlayfield();
       setTimeout(computePlayfield, 50);
@@ -12831,7 +12854,7 @@ function initGalaxyCanvas() {
     arcadeResumeAvailable = false;
     retryPending = false;
     resetArcadeTimerVisuals();
-    galaxyView?.classList.remove("level-10");
+    galaxyView?.classList.remove("level-10", "level-3");
     setMenuOverlayOpen(false);
     syncArcadeEntryLabel();
     setGalaxyViewMode("practice");
@@ -12899,7 +12922,7 @@ function initGalaxyCanvas() {
       if (gamePageActive) playArcadeMenuMusic();
       else audioEngine.stopMusic();
       setGalaxyBackgroundDim(0);
-      galaxyView?.classList.remove("level-10");
+      galaxyView?.classList.remove("level-10", "level-3");
     }
     engineMode = "menu";
     syncArcadeEntryLabel();
@@ -14448,7 +14471,15 @@ function initGalaxyCanvas() {
     const hitIndex = findHitAsteroidIndex(sx, sy);
     if (hitIndex >= 0 && !tutorialFireBlocked) {
       triggerCrosshairFire();
-      splitAsteroidByIndex(hitIndex);
+      // 2026-06-22: a tossed stroid (fiery or frozen — render-only difference) is an in-flight
+      // projectile, not a normal rock. Blasting it detonates on the spot (reusing the impact FX
+      // + sim.tossedAsteroid cleanup) instead of splitting it into children.
+      const hitRock = sim.asteroids[hitIndex];
+      if (hitRock && hitRock.tossed) {
+        detonateTossedAsteroid(hitRock);
+      } else {
+        splitAsteroidByIndex(hitIndex);
+      }
       stuntNotify("shoot");
       return true;
     }

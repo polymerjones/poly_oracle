@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-24 00:10";
+const BUILD_TS = "2026-06-24 11:00";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -477,6 +477,15 @@ const LEVEL_THEMES = {
   14: { primary: "#00FF44", name: "Critical Mass" },
   15: { primary: "#FF8800", name: "The Gauntlet" },
 };
+// 2026-06-24: true for a "red" level theme — high red channel, low green/blue. Used to pick SPC's
+// "gettin' hot in here" intro on red levels (e.g. L13). Orange themes (#FF8800) fail on green.
+function isRedTheme(hex) {
+  if (typeof hex !== "string") return false;
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+  if (!m) return false;
+  const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+  return r > 200 && g < 80 && b < 80;
+}
 // 2026-06-15 (Part 6): per-level explosion spark palettes (levels 11-15). Stored as the
 // "rgba(r,g,b," prefix that sparkColorForSprite() returns — the caller appends the alpha.
 const LEVEL_SPARK_COLORS = {
@@ -631,7 +640,7 @@ const ARCADE_LEVELS = [
   // level-10 boss music + background (musicForLevel/bgKeyForLevel both clamp at >=10) and the
   // hotroid sprites, ramping density/time. "YOU WIN" now fires after clearing level 15.
   { level: 11, label: "AFTERSHOCK", time: 78, totalToClear: 27, startSpawn: 7, spawnEveryMs: 1350, maxOnScreen: 15,
-    musicVolume: 1.3, // 2026-06-24: L11_Swarm track is mastered quiet (≈menu-pause level) — boost it
+    musicVolume: 1.45, // 2026-06-24: L11_Swarm track is mastered quiet — boosted again per playtest
     guaranteedSpawn: [{ type: "quadshot", atMs: 12000 }], // 2026-06-16: early quadshot drop
     waves: [{ count: 9, triggerAtRemaining: 34 }] }, // 2026-06-23: aftershock surge — 9 rocks burst in once ~34s remain
   // 2026-06-15: levels 12-15 are the "second act" with per-level mechanics. New config fields
@@ -654,6 +663,7 @@ const ARCADE_LEVELS = [
     mineCount: 4,              // 4 mines spawn at level start
     mineFuseMs: 5000,          // shorter fuse than normal (normally 8000)
     musicKey: "L12_BOOM",
+    musicVolume: 1.3, // 2026-06-24: L12_BOOM mastered quiet — boost per playtest
   },
   {
     level: 13,
@@ -1423,6 +1433,11 @@ const commBoxController = (() => {
   let damageState = "normal";
   let idleTimer = null;
   let tickerHideTimer = null;
+  // 2026-06-24: SPC levels auto-dismiss the comm mug a short beat after the last line clears, so
+  // her portrait isn't permanently parked over the playfield. Soft CSS collapse (#commanderHUD
+  // .comm-collapsed); restored the instant the next caption shows. CMDR levels are unaffected.
+  let commCollapseTimer = null;
+  const COMM_COLLAPSE_MS = 1600;
   // 2026-06-23: true while an SPC (Stunt Mode) caption owns the ticker. SPC captions are pinned and
   // must NOT be wiped by the shared CMDR auto-hide timer (endTalking) — that's what made the comm
   // box vanish mid-line during the plasma-net praise step. CMDR play never pins, so this stays false
@@ -1656,6 +1671,15 @@ const commBoxController = (() => {
     "SPC_lets_get_after_it.mp3",
     "SPC_timer_warning.mp3",
     "SPC_not_doing_hot.mp3",
+    // 2026-06-24: new SPC gameplay lines (level-start variety, red-level start, plasma recharged,
+    // slow-play nudge, big praise, random ad-lib). Files in vo/SPC_*.mp3.
+    "SPC_its_getting_messy_cadet_take_em_out.mp3",
+    "SPC_peeing_pants.mp3",
+    "SPC_aye_its_gettin_hot_in_here.mp3",
+    "SPC_plasma_recharged_make_a_plasma_net.mp3",
+    "SPC_put_some_effort_into_it.mp3",
+    "SPC_wow_cadet_just_wow-bigpraise.mp3",
+    "SPC_Ayyee.mp3",
   ]);
   const POOL_SPC_PRAISE = [
     "SPC_crushing_it.mp3",
@@ -1664,6 +1688,21 @@ const commBoxController = (() => {
     "SPC_amazing.mp3",
     "SPC_show_boss.mp3",
     "SPC_lets_get_after_it.mp3",
+    "SPC_Ayyee.mp3", // 2026-06-24: ad-lib "Ayyee!" mixed into the ambient praise rotation
+  ];
+  // 2026-06-24: SPC level-start intro pool (general) + the red-theme variant. Picked in startLevel
+  // on SPC levels; red levels (e.g. L13) use the "gettin' hot in here" line instead.
+  const POOL_SPC_LEVEL_START = [
+    "SPC_lets_get_after_it.mp3",
+    "SPC_its_getting_messy_cadet_take_em_out.mp3",
+    "SPC_peeing_pants.mp3",
+  ];
+  // The red-theme intro (SPC_aye_its_gettin_hot_in_here.mp3) is inlined at the startLevel call site.
+  // 2026-06-24: low-time / behind-the-curve nudge pool for SPC levels (alternates the time warning
+  // with a "put some effort into it" line so the 20s mark isn't always the same comm).
+  const POOL_SPC_TIMER_LOW = [
+    "SPC_timer_warning.mp3",
+    "SPC_put_some_effort_into_it.mp3",
   ];
 
   const VO_CAPTIONS = {
@@ -1676,6 +1715,13 @@ const commBoxController = (() => {
     "SPC_lets_get_after_it.mp3": "LET'S GET AFTER IT, CADET!",
     "SPC_timer_warning.mp3": "YOU'RE RUNNING OUT OF TIME, CADET.",
     "SPC_not_doing_hot.mp3": "YOU'RE NOT DOING SO HOT, CADET.",
+    "SPC_its_getting_messy_cadet_take_em_out.mp3": "IT'S GETTING REAL MESSY OUT THERE, CADET. TAKE 'EM OUT!",
+    "SPC_peeing_pants.mp3": "IF THESE 'STROIDS WERE ALIVE, THEY'D BE PEEING THEIR PANTS.",
+    "SPC_aye_its_gettin_hot_in_here.mp3": "AYE, IT'S GETTIN' HOT IN HERE!",
+    "SPC_plasma_recharged_make_a_plasma_net.mp3": "PLASMA RECHARGED — MAKE A PLASMA NET!",
+    "SPC_put_some_effort_into_it.mp3": "PUT SOME EFFORT INTO IT, CADET!",
+    "SPC_wow_cadet_just_wow-bigpraise.mp3": "WOW, CADET. JUST… WOW.",
+    "SPC_Ayyee.mp3": "AYYEE!",
     // 2026-06-15: level 15 finale (Part 8). Audio is a placeholder (Poly records gauntlet_intro.mp3);
     // until then this caption shows in the comm box.
     "gauntlet_intro.mp3": "THIS IS IT CADET. THE GAUNTLET. GIVE IT EVERYTHING YOU'VE GOT.",
@@ -1988,6 +2034,7 @@ const commBoxController = (() => {
     portraitOverride = null;
     _spcMode = false;
     _spcSpeaking = false;
+    cancelCommCollapse(); // 2026-06-24: leaving an SPC level — un-collapse the mug for CMDR
     _spcStopFlap();
     _spcStopBlink();
     if (portrait) {
@@ -2225,6 +2272,7 @@ const commBoxController = (() => {
 
   function showTicker() {
     if (!ticker) return;
+    cancelCommCollapse(); // 2026-06-24: a new caption brings the SPC mug back into view
     configureSignalBars();
     ticker.classList.add("ticker-visible");
     tickerVisible = true;
@@ -2257,6 +2305,24 @@ const commBoxController = (() => {
         .forEach((b) => b.classList.remove("sigbar-active"));
       configureSignalBars();
     }, 300);
+  }
+
+  // 2026-06-24: cancel a pending/active mug auto-collapse and reveal the box (called when any
+  // new caption shows). Safe to call on CMDR levels (no-op beyond removing the class).
+  function cancelCommCollapse() {
+    if (commCollapseTimer) { clearTimeout(commCollapseTimer); commCollapseTimer = null; }
+    hud?.classList.remove("comm-collapsed");
+  }
+  // 2026-06-24: arm the mug auto-collapse — SPC levels only. Fires after a short hold, but only if
+  // nothing is still queued/playing and the ticker is hidden (re-checked when the timer elapses).
+  function scheduleCommCollapse() {
+    if (!_spcMode) return;
+    if (commCollapseTimer) { clearTimeout(commCollapseTimer); commCollapseTimer = null; }
+    commCollapseTimer = setTimeout(() => {
+      commCollapseTimer = null;
+      if (!_spcMode || _voPlaying || _voQueue.length > 0 || tickerVisible) return;
+      hud?.classList.add("comm-collapsed");
+    }, COMM_COLLAPSE_MS);
   }
 
   function configureSignalBars() {
@@ -2440,6 +2506,9 @@ const commBoxController = (() => {
         // praise line vanished mid-VO). SPC drives its own caption lifecycle; only auto-hide here
         // when SPC doesn't own the ticker.
         if (!spcTickerActive) hideTicker();
+        // 2026-06-24: SPC levels — once the caption clears and nothing else is queued, dismiss the
+        // mug after a short beat to free up playfield space (no-op on CMDR levels).
+        scheduleCommCollapse();
         finish();
       }, 1800); // Part 3: +50% so captions linger longer before auto-hiding
     };
@@ -2609,6 +2678,8 @@ const commBoxController = (() => {
     POOL_NICE_SHOT,
     POOL_HYPE,
     POOL_SPC_PRAISE,
+    POOL_SPC_LEVEL_START,
+    POOL_SPC_TIMER_LOW,
     POOL_BOMB,
     POOL_DETONATE,
     POOL_LOW_LIVES,
@@ -7144,11 +7215,15 @@ function initGalaxyCanvas() {
     "bomb_now_tap_the_screen_where_you_want_to_place_it",
     // 2026-06-22: corrected single-purpose recordings (drop the matching vo/SPC_*.mp3 in to enable).
     "blast_those_stroids_with_the_quad_shot", "tap_freeze_on_hud_to_activate_it", "pick_up_the_missile_cadet",
+    // 2026-06-24: dedicated bomb arm/detonate recordings (placed-bomb steps).
+    "Tap_the_bomb_to_arm_it", "tap_the_bomb_again_to_detonate_it",
     "62_part1", "63", "63b", "63b_part1", "63b_part2", "64", "65", "66", "67", "68", "69", "70",
     "amazing", "boom_like_that", "crushing_it", "freeze_toggle", "grab_small", "lets_get_after_it",
     "not_doing_hot", "peeing_pants", "show_boss", "there_you_go", "timer_warning",
-    "BONUS_001", "BONUS_002", "BONUS_003", "BONUS_006", "BONUS_011", "BONUS_012", "BONUS_016",
-    "BONUS_039", "BONUS_057", "BONUS_063", "BONUS_066", "BONUS_075",
+    // 2026-06-24: BONUS_006 & BONUS_039 removed — those recordings were renamed to
+    // SPC_Ayyee.mp3 / SPC_put_some_effort_into_it.mp3 and wired as gameplay bonus lines.
+    "BONUS_001", "BONUS_002", "BONUS_003", "BONUS_011", "BONUS_012", "BONUS_016",
+    "BONUS_057", "BONUS_063", "BONUS_066", "BONUS_075",
   ]);
   let currentLevelIndex = 0;
   let _levelPrimaryColor = "#00FFD1";
@@ -9675,7 +9750,10 @@ function initGalaxyCanvas() {
         if (now2 - lastKillStreakVoAt > 15000) {
           lastKillStreakVoAt = now2;
           setTimeout(() => {
-            // SPC levels: her praise pool stands in for the CMDR "cocky" line.
+            // SPC levels: the kill-streak milestone is the "big praise" moment — fire her
+            // "Wow, Cadet. Just… wow." line; fall back to the praise pool, then CMDR's cocky line.
+            // (2026-06-24)
+            if (queueSpcBonusVO("SPC_wow_cadet_just_wow-bigpraise.mp3")) return;
             if (queueSpcPraiseVO()) return;
             commBoxController.queueVO({
               audioSrc: commBoxController.commVoSrc(
@@ -9977,6 +10055,8 @@ function initGalaxyCanvas() {
           setTimeout(fireRechargeComm, 800);
           return;
         }
+        // SPC levels: her own "Plasma recharged — make a plasma net!" line. (2026-06-24)
+        if (queueSpcBonusVO("SPC_plasma_recharged_make_a_plasma_net.mp3")) return;
         commBoxController.queueVO({
           audioSrc: commBoxController.commVoSrc(
             commBoxController.pickFromPool("plasmarecharged", commBoxController.POOL_PLASMA_RECHARGED),
@@ -11399,10 +11479,15 @@ function initGalaxyCanvas() {
     // starts talking (the comm box was popping up before the level had visually settled).
     setTimeout(() => {
       // 2026-06-17: levels 13 & 14 — SPC owns the comm box and CMDR voice is muted, so greet the
-      // cadet with her own intro line ("Let's get after it, Cadet!") instead of the muted CMDR line.
-      const spcIntro = (levelNum === 13 || levelNum === 14)
-        ? commBoxController.spcBonusVoSrc("SPC_lets_get_after_it.mp3")
+      // cadet with one of her own intro lines instead of the muted CMDR line.
+      // 2026-06-24: pick from POOL_SPC_LEVEL_START for variety; red themes (L13) get the
+      // "gettin' hot in here" line.
+      const spcIntroFile = (levelNum === 13 || levelNum === 14)
+        ? (isRedTheme(LEVEL_THEMES[levelNum]?.primary)
+            ? "SPC_aye_its_gettin_hot_in_here.mp3"
+            : commBoxController.pickFromPool("spcLevelStart", commBoxController.POOL_SPC_LEVEL_START))
         : null;
+      const spcIntro = spcIntroFile ? commBoxController.spcBonusVoSrc(spcIntroFile) : null;
       if (spcIntro) {
         commBoxController.queueVO({ audioSrc: spcIntro, _spc: true });
       } else {
@@ -12723,18 +12808,18 @@ function initGalaxyCanvas() {
       await waitFor(() => placedBombs.length > 0);
       hideTaskInstruction();
 
-      // Step 3 — arm the placed bomb by tapping it. 2026-06-23: TEXT-ONLY for now. The "52"
-      // recording (vo/SPC_52.mp3) is mislabeled — it actually says "Tap the bomb icon on your
-      // HUD", so it played the wrong line right after the bomb was placed. Key "52" is no longer
-      // in SPC_VO_AVAILABLE, so this caption shows with no audio. The bomb stays "spawned"
-      // (noAutoArm) until the cadet taps it, so this waitFor can't hang on an auto-detonated bomb.
-      spcVO("52", "When you see a bomb, tap it to arm it.", "talk_calm");
+      // Step 3 — arm the placed bomb by tapping it. 2026-06-24: dedicated recording
+      // (vo/SPC_Tap_the_bomb_to_arm_it.mp3) with tightened caption "Tap the bomb to arm it."
+      // The bomb stays "spawned" (noAutoArm) until the cadet taps it, so this waitFor can't hang
+      // on an auto-detonated bomb.
+      spcVO("Tap_the_bomb_to_arm_it", "Tap the bomb to arm it.", "talk_calm");
       showTaskInstructionDeferred("TAP THE BOMB TO ARM IT");
       await waitFor(() => placedBombs.some((b) => b.phase === "player_armed"));
       hideTaskInstruction();
 
       // Step 4 — detonate it (tap the armed bomb again). "bomb" event fires on detonation.
-      spcVO("54", "To detonate it yourself, tap it again.", "talk_calm");
+      // 2026-06-24: dedicated recording (vo/SPC_tap_the_bomb_again_to_detonate_it.mp3).
+      spcVO("tap_the_bomb_again_to_detonate_it", "Tap the bomb again to detonate it.", "talk_calm");
       showTaskInstructionDeferred("TAP THE BOMB AGAIN TO DETONATE");
       await waitEvent("bomb");
       hideTaskInstruction();
@@ -12786,7 +12871,7 @@ function initGalaxyCanvas() {
       await waitEvent("freeze");
       hideHudPointer();
       hideTaskInstruction();
-      spcVO("61", "Objects are frozen for a short time. Blast 'em!", "idle_soft");
+      spcVO("61", "Objects are frozen for a short time.", "idle_soft");
       spcVO("freeze_toggle", "Freeze can be enabled and disabled by tapping the freeze icon on your HUD.", "idle_soft");
       await waitVOIdle();
       await clearTutorialField();
@@ -13538,8 +13623,11 @@ function initGalaxyCanvas() {
             && levelRemainingMs > 0 && engineMode === "arcade") {
           _timerWarnedAt60 = true;
           commBoxController.setDamageState("light");
-          // SPC levels: "You're running out of time, Cadet." in place of CMDR's low-time line.
-          if (!queueSpcBonusVO("SPC_timer_warning.mp3", { priority: "high" })) {
+          // SPC levels: low-time nudge — alternates "running out of time" / "put some effort into it"
+          // (2026-06-24) — in place of CMDR's low-time line.
+          if (!queueSpcBonusVO(
+              commBoxController.pickFromPool("spcTimerLow", commBoxController.POOL_SPC_TIMER_LOW),
+              { priority: "high" })) {
             commBoxController.queueVO({
               audioSrc: commBoxController.commVoSrc(
                 commBoxController.pickFromPool("lowlives", commBoxController.POOL_LOW_LIVES),

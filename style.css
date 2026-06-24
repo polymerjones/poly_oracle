@@ -2605,6 +2605,15 @@ select:focus-visible {
   --comm-text-fill: #EFFFFF;
   --comm-chamfer: 9px;
   --comm-border-w: 1.6px;
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+/* 2026-06-24: SPC levels auto-dismiss the comm mug a couple seconds after the last line so the
+   playfield isn't permanently occluded. Soft collapse (no display:none) so the next comm restores
+   it instantly via the JS collapse timer; fade + slide down, never interactive (hud is already
+   pointer-events:none). */
+#commanderHUD.comm-collapsed {
+  opacity: 0;
+  transform: translateY(18px);
 }
 
 /* Chamfered framed panel = cyan backing (.commFrame) + dark inner fill (.commFill),

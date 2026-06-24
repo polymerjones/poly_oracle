@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-24 11:00";
+const BUILD_TS = "2026-06-24 11:25";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2446,6 +2446,7 @@ const commBoxController = (() => {
   function triggerVO({
     lines = [],
     audioSrc = null,
+    voFile = null,
     duration = 3500,
     frame = null,
     event = null,
@@ -2461,8 +2462,20 @@ const commBoxController = (() => {
     const triggerToken = ++_voTriggerToken;
 
     let resolvedLines = lines;
-    if ((!lines || lines.length === 0) && audioSrc) {
-      const filename = audioSrc.split("/").pop();
+    let resolvedAudio = audioSrc;
+    // 2026-06-24: a `voFile` (intended VO filename) resolves audio when the mp3 is available and
+    // ALWAYS resolves the caption from VO_CAPTIONS — so placeholder lines whose audio isn't recorded
+    // yet (e.g. L15 gauntlet_intro.mp3) still TYPE their caption instead of showing a blank comm box.
+    // (commVoSrc() returns null for unrecorded files, which previously left audioSrc null and skipped
+    // the caption lookup below entirely.)
+    if (voFile) {
+      if (!resolvedAudio) resolvedAudio = commVoSrc(voFile);
+      if ((!resolvedLines || resolvedLines.length === 0) && VO_CAPTIONS[voFile]) {
+        resolvedLines = [VO_CAPTIONS[voFile]];
+      }
+    }
+    if ((!resolvedLines || resolvedLines.length === 0) && resolvedAudio) {
+      const filename = resolvedAudio.split("/").pop();
       const caption = VO_CAPTIONS[filename];
       if (caption) resolvedLines = [caption];
     }
@@ -2521,7 +2534,12 @@ const commBoxController = (() => {
     } catch (e) {
       // ignore
     }
-    const voDelay = 280;
+    // 2026-06-24: Stunt Mode (training/practice) — SPC's VO + caption start a touch sooner. The
+    // 280ms beat exists so the level-intro/comm pop settles before CMDR talks in the main game; in
+    // the tutorial it just felt laggy after the blip. Gated on _exclusiveSpeaker (true only while a
+    // stunt session owns the comm box) so the main game is unchanged — revisit for main game after
+    // device testing.
+    const voDelay = _exclusiveSpeaker ? 120 : 280;
 
     const beginMainVO = () => {
       if (triggerToken !== _voTriggerToken) return;
@@ -2529,14 +2547,14 @@ const commBoxController = (() => {
       showTicker();
       typeText(resolvedLines);
 
-      if (audioSrc) {
+      if (resolvedAudio) {
         let audioFallbackTimer = null;
         const finishAudio = () => {
           if (audioFallbackTimer) clearTimeout(audioFallbackTimer);
           endTalking();
         };
         try {
-          voAudio = new Audio(audioSrc);
+          voAudio = new Audio(resolvedAudio);
           voAudio.preload = "auto";
           voAudio.playsInline = true;
           // 2026-06-17: L14 mutes CMDR voice (caption still types), but SPC's own bonus lines
@@ -9954,7 +9972,11 @@ function initGalaxyCanvas() {
     plasmaCage.chargeLoopRate = 0;
     plasmaCage.readySoundPlayed = false;
     plasmaCage.highlightBlipPlayed = false;
-    plasmaCage.rechargeSoundPlayed = false;
+    // 2026-06-24: do NOT touch rechargeSoundPlayed here. This resets the gesture geometry only,
+    // and runs on fizzles, pointer-cancel, and app-resume too. Clearing the recharge flag while
+    // cooldownUntil still points at an already-elapsed cooldown re-fired a FALSE "plasma recharged"
+    // VO. The flag is armed (set false) at the one site that starts a real cooldown (releasePlasmaCage
+    // charged branch) and cleared (true) by the recharge VO / UFO-kill reward / level cleanup.
   }
 
   function isPlasmaCageReady(now = performance.now()) {
@@ -11491,8 +11513,11 @@ function initGalaxyCanvas() {
       if (spcIntro) {
         commBoxController.queueVO({ audioSrc: spcIntro, _spc: true });
       } else {
+        // 2026-06-24: pass the intended filename (voFile) so triggerVO resolves audio when recorded
+        // and always types the caption — L15's placeholder gauntlet_intro.mp3 now shows its caption
+        // instead of a blank comm box under the commander mug.
         commBoxController.queueVO({
-          audioSrc: commBoxController.commVoSrc(levelStartVO),
+          voFile: levelStartVO,
           event: "commander",
         });
       }
@@ -11642,6 +11667,13 @@ function initGalaxyCanvas() {
   // action-completion sites (shoot / plasma / toss / bomb / freeze).
   // ──────────────────────────────────────────────────────────────────────────
   function startStuntMode() {
+    // 2026-06-24: rebuild the AudioContext on every (re)entry so a fresh training session never
+    // inherits the previous one's accumulated VO MediaElementSource nodes. Backing out of Training
+    // and restarting it was very laggy because the same never-closed ctx piled up nodes — the SPC
+    // tutorial is VO-heavy, so the leak builds fast. Same fix as the per-level-advance teardown that
+    // cured full-playthrough lag (see audioEngine.teardown / the startLevel-advance onDismiss path).
+    commBoxController.stopVO();
+    audioEngine.teardown();
     audioEngine.unlock?.();
     audioEngine.loadMany?.(GAME_SFX);
     hideArcadeOverlay();

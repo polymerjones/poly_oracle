@@ -14,8 +14,10 @@ const galaxyBackground = (() => {
     { sky: "#010804", neb: [[0, 80, 30], [10, 100, 40], [0, 60, 20]], star: [180, 255, 200], gas: [[0, 140, 60], [20, 180, 80], [0, 100, 40]] },
     // L7 — Storm (electric blue)
     { sky: "#020318", neb: [[20, 60, 220], [40, 100, 255], [10, 40, 180]], star: [220, 240, 255], gas: [[60, 120, 255], [100, 160, 255], [40, 80, 220]] },
-    // L8 — Blood (crimson)
-    { sky: "#080002", neb: [[160, 0, 20], [200, 10, 30], [120, 0, 10]], star: [255, 160, 170], gas: [[180, 0, 30], [220, 20, 40], [140, 0, 20]] },
+    // L8 — Deep Freeze (ice blue) — 2026-06-24: rethemed from "Blood (crimson)" to match
+    // LEVEL_THEMES[8] primary #33CFFF. The retheme updated script.js but missed this entry, so the
+    // procedural nebula/sky/stars still rendered red on the ice level. gas[0] is the exact primary.
+    { sky: "#02060C", neb: [[20, 90, 140], [30, 130, 190], [10, 70, 130]], star: [200, 240, 255], gas: [[51, 207, 255], [120, 220, 255], [30, 160, 230]] },
     // L9 — Toxic (acid green)
     { sky: "#030800", neb: [[60, 160, 0], [100, 200, 10], [40, 120, 0]], star: [220, 255, 160], gas: [[80, 200, 0], [120, 240, 20], [60, 160, 0]] },
     // L10 — Hellfire (red/orange)
@@ -230,7 +232,8 @@ const galaxyBackground = (() => {
     if (level <= 2)  return { main: [74, 63, 107],  atmosphere: [107, 90, 158] }; // #4a3f6b / #6b5a9e purple
     if (level <= 4)  return { main: [107, 42, 26],  atmosphere: [160, 64, 48] };  // #6b2a1a / #a04030 rust red
     if (level <= 6)  return { main: [26, 90, 74],   atmosphere: [32, 137, 122] }; // #1a5a4a / #20897a deep teal
-    if (level <= 8)  return { main: [107, 37, 0],   atmosphere: [196, 64, 0] };   // #6b2500 / #c44000 fire orange (2026-06-09)
+    if (level === 8) return { main: [20, 86, 122],  atmosphere: [51, 207, 255] }; // #14567a / #33cfff ice (2026-06-24 Deep Freeze retheme)
+    if (level <= 8)  return { main: [107, 37, 0],   atmosphere: [196, 64, 0] };   // #6b2500 / #c44000 fire orange (L7 storm)
     if (level === 9) return { main: [107, 74, 0],   atmosphere: [160, 112, 16] }; // #6b4a00 / #a07010 gold/amber
     // 2026-06-15: second-act planets (Part 4). Hex from the brief, converted to RGB arrays.
     if (level === 11) return { main: [42, 42, 42],  atmosphere: [68, 68, 68] };   // #2a2a2a / #444444 void grey

@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-24 11:25";
+const BUILD_TS = "2026-06-24 16:30";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2554,30 +2554,31 @@ const commBoxController = (() => {
           endTalking();
         };
         try {
-          voAudio = new Audio(resolvedAudio);
-          voAudio.preload = "auto";
-          voAudio.playsInline = true;
+          // 2026-06-24: reuse the persistent "CMDR" VO element (see acquireVoElement) instead of a
+          // fresh `new Audio()` per line — the per-line createMediaElementSource was the node leak.
+          voAudio = acquireVoElement("CMDR");
+          voAudio.src = resolvedAudio;
           // 2026-06-17: L14 mutes CMDR voice (caption still types), but SPC's own bonus lines
           // (_spc) bypass the mute so the Specialist is actually heard on her level.
           voAudio.volume = (muteCmdrVO && !_spc) ? 0 : (_spc ? 0.85 : 0.7);
-          voAudioFxCleanup = applyCommRadioEffect(voAudio, { enabled: !(muteCmdrVO && !_spc) });
+          voAudioFxCleanup = applyCommRadioEffect(voAudio);
           voAudio.play().catch(() => {
             if (!audioFallbackTimer) audioFallbackTimer = setTimeout(endTalking, duration);
           });
-          voAudio.addEventListener("ended", finishAudio);
+          voAudio.onended = finishAudio;
           audioFallbackTimer = setTimeout(endTalking, duration);
           // 2026-06-23: the fallback above (default 3500ms) used to fire endTalking — which runs
           // voAudioFxCleanup() and DISCONNECTS the radio-filter graph — before a long clip naturally
           // ended. Since the audio routes through a MediaElementSource, disconnecting silences its
           // tail (the "THAT'S WHAT I'M TALKING ABOUT" cutoff). Once metadata loads, stretch the
           // fallback to the real clip length (+buffer) so the natural "ended" event drives the end.
-          voAudio.addEventListener("loadedmetadata", () => {
+          voAudio.onloadedmetadata = () => {
             const realMs = (voAudio?.duration || 0) * 1000 + 600;
             if (Number.isFinite(realMs) && realMs > duration && audioFallbackTimer) {
               clearTimeout(audioFallbackTimer);
               audioFallbackTimer = setTimeout(endTalking, realMs);
             }
-          });
+          };
         } catch {
           tickerHideTimer = setTimeout(endTalking, duration);
         }
@@ -3117,12 +3118,13 @@ const audioEngine = {
     this.masterGain.connect(this.ctx.destination);
     return this.ctx;
   },
-  // 2026-06-24: close + drop the AudioContext between levels. A MediaElementSourceNode (created for
-  // every comm-box/SPC VO line via applyCommRadioEffect) is permanently bound to the context and is
-  // never GC'd — so a long playthrough piles up dead nodes and progressively lags (~L13). Closing the
-  // ctx releases them all; ensureContext()/ensureMusic() lazily rebuild on the next level (startLevel
-  // re-unlocks + restarts the level music). Decoded buffers/musicBuffers are AudioBuffers (context-
-  // independent) so they're kept to avoid re-decode. Mirrors a hard-refresh's clean audio state.
+  // ⚠️ RETIRED 2026-06-24 — DO NOT CALL. This closed + rebuilt the AudioContext between levels to
+  // release leaked VO MediaElementSource nodes. It worked, but rebuilding the ctx caused level-start
+  // freezes, iOS audio-loss (a fresh ctx starts suspended and can't resume outside a user gesture),
+  // and music restarts (currentMusic nulled → same-track level pairs no longer carried over). The
+  // leak is now fixed at SOURCE via persistent per-channel VO elements (see acquireVoElement), so the
+  // ctx lives for the whole session. Kept only for reference — re-wiring this re-introduces all three
+  // regressions. Closing the ctx is now never the right move.
   teardown() {
     try { this.stopMusic(); } catch { /* ignore */ }
     try { this.stopAllLoops(); } catch { /* ignore */ }
@@ -3626,12 +3628,49 @@ function makeCommRadioCurve(amount = 18) {
   return curve;
 }
 
-function applyCommRadioEffect(audioNode, { enabled = true } = {}) {
-  if (!enabled || !audioNode) return null;
+// 2026-06-24: persistent per-channel VO <audio> elements. createMediaElementSource() permanently
+// binds an element to the AudioContext and the resulting node is never GC'd — so the old "new Audio()
+// + applyCommRadioEffect() per VO line" piled up dead source nodes and progressively lagged VO-heavy
+// playthroughs (~L13) and the SPC tutorial. We now keep ONE element per channel ("CMDR"/"SPC") and
+// re-point its .src each line, so createMediaElementSource runs at most once per channel for the whole
+// session. This replaces the per-level audioEngine.teardown() sledgehammer (closed the ctx to release
+// the nodes) which cured the leak but caused level-start freezes, iOS audio-loss (a rebuilt ctx starts
+// suspended and can't resume outside a user gesture), and music restarts (teardown nulled currentMusic
+// so same-track level pairs no longer carried over).
+const _voChannels = new Map(); // channel name -> HTMLAudioElement
+const _commRadioWired = new WeakSet(); // elements whose radio graph is already built (wire once)
+function acquireVoElement(channel) {
+  let el = _voChannels.get(channel);
+  if (!el) {
+    el = new Audio();
+    el.preload = "auto";
+    el.playsInline = true;
+    _voChannels.set(channel, el);
+  }
+  // Wire the radio-filter graph once the ctx is running (idempotent; no-op once wired or pre-unlock).
+  applyCommRadioEffect(el);
+  // Reset transient per-line listeners/state so a reused element never inherits the prior line's.
+  el.onended = null;
+  el.onloadedmetadata = null;
+  el.onerror = null;
+  el.onplaying = null;
+  el.ontimeupdate = null;
+  try { el.pause(); el.currentTime = 0; } catch { /* empty element pre-first-src */ }
+  el.playbackRate = 1;
+  return el;
+}
+
+// Wire a one-time "comm radio" filter chain for a VO <audio> element. Idempotent: each element is
+// wired at most once (createMediaElementSource can only ever be called once per element), and the
+// chain stays connected to masterGain for the session — one idle filter chain per channel, not one
+// per line. Returns a no-op cleanup (the persistent graph is never torn down; stop a line via
+// el.pause()). Muting is handled by the caller via el.volume, so the `enabled` arg is advisory.
+function applyCommRadioEffect(audioNode) {
+  if (!audioNode || _commRadioWired.has(audioNode)) return () => {};
   try {
     const ctx = audioEngine.ensureContext?.();
-    if (!ctx || !audioEngine.masterGain) return null;
-    if (ctx.state !== "running") return null;
+    if (!ctx || !audioEngine.masterGain) return () => {};
+    if (ctx.state !== "running") return () => {}; // not unlocked yet — play dry, wire on a later line
     const source = ctx.createMediaElementSource(audioNode);
     const highpass = ctx.createBiquadFilter();
     const lowpass = ctx.createBiquadFilter();
@@ -3661,16 +3700,10 @@ function applyCommRadioEffect(audioNode, { enabled = true } = {}) {
     compressor.connect(output);
     output.connect(audioEngine.masterGain);
 
-    return () => {
-      try { source.disconnect(); } catch {}
-      try { highpass.disconnect(); } catch {}
-      try { lowpass.disconnect(); } catch {}
-      try { drive.disconnect(); } catch {}
-      try { compressor.disconnect(); } catch {}
-      try { output.disconnect(); } catch {}
-    };
+    _commRadioWired.add(audioNode);
+    return () => {};
   } catch {
-    return null;
+    return () => {};
   }
 }
 
@@ -10695,6 +10728,35 @@ function initGalaxyCanvas() {
     }
   }
 
+  // 2026-06-24 PERF: rapid-fire bombs and the chain-reaction levels (L12/L13) used to fire the FULL
+  // screen-wide FX stack — white flash, double shake, "hectic" bg toggle, a 3-impact heavy haptic
+  // burst, and two boom SFX — on EVERY blast. With MINE_CHAIN_PER_FRAME mines draining per frame plus
+  // player rapid-fire, those globals stacked N-deep every frame (the bridged native haptic calls are
+  // the worst offender) → fps slideshow. The per-blast LOCAL FX (particles, shrapnel, warp ring, pixi
+  // shockwave at the blast point) still fire every time; only these screen-wide globals coalesce to
+  // one hit per cooldown window — visually indistinguishable (you can't resolve 5 flashes in 130ms).
+  let _lastBombScreenFxAt = 0;
+  const BOMB_SCREEN_FX_COOLDOWN_MS = 130;
+  function triggerBombScreenFx() {
+    const now = performance.now();
+    if (now - _lastBombScreenFxAt < BOMB_SCREEN_FX_COOLDOWN_MS) {
+      // Coalesced blast: keep a single light boom so the hit still reads, but skip the heavy stack.
+      playGameSfx("bigbang", 1.05);
+      return false;
+    }
+    _lastBombScreenFxAt = now;
+    triggerLandmineScreenFlash();
+    cssFlash("#ffffff", 0.55, 300);
+    cssShake(1.8);
+    setTimeout(() => cssShake(1.0), 120);
+    window.galaxyBackground?.setHectic(true);
+    setTimeout(() => window.galaxyBackground?.setHectic(false), 3000);
+    triggerHugeHaptic(); // 2026-06-12: bomb blast = huge haptic
+    playBigBoomSound();
+    playGameSfx("bigbang", 1.62);
+    return true;
+  }
+
   function explodeMineEntity(mine, { halfRadius = false } = {}) {
     if (!mine) return;
     const x = mine.x;
@@ -10705,15 +10767,7 @@ function initGalaxyCanvas() {
     window.pixiRenderer?.triggerBombDetonation?.(x, y, radius);
     addWarpRing(x, y, "rgba(255,90,90,1)");
     spawnExplosion(x, y, 80, true);
-    triggerLandmineScreenFlash();
-    cssFlash("#ffffff", 0.55, 300);
-    cssShake(1.8);
-    setTimeout(() => cssShake(1.0), 120);
-    window.galaxyBackground?.setHectic(true);
-    setTimeout(() => window.galaxyBackground?.setHectic(false), 3000);
-    triggerHugeHaptic(); // 2026-06-12: bomb blast = huge haptic
-    playBigBoomSound();
-    playGameSfx("bigbang", 1.62);
+    triggerBombScreenFx();
     // chain: queue other armed mines caught in the blast (the just-exploded mine is already
     // removed from its container by the caller, so it can't re-trigger itself). chainDetonateMines
     // enqueues rather than recursing — processPendingExplosions() detonates them in the update loop.
@@ -10747,15 +10801,7 @@ function initGalaxyCanvas() {
     window.pixiRenderer?.triggerBombDetonation?.(x, y, 1050);
     addWarpRing(x, y, "rgba(255,90,90,1)");
     spawnExplosion(x, y, 80, true);
-    triggerLandmineScreenFlash();
-    cssFlash("#ffffff", 0.55, 300);
-    cssShake(1.8);
-    setTimeout(() => cssShake(1.0), 120);
-    window.galaxyBackground?.setHectic(true);
-    setTimeout(() => window.galaxyBackground?.setHectic(false), 3000);
-    triggerHugeHaptic(); // 2026-06-12: bomb blast = huge haptic
-    playBigBoomSound();
-    playGameSfx("bigbang", 1.62);
+    triggerBombScreenFx(); // 2026-06-24 PERF: throttled screen-wide FX (see triggerBombScreenFx)
   }
 
   function spawnBombShrapnel(x, y) {
@@ -11152,11 +11198,13 @@ function initGalaxyCanvas() {
           // 2026-06-12: the "LEVEL X" slam-in fires ONCE, from startLevel() once the next level
           // is fully loaded — not here on dismiss (that double-slammed: once pre-load, once post).
           setTimeout(() => {
-            // 2026-06-24: rebuild the AudioContext on every advance so each level starts on a fresh
-            // audio graph (see audioEngine.teardown) — kills the progressive VO-node leak that lagged
-            // full playthroughs by ~L13. Score/powerups/progress live outside audio and carry over.
+            // 2026-06-24: the per-level audioEngine.teardown() that used to run here is GONE — it
+            // rebuilt the AudioContext every advance to release leaked VO nodes, but that caused
+            // level-start freezes, iOS audio-loss (rebuilt ctx starts suspended, can't resume outside
+            // a gesture), and music restarts. The leak is now fixed at source (persistent per-channel
+            // VO elements, see acquireVoElement), so the ctx lives for the whole session and music
+            // carries over seamlessly across same-track level pairs. stopVO() still flushes in-flight VO.
             commBoxController.stopVO();
-            audioEngine.teardown();
             startLevel(currentLevelIndex + 1);
           }, 420);
         },
@@ -11667,13 +11715,11 @@ function initGalaxyCanvas() {
   // action-completion sites (shoot / plasma / toss / bomb / freeze).
   // ──────────────────────────────────────────────────────────────────────────
   function startStuntMode() {
-    // 2026-06-24: rebuild the AudioContext on every (re)entry so a fresh training session never
-    // inherits the previous one's accumulated VO MediaElementSource nodes. Backing out of Training
-    // and restarting it was very laggy because the same never-closed ctx piled up nodes — the SPC
-    // tutorial is VO-heavy, so the leak builds fast. Same fix as the per-level-advance teardown that
-    // cured full-playthrough lag (see audioEngine.teardown / the startLevel-advance onDismiss path).
+    // 2026-06-24: the audioEngine.teardown() that used to run here is GONE. Backing out of Training
+    // and restarting it was laggy because the SPC tutorial (VO-heavy) piled up MediaElementSource
+    // nodes; teardown released them by closing the ctx but caused freezes + audio-loss. The leak is
+    // now fixed at source (one persistent "SPC" VO element, see acquireVoElement), so the ctx persists.
     commBoxController.stopVO();
-    audioEngine.teardown();
     audioEngine.unlock?.();
     audioEngine.loadMany?.(GAME_SFX);
     hideArcadeOverlay();
@@ -11896,9 +11942,10 @@ function initGalaxyCanvas() {
     _spcLineWatchdogMs = 8000;              // dynamic — tightened to real duration once metadata loads
     if (src) {
       try {
-        _spcAudio = new Audio(src);
-        _spcAudio.preload = "auto";
-        _spcAudio.playsInline = true;
+        // 2026-06-24: reuse the persistent "SPC" VO element (see acquireVoElement) — the SPC tutorial
+        // is VO-heavy, so a fresh element + createMediaElementSource per line leaked the fastest.
+        _spcAudio = acquireVoElement("SPC");
+        _spcAudio.src = src;
         _spcAudio.volume = 0.85;
         _spcAudio.playbackRate = SPC_VO_PLAYBACK_RATE;
         _spcAudioFxCleanup = applyCommRadioEffect(_spcAudio);

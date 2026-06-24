@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-23 16:40";
+const BUILD_TS = "2026-06-23 22:22";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -467,7 +467,7 @@ const LEVEL_THEMES = {
   5:  { primary: "#FF8C00", name: "Ember" },
   6:  { primary: "#00C853", name: "Jungle" },
   7:  { primary: "#00BFFF", name: "Storm" },
-  8:  { primary: "#FF1744", name: "Blood" },
+  8:  { primary: "#33CFFF", name: "Cold Front" }, // 2026-06-23: was red "Blood"; recolored cold/ice to match the level name
   9:  { primary: "#AAFF00", name: "Toxic" },
   10: { primary: "#FF1500", name: "Hellfire" },
   // 2026-06-15: levels 11-15 — primary drives the perimeter timer line + plasma color (Part 7).
@@ -625,16 +625,18 @@ const ARCADE_LEVELS = [
     ] }, // 2026-06-17: two bombs + a quadshot near the start
   { level: 10, label: "RED HORIZON", time: 75, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14,
     powerupOverride: ["freeze", "goldbars", "bomb"], // 2026-06-16: boss-level support kit
-    guaranteedSpawn: [{ type: "freeze", atMs: 37000 }] }, // 2026-06-23: guaranteed freeze around the half-way mark
+    guaranteedSpawn: [{ type: "freeze", atMs: 37000 }], // 2026-06-23: guaranteed freeze around the half-way mark
+    waves: [{ count: 8, triggerAtRemaining: 32 }] }, // 2026-06-23: boss surge — 8 rocks burst in once ~32s remain
   // 2026-06-15: second act — the run no longer ends at level 10. Levels 11-15 reuse the
   // level-10 boss music + background (musicForLevel/bgKeyForLevel both clamp at >=10) and the
   // hotroid sprites, ramping density/time. "YOU WIN" now fires after clearing level 15.
   { level: 11, label: "AFTERSHOCK", time: 78, totalToClear: 27, startSpawn: 7, spawnEveryMs: 1350, maxOnScreen: 15,
-    guaranteedSpawn: [{ type: "quadshot", atMs: 12000 }] }, // 2026-06-16: early quadshot drop
+    guaranteedSpawn: [{ type: "quadshot", atMs: 12000 }], // 2026-06-16: early quadshot drop
+    waves: [{ count: 9, triggerAtRemaining: 34 }] }, // 2026-06-23: aftershock surge — 9 rocks burst in once ~34s remain
   // 2026-06-15: levels 12-15 are the "second act" with per-level mechanics. New config fields
   // (asteroidKinds, asteroidSpeedMult, mineLaunch/mineCount/mineFuseMs, noUfo, ufoSpawnAt,
-  // powerupOverride, powerupIntervalMs, label, musicKey) are honored by the engine. dualUfo and
-  // waves are declared but NOT yet wired — see the TODO stubs in startLevel/setupUfoSpawnForLevel.
+  // powerupOverride, powerupIntervalMs, label, musicKey) are honored by the engine. waves is now
+  // wired (second-wave surge in the main loop); dualUfo is still NOT wired — see setupUfoSpawnForLevel.
   {
     level: 12,
     label: "MAKE IT BOOM",
@@ -654,20 +656,26 @@ const ARCADE_LEVELS = [
   },
   {
     level: 13,
-    label: "BOOM PT 2",
+    label: "MAKE IT BOOM PT 2",
     time: 50,
     totalToClear: 22,
     startSpawn: 8,
     spawnEveryMs: 6000,
     maxOnScreen: 12,
     asteroidKinds: [3, 2, 2, 1], // mix of all sizes
-    asteroidSpeedMult: 1.4,       // 40% faster than normal
+    asteroidSpeedMult: 1.3,       // 2026-06-23: eased 1.4→1.3 so fast laser/net clearing is viable
     noUfo: false,
     ufoSpawnAt: 15,               // UFO arrives early
     mineLaunch: true,
     mineCount: 3,
     mineFuseMs: 5000,
     powerupOverride: ["missile", "missile", "goldbars"], // 2026-06-16: missile-weighted pool
+    // 2026-06-23: CRUCIAL make-or-break timer. One +30s timer drops at 20s-remaining; collected it
+    // refills the clock toward full (collectPowerup caps at levelDurationMs), missed and the level is
+    // near-unwinnable. This is the level-saver — bombs/mines are a distraction; reward is fast laser +
+    // dropping/clustering stroids (grab→release drops dead in place on L13, see launchStroidToss) for
+    // a big plasma-net sweep.
+    guaranteedSpawn: [{ type: "timer", atMs: 30000 }],
     musicKey: "L13_BOOM_PT2",
   },
   {
@@ -703,7 +711,7 @@ const ARCADE_LEVELS = [
     mineLaunch: true,
     mineCount: 2,
     waves: [
-      { count: 10, triggerAtRemaining: 20 }, // NOT yet wired — see startLevel TODO
+      { count: 10, triggerAtRemaining: 20 }, // 2026-06-23: wired — surge fires in the main loop
     ],
     // 2026-06-16: missile-heavy mix with every type available, dropping every 12s.
     powerupOverride: ["missile", "missile", "timer", "freeze", "quadshot", "bomb"],
@@ -2470,6 +2478,18 @@ const commBoxController = (() => {
           });
           voAudio.addEventListener("ended", finishAudio);
           audioFallbackTimer = setTimeout(endTalking, duration);
+          // 2026-06-23: the fallback above (default 3500ms) used to fire endTalking — which runs
+          // voAudioFxCleanup() and DISCONNECTS the radio-filter graph — before a long clip naturally
+          // ended. Since the audio routes through a MediaElementSource, disconnecting silences its
+          // tail (the "THAT'S WHAT I'M TALKING ABOUT" cutoff). Once metadata loads, stretch the
+          // fallback to the real clip length (+buffer) so the natural "ended" event drives the end.
+          voAudio.addEventListener("loadedmetadata", () => {
+            const realMs = (voAudio?.duration || 0) * 1000 + 600;
+            if (Number.isFinite(realMs) && realMs > duration && audioFallbackTimer) {
+              clearTimeout(audioFallbackTimer);
+              audioFallbackTimer = setTimeout(endTalking, realMs);
+            }
+          });
         } catch {
           tickerHideTimer = setTimeout(endTalking, duration);
         }
@@ -7154,6 +7174,11 @@ function initGalaxyCanvas() {
   let playerFreezeInventory = 0;
   const MAX_FREEZE_INVENTORY = 3;
   const FREEZE_DURATION_MS = 12000;
+  // 2026-06-23: a running freeze no longer fully stops the perimeter clock — it runs it at
+  // FREEZE_TIMER_SLOW (0.25x), then ramps back to full speed over the final FREEZE_TIMER_RAMP_MS
+  // of the bank so the timer eases back to normal as the freeze runs out (no abrupt snap).
+  const FREEZE_TIMER_SLOW = 0.25;
+  const FREEZE_TIMER_RAMP_MS = 3000;
   // 2026-06-21: freeze is a PAUSABLE TIMER, not an on/off toggle. Spending one charge banks
   // FREEZE_DURATION_MS of freeze time; tapping pauses (time stays banked) / resumes (no new charge);
   // the freeze fully ends only when the bank drains to 0 (auto-expiry) or the level resets.
@@ -7191,6 +7216,9 @@ function initGalaxyCanvas() {
   // 2026-06-16: cfg.guaranteedSpawn = [{type, atMs}] — force-spawn a powerup once its atMs elapses.
   // Tracks which entries (by index) have already fired this level.
   const firedGuaranteedSpawns = new Set();
+  // 2026-06-23: cfg.waves = [{count, triggerAtRemaining}] — second-wave surge spawning. Tracks
+  // which wave entries (by index) have already burst this level. Re-armed in clearGameplayEntities.
+  const firedWaves = new Set();
   // 2026-06-16: cfg.speedEscalation (L15) — live asteroids ramp speed with elapsed time. We track
   // the last-applied factor and scale all asteroids by the per-tick delta ratio (clamped to 2.5x).
   let appliedSpeedEscalation = 1;
@@ -9179,8 +9207,13 @@ function initGalaxyCanvas() {
         const pl = Math.hypot(pvx, pvy);
         if (pl > 1) { dnx = pvx / pl; dny = pvy / pl; } // pre-grab drift
       }
-      entity.vx = dnx * STROID_TOSS_SLOW_SPEED;
-      entity.vy = dny * STROID_TOSS_SLOW_SPEED;
+      // 2026-06-23: on L13 ("MAKE IT BOOM PT 2"), a flick-less release DROPS the stroid dead in place
+      // instead of drifting — this is the level's rearrange strategy: cluster stroids together, then
+      // sweep them all with one plasma net. Everywhere else keeps the slow cold-drift feel (2026-06-12).
+      const dropInPlace = ARCADE_LEVELS[currentLevelIndex]?.level === 13;
+      const slowSpeed = dropInPlace ? 0 : STROID_TOSS_SLOW_SPEED;
+      entity.vx = dnx * slowSpeed;
+      entity.vy = dny * slowSpeed;
       entity._stroidHeld = false;
       delete entity._preTossVx;
       delete entity._preTossVy;
@@ -10512,11 +10545,35 @@ function initGalaxyCanvas() {
 
   // 2026-06-10: shared explosion effects for any mine entity (level landmine or placed bomb).
   // Removal from its container is the caller's job.
+  // 2026-06-23: big-bomb combo reward — when a single blast catches BIG_BOMB_GOLDBARS_THRESHOLD+
+  // large (kind-3) stroids, drop a goldbars powerup. Counts the big rocks present in the blast radius
+  // at detonation (shrapnel kills them over the next ~2s). Throttled to one goldbars on screen so the
+  // dense mine-chain levels can't flood the field; bypasses powerupOverride since it's a skill reward.
+  const BIG_BOMB_GOLDBARS_THRESHOLD = 5;
+  function rewardBigBombCombo(x, y, radius) {
+    if (engineMode !== "arcade" || !arcadeActive) return;
+    if (powerups.some((p) => p.type === "goldbars")) return;
+    let big = 0;
+    const r2 = radius * radius;
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const a = sim.asteroids[i];
+      if (a.kind !== 3 || a.ambient) continue;
+      const dx = a.x - x;
+      const dy = a.y - y;
+      if (dx * dx + dy * dy <= r2) big += 1;
+    }
+    if (big >= BIG_BOMB_GOLDBARS_THRESHOLD) {
+      spawnPowerupAt("goldbars", randomPowerupPoint());
+      playGameSfx("bling", 0.85);
+    }
+  }
+
   function explodeMineEntity(mine, { halfRadius = false } = {}) {
     if (!mine) return;
     const x = mine.x;
     const y = mine.y;
     const radius = halfRadius ? 350 : 700;
+    rewardBigBombCombo(x, y, radius);
     spawnBombShrapnel(x, y);
     window.pixiRenderer?.triggerBombDetonation?.(x, y, radius);
     addWarpRing(x, y, "rgba(255,90,90,1)");
@@ -10558,6 +10615,7 @@ function initGalaxyCanvas() {
     // 2026-06-09: deploy at the aimed tap point (falls back to center if none given)
     const x = Number.isFinite(aimX) ? aimX : sim.width / 2;
     const y = Number.isFinite(aimY) ? aimY : sim.height / 2;
+    rewardBigBombCombo(x, y, 1050); // 2026-06-23: 5+ big stroids in the blast → goldbars reward
     spawnBombShrapnel(x, y);
     window.pixiRenderer?.triggerBombDetonation?.(x, y, 1050);
     addWarpRing(x, y, "rgba(255,90,90,1)");
@@ -10642,6 +10700,7 @@ function initGalaxyCanvas() {
     goldbarsForceSpawnedThisLevel = false;
     emergencyTimerSpawned = false; // 2026-06-16: re-arm the under-20s emergency timer drop
     firedGuaranteedSpawns.clear(); // 2026-06-16: re-arm cfg.guaranteedSpawn entries
+    firedWaves.clear(); // 2026-06-23: re-arm cfg.waves second-wave surges
     appliedSpeedEscalation = 1; // 2026-06-16: reset L15 speed ramp
     // 2026-06-14: freeze inventory PERSISTS across levels (matches bomb) — collected freezes
     // carry forward; only a full game reset (startArcadeNew / startStuntMode) zeroes it.
@@ -10926,6 +10985,15 @@ function initGalaxyCanvas() {
     if (accuracyBonus > 0) addArcadeScore(accuracyBonus);
     const scoreAfter = arcadeScore;
     triggerHapticNotification(hapticNotificationType.Success);
+    // 2026-06-23: L13/L14 are SPC levels (SPC face, CMDR voice muted), but the end-of-level praise
+    // is the Commander's line ("Phenomenal work, cadet"). Show HIS mug (correct crop via the standard
+    // commander portrait) and let his voice through for this one comm instead of SPC's face. The next
+    // startLevel() re-applies the right portrait override (SPC for L14, CMDR for L15).
+    const _lcCfg = ARCADE_LEVELS[currentLevelIndex];
+    if (_lcCfg && (_lcCfg.level === 13 || _lcCfg.level === 14)) {
+      commBoxController.setMuteCmdrVO(false);
+      commBoxController.clearPortraitOverride();
+    }
     commBoxController.reactTo("levelcomplete");
     commBoxController.queueVO({
       audioSrc: commBoxController.commVoSrc(
@@ -11246,7 +11314,8 @@ function initGalaxyCanvas() {
     }
     lvlTrace(`[lvltrans] after synchronous spawn work duration=${(performance.now() - _spawnWorkStartAt).toFixed(1)}ms asteroids=${sim.asteroids.length} mines=${placedBombs.length}`);
 
-    // TODO: waves — see Level 11 wave system for pattern (cfg.waves not yet wired)
+    // 2026-06-23: cfg.waves second-wave surges are wired in the main update loop (keyed on
+    // levelRemainingMs <= triggerAtRemaining), not here — startLevel only seeds the opening field.
 
     arcadeActive = true;
     retryPending = false;
@@ -11588,7 +11657,10 @@ function initGalaxyCanvas() {
       try {
         await waitVOIdle();
         await waitMs(extraMs);
-        if (stuntActive) commBoxController.hide();
+        // 2026-06-23: a NEW SPC line may have started during the wait (e.g. the cadet finished the
+        // net fast and the "Nice work — you learn fast" praise line is now playing). Hiding here was
+        // blanking the comm box mid-line (text + portrait invisible). Only hide if SPC is truly idle.
+        if (stuntActive && !_spcPlaying && _spcQueue.length === 0) commBoxController.hide();
       } catch { /* aborted on teardown */ }
     })();
   }
@@ -11616,13 +11688,13 @@ function initGalaxyCanvas() {
     if (_spcAudio) { try { _spcAudio.pause(); } catch {} _spcAudio = null; }
     commBoxController.spcSpeakEnd?.();
   }
-  function spcVO(key, text, frameHint) {
-    _spcQueue.push({ key, text, frameHint });
+  function spcVO(key, text, frameHint, onStart) {
+    _spcQueue.push({ key, text, frameHint, onStart });
     pumpSpc();
   }
   function pumpSpc() {
     if (_spcPlaying || _spcQueue.length === 0) return;
-    const { key, text, frameHint } = _spcQueue.shift();
+    const { key, text, frameHint, onStart } = _spcQueue.shift();
     _spcPlaying = true;
     // Start the "continuous talking" clock at the first line of an uninterrupted run; following
     // lines start immediately so the run is unbroken until the queue empties (see advance()).
@@ -11630,6 +11702,9 @@ function initGalaxyCanvas() {
     commBoxController.show();
     commBoxController.spcSpeakStart?.(frameHint); // animate the SPC portrait first so the mouth-flap starts immediately
     commBoxController.pinTicker(text); // types text + keeps ticker visible (cancels auto-hide)
+    // 2026-06-23: optional per-line hook fired exactly when this caption starts (used to sync a
+    // visual demo to the words — e.g. replaying the plasma recharge while SPC narrates it).
+    if (onStart) { try { onStart(); } catch {} }
     const src = spcVoSrc(key);
     const dur = Math.max(1200, Math.min(4600, (text.length * 46) / SPC_VO_PLAYBACK_RATE));
     const advance = () => {
@@ -12480,7 +12555,15 @@ function initGalaxyCanvas() {
       await waitFor(() => !ufo);
       hideTaskInstruction();
       spcVO("26", "Wow, there you go.", "laugh");
-      spcVO("27", "Destroying a UFO instantly recharges your plasma.");
+      // 2026-06-23: visibly DEMONSTRATE the recharge as SPC says it — refill the cage and replay the
+      // recharge sound + a teal flash so the cadet connects "UFO down → plasma ready". (No arrow: the
+      // plasma net is a gesture weapon with no HUD meter, so there's no correct target to point at —
+      // the teal flash is the cue.)
+      spcVO("27", "Destroying a UFO instantly recharges your plasma.", undefined, () => {
+        rechargePlasmaNow();
+        playGameSfx(Math.random() < 0.5 ? "plasmarecharged" : "plasmarecharged1", 1.0);
+        cssFlash("#00ffd1", 0.22, 300);
+      });
       spcVO("28-30", "So net the **Stroids** when a UFO shows up.");
       await clearTutorialField();
       spawnTutorialAsteroids(3, 2);
@@ -13286,20 +13369,28 @@ function initGalaxyCanvas() {
           nextThemeCycleAt = now + PRACTICE_THEME_INTERVAL_MS;
         }
       }
-      // 2026-06-21: a RUNNING freeze drains the bank and pauses the level clock — shift every time
-      // anchor by dt each frozen frame so remaining/elapsed (and the perimeter line) hold. dt is
-      // clamped to 33ms upstream (script.js Math.min(rawDt,33)), so a huge dt on foreground return
-      // can't nuke the bank in one frame. When the bank hits 0, auto-end silently. A PAUSE leaves
-      // _freezeActive=false with bank intact — the clock simply resumes ticking (no special case).
+      // 2026-06-21/2026-06-23: a RUNNING freeze drains the bank and SLOWS the level clock (it no
+      // longer fully stops). Each frozen frame we push the time anchors forward by hold = dt*(1-rate),
+      // so the clock advances at `rate` of real time: FREEZE_TIMER_SLOW (0.25x) for most of the bank,
+      // then ramps to 1.0x over the final FREEZE_TIMER_RAMP_MS so it eases back to normal as the
+      // freeze runs out. dt is clamped to 33ms upstream, so a huge dt on foreground return can't nuke
+      // the bank in one frame. When the bank hits 0, auto-end silently. A PAUSE leaves _freezeActive
+      // = false with bank intact — the clock simply resumes ticking at full speed (no special case).
       if (_freezeActive) {
         _freezeBankMs -= dt;
         if (_freezeBankMs <= 0) {
           endFreeze(false); // bank drained — silent unfreeze (drops music filter + HUD glow)
         } else {
-          levelEndsAt += dt;
-          levelRunStartAt += dt;
-          if (Number.isFinite(nextSpawnAt)) nextSpawnAt += dt;
-          if (nextMineRespawnAt) nextMineRespawnAt += dt; // 2026-06-16: hold mine drip during freeze
+          let rate = FREEZE_TIMER_SLOW;
+          if (_freezeBankMs < FREEZE_TIMER_RAMP_MS) {
+            const t = 1 - _freezeBankMs / FREEZE_TIMER_RAMP_MS; // 0 → 1 across the final ramp window
+            rate = FREEZE_TIMER_SLOW + (1 - FREEZE_TIMER_SLOW) * t;
+          }
+          const hold = dt * (1 - rate); // dt → fully paused, 0 → full speed
+          levelEndsAt += hold;
+          levelRunStartAt += hold;
+          if (Number.isFinite(nextSpawnAt)) nextSpawnAt += hold;
+          if (nextMineRespawnAt) nextMineRespawnAt += hold; // 2026-06-16: hold mine drip during freeze
         }
       }
       const remainingMs = levelEndsAt - now;
@@ -13387,6 +13478,30 @@ function initGalaxyCanvas() {
 
         const elapsedMs = Math.max(0, now - levelRunStartAt);
         const levelRemainingMs = levelDurationMs - elapsedMs;
+
+        // 2026-06-23: cfg.waves = [{count, triggerAtRemaining}] — second-wave surge. When the clock
+        // drops to triggerAtRemaining seconds, burst `count` extra asteroids from the rim that the
+        // player must also clear. Both spawnedTotal and totalToSpawn are bumped so the level-complete
+        // gate (spawnedTotal >= totalToSpawn && nonAmbient === 0) stays consistent — the surge is
+        // gated purely on clearing the new rocks. Each entry fires once; re-armed per level.
+        if (Array.isArray(cfg.waves)) {
+          for (let wi = 0; wi < cfg.waves.length; wi += 1) {
+            const wv = cfg.waves[wi];
+            const triggerMs = (wv?.triggerAtRemaining || 0) * 1000;
+            if (!firedWaves.has(wi) && levelRemainingMs <= triggerMs && levelRemainingMs > 0) {
+              firedWaves.add(wi);
+              const wvCount = Math.max(1, wv.count || 1);
+              for (let wk = 0; wk < wvCount; wk += 1) {
+                const wp = randomPerimeterPoint();
+                spawnAsteroid(wp.x, wp.y, pickAsteroidKind(cfg), true);
+                spawnedTotal += 1;
+                totalToSpawn += 1;
+              }
+              playGameSfx("ufo_spawn", 0.85);
+            }
+          }
+        }
+
         if (!_timerWarnedAt60 && levelRemainingMs <= 20000
             && levelRemainingMs > 0 && engineMode === "arcade") {
           _timerWarnedAt60 = true;

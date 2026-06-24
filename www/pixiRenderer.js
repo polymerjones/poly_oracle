@@ -31,6 +31,51 @@ const pixiRenderer = (() => {
 
   const textures = {};
 
+  // 2026-06-23: build the L14 neon asteroid skin as a PIXI canvas texture (no file asset exists —
+  // it's code-generated). Loads roid01.png, applies the same tritone luminance gradient map used by
+  // buildNeonAsteroidSprite() in script.js, and wraps the canvas in a texture. Returns null on any
+  // failure (e.g. tainted canvas) so the caller falls back to the silver roid01 sprite.
+  function buildNeonAsteroidTexture() {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const w = img.naturalWidth;
+          const h = img.naturalHeight;
+          if (!w || !h) return resolve(null);
+          const cv = document.createElement('canvas');
+          cv.width = w;
+          cv.height = h;
+          const c = cv.getContext('2d');
+          if (!c) return resolve(null);
+          c.drawImage(img, 0, 0);
+          let data;
+          try { data = c.getImageData(0, 0, w, h); } catch { return resolve(null); }
+          const px = data.data;
+          const SHADOW = [4, 0, 10];   // near-black violet
+          const MID = [57, 255, 20];   // neon green
+          const HI = [168, 70, 255];   // purple highlight
+          for (let i = 0; i < px.length; i += 4) {
+            if (px[i + 3] === 0) continue;
+            const L = (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]) / 255;
+            let a0; let a1; let t;
+            if (L < 0.5) { a0 = SHADOW; a1 = MID; t = L / 0.5; }
+            else { a0 = MID; a1 = HI; t = (L - 0.5) / 0.5; }
+            px[i] = a0[0] + (a1[0] - a0[0]) * t;
+            px[i + 1] = a0[1] + (a1[1] - a0[1]) * t;
+            px[i + 2] = a0[2] + (a1[2] - a0[2]) * t;
+          }
+          c.putImageData(data, 0, 0);
+          resolve(PIXI.Texture.from(cv));
+        } catch {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = 'astgfx/roid01.png';
+    });
+  }
+
   let flashFilter = null;
   let flashAlpha = 0;
   let _plasmaBorderFlash = 0;
@@ -137,6 +182,13 @@ const pixiRenderer = (() => {
         }),
       );
       textures.ufo = await PIXI.Assets.load('astgfx/ufo.png').catch(() => null);
+
+      // 2026-06-23: L14 ("roidneon") is a CODE-GENERATED skin, not a file asset — there's no
+      // astgfx/roidneon.png to PIXI.Assets.load. Build it here as a canvas texture (tritone luminance
+      // gradient map over roid01: black shadows -> neon-green mids -> purple highlights) so the
+      // iPad/PIXI path shows the green/purple stroids. Mirrors buildNeonAsteroidSprite() in script.js.
+      // Without this the renderer fell back to textures.roid01 (silver) — why L14 looked un-neon.
+      textures.roidneon = await buildNeonAsteroidTexture().catch(() => null) || textures.roid01;
 
       starContainer = new PIXI.Graphics();
       warpRingContainer = new PIXI.Container();

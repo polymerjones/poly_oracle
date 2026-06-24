@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-23 22:22";
+const BUILD_TS = "2026-06-24 00:10";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -467,7 +467,7 @@ const LEVEL_THEMES = {
   5:  { primary: "#FF8C00", name: "Ember" },
   6:  { primary: "#00C853", name: "Jungle" },
   7:  { primary: "#00BFFF", name: "Storm" },
-  8:  { primary: "#33CFFF", name: "Cold Front" }, // 2026-06-23: was red "Blood"; recolored cold/ice to match the level name
+  8:  { primary: "#33CFFF", name: "Deep Freeze" }, // 2026-06-24: ice retheme — recolored cold/ice (2026-06-23) and renamed from "Cold Front" (L3 already owns "Ice Field")
   9:  { primary: "#AAFF00", name: "Toxic" },
   10: { primary: "#FF1500", name: "Hellfire" },
   // 2026-06-15: levels 11-15 — primary drives the perimeter timer line + plasma color (Part 7).
@@ -615,7 +615,7 @@ const ARCADE_LEVELS = [
     spriteKey: "roid01", // 2026-06-23: silver stroids for the whole level
     musicVolume: 1.15 }, // 2026-06-17: +15% music gain for this level
   { level: 7, label: "Into The Deep", time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
-  { level: 8, label: "COLD FRONT", time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14 },
+  { level: 8, label: "DEEP FREEZE", time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14 },
   { level: 9, label: "DANGER CLOSE", time: 68, totalToClear: 21, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14,
     spriteKey: "roid01", // 2026-06-23: silver stroids for the whole level
     guaranteedSpawn: [
@@ -631,6 +631,7 @@ const ARCADE_LEVELS = [
   // level-10 boss music + background (musicForLevel/bgKeyForLevel both clamp at >=10) and the
   // hotroid sprites, ramping density/time. "YOU WIN" now fires after clearing level 15.
   { level: 11, label: "AFTERSHOCK", time: 78, totalToClear: 27, startSpawn: 7, spawnEveryMs: 1350, maxOnScreen: 15,
+    musicVolume: 1.3, // 2026-06-24: L11_Swarm track is mastered quiet (≈menu-pause level) — boost it
     guaranteedSpawn: [{ type: "quadshot", atMs: 12000 }], // 2026-06-16: early quadshot drop
     waves: [{ count: 9, triggerAtRemaining: 34 }] }, // 2026-06-23: aftershock surge — 9 rocks burst in once ~34s remain
   // 2026-06-15: levels 12-15 are the "second act" with per-level mechanics. New config fields
@@ -3026,6 +3027,29 @@ const audioEngine = {
     this.masterGain.gain.value = 0.75;
     this.masterGain.connect(this.ctx.destination);
     return this.ctx;
+  },
+  // 2026-06-24: close + drop the AudioContext between levels. A MediaElementSourceNode (created for
+  // every comm-box/SPC VO line via applyCommRadioEffect) is permanently bound to the context and is
+  // never GC'd — so a long playthrough piles up dead nodes and progressively lags (~L13). Closing the
+  // ctx releases them all; ensureContext()/ensureMusic() lazily rebuild on the next level (startLevel
+  // re-unlocks + restarts the level music). Decoded buffers/musicBuffers are AudioBuffers (context-
+  // independent) so they're kept to avoid re-decode. Mirrors a hard-refresh's clean audio state.
+  teardown() {
+    try { this.stopMusic(); } catch { /* ignore */ }
+    try { this.stopAllLoops(); } catch { /* ignore */ }
+    try { this.removeFreezeFilter(); } catch { /* ignore */ }
+    try { this.ctx?.close(); } catch { /* ignore */ }
+    this.ctx = null;
+    this.masterGain = null;
+    this.musicGain = null;
+    this._freezeFilter = null;
+    this._freezeFilter2 = null;
+    this._musicGainBeforeFreeze = null;
+    this.currentMusic = null;
+    this.currentMusicHtml = null;
+    this.voices.clear(); // context-bound SFX source nodes — die with the ctx
+    this.loops.clear();  // context-bound loop source nodes — die with the ctx
+    this.unlocked = false; // force unlock()/resume() on the rebuilt ctx
   },
   async unlock() {
     const ctx = this.ensureContext();
@@ -7607,7 +7631,8 @@ function initGalaxyCanvas() {
 
   function playArcadeMenuMusic() {
     audioEngine.unlock();
-    audioEngine.playMusic("ARCADE_MENU", MUSIC.ARCADE_MENU, { crossfadeMs: 250, volume: 1 });
+    // 2026-06-24: menu theme sounded quiet on desktop but fine on iOS — bump desktop only.
+    audioEngine.playMusic("ARCADE_MENU", MUSIC.ARCADE_MENU, { crossfadeMs: 250, volume: isIOSWebKit ? 1 : 1.15 });
     audioEngine.loadMusicBuffer(getMusicForLevel(1)).catch(() => {});
     audioEngine.loadMusicBuffer(getMusicForLevel(0)).catch(() => {});
   }
@@ -11024,7 +11049,14 @@ function initGalaxyCanvas() {
           setSavedArcadeLevel(nextLevel);
           // 2026-06-12: the "LEVEL X" slam-in fires ONCE, from startLevel() once the next level
           // is fully loaded — not here on dismiss (that double-slammed: once pre-load, once post).
-          setTimeout(() => startLevel(currentLevelIndex + 1), 420);
+          setTimeout(() => {
+            // 2026-06-24: rebuild the AudioContext on every advance so each level starts on a fresh
+            // audio graph (see audioEngine.teardown) — kills the progressive VO-node leak that lagged
+            // full playthroughs by ~L13. Score/powerups/progress live outside audio and carry over.
+            commBoxController.stopVO();
+            audioEngine.teardown();
+            startLevel(currentLevelIndex + 1);
+          }, 420);
         },
       });
       return;

@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-25 11:15";
+const BUILD_TS = "2026-06-25 11:28";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2421,6 +2421,13 @@ const commBoxController = (() => {
     if (commCollapseTimer) { clearTimeout(commCollapseTimer); commCollapseTimer = null; }
     hud?.classList.remove("comm-collapsed");
   }
+  // 2026-06-25: collapse the comm box immediately (no delay). Used at the start of an SPC-host level
+  // so her mug isn't left standing on the playfield before she's said anything — the first VO line
+  // un-collapses it (showTicker → cancelCommCollapse) so the mug appears WITH the voice, not before.
+  function collapseCommNow() {
+    if (commCollapseTimer) { clearTimeout(commCollapseTimer); commCollapseTimer = null; }
+    hud?.classList.add("comm-collapsed");
+  }
   // 2026-06-24: arm the mug auto-collapse — SPC levels only. Fires after a short hold, but only if
   // nothing is still queued/playing and the ticker is hidden (re-checked when the timer elapses).
   function scheduleCommCollapse() {
@@ -2633,12 +2640,10 @@ const commBoxController = (() => {
       if (voAudioFxCleanup) { voAudioFxCleanup(); voAudioFxCleanup = null; }
       voAudio = null;
       stopMouthFlap();
-      // 2026-06-25: line over. A finished CMDR gameplay line on an SPC-host level used to restore
-      // SPC's idle mug here, which parked her face on the playfield as a dead "fallback" for the
-      // collapse beat even though she had nothing to say. Only bring her mug back if she actually has
-      // a line queued; otherwise leave whoever just spoke and let the overlay collapse away cleanly
-      // (her mug is re-established by triggerVO when her next line plays — see the _spc branch above).
-      if (_spcLevelHost && !_spcMode && _voQueue.length > 0) restoreSpcHost();
+      // 2026-06-25: line over. We NO LONGER re-park SPC's idle mug here. The mug now only ever shows
+      // while someone is actively speaking — SPC's mug appears when SHE speaks (the _spc branch in
+      // triggerVO) and goes away with the line. This kills the "SPC mug pops up for nothing right after
+      // a Commander comm" bug (it fired even on levels where the SPC-host flag leaked on, e.g. L12).
       tickIdle();
       tickerHideTimer = setTimeout(() => {
         // 2026-06-23: never let a stale CMDR auto-hide wipe a live SPC caption (the plasma-net
@@ -2660,12 +2665,11 @@ const commBoxController = (() => {
     } catch (e) {
       // ignore
     }
-    // 2026-06-24: Stunt Mode (training/practice) — SPC's VO + caption start a touch sooner. The
-    // 280ms beat exists so the level-intro/comm pop settles before CMDR talks in the main game; in
-    // the tutorial it just felt laggy after the blip. Gated on _exclusiveSpeaker (true only while a
-    // stunt session owns the comm box) so the main game is unchanged — revisit for main game after
-    // device testing.
-    const voDelay = _exclusiveSpeaker ? 120 : 280;
+    // 2026-06-24: Stunt Mode (training/practice) — SPC's VO + caption start a touch sooner (120ms).
+    // 2026-06-25: device-tested the snappier training timing and brought the main game down to match
+    // (was 280ms — felt laggy after the comm-box pop/blip). Small 150ms beat still lets the comm pop
+    // settle before the voice starts.
+    const voDelay = _exclusiveSpeaker ? 120 : 150;
 
     const beginMainVO = () => {
       if (triggerToken !== _voTriggerToken) return;
@@ -2804,6 +2808,7 @@ const commBoxController = (() => {
     setMuteCmdrVO: (on) => { muteCmdrVO = !!on; },
     pinTicker,
     hideTicker,
+    collapseCommNow,
     isTickerVisible,
     setPortraitOverride,
     clearPortraitOverride,
@@ -7137,6 +7142,7 @@ function initGalaxyCanvas() {
     asteroids: [],
     particles: [],
     warpRings: [],
+    shockwaves: [],
     lightningRings: [],
     shooting: null,
     tossedAsteroid: null,
@@ -7632,6 +7638,17 @@ function initGalaxyCanvas() {
   let lastAsteroidCollisionSfxAt = 0;
   let suppressAstCollisionSfxUntil = 0;
   let _lastExplosionSoundAt = 0;
+  // 2026-06-25: kill-burst boom coalescer. Several asteroid deaths landing within a few ms (quad-shot
+  // cluster, bomb chains, split cascades) used to each fire their own boom — they phase-stack into mud
+  // AND churn audio nodes mid-frame (the dominant audio cost). Instead: play the FIRST boom of a burst
+  // live (instant feedback), swallow the rest, and at the window's end fire ONE "cluster" boom scaled
+  // by how many were swallowed — so a multi-kill feels BIGGER (not randomly quieter, which is what the
+  // old iOS 2-per-frame / 80ms drop did) for a fraction of the node churn.
+  const BOOM_BURST_WINDOW_MS = 60;
+  let _boomBurstOpen = false;
+  let _boomBurstCount = 0;
+  let _boomBurstVol = 0;
+  let _boomBurstTimer = null;
   let scoreRenderRaf = 0;
   let warningActive = false;
   let warningLoopHandle = null;
@@ -8624,16 +8641,54 @@ function initGalaxyCanvas() {
     audioEngine.stopLoop("droneufo");
   }
 
-  function playAsteroidExplosionBoom(kind, volume, rate) {
-    if (isIOSNative) {
-      const now = performance.now();
-      if (now - _lastExplosionSoundAt < 80) return;
-      _lastExplosionSoundAt = now;
-    }
+  function playSingleAsteroidBoom(kind, volume, rate) {
     const mediumKeys = ["explosion_med", "explosion_med_alt"];
     const smallKeys = ["explosion_small", "explosion_small_alt"];
     const key = kind >= 3 ? "explosion_big" : kind === 2 ? pick(mediumKeys) : pick(smallKeys);
     playGameSfx(key, volume * 1.8, { rate, forceHtmlOnIOS: true });
+  }
+
+  function resetBoomBurst() {
+    if (_boomBurstTimer) { clearTimeout(_boomBurstTimer); _boomBurstTimer = null; }
+    _boomBurstOpen = false;
+    _boomBurstCount = 0;
+    _boomBurstVol = 0;
+  }
+
+  function flushBoomBurst() {
+    _boomBurstTimer = null;
+    const swallowed = _boomBurstCount - 1; // the first boom of the burst already played live
+    if (swallowed >= 1) {
+      // One designed "cluster detonation" standing in for the N swallowed booms — scaled up with the
+      // kill count (louder + heavier/deeper as the cluster grows) so a multi-kill reads as one decisive
+      // impact rather than a muddy smear. TODO: swap "explosion_big" for a bespoke cluster-boom asset
+      // when one is recorded — this is the only line that needs to change.
+      const intensity = Math.min(1, 0.5 + swallowed * 0.18);
+      const vol = clamp(_boomBurstVol * (0.55 + intensity * 0.6), 0, 1.6);
+      const rate = 0.82 - Math.min(0.12, swallowed * 0.03);
+      playGameSfx("explosion_big", vol * 1.8, { rate, forceHtmlOnIOS: true, important: true });
+    }
+    _boomBurstOpen = false;
+    _boomBurstCount = 0;
+    _boomBurstVol = 0;
+  }
+
+  function playAsteroidExplosionBoom(kind, volume, rate) {
+    if (!_boomBurstOpen) {
+      // first kill of a burst — play it live for instant feedback, then open the coalescing window
+      _boomBurstOpen = true;
+      _boomBurstCount = 1;
+      _boomBurstVol = volume;
+      _lastExplosionSoundAt = performance.now();
+      playSingleAsteroidBoom(kind, volume, rate);
+      if (_boomBurstTimer) clearTimeout(_boomBurstTimer);
+      _boomBurstTimer = setTimeout(flushBoomBurst, BOOM_BURST_WINDOW_MS);
+      return;
+    }
+    // burst already open — swallow this boom and fold it into the pending cluster accent
+    void kind;
+    _boomBurstCount += 1;
+    if (volume > _boomBurstVol) _boomBurstVol = volume;
   }
 
   // === Warp Spawns ===
@@ -8717,6 +8772,25 @@ function initGalaxyCanvas() {
     ring.alpha = prefersReducedMotion ? 0.24 : 0.42;
     ring.color = color;
     sim.warpRings.push(ring);
+  }
+
+  // 2026-06-25: localized "heat shimmer" shockwave for quad-shot blasts. A fast additive ring
+  // with a faint trailing echo and (off the perf-critical native path) a 1px chromatic R/B split —
+  // cheap fake distortion drawn on the 2D overlay, reads as a heatwave pop at the impact point
+  // without ever touching the framebuffer. Pooled through the shared ring pool; capped per frame.
+  function addShockwave(x, y) {
+    if (prefersReducedMotion || state.minimal) return;
+    const cap = isIOSNative ? 6 : 12;
+    if (sim.shockwaves.length >= cap) releaseRing(sim.shockwaves.shift());
+    const s = getRing();
+    s.x = x;
+    s.y = y;
+    s.life = 0;
+    s.ttl = isIOSNative ? 240 : 300;
+    s.baseR = 6;
+    s.maxR = isIOSNative ? 50 : 64;
+    s.alpha = 0.5;
+    sim.shockwaves.push(s);
   }
 
   function spawnAsteroid(x, y, kind = 3, warp = true, spriteKeyOverride = null) {
@@ -11058,6 +11132,8 @@ function initGalaxyCanvas() {
     while (sim.asteroids.length) releaseAsteroid(sim.asteroids.pop());
     while (sim.particles.length) releaseParticle(sim.particles.pop());
     while (sim.warpRings.length) releaseRing(sim.warpRings.pop());
+    while (sim.shockwaves.length) releaseRing(sim.shockwaves.pop());
+    resetBoomBurst(); // drop any pending cluster-boom timer so it can't fire across a transition
     sim.lightningRings.length = 0;
     sim.shooting = null;
     landmine = null;
@@ -11770,6 +11846,9 @@ function initGalaxyCanvas() {
     if (isSpcLevel) {
       commBoxController.setPortraitOverride(null, "SPC");
       commBoxController.setSpcFrame("smile_wide");
+      // 2026-06-25: set SPC up as the level host (routing + CMDR mute) but DON'T leave her mug
+      // standing at level start — collapse the box so her mug first appears with her intro VO.
+      commBoxController.collapseCommNow();
     } else {
       commBoxController.clearPortraitOverride();
     }
@@ -14328,6 +14407,15 @@ function initGalaxyCanvas() {
         releaseRing(ring);
       }
     }
+    for (let i = sim.shockwaves.length - 1; i >= 0; i -= 1) {
+      const s = sim.shockwaves[i];
+      s.life += dt;
+      if (s.life >= s.ttl) {
+        sim.shockwaves[i] = sim.shockwaves[sim.shockwaves.length - 1];
+        sim.shockwaves.pop();
+        releaseRing(s);
+      }
+    }
     for (let i = sim.lightningRings.length - 1; i >= 0; i -= 1) {
       const ring = sim.lightningRings[i];
       ring.life += dt;
@@ -15021,6 +15109,48 @@ function initGalaxyCanvas() {
         ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
         ctx.stroke();
       }
+      // 2026-06-25: quad-shot shockwave bloom — additive expanding ring, thick at birth and
+      // thinning out, with a trailing echo (the "compression" double-edge) and, off the native
+      // path, a chromatic R/B split that reads as heat distortion. All on the 2D overlay.
+      if (sim.shockwaves.length) {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        for (let i = 0; i < sim.shockwaves.length; i += 1) {
+          const s = sim.shockwaves[i];
+          const t = s.life / s.ttl;
+          const ease = 1 - (1 - t) * (1 - t); // ease-out so it punches out fast, settles slow
+          const radius = s.baseR + (s.maxR - s.baseR) * ease;
+          const fade = s.alpha * (1 - t);
+          if (fade <= 0.01) continue;
+          const lw = (1 - t) * 3.0 + 0.6; // wide at birth, thins as it expands
+          ctx.lineWidth = lw;
+          ctx.strokeStyle = `rgba(255,236,202,${fade.toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, radius, 0, Math.PI * 2);
+          ctx.stroke();
+          if (!isIOSNative) {
+            const split = 1.4 + t * 2.6; // edges separate more as the wave grows
+            ctx.lineWidth = Math.max(0.5, lw * 0.6);
+            ctx.strokeStyle = `rgba(255,80,80,${(fade * 0.5).toFixed(3)})`;
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, radius + split, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.strokeStyle = `rgba(90,150,255,${(fade * 0.5).toFixed(3)})`;
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, Math.max(0, radius - split), 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          const trail = radius - lw * 2.2; // faint inner echo ring
+          if (trail > 0) {
+            ctx.lineWidth = Math.max(0.5, lw * 0.5);
+            ctx.strokeStyle = `rgba(200,230,255,${(fade * 0.34).toFixed(3)})`;
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, trail, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+      }
     }
     for (let i = 0; i < sim.lightningRings.length; i += 1) {
       const ring = sim.lightningRings[i];
@@ -15197,6 +15327,7 @@ function initGalaxyCanvas() {
     const quadActive = performance.now() < quadShotUntil;
     _sfxBudgetExempt = quadActive;
     const hitSomething = resolveShotAt(x, y, now, isTouch);
+    if (quadActive) addShockwave(x, y); // localized heat-shimmer bloom on the primary quad blast
     // Tutorial chatter is skipped by tapping the subtle "TAP TO SKIP" hint above the comm box
     // (the hint text is its own tap target) — the old double-tap-empty-space detection is gone.
     // 2026-06-10: quadshot — 3 extra shots clustered around the tap point while active.
@@ -15227,6 +15358,7 @@ function initGalaxyCanvas() {
         // 2026-06-24: per-shot detune jitter so the 4 identical advfire buffers per quad tap don't
         // phase-lock into a low resonant comb-filter boom under sustained fire (de-correlates them).
         playGameSfx("advfire", 0.42, { important: true, detune: (Math.random() - 0.5) * 160 });
+        addShockwave(ex, ey); // each cluster blast gets its own localized shimmer ring
         if (resolveShotAt(ex, ey, now, isTouch)) extraHit = true;
       }
     }

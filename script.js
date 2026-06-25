@@ -48,8 +48,11 @@ async function initMediaSession() {
         artist: "POLYVERSE",
         album: "Arcade Mode",
         artwork: [{
-          src: "favicon.png",
-          sizes: "256x256",
+          // 2026-06-25: was favicon.png — the stale Feb icon (old pink orb) that showed on the iOS
+          // lock-screen / Now Playing. android-chrome-512.png is the current app-icon art (matches
+          // the Xcode AppIcon) and is copied into www/ by prepare:web.
+          src: "android-chrome-512.png",
+          sizes: "512x512",
           type: "image/png",
         }],
       });
@@ -93,8 +96,9 @@ async function updateMediaSessionLevel(levelNum, levelLabel) {
       artist: "POLYVERSE",
       album: "Arcade Mode",
       artwork: [{
-        src: "favicon.png",
-        sizes: "256x256",
+        // 2026-06-25: current app-icon art (was the stale favicon.png) — see initMediaSession.
+        src: "android-chrome-512.png",
+        sizes: "512x512",
         type: "image/png",
       }],
     });
@@ -180,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-25 11:28";
+const BUILD_TS = "2026-06-25 11:32";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -736,6 +740,9 @@ const ARCADE_LEVELS = [
     powerupOverride: ["missile", "missile", "timer", "freeze", "quadshot", "bomb"],
     powerupIntervalMs: 12000,
     speedEscalation: true,       // 2026-06-16: live asteroids ramp speed over the level (cap 2.5x)
+    musicVolume: 1.4,            // 2026-06-25: L15 was too quiet — it plays the L10 boss track as a
+                                 // fallback at default 1.0 gain (quieter than L10's own 1.15). Boost
+                                 // for the finale; revisit when the real L15_gauntlet track is supplied.
     musicKey: "L15_GAUNTLET",
   },
 ];

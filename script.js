@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-24 18:55";
+const BUILD_TS = "2026-06-24 19:05";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -11940,6 +11940,7 @@ function initGalaxyCanvas() {
   }
 
   function startArcadeAtLevel(levelNum) {
+    arcadeLevelSelectOpen = false; // 2026-06-24: grid is dismissed — re-enable comms for the run
     audioEngine.unlock?.();
     audioEngine.loadMany?.(GAME_SFX);
     hideArcadeOverlay();

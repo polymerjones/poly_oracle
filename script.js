@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-24 18:02";
+const BUILD_TS = "2026-06-24 18:28";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1478,6 +1478,19 @@ const commBoxController = (() => {
   let easterEggCooldown = 0;
 
   const VO3_FILES = new Set([
+    // 2026-06-24: new commander VO drop (files live in assets/vo3/ — uppercase-first names route
+    // there via commVoSrc). Captions in VO_CAPTIONS below. Not yet wired to game events — see
+    // the catalog note; available for triggerVO({ voFile }) / pool wiring.
+    "CMDR_a_job_well_done_cadet_you_win.mp3",
+    "CMDR_get_the_alien.mp3",
+    "CMDR_get_the_alien_cadet_alternate.mp3",
+    "CMDR_i_dont_know_where_they_found_you_cadet_but_youre_killin_it.mp3",
+    "CMDR_id_be_lost_without_you_cadet_alternate.mp3",
+    "CMDR_level_7_start_were_getting_deeper.mp3",
+    "CMDR_this_looks_like_a_world_of_trouble_cadet.mp3",
+    "CMDR_this_looks_like_a_world_of_trouble_cadet_alternate.mp3",
+    "CMDR_you_really_are_doing_a_great_job_cadet.mp3",
+    "CMDR_you_win_a_job_well_done_cadet.mp3",
     "blast_em_ha_ha.mp3",
     "EHEHAHH.mp3",
     "GET_EM_GET_EM_GET_EM.mp3",
@@ -1571,6 +1584,9 @@ const commBoxController = (() => {
     "vo-lets_blast_these_stroids.mp3",
     "this_definitely_concerns_you_cadet.mp3",
     "this_definitely_concerns_you_cadet2.mp3",
+    // 2026-06-24: ominous intro lines (new CMDR drop) — sit alongside "this definitely concerns you".
+    "CMDR_this_looks_like_a_world_of_trouble_cadet.mp3",
+    "CMDR_this_looks_like_a_world_of_trouble_cadet_alternate.mp3",
   ];
 
   const POOL_LEVEL_COMPLETE = [
@@ -1591,6 +1607,31 @@ const commBoxController = (() => {
     "YOU_SHOW_EM_WHOS_BOSSS.mp3",
     "id_be_lost_without_you_cadet_nice_work.mp3",
     "if_these_stroids_were_alive_theyd_be_shook.mp3",
+    // 2026-06-24: new CMDR praise lines, safe at any level.
+    "CMDR_you_really_are_doing_a_great_job_cadet.mp3",
+    "CMDR_id_be_lost_without_you_cadet_alternate.mp3",
+  ];
+
+  // 2026-06-24: late-game level-complete pool — the base praise lines PLUS "you're killin' it",
+  // which name-checks how far the cadet has come and shouldn't fire on the opening levels. Used in
+  // place of POOL_LEVEL_COMPLETE once level >= LEVEL_COMPLETE_LATE_FROM (separate pickFromPool key so
+  // its shuffle is independent of the base pool). [[playtest-backlog-2026-06-24]]
+  const POOL_LEVEL_COMPLETE_LATE = [
+    ...POOL_LEVEL_COMPLETE,
+    "CMDR_i_dont_know_where_they_found_you_cadet_but_youre_killin_it.mp3",
+  ];
+
+  // 2026-06-24: UFO ("alien") spotted callout pool — the original line plus two new CMDR variants.
+  const POOL_UFO_SPOTTED = [
+    "vo-ufo_spotted_takeemout.mp3",
+    "CMDR_get_the_alien.mp3",
+    "CMDR_get_the_alien_cadet_alternate.mp3",
+  ];
+
+  // 2026-06-24: "YOU WIN" celebration VO (new CMDR drop) — one plays over the win-sequence barrage.
+  const POOL_WIN = [
+    "CMDR_a_job_well_done_cadet_you_win.mp3",
+    "CMDR_you_win_a_job_well_done_cadet.mp3",
   ];
 
   const POOL_NICE_SHOT = [
@@ -1765,6 +1806,17 @@ const commBoxController = (() => {
     "vo-you_show_em_whos_boss.mp3": "YOU SHOW 'EM WHO'S BOSS.",
     "vo-you_show_em_whos_boss2.mp3": "YOU SHOW 'EM WHO'S BOSS.",
     "vo-you_show_em_whos_boss3.mp3": "YOU SHOW 'EM WHO'S BOSS.",
+    // 2026-06-24: new commander VO drop (assets/vo3/CMDR_*.mp3).
+    "CMDR_a_job_well_done_cadet_you_win.mp3": "A JOB WELL DONE, CADET. YOU WIN.",
+    "CMDR_get_the_alien.mp3": "GET THE ALIEN.",
+    "CMDR_get_the_alien_cadet_alternate.mp3": "GET THE ALIEN, CADET.",
+    "CMDR_i_dont_know_where_they_found_you_cadet_but_youre_killin_it.mp3": "I DON'T KNOW WHERE THEY FOUND YOU, CADET, BUT YOU'RE KILLIN' IT.",
+    "CMDR_id_be_lost_without_you_cadet_alternate.mp3": "I'D BE LOST WITHOUT YOU, CADET.",
+    "CMDR_level_7_start_were_getting_deeper.mp3": "WE'RE GETTING DEEPER.",
+    "CMDR_this_looks_like_a_world_of_trouble_cadet.mp3": "THIS LOOKS LIKE A WORLD OF TROUBLE, CADET.",
+    "CMDR_this_looks_like_a_world_of_trouble_cadet_alternate.mp3": "THIS LOOKS LIKE A WORLD OF TROUBLE, CADET.",
+    "CMDR_you_really_are_doing_a_great_job_cadet.mp3": "YOU REALLY ARE DOING A GREAT JOB, CADET.",
+    "CMDR_you_win_a_job_well_done_cadet.mp3": "YOU WIN! A JOB WELL DONE, CADET.",
     "blast_em_ha_ha.mp3": "BLAST 'EM! HA HA!",
     "EHEHAHH.mp3": "EHEHAHH.",
     "GET_EM_GET_EM_GET_EM.mp3": "GET 'EM! GET 'EM! GET 'EM!",
@@ -2755,6 +2807,9 @@ const commBoxController = (() => {
     pickFromPool,
     POOL_LEVEL_START,
     POOL_LEVEL_COMPLETE,
+    POOL_LEVEL_COMPLETE_LATE,
+    POOL_UFO_SPOTTED,
+    POOL_WIN,
     POOL_NICE_SHOT,
     POOL_HYPE,
     POOL_SPC_PRAISE,
@@ -8841,7 +8896,10 @@ function initGalaxyCanvas() {
       // 2026-06-22: drop the callout at play time if the UFO is already dead (killed during the
       // ~600ms queue gap) — no point announcing a UFO the player just destroyed.
       commBoxController.queueVO({
-        audioSrc: commBoxController.commVoSrc("vo-ufo_spotted_takeemout.mp3"),
+        // 2026-06-24: vary the UFO callout across the original line + two new "get the alien" CMDR variants.
+        audioSrc: commBoxController.commVoSrc(
+          commBoxController.pickFromPool("ufoSpotted", commBoxController.POOL_UFO_SPOTTED),
+        ),
         event: "ufo",
         playGuard: () => !!(ufo && ufo.alive),
       });
@@ -11294,12 +11352,26 @@ function initGalaxyCanvas() {
       commBoxController.clearPortraitOverride();
     }
     commBoxController.reactTo("levelcomplete");
-    commBoxController.queueVO({
-      audioSrc: commBoxController.commVoSrc(
-        commBoxController.pickFromPool("levelcomplete", commBoxController.POOL_LEVEL_COMPLETE),
-      ),
-      event: "levelcomplete",
-    });
+    // 2026-06-24: from level 8 on, fold in the "you're killin' it" praise (it name-checks how far the
+    // cadet has come, so it'd ring false on the opening levels). Distinct pool key keeps the late
+    // shuffle independent of the base one.
+    const LEVEL_COMPLETE_LATE_FROM = 8;
+    const _lcLevel = _lcCfg ? _lcCfg.level : 0;
+    const _lcLate = _lcLevel >= LEVEL_COMPLETE_LATE_FROM;
+    // 2026-06-24: on the FINAL clear (game won) skip the routine praise — playWinSequence speaks the
+    // dedicated "YOU WIN" line instead, so we don't stack two ~3s commander lines back-to-back.
+    const _lcFinalWin = _lcLevel >= ARCADE_LEVELS.length;
+    if (!_lcFinalWin) {
+      commBoxController.queueVO({
+        audioSrc: commBoxController.commVoSrc(
+          commBoxController.pickFromPool(
+            _lcLate ? "levelcomplete_late" : "levelcomplete",
+            _lcLate ? commBoxController.POOL_LEVEL_COMPLETE_LATE : commBoxController.POOL_LEVEL_COMPLETE,
+          ),
+        ),
+        event: "levelcomplete",
+      });
+    }
     const cfg = ARCADE_LEVELS[currentLevelIndex];
     const nextLevel = cfg.level + 1;
     if (nextLevel <= ARCADE_LEVELS.length) {
@@ -11398,6 +11470,17 @@ function initGalaxyCanvas() {
     // Triumphant chime layered over the boom barrage.
     playGameSfx("level_up", 0.95);
 
+    // 2026-06-24: commander signs off the run with a "you win" line over the celebration (new CMDR
+    // drop). Small delay so it lands after the chime/first boom rather than on top of them. The
+    // routine level-complete praise is suppressed on the final clear (see _lcFinalWin), so this is
+    // the only commander line here — the hold below is stretched to let it finish before handoff.
+    setTimeout(() => {
+      commBoxController.queueVO({
+        voFile: commBoxController.pickFromPool("win", commBoxController.POOL_WIN),
+        event: "levelcomplete",
+      });
+    }, 500);
+
     // 2026-06-24: track every celebration timer so a mid-sequence teardown (new game / navigate away,
     // which runs stopGalaxyLoop) cancels the pending explosions/fade instead of firing them blind.
     _winSeqTimers.forEach(clearTimeout);
@@ -11432,7 +11515,9 @@ function initGalaxyCanvas() {
       arcadeOverlayText.classList.add("show");
     }
 
-    // Hold ~1.5s after the slam, fade out, then hand off (~2.9s total).
+    // Hold the "YOU WIN" slam, fade out, then hand off. 2026-06-24: extended from 2400→4200ms so the
+    // commander "you win" line (queued ~0.5s in, ~3s long) finishes before the handoff to the
+    // score/initials screen instead of getting cut off.
     _winSeqTimers.push(setTimeout(() => {
       if (arcadeOverlayText) arcadeOverlayText.classList.add("fadeOut");
       setTimeout(() => {
@@ -11445,7 +11530,7 @@ function initGalaxyCanvas() {
         }
         onComplete();
       }, ARCADE_OVERLAY_FADE_MS);
-    }, 2400));
+    }, 4200));
   }
 
   function promptRetryOrGameOver() {
@@ -11673,6 +11758,9 @@ function initGalaxyCanvas() {
       levelStartVO = "vo-welcometothepolyverse.mp3";
     } else if (levelNum === 5) {
       levelStartVO = "vo-hairytakeemout.mp3";
+    } else if (levelNum === 7) {
+      // 2026-06-24: dedicated level-7 intro (new CMDR drop) — "we're getting deeper".
+      levelStartVO = "CMDR_level_7_start_were_getting_deeper.mp3";
     } else if (levelNum === 15) {
       // 2026-06-15 (Part 8): final-level commander line. Placeholder audio (vo/gauntlet_intro.mp3)
       // falls back to the VO_CAPTIONS caption until Poly records it.

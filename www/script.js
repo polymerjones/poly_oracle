@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-24 18:28";
+const BUILD_TS = "2026-06-24 18:55";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1346,6 +1346,11 @@ const arcadeOverlaySub = document.getElementById("arcadeOverlaySub");
 const arcadeOverlayBtn = document.getElementById("arcadeOverlayBtn");
 const arcadeOverlayBtnSecondary = document.getElementById("arcadeOverlayBtnSecondary");
 
+// 2026-06-24: true while the arcade level-select grid is showing. Comms (reactions + queued VO)
+// are suppressed while it's up — picking a level via Level Skip was firing leftover/gameplay comms
+// over the menu. Set in setArcadeSubmenu (single choke point for every submenu transition).
+let arcadeLevelSelectOpen = false;
+
 const commBoxController = (() => {
   const FRAMES = {
     idle: "commander/idle_commander.jpg",
@@ -2503,7 +2508,7 @@ const commBoxController = (() => {
   }
 
   function reactTo(eventType) {
-    if (!hudVisible) return;
+    if (!hudVisible || arcadeLevelSelectOpen) return;
     const reactions = {
       ufo: "shockd",
       landmine: "shockd",
@@ -2557,6 +2562,7 @@ const commBoxController = (() => {
     _onEnd = null,
     _spc = false,
   } = {}) {
+    if (arcadeLevelSelectOpen) { if (_onEnd) _onEnd(); return; } // no comms over the level-select menu
     if (!hudVisible) show();
     if (!hudVisible) {
       if (_onEnd) _onEnd();
@@ -2755,6 +2761,7 @@ const commBoxController = (() => {
   }
 
   function queueVO(options = {}) {
+    if (arcadeLevelSelectOpen) return; // no comms over the level-select menu
     if (_exclusiveSpeaker && !options._spc) return;
     // Level-end window: let only the one levelcomplete praise speak (see setLevelEndLock).
     if (_levelEndLock && options.event !== "levelcomplete") return;
@@ -7260,8 +7267,8 @@ function initGalaxyCanvas() {
   // sprite. Tweak the three ramp stops per skin to retune the colors.
   // 2026-06-24: generalized from the single L14 "roidneon" builder so new tinted variants (L3 Blue
   // Moon, L8 ice, L12 purple/grey) reuse the exact same fantastic-looking method.
-  function buildTintedAsteroidSprite(outKey, shadow, mid, hi) {
-    const base = asteroidSprites.roid01;
+  function buildTintedAsteroidSprite(outKey, shadow, mid, hi, baseKey = "roid01") {
+    const base = asteroidSprites[baseKey] || asteroidSprites.roid01;
     if (!base || !base.complete || !base.naturalWidth) return false;
     const w = base.naturalWidth;
     const h = base.naturalHeight;
@@ -7293,18 +7300,25 @@ function initGalaxyCanvas() {
   function buildGeneratedAsteroidSprites() {
     const base = asteroidSprites.roid01;
     if (!base || !base.complete || !base.naturalWidth) return false;
+    const base03 = asteroidSprites.roid03;
+    const base03Ready = base03 && base03.complete && base03.naturalWidth;
     // L14 neon: faint-violet shadows -> neon green mids -> purple highlights (the original look).
     buildTintedAsteroidSprite("roidneon", [4, 0, 10], [57, 255, 20], [168, 70, 255]);
-    // L3 "Blue Moon": midnight-blue body -> cool grey mids -> near-white highlights.
-    buildTintedAsteroidSprite("roidbluemoon", [10, 16, 45], [120, 128, 145], [240, 244, 255]);
-    // L8 "DEEP FREEZE": deep ice-blue shadows -> ice blue -> icy white (kicks in mid-level, 18s).
-    buildTintedAsteroidSprite("roidice", [12, 34, 66], [86, 170, 214], [224, 246, 255]);
-    // L12 "MAKE IT BOOM": deep purple shadows -> purple-grey mids -> pale lilac highlights.
-    buildTintedAsteroidSprite("roidpurplegrey", [30, 12, 52], [122, 104, 134], [228, 222, 238]);
-    return true;
+    // 2026-06-24: skins punched up — these were reading as "just tinted silver" on device. The
+    // mids now carry full saturation so each level's rocks look like a different MATERIAL, not a
+    // recolored silver (the L14 neon look). Shadows stay deep, highlights stay near-white for rim.
+    // L3 "Blue Moon": deep navy shadows -> vivid electric blue mids -> icy white highlights.
+    buildTintedAsteroidSprite("roidbluemoon", [3, 10, 38], [28, 96, 235], [188, 222, 255]);
+    // L8 "DEEP FREEZE": baked on roid03 (this level's rock sprite, not roid01) — deep teal-ice
+    // shadows -> bright cyan-ice mids -> icy white (kicks in mid-level, 18s).
+    buildTintedAsteroidSprite("roidice", [4, 28, 64], [40, 196, 230], [226, 250, 255], "roid03");
+    // L12 "MAKE IT BOOM": deep purple shadows -> vivid magenta-purple mids -> pale lilac highlights.
+    buildTintedAsteroidSprite("roidpurplegrey", [26, 4, 52], [168, 56, 214], [236, 214, 248]);
+    return base03Ready; // false until roid03 is decoded too, so the ice bake re-runs on its load
   }
   if (!buildGeneratedAsteroidSprites()) {
     asteroidSprites.roid01.addEventListener("load", buildGeneratedAsteroidSprites, { once: true });
+    asteroidSprites.roid03?.addEventListener("load", buildGeneratedAsteroidSprites, { once: true });
   }
 
   // 2026-06-10: powerup sprites (256px source, transparent bg, baked-in glow) — drawn ~56px.
@@ -8040,6 +8054,10 @@ function initGalaxyCanvas() {
     const showArcade = mode === "arcade";
     const showLevels = mode === "levels";
     const showStunt = mode === "stunt";
+    // 2026-06-24: suppress comms while the level-select grid is up; kill any in-flight/queued VO
+    // the moment it opens so a leftover gameplay line can't talk over the menu.
+    arcadeLevelSelectOpen = showLevels;
+    if (showLevels) { commBoxController.stopVO(); commBoxController.hide(); }
     if (btnArcade) btnArcade.style.display = showRoot ? "" : "none";
     if (btnPractice) btnPractice.style.display = showRoot ? "" : "none";
     // 2026-06-14: Stunt Mode is a top-level mode now (Select Mode menu), not under Arcade

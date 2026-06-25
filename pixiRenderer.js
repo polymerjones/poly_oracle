@@ -39,7 +39,7 @@ const pixiRenderer = (() => {
   // Moon, L8 ice, L12 purple/grey, L14 neon) is produced the identical way on the PIXI/iOS path.
   // shadow/mid/hi are the tritone luminance ramp stops; MUST match buildTintedAsteroidSprite() in
   // script.js so the device and 2D-canvas paths render the same colors.
-  function buildTintedAsteroidTexture(shadow, mid, hi) {
+  function buildTintedAsteroidTexture(shadow, mid, hi, baseSrc = 'astgfx/roid01.png') {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -73,7 +73,7 @@ const pixiRenderer = (() => {
         }
       };
       img.onerror = () => resolve(null);
-      img.src = 'astgfx/roid01.png';
+      img.src = baseSrc;
     });
   }
 
@@ -188,10 +188,10 @@ const pixiRenderer = (() => {
       // iPad/PIXI path shows them — without this the renderer falls back to textures.roid01 (silver).
       // Ramp stops MUST match buildGeneratedAsteroidSprites() in script.js (device + 2D paths in sync).
       const [_neon, _bluemoon, _ice, _purplegrey] = await Promise.all([
-        buildTintedAsteroidTexture([4, 0, 10], [57, 255, 20], [168, 70, 255]).catch(() => null),       // L14 neon
-        buildTintedAsteroidTexture([10, 16, 45], [120, 128, 145], [240, 244, 255]).catch(() => null),  // L3 Blue Moon
-        buildTintedAsteroidTexture([12, 34, 66], [86, 170, 214], [224, 246, 255]).catch(() => null),   // L8 ice
-        buildTintedAsteroidTexture([30, 12, 52], [122, 104, 134], [228, 222, 238]).catch(() => null),  // L12 purple/grey
+        buildTintedAsteroidTexture([4, 0, 10], [57, 255, 20], [168, 70, 255]).catch(() => null),        // L14 neon
+        buildTintedAsteroidTexture([3, 10, 38], [28, 96, 235], [188, 222, 255]).catch(() => null),      // L3 Blue Moon (vivid electric blue)
+        buildTintedAsteroidTexture([4, 28, 64], [40, 196, 230], [226, 250, 255], 'astgfx/roid03.png').catch(() => null), // L8 ice on roid03
+        buildTintedAsteroidTexture([26, 4, 52], [168, 56, 214], [236, 214, 248]).catch(() => null),     // L12 magenta-purple
       ]);
       textures.roidneon = _neon || textures.roid01;
       textures.roidbluemoon = _bluemoon || textures.roid01;

@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-24 19:05";
+const BUILD_TS = "2026-06-25 11:15";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2424,11 +2424,14 @@ const commBoxController = (() => {
   // 2026-06-24: arm the mug auto-collapse — SPC levels only. Fires after a short hold, but only if
   // nothing is still queued/playing and the ticker is hidden (re-checked when the timer elapses).
   function scheduleCommCollapse() {
-    if (!_spcMode) return;
+    // 2026-06-25: collapse on any SPC-host level, not only while SPC's own mug is up. A CMDR
+    // gameplay line ending on L13/L14 now leaves the CMDR mug (_spcMode false) instead of swapping
+    // to SPC's idle face — but the overlay must still dismiss so it doesn't park over the playfield.
+    if (!_spcMode && !_spcLevelHost) return;
     if (commCollapseTimer) { clearTimeout(commCollapseTimer); commCollapseTimer = null; }
     commCollapseTimer = setTimeout(() => {
       commCollapseTimer = null;
-      if (!_spcMode || _voPlaying || _voQueue.length > 0 || tickerVisible) return;
+      if ((!_spcMode && !_spcLevelHost) || _voPlaying || _voQueue.length > 0 || tickerVisible) return;
       hud?.classList.add("comm-collapsed");
     }, COMM_COLLAPSE_MS);
   }
@@ -2630,8 +2633,12 @@ const commBoxController = (() => {
       if (voAudioFxCleanup) { voAudioFxCleanup(); voAudioFxCleanup = null; }
       voAudio = null;
       stopMouthFlap();
-      // 2026-06-24: line over — return the mug to the level's SPC host if we showed CMDR for this line.
-      if (_spcLevelHost && !_spcMode) restoreSpcHost();
+      // 2026-06-25: line over. A finished CMDR gameplay line on an SPC-host level used to restore
+      // SPC's idle mug here, which parked her face on the playfield as a dead "fallback" for the
+      // collapse beat even though she had nothing to say. Only bring her mug back if she actually has
+      // a line queued; otherwise leave whoever just spoke and let the overlay collapse away cleanly
+      // (her mug is re-established by triggerVO when her next line plays — see the _spc branch above).
+      if (_spcLevelHost && !_spcMode && _voQueue.length > 0) restoreSpcHost();
       tickIdle();
       tickerHideTimer = setTimeout(() => {
         // 2026-06-23: never let a stale CMDR auto-hide wipe a live SPC caption (the plasma-net

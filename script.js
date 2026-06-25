@@ -7177,6 +7177,7 @@ function initGalaxyCanvas() {
 
   function showFpsOverlay() {
     return; // hidden permanently
+    // eslint-disable-next-line no-unreachable -- intentional kill-switch above
     ensureFpsOverlay();
     if (_fpsOverlay) _fpsOverlay.style.display = "block";
   }
@@ -12339,6 +12340,7 @@ function initGalaxyCanvas() {
     // it needs a redesign as a comet/dot travelling ALONG the perimeter timer (separate future task).
     // No-op for now — hideTimerArrow() stays safe to call (it just no-ops when nothing is shown).
     return;
+    // eslint-disable-next-line no-unreachable -- intentional: feature disabled pending redesign
     ensureTutorialPointerCss(); // provides the @keyframes tutorialPulse used by #timerArrow
     ensureTutorialChromeCss();
     if (!galaxyPlayCanvas) return;

@@ -180,7 +180,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-24 16:30";
+const BUILD_TS = "2026-06-24 18:02";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -612,7 +612,8 @@ const ARCADE_LEVELS = [
   // empty. L1/L2 have no trickle (spawnEveryMs 0), so totalToClear MUST equal startSpawn there.
   { level: 1, label: "First Flight", time: 48, totalToClear: 4, startSpawn: 4, spawnEveryMs: 0, maxOnScreen: 12 },
   { level: 2, label: "SHAKE DOWN", time: 50, totalToClear: 6, startSpawn: 6, spawnEveryMs: 0, maxOnScreen: 12 },
-  { level: 3, label: "Blue Moon", time: 52, totalToClear: 10, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12 },
+  { level: 3, label: "Blue Moon", time: 52, totalToClear: 10, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12,
+    spriteKey: "roidbluemoon" }, // 2026-06-24: code-baked midnight-blue/grey/white skin (Blue Moon)
   { level: 4, label: "DEBRIS RUN", time: 54, totalToClear: 12, startSpawn: 6, spawnEveryMs: 2000, maxOnScreen: 12,
     // 2026-06-23: ambient silver debris trickles in throughout — bonus targets/hazards that do NOT
     // count toward the clear quota (spawned with .ambient = true; see the debris block in update()).
@@ -624,15 +625,21 @@ const ARCADE_LEVELS = [
     spriteKey: "roid01", // 2026-06-23: silver stroids for the whole level
     musicVolume: 1.15 }, // 2026-06-17: +15% music gain for this level
   { level: 7, label: "Into The Deep", time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
-  { level: 8, label: "DEEP FREEZE", time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14 },
+  { level: 8, label: "DEEP FREEZE", time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14,
+    // 2026-06-24: mid-level skin shift — asteroids spawned after the 18s mark come in ice-blue
+    // (earlier ones keep their skin). Honored by pickArcadeSpriteOverride at the spawn call.
+    spriteShift: { afterMs: 18000, key: "roidice" } },
   { level: 9, label: "DANGER CLOSE", time: 68, totalToClear: 21, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14,
     spriteKey: "roid01", // 2026-06-23: silver stroids for the whole level
+    musicRamp: { atMs: 25000, toMult: 1.4, rampMs: 4000 }, // 2026-06-24: noticeable swell ~25s in
     guaranteedSpawn: [
       { type: "bomb", atMs: 8000 },
       { type: "bomb", atMs: 20000 },
       { type: "quadshot", atMs: 12000 },
     ] }, // 2026-06-17: two bombs + a quadshot near the start
   { level: 10, label: "RED HORIZON", time: 75, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14,
+    musicVolume: 1.15, // 2026-06-24: boss music up a touch from the start
+    musicRamp: { atMs: 6000, toMult: 1.35, rampMs: 50000 }, // 2026-06-24: gradual rise across the level
     powerupOverride: ["freeze", "goldbars", "bomb"], // 2026-06-16: boss-level support kit
     guaranteedSpawn: [{ type: "freeze", atMs: 37000 }], // 2026-06-23: guaranteed freeze around the half-way mark
     waves: [{ count: 8, triggerAtRemaining: 32 }] }, // 2026-06-23: boss surge — 8 rocks burst in once ~32s remain
@@ -656,7 +663,7 @@ const ARCADE_LEVELS = [
     spawnEveryMs: 8000,
     maxOnScreen: 10,
     asteroidKinds: [3, 3, 2],   // large + medium only — tight clusters
-    spriteMix: [["roid01", 5], ["hotroid01", 1]], // 2026-06-23: mostly silver, a select few red
+    spriteMix: [["roidpurplegrey", 5], ["hotroid01", 1]], // 2026-06-24: purple/grey skin, a few red boom-rocks
     noUfo: false,
     ufoSpawnAt: 25,             // UFO arrives mid-level to disrupt chains
     mineLaunch: true,
@@ -688,6 +695,7 @@ const ARCADE_LEVELS = [
     // a big plasma-net sweep.
     guaranteedSpawn: [{ type: "timer", atMs: 30000 }],
     musicKey: "L13_BOOM_PT2",
+    musicVolume: 1.35, // 2026-06-24: L13_Boom_pt2 mastered quiet — boost per playtest (also covers L14 fallback)
   },
   {
     level: 14,
@@ -1798,6 +1806,12 @@ const commBoxController = (() => {
   // 2026-06-16: SPC animated-portrait state. `_spcMode` is true while the SPC override owns the
   // portrait; speech runs a mouth-flap through talk frames, and an idle blink ticks between lines.
   let _spcMode = false;
+  // 2026-06-24: the LEVEL's default host (SPC on L13/L14) is tracked separately from _spcMode (which
+  // is "is the SPC mug currently displayed"). On SPC-host levels a CMDR-spoken gameplay line is shown
+  // with the CMDR mug for its duration, then the SPC host mug is restored — see triggerVO. Without
+  // this split, every CMDR gameplay line (UFO/plasma/landmine/level-complete) flapped the SPC mug.
+  let _spcLevelHost = false;           // level default is SPC (mug follows the line speaker on top)
+  let _spcLevelPortraitSrc = null;     // the SPC override src to restore after a CMDR line
   let _spcRestFrame = "smile_wide";    // idle frame returned to after a line / blink
   let _spcLastFrameHint = null;        // frameHint of the most recently started line (for spcSpeakEnd)
   let _spcSpeaking = false;
@@ -2012,6 +2026,8 @@ const commBoxController = (() => {
   function setPortraitOverride(src, callsign = "SPC") {
     portraitOverride = src || SPC_PLACEHOLDER;
     _spcMode = true;
+    _spcLevelHost = true;                  // 2026-06-24: this level's default host is SPC
+    _spcLevelPortraitSrc = portraitOverride; // remember it so CMDR lines can restore the SPC mug
     _spcRestFrame = "smile_wide";
     _spcSpeaking = false;
     const cs = callsignEl();
@@ -2033,6 +2049,8 @@ const commBoxController = (() => {
   function clearPortraitOverride() {
     portraitOverride = null;
     _spcMode = false;
+    _spcLevelHost = false;           // 2026-06-24: back to a CMDR-host level
+    _spcLevelPortraitSrc = null;
     _spcSpeaking = false;
     cancelCommCollapse(); // 2026-06-24: leaving an SPC level — un-collapse the mug for CMDR
     _spcStopFlap();
@@ -2048,6 +2066,39 @@ const commBoxController = (() => {
     // 2026-06-18: CMDR is back — resume its idle loop if the HUD is showing (mirrors the stopIdle in
     // setPortraitOverride). startIdle() no-ops if already running.
     if (hudVisible) startIdle();
+  }
+
+  // 2026-06-24: per-line portrait swap so the mug follows the LINE's speaker on SPC-host levels.
+  // showCmdrForLine() drops the SPC override for the duration of a CMDR-spoken line — portraitOverride
+  // must be null so setFrame draws real CMDR frames, and _spcMode false so the talk/idle loops use
+  // CMDR frames. restoreSpcHost() puts the SPC host mug back when the line ends (or an SPC line plays).
+  function showCmdrForLine() {
+    _spcStopFlap();
+    _spcStopBlink();
+    portraitOverride = null;
+    _spcMode = false;
+    if (portrait) {
+      portrait.onerror = null;
+      portrait.classList.add("commPortraitImg--commander");
+    }
+    const cs = callsignEl();
+    if (cs) cs.textContent = "CMDR";
+  }
+  function restoreSpcHost() {
+    portraitOverride = _spcLevelPortraitSrc || SPC_PLACEHOLDER;
+    _spcMode = true;
+    _spcRestFrame = "smile_wide";
+    _spcSpeaking = false;
+    if (portrait) {
+      portrait.classList.remove("commPortraitImg--commander");
+      portrait.onerror = () => { portrait.onerror = null; portrait.src = SPC_PLACEHOLDER; };
+      portrait.src = (spcImages.smile_wide && spcImages.smile_wide.src)
+        ? spcImages.smile_wide.src
+        : portraitOverride;
+    }
+    const cs = callsignEl();
+    if (cs) cs.textContent = "SPC";
+    _spcStartBlink();
   }
 
   function isVOActive() {
@@ -2490,6 +2541,14 @@ const commBoxController = (() => {
       voAudio = null;
     }
 
+    // 2026-06-24: mug follows the line's speaker, not the level. On SPC-host levels (13/14) a CMDR
+    // gameplay line (_spc false) shows the CMDR mug for its duration; SPC's own lines (_spc true) keep
+    // her mug. Restored to the SPC host when the line ends (endTalking).
+    if (_spcLevelHost) {
+      if (_spc) { if (!_spcMode) restoreSpcHost(); }
+      else if (_spcMode) { showCmdrForLine(); }
+    }
+
     stopMouthFlap();
     if (frame) {
       setFrame(frame);
@@ -2513,6 +2572,8 @@ const commBoxController = (() => {
       if (voAudioFxCleanup) { voAudioFxCleanup(); voAudioFxCleanup = null; }
       voAudio = null;
       stopMouthFlap();
+      // 2026-06-24: line over — return the mug to the level's SPC host if we showed CMDR for this line.
+      if (_spcLevelHost && !_spcMode) restoreSpcHost();
       tickIdle();
       tickerHideTimer = setTimeout(() => {
         // 2026-06-23: never let a stale CMDR auto-hide wipe a live SPC caption (the plasma-net
@@ -3314,10 +3375,16 @@ const audioEngine = {
       || name === "landmine_boom"
       || name === "astcollide1"
       || name === "astcollide2";
+    // 2026-06-24: cap the player fire sound (advfire) lower and steal the oldest voice — without this,
+    // up to 8 identical phase-locked buffers (4 per quad tap) summed into a low resonant boom under
+    // sustained fire. Fewer overlapping voices + the per-shot detune jitter keep it crisp.
+    const isPlayerFire = name === "advfire";
     const maxVoices = name === "orb_tap"
       ? 10
-      : (isExplosionLike ? (isIOSWebKit ? 24 : 16) : this.maxVoicesPerSound);
-    const mode = name === "orb_tap" ? "drop_newest" : (isExplosionLike ? "steal_oldest" : "drop_newest");
+      : (isExplosionLike ? (isIOSWebKit ? 24 : 16) : (isPlayerFire ? 5 : this.maxVoicesPerSound));
+    const mode = name === "orb_tap"
+      ? "drop_newest"
+      : ((isExplosionLike || isPlayerFire) ? "steal_oldest" : "drop_newest");
     if (!this.enforcePolyphony(name, maxVoices, mode)) {
       return { source: null, ended: Promise.resolve() };
     }
@@ -3475,7 +3542,7 @@ const audioEngine = {
       node.playsInline = true;
       node.volume = state.whisper ? 0.43 : Math.min(1, MUSIC_MAX_GAIN * volume);
       node.play().catch(() => {});
-      this.currentMusicHtml = { key, url, node };
+      this.currentMusicHtml = { key, url, node, baseVolume: volume };
       return;
     }
     if (this.currentMusicHtml?.node) {
@@ -3511,7 +3578,28 @@ const audioEngine = {
         // ignore
       }
     }
-    this.currentMusic = { key, url, source, gain, startedAt: performance.now(), ctxStartedAt: this.ctx.currentTime };
+    this.currentMusic = { key, url, source, gain, baseVolume: volume, startedAt: performance.now(), ctxStartedAt: this.ctx.currentTime };
+  },
+  // 2026-06-24: mid-track music swell. Ramp the live music source's gain to baseVolume * mult over
+  // rampMs — drives L9's noticeable swell (~25s in) and L10's gradual rise across the level. No-op if
+  // no music is playing yet. Relative to the per-level base so it composes with cfg.musicVolume.
+  rampMusicVolume(mult, rampMs = 2000) {
+    const m = this.currentMusic;
+    if (m?.gain && this.ctx) {
+      const now = this.ctx.currentTime;
+      const target = (m.baseVolume || 1) * mult;
+      try {
+        m.gain.gain.cancelScheduledValues(now);
+        m.gain.gain.setValueAtTime(m.gain.gain.value, now);
+        m.gain.gain.linearRampToValueAtTime(target, now + Math.max(0.05, rampMs / 1000));
+      } catch {
+        // ignore
+      }
+    }
+    if (this.currentMusicHtml?.node) {
+      const full = state.whisper ? 0.43 : MUSIC_MAX_GAIN;
+      this.currentMusicHtml.node.volume = Math.min(1, full * (this.currentMusicHtml.baseVolume || 1) * mult);
+    }
   },
   stopMusic() {
     _musicWasPlaying = false;
@@ -7108,13 +7196,16 @@ function initGalaxyCanvas() {
     asteroidSprites[key] = img;
   });
 
-  // 2026-06-23: L14 ("roidneon") gets a code-generated skin instead of a painted asset — a tritone
-  // luminance gradient map over roid01: black shadows -> neon-green mids -> purple highlights, exactly
-  // the look asked for. Built once into an offscreen canvas, then baked to an Image so the renderer's
-  // .complete/.naturalWidth checks and the asteroidSprites lookup all work unchanged. If roid01 isn't
-  // decoded yet we defer to its load; if the canvas reads back tainted we bail and L14 falls back to
-  // the normal sprite. Tweak the three ramp stops below to retune the colors.
-  function buildNeonAsteroidSprite() {
+  // 2026-06-23: code-generated asteroid skins instead of painted assets — a tritone luminance
+  // gradient map over roid01 (shadow -> mid -> highlight stops). Built once into an offscreen canvas,
+  // then baked to an Image so the renderer's .complete/.naturalWidth checks and the asteroidSprites
+  // lookup all work unchanged (PIXI on iOS-native builds its texture from the same Image, which is why
+  // this approach renders everywhere — unlike the 2D multiply tint). If roid01 isn't decoded yet we
+  // defer to its load; if the canvas reads back tainted we bail and the level falls back to the normal
+  // sprite. Tweak the three ramp stops per skin to retune the colors.
+  // 2026-06-24: generalized from the single L14 "roidneon" builder so new tinted variants (L3 Blue
+  // Moon, L8 ice, L12 purple/grey) reuse the exact same fantastic-looking method.
+  function buildTintedAsteroidSprite(outKey, shadow, mid, hi) {
     const base = asteroidSprites.roid01;
     if (!base || !base.complete || !base.naturalWidth) return false;
     const w = base.naturalWidth;
@@ -7128,15 +7219,12 @@ function initGalaxyCanvas() {
     let data;
     try { data = c.getImageData(0, 0, w, h); } catch { return false; } // tainted-canvas guard
     const px = data.data;
-    const SHADOW = [4, 0, 10];     // near-black (a faint violet so shadows aren't dead flat)
-    const MID = [57, 255, 20];     // neon green
-    const HI = [168, 70, 255];     // purple highlight
     for (let i = 0; i < px.length; i += 4) {
       if (px[i + 3] === 0) continue; // keep fully-transparent pixels (silhouette + AA edges intact)
       const L = (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]) / 255;
       let a0; let a1; let t;
-      if (L < 0.5) { a0 = SHADOW; a1 = MID; t = L / 0.5; }
-      else { a0 = MID; a1 = HI; t = (L - 0.5) / 0.5; }
+      if (L < 0.5) { a0 = shadow; a1 = mid; t = L / 0.5; }
+      else { a0 = mid; a1 = hi; t = (L - 0.5) / 0.5; }
       px[i] = a0[0] + (a1[0] - a0[0]) * t;
       px[i + 1] = a0[1] + (a1[1] - a0[1]) * t;
       px[i + 2] = a0[2] + (a1[2] - a0[2]) * t;
@@ -7144,11 +7232,24 @@ function initGalaxyCanvas() {
     c.putImageData(data, 0, 0);
     const out = new Image();
     out.src = cv.toDataURL("image/png");
-    asteroidSprites.roidneon = out;
+    asteroidSprites[outKey] = out;
     return true;
   }
-  if (!buildNeonAsteroidSprite()) {
-    asteroidSprites.roid01.addEventListener("load", buildNeonAsteroidSprite, { once: true });
+  function buildGeneratedAsteroidSprites() {
+    const base = asteroidSprites.roid01;
+    if (!base || !base.complete || !base.naturalWidth) return false;
+    // L14 neon: faint-violet shadows -> neon green mids -> purple highlights (the original look).
+    buildTintedAsteroidSprite("roidneon", [4, 0, 10], [57, 255, 20], [168, 70, 255]);
+    // L3 "Blue Moon": midnight-blue body -> cool grey mids -> near-white highlights.
+    buildTintedAsteroidSprite("roidbluemoon", [10, 16, 45], [120, 128, 145], [240, 244, 255]);
+    // L8 "DEEP FREEZE": deep ice-blue shadows -> ice blue -> icy white (kicks in mid-level, 18s).
+    buildTintedAsteroidSprite("roidice", [12, 34, 66], [86, 170, 214], [224, 246, 255]);
+    // L12 "MAKE IT BOOM": deep purple shadows -> purple-grey mids -> pale lilac highlights.
+    buildTintedAsteroidSprite("roidpurplegrey", [30, 12, 52], [122, 104, 134], [228, 222, 238]);
+    return true;
+  }
+  if (!buildGeneratedAsteroidSprites()) {
+    asteroidSprites.roid01.addEventListener("load", buildGeneratedAsteroidSprites, { once: true });
   }
 
   // 2026-06-10: powerup sprites (256px source, transparent bg, baked-in glow) — drawn ~56px.
@@ -7171,6 +7272,10 @@ function initGalaxyCanvas() {
 
   let galaxyRaf = 0;
   let galaxyRunning = false;
+  // 2026-06-24: handles for the YOU-WIN celebration timers (explosion barrage + fade) so they can be
+  // cancelled if the loop is torn down mid-sequence (navigate away / new game) instead of firing
+  // spawnExplosion/sfx against a dead state.
+  let _winSeqTimers = [];
   let engineMode = "menu"; // menu | practice | arcade
   let worldLockEnabled = false;
   let worldLockWidth = 0;
@@ -7436,6 +7541,7 @@ function initGalaxyCanvas() {
   let lastKillStreakVoAt = 0;
   let _timerWarnedAt60 = false;
   let _timerWarnedAt10 = false;
+  let _musicRampFired = false; // 2026-06-24: one-shot guard for cfg.musicRamp per level
   let _timerNumberVisible = false;
   let _timerSlammed = false;
   let _timerRemainingMs = 0;
@@ -8165,7 +8271,9 @@ function initGalaxyCanvas() {
     // 2026-06-23: silver-stroid levels render the natural blue-grey roid01 (and L12's few red
     // hotroids) untinted — a teal/gold/cyan multiply would discolor the "silver" read. L14 uses the
     // code-generated neon skin with its colors already baked in, so it stays untinted too.
-    if (level === 6 || level === 9 || level === 12 || level === 14) return null;
+    // 2026-06-24: L3 (Blue Moon) and L8 (ice, after 18s) now use code-baked color skins as well, so
+    // they also skip the 2D multiply tint that would otherwise muddy those baked colors.
+    if (level === 3 || level === 6 || level === 8 || level === 9 || level === 12 || level === 14) return null;
     if (level <= 4)  return "rgba(200,80,40,0.18)";
     if (level <= 6)  return "rgba(0,180,160,0.18)";
     if (level <= 8)  return "rgba(140,60,200,0.18)";
@@ -8413,7 +8521,9 @@ function initGalaxyCanvas() {
     }
     // 2026-06-09: ensure the AudioContext is resumed (Chrome desktop can stay suspended until a gesture)
     if (!audioEngine.unlocked) audioEngine.unlock();
-    playGameSfx("advfire", 0.86);
+    // 2026-06-24: small detune jitter on every shot — rapid identical advfire buffers were summing
+    // into a resonant low boom (worst under quadshot); this de-correlates their phase, staying crisp.
+    playGameSfx("advfire", 0.86, { detune: (Math.random() - 0.5) * 100 });
   }
 
   function startUfoDrone() {
@@ -8601,6 +8711,18 @@ function initGalaxyCanvas() {
       PRACTICE_ASTEROID_SPRITE_KEYS.length,
     );
     return PRACTICE_ASTEROID_SPRITE_KEYS[(Math.random() * unlockedKindCount) | 0];
+  }
+
+  // 2026-06-24: time-gated mid-level skin shift for arcade levels. cfg.spriteShift = { afterMs, key }
+  // forces a different baked skin on every asteroid spawned after `afterMs` into the level (L8 ice).
+  // Returns the override key once the clock passes the mark, else null (level default). Guards on the
+  // baked sprite actually existing so a not-yet-decoded skin falls back cleanly.
+  function pickArcadeSpriteOverride(cfg, now) {
+    const sh = cfg?.spriteShift;
+    if (sh && asteroidSprites[sh.key]) {
+      if (Math.max(0, now - levelRunStartAt) >= sh.afterMs) return sh.key;
+    }
+    return null;
   }
 
   function spawnLandmine() {
@@ -10956,7 +11078,11 @@ function initGalaxyCanvas() {
     const s = document.createElement("style");
     s.id = "lsrStyles";
     s.textContent = `
-      #levelScoreReport{position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;pointer-events:auto;}
+      /* 2026-06-24: opaque backdrop above the comm box (9000) + HUD so the scorecard's first painted
+         frame fully covers the just-beaten level and its score counter — no "stale level" flash before
+         the panel slams in. The backdrop is solid on frame 1 (no opacity animation); only the panel
+         animates (lsrSlam). This is what makes the level feel "put to bed". */
+      #levelScoreReport{position:fixed;inset:0;z-index:9500;display:flex;align-items:center;justify-content:center;pointer-events:auto;background:radial-gradient(circle at 50% 42%,rgba(6,16,30,.93),rgba(1,4,10,.97));}
       .lsr-panel{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;color:#dff;background:linear-gradient(180deg,rgba(5,18,32,.96),rgba(2,8,18,.99));border:1px solid rgba(0,255,209,.42);border-radius:16px;padding:36px 48px;min-width:min(420px,92vw);box-shadow:0 0 48px rgba(0,255,209,.16),inset 0 0 24px rgba(0,255,209,.06);animation:lsrSlam 250ms cubic-bezier(.2,1.4,.4,1) both;}
       @keyframes lsrSlam{from{transform:scale(2);opacity:0}to{transform:scale(1);opacity:1}}
       @keyframes lsrRowIn{from{opacity:0;transform:translateX(-16px)}to{opacity:1;transform:none}}
@@ -11241,6 +11367,9 @@ function initGalaxyCanvas() {
       galaxyView?.classList.remove("level-10", "level-3");
       audioEngine.stopMusic();
       stopGalaxyBackground();
+      // 2026-06-24: celebration done — stop the render loop before the initials/YOU-WIN screen so it
+      // doesn't keep drawing over the menu (next fresh start re-inits via resizeGalaxyCanvas).
+      stopGalaxyLoop();
       if (arcadeScore > 0) {
         showInitialsEntry(arcadeScore, _runMsg);
         return;
@@ -11269,17 +11398,22 @@ function initGalaxyCanvas() {
     // Triumphant chime layered over the boom barrage.
     playGameSfx("level_up", 0.95);
 
+    // 2026-06-24: track every celebration timer so a mid-sequence teardown (new game / navigate away,
+    // which runs stopGalaxyLoop) cancels the pending explosions/fade instead of firing them blind.
+    _winSeqTimers.forEach(clearTimeout);
+    _winSeqTimers = [];
+
     // 7 large explosions at random spots across the screen, staggered ~180ms over ~1.3s.
     const EXPLOSION_COUNT = 7;
     const boomKeys = ["explosion_big", "explosion_med", "explosion_med_alt"];
     for (let i = 0; i < EXPLOSION_COUNT; i += 1) {
-      setTimeout(() => {
+      _winSeqTimers.push(setTimeout(() => {
         const x = sim.width * (0.12 + Math.random() * 0.76);
         const y = sim.height * (0.15 + Math.random() * 0.6);
         spawnExplosion(x, y, 60, true, 2.4, 1.2, 3, "roid01");
         cssShake(i === 0 ? 1.5 : 0.8);
         playGameSfx(boomKeys[i % boomKeys.length], 1.1 + Math.random() * 0.2, { important: true });
-      }, i * 180);
+      }, i * 180));
     }
 
     // "YOU WIN" slam-in — same overlay element as the level intro, bigger/bolder via .winBig.
@@ -11299,7 +11433,7 @@ function initGalaxyCanvas() {
     }
 
     // Hold ~1.5s after the slam, fade out, then hand off (~2.9s total).
-    setTimeout(() => {
+    _winSeqTimers.push(setTimeout(() => {
       if (arcadeOverlayText) arcadeOverlayText.classList.add("fadeOut");
       setTimeout(() => {
         if (arcadeOverlay) {
@@ -11311,7 +11445,7 @@ function initGalaxyCanvas() {
         }
         onComplete();
       }, ARCADE_OVERLAY_FADE_MS);
-    }, 2400);
+    }, 2400));
   }
 
   function promptRetryOrGameOver() {
@@ -11371,6 +11505,10 @@ function initGalaxyCanvas() {
     commBoxController.clearPortraitOverride(); // 2026-06-16: restore CMDR if we failed on an SPC level (13/14)
     audioEngine.stopMusic();
     stopGalaxyBackground();
+    // 2026-06-24: terminal game over — fully stop the render loop (was left running over the
+    // GAME OVER / initials screen, burning CPU/GPU every session). The next fresh start re-inits the
+    // renderer via resizeGalaxyCanvas (same teardown stopAndMenu already does on the way to the menu).
+    stopGalaxyLoop();
     stopWarningState();
     arcadeResumeAvailable = false;
     syncArcadeEntryLabel();
@@ -11446,6 +11584,7 @@ function initGalaxyCanvas() {
     bgPreRolledForLevel = false;
     _timerWarnedAt60 = false;
     _timerWarnedAt10 = false;
+    _musicRampFired = false;
     resetArcadeTimerVisuals();
     syncArcadeEntryLabel();
     setGalaxyBackgroundForLevel(cfg.level);
@@ -11547,7 +11686,17 @@ function initGalaxyCanvas() {
 
     // 2026-06-17: delay the first VO 800ms so the level-intro animation finishes before SPC/CMDR
     // starts talking (the comm box was popping up before the level had visually settled).
+    // 2026-06-24: L10 stays silent for the first 8s — no intro chatter before the action gets going.
+    const firstVoDelayMs = levelNum === 10 ? 8000 : 800;
     setTimeout(() => {
+      // 2026-06-24: L10 — after the 8s hush the commander opens with the blast line (its only intro).
+      if (levelNum === 10) {
+        commBoxController.queueVO({
+          audioSrc: commBoxController.commVoSrc("vo-lets_blast_these_stroids.mp3"),
+          event: "commander",
+        });
+        return;
+      }
       // 2026-06-17: levels 13 & 14 — SPC owns the comm box and CMDR voice is muted, so greet the
       // cadet with one of her own intro lines instead of the muted CMDR line.
       // 2026-06-24: pick from POOL_SPC_LEVEL_START for variety; red themes (L13) get the
@@ -11569,7 +11718,7 @@ function initGalaxyCanvas() {
           event: "commander",
         });
       }
-    }, 800);
+    }, firstVoDelayMs);
 
     if (levelNum === 1) {
       function fireSecondVO() {
@@ -13611,7 +13760,7 @@ function initGalaxyCanvas() {
               p.y,
               pickAsteroidKind(cfg),
               true,
-              practiceEndless ? pickPracticeAsteroidSpriteKey(now) : null,
+              practiceEndless ? pickPracticeAsteroidSpriteKey(now) : pickArcadeSpriteOverride(cfg, now),
             );
             spawnQueue -= 1;
             spawnedTotal += 1;
@@ -13629,7 +13778,7 @@ function initGalaxyCanvas() {
             p.y,
             pickAsteroidKind(cfg),
             true,
-            practiceEndless ? pickPracticeAsteroidSpriteKey(now) : null,
+            practiceEndless ? pickPracticeAsteroidSpriteKey(now) : pickArcadeSpriteOverride(cfg, now),
           );
           spawnQueue -= 1;
           spawnedTotal += 1;
@@ -13696,6 +13845,14 @@ function initGalaxyCanvas() {
               playGameSfx("ufo_spawn", 0.85);
             }
           }
+        }
+
+        // 2026-06-24: per-level music swell — cfg.musicRamp = { atMs, toMult, rampMs }. Once the clock
+        // passes atMs, ramp the music to baseVolume * toMult over rampMs. Fires once per level (L9
+        // noticeable swell ~25s in; L10 gradual rise across the level).
+        if (!_musicRampFired && cfg.musicRamp && elapsedMs >= (cfg.musicRamp.atMs || 0)) {
+          _musicRampFired = true;
+          audioEngine.rampMusicVolume(cfg.musicRamp.toMult || 1, cfg.musicRamp.rampMs || 3000);
         }
 
         if (!_timerWarnedAt60 && levelRemainingMs <= 20000
@@ -14951,7 +15108,9 @@ function initGalaxyCanvas() {
         // 2026-06-14: each cluster shot fires its own report so quadshot sounds like a burst
         // (was silent past the first tap). Budget-exempt above so they layer instead of dropping.
         // 2026-06-22: trimmed 0.6 → 0.42 — layered bursts were a touch too loud.
-        playGameSfx("advfire", 0.42, { important: true });
+        // 2026-06-24: per-shot detune jitter so the 4 identical advfire buffers per quad tap don't
+        // phase-lock into a low resonant comb-filter boom under sustained fire (de-correlates them).
+        playGameSfx("advfire", 0.42, { important: true, detune: (Math.random() - 0.5) * 160 });
         if (resolveShotAt(ex, ey, now, isTouch)) extraHit = true;
       }
     }
@@ -15675,6 +15834,9 @@ function initGalaxyCanvas() {
     galaxyRunning = false;
     stopWarningState();
     stopDangerLoop();
+    // 2026-06-24: cancel any in-flight YOU-WIN celebration timers so they don't fire after teardown.
+    _winSeqTimers.forEach(clearTimeout);
+    _winSeqTimers = [];
     if (galaxyRaf) cancelAnimationFrame(galaxyRaf);
     galaxyRaf = 0;
     clearTimeout(sim.shootingTimer);

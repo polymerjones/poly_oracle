@@ -1,4 +1,10 @@
 const galaxyBackground = (() => {
+  // DEBUG 2026-06-26: the level-entry "warp" burst — 120 rays spiking out from the screen-center
+  // vanishing point (the "star circle" graphic). Disabled for a few builds to rule it out as a
+  // cause of the level-start hang and to stop it making hangs so visible. Flip back to true to
+  // fully restore the warp animation (rays + star-streak).
+  const WARP_FX_ENABLED = false;
+
   const THEMES = [
     // L1 — Deep Space (teal)
     { sky: "#020408", neb: [[0, 40, 90], [55, 0, 100], [0, 65, 85]], star: [220, 230, 255], gas: [[0, 140, 160], [0, 80, 120], [20, 60, 100]] },
@@ -746,6 +752,7 @@ const galaxyBackground = (() => {
   }
 
   function triggerWarp() {
+    if (!WARP_FX_ENABLED) return; // DEBUG 2026-06-26: warp burst hidden — see WARP_FX_ENABLED
     if (warping) return;
     warping = true;
     warpT = 0;

@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-25 11:32";
+const BUILD_TS = "2026-06-26 10:26";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -7270,6 +7270,11 @@ function initGalaxyCanvas() {
     roid02: "astgfx/roid02.png",
     roid03: "astgfx/roid03.png",
     hotroid01: "astgfx/hotroid01.png",
+    // 2026-06-26: L4 DEBRIS RUN ambient debris — real crumpled-foil debris art (silver default;
+    // ice/redhot variants on hand for future themed debris levels).
+    debris: "astgfx/roid_debris.png",
+    debris_ice: "astgfx/roid_debris_ice.png",
+    debris_redhot: "astgfx/roid_debris_redhot.png",
   };
   const asteroidSprites = {};
   Object.keys(asteroidSpritePaths).forEach((key) => {
@@ -7343,7 +7348,8 @@ function initGalaxyCanvas() {
   }
 
   // 2026-06-10: powerup sprites (256px source, transparent bg, baked-in glow) — drawn ~56px.
-  // The bomb powerup keeps its canvas-drawn ring + glyph for now.
+  // 2026-06-26: bomb now uses a framed sprite too; the canvas-drawn ring + 💣 glyph remains
+  // only as the decode-frames fallback in drawPowerups.
   const POWERUP_SPRITE_SIZE = 56;
   const powerupSpritePaths = {
     goldbars: "powerups/powerup_goldbars.png",
@@ -7351,6 +7357,7 @@ function initGalaxyCanvas() {
     timer: "powerups/powerup_timer.png",
     snowflake: "powerups/powerup_freeze.png",
     missile: "powerups/powerup_missile.png",
+    bomb: "powerups/powerup_bomb.png", // 2026-06-26: framed bomb sprite (was canvas-drawn 💣)
   };
   const powerupSprites = {};
   Object.keys(powerupSpritePaths).forEach((key) => {
@@ -13987,7 +13994,7 @@ function initGalaxyCanvas() {
           nextSpawnAt = Math.max(nextSpawnAt, now + Math.max(350, cfg.spawnEveryMs));
         }
 
-        // 2026-06-23: L4 ambient debris field — small silver (roid01) debris trickles in throughout
+        // 2026-06-23: L4 ambient debris field — small debris sprite trickles in throughout
         // as bonus targets/hazards. Flagged .ambient so it doesn't count toward the clear quota
         // (nonAmbientAsteroidCount) and isn't tinted by the level color. Capped low so it never
         // crowds the real-asteroid spawn budget.
@@ -13999,7 +14006,7 @@ function initGalaxyCanvas() {
           }
           if (ambientLive < (df.maxDebris || 4)) {
             const dp = randomPerimeterPoint();
-            const debris = spawnAsteroid(dp.x, dp.y, 1, true, "roid01");
+            const debris = spawnAsteroid(dp.x, dp.y, 1, true, "debris");
             if (debris) debris.ambient = true;
           }
           nextDebrisAt = now + (df.intervalMs || 1500);
@@ -14671,7 +14678,7 @@ function initGalaxyCanvas() {
       tctx.translate(pu.x, pu.y);
       tctx.scale(pulse, pulse);
       const sprite = powerupSprites[pu.type];
-      if (pu.type !== "bomb" && sprite && sprite.complete && sprite.naturalWidth > 0) {
+      if (sprite && sprite.complete && sprite.naturalWidth > 0) {
         // 2026-06-14: the missile gets an explicit gold glow ring (#ffd700) behind its sprite.
         if (pu.type === "missile") {
           tctx.beginPath();

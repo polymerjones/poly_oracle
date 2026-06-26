@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-26 11:10";
+const BUILD_TS = "2026-06-26 16:05 crystalball-decoder-free";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -510,9 +510,12 @@ const BOMB_POWERUP_INTERVAL_MAX = 35000;
 const BOMB_POWERUP_LIFETIME_MS = 10000;
 const MUSIC_MAX_GAIN = 1.0; // 2026-06-10: was 0.9, bumped to full
 // 2026-06-23 PERF: max decoded music tracks kept in memory (see audioEngine._evictMusicBuffers).
-// 4 = currently-playing + prefetched next + a little slack, so normal level progression never
-// re-decodes the track it just left. Each entry is ~40-60MB of PCM, so this caps audio at ~200MB.
-const MUSIC_BUFFER_CACHE_MAX = 4;
+// 2026-06-26: dropped 4→2 (currently-playing + prefetched-next only, no slack). Each entry is
+// ~40-60MB of PCM, so 4 pinned ~200-240MB; on iPad that headroom is what the L9-entry boss-tier
+// preload (boss video .load() + boss-music decodeAudioData) blew through, jettisoning the
+// WebContent process for ~11.5s (CARenderServer bootstrap failure). 2 caps audio at ~100-120MB
+// and leaves room to absorb the boss preload. Cost: stepping BACK a level re-decodes — negligible.
+const MUSIC_BUFFER_CACHE_MAX = 2;
 const MUSIC = {
   L1_3:    "assets/music/E1L1-3.mp3",          // levels 1-2
   // L4_7: "assets/music/E1L4-7.mp3",          // retired - replaced by phonk series
@@ -4659,6 +4662,17 @@ function openGalaxyView() {
       initGalaxyBackgroundStack();
     }
   }
+  // 2026-06-26: free the crystal-ball reveal video's decoder/buffer while in the game (Stroids menu
+  // + gameplay). It's an Oracle-only on-demand FX, so holding it here just adds to the simultaneous-
+  // video-decoder pressure suspected in the L9/menu render-server crash (CARenderServer). Re-armed
+  // in closeGalaxyView(); startCrystalOverlay() also re-sets the src on the next Reveal.
+  if (revealFxVideo) {
+    try {
+      revealFxVideo.pause();
+      revealFxVideo.removeAttribute("src");
+      revealFxVideo.load();
+    } catch { /* decoder release is best-effort */ }
+  }
   if (galaxyCanvasController) {
     requestAnimationFrame(() => galaxyCanvasController.showModeSelect?.());
   }
@@ -4692,6 +4706,15 @@ function closeGalaxyView() {
   }
   if (!prefersReducedMotion) {
     if (oracleBgController) oracleBgController.start();
+  }
+  // 2026-06-26: re-arm the crystal-ball reveal video (its src was released in openGalaxyView so it
+  // wouldn't hold a decoder during the game). Restore the src + load so the next Reveal is ready;
+  // it stays paused/hidden until startCrystalOverlay() plays it.
+  if (revealFxVideo && !revealFxVideo.getAttribute("src")) {
+    try {
+      revealFxVideo.setAttribute("src", "crystalballfx.mp4");
+      revealFxVideo.load();
+    } catch { /* startCrystalOverlay() re-sets the src on the next Reveal regardless */ }
   }
   if (galaxyCanvasController) galaxyCanvasController.stop?.();
   // 2026-06-18: the "← Oracle" back button bypassed tutorial/practice teardown — commBoxController.hide()
@@ -7979,7 +8002,9 @@ function initGalaxyCanvas() {
     const volume = ARCADE_LEVELS.find((l) => l.level === levelNum)?.musicVolume || 1;
     audioEngine.playMusic(url, url, { crossfadeMs: 250, volume });
     const nextUrl = getMusicForLevel(levelNum + 1);
-    if (nextUrl && nextUrl !== url) {
+    // 2026-06-26 EXPERIMENT: also skip the boss-music decode prefetch at L9 so the boss-tier
+    // lookahead is fully off for this test (decoded at L10 entry instead). // DEBUG: revert before release
+    if (nextUrl && nextUrl !== url && !(SKIP_BOSS_LOOKAHEAD && levelNum + 1 >= 10)) {
       audioEngine.loadMusicBuffer(nextUrl).catch(() => {});
     }
   }
@@ -8442,7 +8467,13 @@ function initGalaxyCanvas() {
     const key = bgKeyForLevel(levelNum);
     setGalaxyBackgroundKey(key, { fadeMs: 450, fadeInSeconds: 20 });
     const nextKey = bgKeyForLevel(levelNum + 1);
-    if (nextKey && nextKey !== key) preloadGalaxyBackgroundKey(nextKey);
+    // 2026-06-26 EXPERIMENT (SKIP_BOSS_LOOKAHEAD): the L9→L10 boss-video preload spins up an extra
+    // hardware video decoder (27s 720p, preload=auto) on top of the live bg + oracle videos — the
+    // suspected cause of the render-server crash / ~12s WebContent stall at L9 entry. Skip the
+    // boss-tier lookahead; the boss bg loads at L10 entry instead. // DEBUG: revert before release
+    if (nextKey && nextKey !== key && !(SKIP_BOSS_LOOKAHEAD && nextKey === "L10")) {
+      preloadGalaxyBackgroundKey(nextKey);
+    }
   }
 
   function applyLevelTheme(levelNum) {
@@ -11241,6 +11272,63 @@ function initGalaxyCanvas() {
   const lvlTrace = (...a) => { if (DEBUG_LVLTRANS) console.log(...a); };
   const spcTrace = (...a) => { if (DEBUG_SPC_VO) console.log(...a); };
 
+  // 2026-06-26: ON-SCREEN level-entry freeze probe (no Web Inspector needed). For each level
+  // entry it records (a) the synchronous cost of each suspect phase inside startLevel and
+  // (b) the worst single frame delta in the WINDOW_MS after entry — a ~10s WKWebView freeze
+  // shows up as one giant rawDt on the first frame after the app un-stalls. The summary is
+  // painted just above the BUILD stamp so it's readable straight off the iPad. Flip
+  // FREEZE_DIAG=false to remove once the L9 freeze is pinned. // DEBUG: revert before release
+  const FREEZE_DIAG = true;
+  // 2026-06-26 EXPERIMENT: skip the L9→L10 boss-tier lookahead preload (boss video + boss music)
+  // to test whether that resource spike is the L9-entry render-server crash. // DEBUG: revert before release
+  const SKIP_BOSS_LOOKAHEAD = true;
+  // Worst frame is tracked for the WHOLE level (until the next entry), repainted live on every
+  // new worst, so a freeze that starts seconds in and lasts ~10s can never slip past a fixed
+  // window — its recovery frame (huge rawDt) is always still being watched.
+  const _fd = { level: 0, t0: 0, phases: [], worstDt: 0, worstAt: 0, armed: false };
+  let _fdEl = null;
+  function fdRepaint() {
+    if (!FREEZE_DIAG || !_fd.armed) return;
+    if (!_fdEl) {
+      _fdEl = document.createElement("div");
+      _fdEl.style.cssText = "position:fixed;bottom:20px;left:8px;font-family:monospace;"
+        + "font-size:10px;color:rgba(255,210,0,0.85);pointer-events:none;z-index:99999;"
+        + "white-space:pre;text-shadow:0 0 3px #000;";
+      document.body.appendChild(_fdEl);
+    }
+    const ph = _fd.phases.map(([l, ms]) => `${l}:${ms.toFixed(0)}`).join(" ");
+    const syncTotal = _fd.phases.reduce((s, [, ms]) => s + ms, 0);
+    const at = _fd.worstAt > 0 ? `@+${(_fd.worstAt - _fd.t0).toFixed(0)}ms` : "";
+    _fdEl.textContent = `L${_fd.level} worstΔ=${_fd.worstDt.toFixed(0)}ms ${at}`
+      + `\nsync=${syncTotal.toFixed(0)}ms ${ph}`;
+  }
+  // Begin a probe at the top of startLevel. fdPhase() brackets each suspect call.
+  function fdBegin(level) {
+    if (!FREEZE_DIAG) return;
+    _fd.level = level;
+    _fd.t0 = performance.now();
+    _fd.phases = [];
+    _fd.worstDt = 0;
+    _fd.worstAt = 0;
+    _fd.armed = true;
+  }
+  function fdPhase(label, fn) {
+    if (!FREEZE_DIAG) return fn();
+    const a = performance.now();
+    const r = fn();
+    _fd.phases.push([label, performance.now() - a]);
+    return r;
+  }
+  // Called every frame from the main loop. rawDt is the inter-frame gap (10s freeze ≈ 10000).
+  function fdSampleFrame(rawDt, now) {
+    if (!FREEZE_DIAG || !_fd.armed) return;
+    if (rawDt > _fd.worstDt) {
+      _fd.worstDt = rawDt;
+      _fd.worstAt = now;
+      fdRepaint();
+    }
+  }
+
   function startLevelTransitionWatch(levelIndex) {
     if (_lvlTransWatch?.reportTimer) clearTimeout(_lvlTransWatch.reportTimer);
     _lvlTransWatch = {
@@ -11765,6 +11853,7 @@ function initGalaxyCanvas() {
 
   function startLevel(idx) {
     const _lvlTransStartAt = performance.now();
+    fdBegin(ARCADE_LEVELS[clamp(idx, 0, ARCADE_LEVELS.length - 1)]?.level || 0);
     lvlTrace(`[lvltrans] startLevel entry requestedIndex=${idx}`);
     stuntActive = false; // a real arcade level is never a stunt session
     practiceEndless = false; // ...nor an endless practice session (Stunt Practice re-sets this after)
@@ -11826,15 +11915,17 @@ function initGalaxyCanvas() {
     _musicRampFired = false;
     resetArcadeTimerVisuals();
     syncArcadeEntryLabel();
-    setGalaxyBackgroundForLevel(cfg.level);
+    fdPhase("bg", () => setGalaxyBackgroundForLevel(cfg.level));
     window.galaxyBackground?.show();
-    window.galaxyBackground?.setTheme(cfg.level);
-    window.galaxyBackground?.setLevel(cfg.level);
+    fdPhase("theme", () => {
+      window.galaxyBackground?.setTheme(cfg.level);
+      window.galaxyBackground?.setLevel(cfg.level);
+    });
     if (currentLevelIndex > 0) {
-      window.galaxyBackground?.triggerWarp();
+      fdPhase("warp", () => window.galaxyBackground?.triggerWarp());
     }
     lvlTrace(`[lvltrans] after triggerWarp invoked=${currentLevelIndex > 0}`);
-    playArcadeMusicForLevel(cfg.level);
+    fdPhase("music", () => playArcadeMusicForLevel(cfg.level));
     if (cfg.level === 10) {
       playGameSfx("lastlevelstart", 0.96);
     }
@@ -11844,11 +11935,13 @@ function initGalaxyCanvas() {
     const _spawnWorkStartAt = performance.now();
     lvlTrace(`[lvltrans] before synchronous spawn work level=${cfg.level} startSpawn=${cfg.startSpawn} mines=${cfg.mineLaunch ? (cfg.mineCount || 1) : 0}`);
     const interiorShare = cfg.level <= 2 ? 0.5 : cfg.level <= 4 ? 0.35 : 0;
-    for (let i = 0; i < cfg.startSpawn; i += 1) {
-      const p = Math.random() < interiorShare ? randomInteriorPoint() : randomPerimeterPoint();
-      spawnAsteroid(p.x, p.y, pickAsteroidKind(cfg), false);
-      spawnedTotal += 1;
-    }
+    fdPhase("spawn", () => {
+      for (let i = 0; i < cfg.startSpawn; i += 1) {
+        const p = Math.random() < interiorShare ? randomInteriorPoint() : randomPerimeterPoint();
+        spawnAsteroid(p.x, p.y, pickAsteroidKind(cfg), false);
+        spawnedTotal += 1;
+      }
+    });
 
     // 2026-06-15: cfg.mineLaunch spawns cfg.mineCount mines at level start (into the shared
     // placedBombs array, which already auto-arms + chain-detonates them via updateMineEntity).
@@ -14704,6 +14797,9 @@ function initGalaxyCanvas() {
     const nowP = performance.now();
     for (let i = 0; i < powerups.length; i += 1) {
       const pu = powerups[i];
+      // 2026-06-26: the bomb art has spark/glow padding on its edges, so its bomb body reads
+      // smaller than the other powerups — draw it 20% larger to compensate (visual only).
+      const drawSize = pu.type === "bomb" ? POWERUP_SPRITE_SIZE * 1.2 : POWERUP_SPRITE_SIZE;
       const remaining = BOMB_POWERUP_LIFETIME_MS - (nowP - pu.spawnedAt);
       const opacity = remaining < 500 ? Math.max(0, remaining / 500) : 1.0;
       // quadshot pulses slightly harder than the rest so it still stands out (was a spin)
@@ -14720,7 +14816,7 @@ function initGalaxyCanvas() {
         // 2026-06-14: the missile gets an explicit gold glow ring (#ffd700) behind its sprite.
         if (pu.type === "missile") {
           tctx.beginPath();
-          tctx.arc(0, 0, POWERUP_SPRITE_SIZE / 2 - 2, 0, Math.PI * 2);
+          tctx.arc(0, 0, drawSize / 2 - 2, 0, Math.PI * 2);
           tctx.strokeStyle = blinkRed ? "#ff3333" : "#ffd700";
           tctx.lineWidth = 2.5;
           tctx.shadowColor = blinkRed ? "#ff3333" : "#ffd700";
@@ -14730,17 +14826,17 @@ function initGalaxyCanvas() {
         }
         tctx.drawImage(
           sprite,
-          -POWERUP_SPRITE_SIZE / 2,
-          -POWERUP_SPRITE_SIZE / 2,
-          POWERUP_SPRITE_SIZE,
-          POWERUP_SPRITE_SIZE,
+          -drawSize / 2,
+          -drawSize / 2,
+          drawSize,
+          drawSize,
         );
         if (blinkRed) {
           // red warning tint over the sprite — normal compositing; multiply would also
           // darken whatever the overlay already drew underneath the circle
           tctx.fillStyle = "rgba(255,51,51,0.38)";
           tctx.beginPath();
-          tctx.arc(0, 0, POWERUP_SPRITE_SIZE / 2, 0, Math.PI * 2);
+          tctx.arc(0, 0, drawSize / 2, 0, Math.PI * 2);
           tctx.fill();
         }
         tctx.restore();
@@ -15313,6 +15409,7 @@ function initGalaxyCanvas() {
     }
     const rawDt = sim.last ? now - sim.last : 16;
     sampleLevelTransitionFrame(rawDt, now);
+    fdSampleFrame(rawDt, now);
     const dt = Math.min(rawDt, 33);
     sim.last = now;
     update(dt, now);

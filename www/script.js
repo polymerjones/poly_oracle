@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-26 10:26";
+const BUILD_TS = "2026-06-26 11:10";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -621,7 +621,7 @@ const ARCADE_LEVELS = [
   { level: 4, label: "DEBRIS RUN", time: 54, totalToClear: 12, startSpawn: 6, spawnEveryMs: 2000, maxOnScreen: 12,
     // 2026-06-23: ambient silver debris trickles in throughout — bonus targets/hazards that do NOT
     // count toward the clear quota (spawned with .ambient = true; see the debris block in update()).
-    debrisField: { intervalMs: 1500, maxDebris: 4 } },
+    debrisField: { intervalMs: 1500, maxDebris: 6 } },
   { level: 5, label: "Emotions Heavy", time: 56, totalToClear: 13, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12,
     // 2026-06-23: missile unlocks at L5 — drop one near the end (~10s before the timer expires).
     guaranteedSpawn: [{ type: "bomb", atMs: 8000 }, { type: "bomb", atMs: 18000 }, { type: "missile", atMs: 46000 }] },
@@ -630,9 +630,10 @@ const ARCADE_LEVELS = [
     musicVolume: 1.15 }, // 2026-06-17: +15% music gain for this level
   { level: 7, label: "Into The Deep", time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
   { level: 8, label: "DEEP FREEZE", time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14,
-    // 2026-06-24: mid-level skin shift — asteroids spawned after the 18s mark come in ice-blue
+    // 2026-06-24: mid-level skin shift — asteroids spawned after the shift mark come in ice-blue
     // (earlier ones keep their skin). Honored by pickArcadeSpriteOverride at the spawn call.
-    spriteShift: { afterMs: 18000, key: "roidice" } },
+    // 2026-06-26: shift pulled 18s→10s so more of the level spawns blue.
+    spriteShift: { afterMs: 10000, key: "roidice" } },
   { level: 9, label: "DANGER CLOSE", time: 68, totalToClear: 21, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14,
     spriteKey: "roid01", // 2026-06-23: silver stroids for the whole level
     musicRamp: { atMs: 25000, toMult: 1.4, rampMs: 4000 }, // 2026-06-24: noticeable swell ~25s in
@@ -6909,6 +6910,20 @@ function setGalaxyBackgroundDim(ratio = 0) {
   bgTint.style.background = `radial-gradient(circle at 50% 32%, rgba(140, 90, 255, ${alpha}), rgba(0, 0, 0, 0.54)), radial-gradient(circle at 50% 50%, rgba(0,0,0,0), rgba(0,0,0,${vignette}))`;
 }
 
+// 2026-06-26: blur+grayscale the just-completed level's background during the scorecard so the
+// player isn't left staring at the old playfield (no full level-transition animation — that was a
+// hang source). Pauses the bg video so the GPU filter runs over a static frame. Cleared in startLevel().
+function setLevelBackgroundDefocus(on) {
+  const bgStackEl = document.getElementById("bgStack");
+  const bgCanvasEl = document.getElementById("galaxyBgCanvas");
+  bgStackEl?.classList.toggle("level-defocus", on);
+  bgCanvasEl?.classList.toggle("level-defocus", on);
+  if (on) {
+    [bgVideoA, bgVideoB].forEach((v) => { try { v?.pause(); } catch {} });
+  }
+  // resume is implicit: the next level's setGalaxyBackgroundKey re-plays the front video.
+}
+
 async function setGalaxyBackgroundKey(key, opts = {}) {
   if (DISABLE_VIDEO_BG) return;
   initGalaxyBackgroundStack();
@@ -10839,6 +10854,27 @@ function initGalaxyCanvas() {
     drawStroidTossOverlay(now);
   }
 
+  // 2026-06-26: the "DETONATE THE BOMB" comm used to fire the instant a bomb was armed, every
+  // single time. Now it waits 5s and only nags if that bomb is STILL sitting armed — and at most
+  // once every 30s — so it's an occasional reminder, not a per-arm announcement.
+  let lastDetonateNagAt = 0;
+  function scheduleDetonateNag(mine) {
+    setTimeout(() => {
+      if (!mine || mine.phase !== "player_armed") return;            // re-armed / phase changed
+      if (landmine !== mine && !placedBombs.includes(mine)) return;  // already detonated / removed
+      const now = performance.now();
+      if (now - lastDetonateNagAt < 30000) return;                   // throttle the reminder
+      lastDetonateNagAt = now;
+      commBoxController.queueVO({
+        audioSrc: commBoxController.commVoSrc(
+          commBoxController.pickFromPool("detonate", commBoxController.POOL_DETONATE),
+        ),
+        event: "landmine",
+        priority: "high",
+      });
+    }, 5000);
+  }
+
   // 2026-06-10: shared tap behavior for any mine entity. explodeFn handles removal.
   function armMineEntity(mine, explodeFn) {
     if (!mine) return false;
@@ -10857,13 +10893,7 @@ function initGalaxyCanvas() {
       playGameSfx("landmine_arm", 1.0);
       playGameSfx("arm_bomb", 0.8);
       // startDangerLoop(); // 2026-06-09: danger_loop silenced
-      commBoxController.queueVO({
-        audioSrc: commBoxController.commVoSrc(
-          commBoxController.pickFromPool("detonate", commBoxController.POOL_DETONATE),
-        ),
-        event: "landmine",
-        priority: "high",
-      });
+      scheduleDetonateNag(mine); // 2026-06-26: delayed + throttled (was an instant per-arm VO)
       return true;
     }
 
@@ -11313,6 +11343,10 @@ function initGalaxyCanvas() {
     // still rendering, until the next startLevel() cleared them on dismiss. Idempotent with that.
     clearGameplayEntities();
 
+    // 2026-06-26: defocus the just-completed level's background (blur+grayscale, bg video paused)
+    // so it isn't sitting visible behind the scorecard. Cleared in startLevel() as the next bg loads.
+    setLevelBackgroundDefocus(true);
+
     // FIX 2026-06-09: duck music to 0.75 while the scorecard is up, restore on dismiss
     const scorecardMusicGainBefore = audioEngine.musicGain?.gain?.value ?? MUSIC_MAX_GAIN;
     const scorecardMusicHtmlVolBefore = audioEngine.currentMusicHtml?.node?.volume ?? MUSIC_MAX_GAIN;
@@ -11332,6 +11366,7 @@ function initGalaxyCanvas() {
     const shownAt = performance.now();
     let dismissed = false;
     let lastTapAt = 0;
+    let hintVisible = false; // 2026-06-26: TAP TO CONTINUE shown — single tap may now skip
     let autoTimer = null;
     const tallyTimers = [];
     let tallyDone = false;
@@ -11366,7 +11401,9 @@ function initGalaxyCanvas() {
       const tapNow = performance.now();
       const isDoubleTap = tapNow - lastTapAt < 350;
       lastTapAt = tapNow;
-      if (isDoubleTap || tapNow - shownAt >= 2000) dismiss();
+      // 2026-06-26: stray firing taps were skipping the scorecard. Only skip via either
+      // (a) a deliberate double-tap once it's been up ≥1s, or (b) a single tap once TAP TO CONTINUE shows.
+      if (hintVisible || (isDoubleTap && tapNow - shownAt >= 1000)) dismiss();
     }, { passive: false });
 
     autoTimer = setTimeout(dismiss, 7000);
@@ -11383,7 +11420,7 @@ function initGalaxyCanvas() {
           stopWriteLoop();
           // Hint appears concurrently while countup is still running
           tallyTimers.push(setTimeout(() => {
-            if (!dismissed) panel.querySelector(".lsr-hint")?.classList.add("in");
+            if (!dismissed) { panel.querySelector(".lsr-hint")?.classList.add("in"); hintVisible = true; }
           }, 400));
           // Score countup from scoreBefore → scoreAfter over ~1500ms
           const totalEl = panel.querySelector("#lsrTotalVal");
@@ -11732,6 +11769,7 @@ function initGalaxyCanvas() {
     stuntActive = false; // a real arcade level is never a stunt session
     practiceEndless = false; // ...nor an endless practice session (Stunt Practice re-sets this after)
     commBoxController.setLevelEndLock(false); // 2026-06-21 (Item 1b): next level live — end the level-end VO lock
+    setLevelBackgroundDefocus(false); // 2026-06-26: lift the scorecard bg blur as the next level's bg comes in
     const safeIdx = clamp(idx, 0, ARCADE_LEVELS.length - 1);
     audioEngine.unlock?.();
     audioEngine.loadMany?.(GAME_SFX);
@@ -15985,8 +16023,10 @@ function initGalaxyCanvas() {
         galaxyGesture.mode = "cage";
         galaxyGesture.canceled = !beginPlasmaCage(galaxyGesture.start, point, now);
       } else if (plasmaCage.active) {
-        plasmaCage.currentX = point.x;
-        plasmaCage.currentY = point.y;
+        // 2026-06-26: clamp the net corner to the play bounds so sliding a finger to the screen
+        // edge keeps the net alive on-screen instead of losing it off the edge.
+        plasmaCage.currentX = Math.max(0, Math.min(sim.width, point.x));
+        plasmaCage.currentY = Math.max(0, Math.min(sim.height, point.y));
       }
     }
   }
@@ -15995,7 +16035,10 @@ function initGalaxyCanvas() {
   // any in-progress grab and clear the gesture, or the grabbed stroid stays pinned in place.
   function onGalaxyPointerCancel() {
     if (stroidToss.active) cancelStroidToss();
-    if (plasmaCage.active) resetPlasmaCageGesture();
+    // 2026-06-26: an iOS edge-gesture pointercancel used to silently DISCARD an in-progress
+    // plasma net — players "lost" the net by dragging to the screen edge. Fire it instead so the
+    // drag still pays off; releasePlasmaCage fizzles harmlessly if it was too small to be a net.
+    if (plasmaCage.active) releasePlasmaCage(performance.now());
     galaxyGesture = null;
   }
 

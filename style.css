@@ -1550,6 +1550,15 @@ select:focus-visible {
   isolation: isolate;
 }
 
+/* 2026-06-26: defocus the just-completed level's background while the scorecard is up so the
+   player isn't staring at the old playfield. Cheap GPU filter (no per-frame JS); the bg video is
+   also paused so we filter a static frame. Cleared in startLevel() as the next level's bg fades in. */
+#bgStack.level-defocus,
+#galaxyBgCanvas.level-defocus {
+  filter: grayscale(1) blur(6px) brightness(0.55);
+  transition: filter 220ms ease;
+}
+
 .bgVideo {
   position: absolute;
   inset: 0;

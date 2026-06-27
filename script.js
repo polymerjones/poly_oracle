@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-27 slot-shell-steps1-4";
+const BUILD_TS = "2026-06-27 slot-5a-reels-music";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -7623,6 +7623,14 @@ function initGalaxyCanvas() {
   let slotContinueShown = false;     // true once the continue overlay is up
   let slotPaused = false;            // true while backgrounded (step 4) — a PAUSE, never a teardown
   const slotEls = {};                // cached child refs of the mounted overlay
+  // Reel engine (step 5a). Mechanics only: weighted strips, spin physics, lever, token-per-pull.
+  // NO win evaluation / payouts / rewards / jackpot yet — those are 5b.
+  let slotReels = [];                // per-reel { canvas, ctx, cw, ch, strip, len, pos, vel, state, ... }
+  let slotRampHandle = null;         // slot_ramp spin loop handle (tracked via slotTrackLoop)
+  let slotLastFrameAt = 0;           // dt clock for the rAF loop
+  const slotLever = { value: 0, vel: 0, mode: "rest", grabOffset: 0, springTarget: 0 };
+  let slotMusicEl = null;            // dedicated streaming <audio> (long tracks aren't decoded — see note)
+  let _musicGainBeforeSlot = null;   // shared music-bus gain saved at open, restored on exit
 
   // Single predicate the rest of the game branches on to detect slot ownership. Active == any live
   // state; idle/disposed == not active. Exposed on the controller API (see return block) so the
@@ -7673,6 +7681,8 @@ function initGalaxyCanvas() {
     }
     slotLoopHandles.forEach((h) => { try { h.stop?.(); } catch { /* ignore */ } });
     slotLoopHandles.clear();
+    slotRampHandle = null;
+    slotStopMusic(true); // stop the streamed slot track AND restore the ducked music bus
     slotTimers.forEach((id) => clearTimeout(id));
     slotTimers.clear();
     if (slotRaf) { cancelAnimationFrame(slotRaf); slotRaf = 0; }
@@ -7692,6 +7702,8 @@ function initGalaxyCanvas() {
     slotContinueArmedAt = Infinity;
     slotContinueShown = false;
     slotPaused = false;
+    slotReels = [];
+    slotLever.value = 0; slotLever.vel = 0; slotLever.mode = "rest"; slotLever.springTarget = 0;
     for (const k in slotEls) delete slotEls[k];
     // Use-it-or-lose-it: discard unused tokens only on a listed real exit. Centralised here so
     // menu/normal exit can't forget; unlisted reasons preserve the bank (see SLOT_TOKEN_DISCARD_REASONS).
@@ -7712,6 +7724,201 @@ function initGalaxyCanvas() {
   const SLOT_OPEN_AFTER_EVERY_LEVEL = true;
   function shouldOpenSlot() {
     return SLOT_OPEN_AFTER_EVERY_LEVEL;
+  }
+
+  // ── POLYSLOTS reel engine (step 5a) ────────────────────────────────────────────────────────
+  // Ported from prototypes/slot-machine.html, but: rAF via slotTrackRaf (cancellable), reel-stop
+  // scheduling via slotTrackTimeout, SFX via playGameSfx/slotTrackLoop, music via a streamed <audio>.
+  // 5a is MECHANICS ONLY — no win evaluation, payouts, rewards, jackpot, or sprite art (text faces).
+  const SLOT_SYMBOLS = ["jackpot", "quad", "missile", "bomb", "freeze", "goldbar", "wild", "alien", "blank"];
+  const SLOT_STRIP_WEIGHTS = { blank: 9, goldbar: 4, freeze: 4, bomb: 4, quad: 3, missile: 3, wild: 2, alien: 2, jackpot: 1 };
+  const SLOT_SYM_LABEL = { jackpot: "ORB", quad: "QUAD", missile: "MSL", bomb: "BOMB", freeze: "FRZ", goldbar: "GOLD", wild: "WILD", alien: "ALN", blank: "·" };
+  const SLOT_SYM_COLOR = { jackpot: "#aa78ff", quad: "#be6eff", missile: "#ff5050", bomb: "#ffaa3c", freeze: "#6ec8ff", goldbar: "#ffcd5a", wild: "#5ae6d2", alien: "#78eb78", blank: "#506e96" };
+  const SLOT_SPIN_SPEED = 16, SLOT_SPIN_TIME_MS = 2600, SLOT_REEL_STAGGER_MS = 380;
+  const SLOT_STOP_MIN_TRAVEL = 6, SLOT_STOP_DUR = 1.0;
+  const SLOT_LEVER_THRESHOLD = 0.6, SLOT_LEVER_STIFF = 120, SLOT_LEVER_DAMP = 9, SLOT_LEVER_TRAVEL_PX = 140;
+  const SLOT_BOUNCE_IMPULSE = 0.16, SLOT_BOUNCE_K = 200, SLOT_BOUNCE_DAMP = 16;
+  const SLOT_DPR = Math.min(window.devicePixelRatio || 1, 2);
+  // Long session-music tracks stream as <audio> (NOT decoded — see the GAME_SFX music note).
+  const SLOT_MUSIC_URLS = ["assets/music/polyslots_music1.mp3", "assets/music/polyslots_music2.mp3"];
+  const SLOT_MUSIC_VOL = 0.5;
+  void SLOT_SYMBOLS; // canonical symbol order — used by 5b payline evaluation; silence until then
+
+  function slotShuffle(a) {
+    for (let i = a.length - 1; i > 0; i -= 1) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+  function slotBuildStrip() {
+    const arr = [];
+    for (const id in SLOT_STRIP_WEIGHTS) { for (let i = 0; i < SLOT_STRIP_WEIGHTS[id]; i += 1) arr.push(id); }
+    return slotShuffle(arr);
+  }
+  function slotMakeReels() {
+    slotReels = (slotEls.reelCanvas || []).map((canvas, i) => {
+      const strip = slotBuildStrip();
+      return {
+        canvas, ctx: canvas.getContext("2d"), cw: 0, ch: 0,
+        strip, len: strip.length, pos: i + strip.length, vel: 0,
+        bounce: 0, bounceVel: 0, state: "idle", target: 0,
+        stopFrom: 0, stopFinal: 0, stopV0: 0, stopT0: 0,
+      };
+    });
+    slotSizeReels();
+  }
+  function slotSizeReels() {
+    for (const r of slotReels) {
+      const w = r.canvas.clientWidth, h = r.canvas.clientHeight;
+      r.cw = w; r.ch = h;
+      r.canvas.width = Math.round(w * SLOT_DPR);
+      r.canvas.height = Math.round(h * SLOT_DPR);
+      r.ctx.setTransform(SLOT_DPR, 0, 0, SLOT_DPR, 0, 0);
+      slotDrawReel(r);
+    }
+  }
+  function slotDrawReel(r) {
+    const ctx = r.ctx, mid = r.ch / 2, cx = r.cw / 2, len = r.len, rowH = r.ch / 3;
+    if (!len || !r.cw) return;
+    ctx.clearRect(0, 0, r.cw, r.ch);
+    const rp = r.pos + r.bounce, base = Math.round(rp);
+    const sz = Math.min(rowH * 0.92, r.cw * 0.92);
+    for (let k = -2; k <= 2; k += 1) {
+      const a = base + k, id = r.strip[((a % len) + len) % len], y = mid + (rp - a) * rowH;
+      if (y < -rowH || y > r.ch + rowH) continue;
+      ctx.fillStyle = "#081421";
+      const cs = sz, x0 = cx - cs / 2, y0 = y - cs / 2;
+      ctx.fillRect(x0, y0, cs, cs);
+      ctx.strokeStyle = "rgba(120,150,185,0.22)"; ctx.lineWidth = 1; ctx.strokeRect(x0, y0, cs, cs);
+      // 5a: text faces (sprite art is deferred). Per-symbol colour stands in for the icon.
+      ctx.fillStyle = SLOT_SYM_COLOR[id] || "#9fb";
+      ctx.font = `700 ${Math.round(sz * 0.26)}px ui-monospace,monospace`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(SLOT_SYM_LABEL[id] || id, cx, y);
+    }
+  }
+
+  function slotLeverEnabled() {
+    return slotTokens > 0 && slotState === SLOT_STATE.READY && performance.now() >= slotInputLockedUntil;
+  }
+  function slotReleaseLever() {
+    if (slotLever.mode !== "drag") return;
+    const pulled = slotLever.value >= SLOT_LEVER_THRESHOLD;
+    slotLever.mode = "recoil"; slotLever.springTarget = 0;
+    if (pulled) slotDoPull();
+  }
+
+  function slotStartSpin() {
+    slotReels.forEach((r) => {
+      r.pos = ((Math.round(r.pos) % r.len) + r.len) % r.len + r.len;
+      r.vel = SLOT_SPIN_SPEED; r.state = "spinning";
+    });
+  }
+  function slotCommandStop(r, targetIndex) {
+    const start = r.pos, v0 = r.vel, len = r.len;
+    const natural = v0 * SLOT_STOP_DUR / 2, minPos = start + Math.max(natural, SLOT_STOP_MIN_TRAVEL);
+    let final = Math.ceil((minPos - targetIndex) / len) * len + targetIndex;
+    if (final < minPos) final += len;
+    r.stopFrom = start; r.stopFinal = final; r.stopV0 = v0; r.stopT0 = performance.now(); r.state = "stopping";
+  }
+  function slotStopRamp() {
+    const h = slotRampHandle;
+    slotRampHandle = null;
+    if (h) { try { h.stop?.(); } catch { /* ignore */ } slotLoopHandles.delete(h); }
+  }
+  function slotDoPull() {
+    if (slotState !== SLOT_STATE.READY || slotTokens <= 0 || performance.now() < slotInputLockedUntil) return;
+    slotTokens -= 1;
+    if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
+    slotState = SLOT_STATE.SPINNING;
+    setSlotHint("");
+    slotEls.skip?.classList.remove("show");
+    playGameSfx("slot_recoil", 0.8);
+    slotRampHandle = slotTrackLoop(audioEngine.playLoop("slot_ramp", { volume: 0.55 }));
+    slotReels.forEach((r) => { r.strip = slotBuildStrip(); r.len = r.strip.length; r.target = (Math.random() * r.len) | 0; });
+    slotStartSpin();
+    slotReels.forEach((r, i) => slotTrackTimeout(() => slotCommandStop(r, r.target), SLOT_SPIN_TIME_MS + i * SLOT_REEL_STAGGER_MS));
+  }
+  function slotOnAllStopped() {
+    slotStopRamp();
+    // 5a: no evaluation / payout / rewards yet (that's 5b). Just return to a pull-again ready state.
+    slotState = SLOT_STATE.READY;
+    if (slotTokens <= 0) { slotShowContinue(); return; }
+    slotEls.skip?.classList.add("show");
+    setSlotHint("PULL AGAIN");
+  }
+
+  function slotFrame(now) {
+    if (slotState === SLOT_STATE.DISPOSED || !slotOverlay) return; // loop ends (not rescheduled)
+    let dt = (now - slotLastFrameAt) / 1000; slotLastFrameAt = now;
+    if (dt > 0.05) dt = 0.05; if (dt < 0) dt = 0;
+    // lever spring physics
+    if (slotLever.mode === "drag") {
+      slotLever.vel += (slotLever.springTarget - slotLever.value) * SLOT_LEVER_STIFF * dt;
+      slotLever.vel -= slotLever.vel * SLOT_LEVER_DAMP * dt; slotLever.value += slotLever.vel * dt;
+    } else if (slotLever.mode === "recoil") {
+      slotLever.vel += (0 - slotLever.value) * SLOT_LEVER_STIFF * dt;
+      slotLever.vel -= slotLever.vel * SLOT_LEVER_DAMP * dt; slotLever.value += slotLever.vel * dt;
+      if (Math.abs(slotLever.value) < 0.004 && Math.abs(slotLever.vel) < 0.02) { slotLever.value = 0; slotLever.vel = 0; slotLever.mode = "rest"; }
+    }
+    slotLever.value = Math.max(0, Math.min(1, slotLever.value));
+    if (slotEls.knob) slotEls.knob.style.transform = `translate(-50%, ${slotLever.value * SLOT_LEVER_TRAVEL_PX}px)`;
+    slotEls.lever?.classList.toggle("disabled", !slotLeverEnabled());
+    // reels
+    for (const r of slotReels) {
+      if (r.state === "spinning") { r.pos += r.vel * dt; }
+      else if (r.state === "stopping") {
+        const s = Math.min(1, ((now - r.stopT0) / 1000) / SLOT_STOP_DUR), s2 = s * s, s3 = s2 * s;
+        r.pos = r.stopFrom * (2 * s3 - 3 * s2 + 1) + (r.stopV0 * SLOT_STOP_DUR) * (s3 - 2 * s2 + s) + r.stopFinal * (-2 * s3 + 3 * s2);
+        if (s >= 1) { r.pos = r.stopFinal; r.bounce = 0; r.bounceVel = SLOT_BOUNCE_IMPULSE; r.state = "settle"; playGameSfx("slot_reel_click", 0.7); }
+      } else if (r.state === "settle") {
+        r.bounceVel += (0 - r.bounce) * SLOT_BOUNCE_K * dt; r.bounceVel -= r.bounceVel * SLOT_BOUNCE_DAMP * dt; r.bounce += r.bounceVel * dt;
+        if (Math.abs(r.bounce) < 0.002 && Math.abs(r.bounceVel) < 0.02) {
+          r.bounce = 0; r.state = "stopped";
+          if (slotReels.every((x) => x.state === "stopped")) slotOnAllStopped();
+        }
+      }
+      slotDrawReel(r);
+    }
+    slotTrackRaf(slotFrame);
+  }
+  function slotStartFrameLoop() {
+    if (slotRaf) return; // already scheduled
+    slotLastFrameAt = performance.now();
+    slotTrackRaf(slotFrame);
+  }
+
+  function slotStartMusic() {
+    slotStopMusic(false); // clear any prior element without restoring the bus yet
+    // Duck the carried-over level music bus to silence while the slot's own track plays over it.
+    try {
+      if (audioEngine.musicGain && audioEngine.ctx) {
+        _musicGainBeforeSlot = audioEngine.musicGain.gain.value;
+        const t = audioEngine.ctx.currentTime;
+        audioEngine.musicGain.gain.cancelScheduledValues(t);
+        audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, t);
+        audioEngine.musicGain.gain.linearRampToValueAtTime(0, t + 0.3);
+      }
+      if (audioEngine.currentMusicHtml?.node) audioEngine.currentMusicHtml.node.volume = 0;
+    } catch { /* best-effort duck */ }
+    const url = SLOT_MUSIC_URLS[(Math.random() * SLOT_MUSIC_URLS.length) | 0];
+    slotMusicEl = new Audio(url);
+    slotMusicEl.loop = true;
+    slotMusicEl.playsInline = true;
+    slotMusicEl.volume = state.whisper ? SLOT_MUSIC_VOL * 0.5 : SLOT_MUSIC_VOL;
+    slotMusicEl.play().catch(() => { /* may need the next gesture; handled by the lever/skip taps */ });
+  }
+  function slotStopMusic(restoreBus = true) {
+    if (slotMusicEl) { try { slotMusicEl.pause(); } catch { /* ignore */ } slotMusicEl = null; }
+    if (restoreBus && _musicGainBeforeSlot != null) {
+      try {
+        if (audioEngine.musicGain && audioEngine.ctx) {
+          const t = audioEngine.ctx.currentTime;
+          audioEngine.musicGain.gain.cancelScheduledValues(t);
+          audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, t);
+          audioEngine.musicGain.gain.linearRampToValueAtTime(_musicGainBeforeSlot, t + 0.3);
+        }
+      } catch { /* ignore */ }
+      _musicGainBeforeSlot = null;
+    }
   }
 
   let _slotStylesInjected = false;
@@ -7737,6 +7944,14 @@ function initGalaxyCanvas() {
       .ps-continue{position:absolute;inset:0;z-index:12;display:flex;align-items:center;justify-content:center;border-radius:16px;background:rgba(2,8,18,.88);opacity:0;pointer-events:none;transition:opacity .3s ease;}
       .ps-continue.show{opacity:1;pointer-events:auto;}
       .ps-continue-inner{font-size:1.2rem;letter-spacing:.18em;color:#00FFD1;text-shadow:0 0 10px rgba(0,255,209,.5);}
+      .ps-reels{display:flex;gap:6px;width:min(340px,78vw);height:min(210px,42vh);margin:6px auto 4px;padding:8px;background:rgba(1,5,12,.6);border:1px solid rgba(0,255,209,.22);border-radius:12px;}
+      .ps-reel{flex:1;position:relative;overflow:hidden;border-radius:8px;background:#040b14;}
+      .ps-reel canvas{position:absolute;inset:0;width:100%;height:100%;}
+      .ps-lever{position:absolute;right:6%;top:50%;transform:translateY(-50%);width:26px;height:170px;z-index:11;touch-action:none;}
+      .ps-lever.disabled{opacity:.4;pointer-events:none;}
+      .ps-track{position:absolute;left:50%;top:0;transform:translateX(-50%);width:8px;height:100%;background:linear-gradient(180deg,#16314a,#0a1828);border-radius:6px;box-shadow:inset 0 0 6px rgba(0,0,0,.7);}
+      .ps-knob{position:absolute;left:50%;top:0;transform:translate(-50%,0);width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ff5a5a,#a01818);box-shadow:0 2px 8px rgba(0,0,0,.6),inset 0 0 6px rgba(255,255,255,.3);cursor:grab;touch-action:none;}
+      .ps-lever:not(.disabled) .ps-knob:active{cursor:grabbing;}
     `;
     document.head.appendChild(s);
   }
@@ -7749,8 +7964,13 @@ function initGalaxyCanvas() {
       <div class="ps-panel">
         <div class="ps-title">POLYSLOTS</div>
         <div class="ps-tokens">TOKENS <b id="psTokenCount">0</b></div>
+        <div class="ps-reels" id="psReels">
+          <div class="ps-reel"><canvas id="psReelC0"></canvas></div>
+          <div class="ps-reel"><canvas id="psReelC1"></canvas></div>
+          <div class="ps-reel"><canvas id="psReelC2"></canvas></div>
+        </div>
         <div class="ps-hint" id="psHint">GET READY</div>
-        <div class="ps-stub">reels — step 4</div>
+        <div class="ps-lever" id="psLever"><div class="ps-track" id="psTrack"></div><div class="ps-knob" id="psKnob"></div></div>
         <div class="ps-continue" id="psContinue"><div class="ps-continue-inner" id="psContinueInner">TAP TO CONTINUE</div></div>
       </div>
       <button class="ps-skip" id="psSkip" type="button">SKIP ▸</button>
@@ -7762,6 +7982,11 @@ function initGalaxyCanvas() {
     slotEls.skip = overlay.querySelector("#psSkip");
     slotEls.continue = overlay.querySelector("#psContinue");
     slotEls.continueInner = overlay.querySelector("#psContinueInner");
+    slotEls.reels = overlay.querySelector("#psReels");
+    slotEls.lever = overlay.querySelector("#psLever");
+    slotEls.track = overlay.querySelector("#psTrack");
+    slotEls.knob = overlay.querySelector("#psKnob");
+    slotEls.reelCanvas = [0, 1, 2].map((i) => overlay.querySelector("#psReelC" + i));
     return overlay;
   }
 
@@ -7796,7 +8021,29 @@ function initGalaxyCanvas() {
       e.stopPropagation();
       if (performance.now() >= slotContinueArmedAt) exitSlot();
     }, { passive: false });
-    // After the lockout: become READY and invite the pull (reels land in step 4).
+    // Lever (drag-only — anti-misclick). Spring physics run in slotFrame; a release past the
+    // threshold triggers the pull.
+    slotTrackListener(slotEls.knob, "pointerdown", (e) => {
+      if (!slotLeverEnabled()) return;
+      slotLever.mode = "drag";
+      try { slotEls.knob.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      const rect = slotEls.track.getBoundingClientRect();
+      slotLever.grabOffset = e.clientY - (rect.top + slotLever.value * SLOT_LEVER_TRAVEL_PX);
+      e.preventDefault();
+    }, { passive: false });
+    slotTrackListener(slotEls.knob, "pointermove", (e) => {
+      if (slotLever.mode !== "drag") return;
+      const rect = slotEls.track.getBoundingClientRect();
+      slotLever.springTarget = Math.max(0, Math.min(1, (e.clientY - slotLever.grabOffset - rect.top) / SLOT_LEVER_TRAVEL_PX));
+    });
+    slotTrackListener(slotEls.knob, "pointerup", slotReleaseLever);
+    slotTrackListener(slotEls.knob, "pointercancel", slotReleaseLever);
+    // Build the reels and start the (cancellable) render/physics loop + slot music.
+    slotMakeReels();
+    requestAnimationFrame(slotSizeReels); // re-measure once CSS layout has settled
+    slotStartFrameLoop();
+    slotStartMusic();
+    // After the lockout: become READY and invite the pull.
     slotTrackTimeout(() => {
       if (slotState !== SLOT_STATE.ENTERING) return;
       slotState = SLOT_STATE.READY;
@@ -7852,6 +8099,9 @@ function initGalaxyCanvas() {
     }
     slotLoopHandles.forEach((h) => { try { h.stop?.(); } catch { /* ignore */ } });
     slotLoopHandles.clear();
+    slotRampHandle = null;
+    // Pause the streamed slot music (do NOT restore the bus — this is a pause, not an exit).
+    if (slotMusicEl) { try { slotMusicEl.pause(); } catch { /* ignore */ } }
     lvlTrace(`[slot] background pause state=${slotState}`);
   }
   function slotResumeFromBackground() {
@@ -7867,6 +8117,10 @@ function initGalaxyCanvas() {
     // fire SKIP / CONTINUE, and re-arm the continue overlay if it was already up.
     slotInputLockedUntil = now + SLOT_LOCKOUT_MS;
     if (slotContinueShown) slotContinueArmedAt = now + SLOT_CONTINUE_DELAY_MS;
+    // Drop any half-finished drag and restart the render loop (rAF doesn't fire while backgrounded).
+    slotLever.mode = "rest"; slotLever.vel = 0;
+    slotStartFrameLoop();
+    if (slotMusicEl) { try { slotMusicEl.play().catch(() => {}); } catch { /* ignore */ } }
     lvlTrace(`[slot] background resume state=${slotState}`);
   }
 
@@ -7876,8 +8130,6 @@ function initGalaxyCanvas() {
     if (shouldOpenSlot()) { enterSlot({ onExit: continueToNextLevel }); return; }
     continueToNextLevel();
   }
-  // referenced once the reel/overlay animation lands (step 4); silence no-unused-vars until then.
-  void slotTrackRaf; void slotTrackLoop;
   // ───────────────────────────────────────────────────────────────────────────────────────────
   // 2026-06-10: multi-type powerup system (generalized from the single bomb powerup).
   // Types: timer (+30s), goldbars (+1000), quadshot (cluster fire), snowflake (freeze), bomb.

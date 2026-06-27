@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-26 19:48 hide-freeze-probe";
+const BUILD_TS = "2026-06-27 slot-shell-steps1-4";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -7561,6 +7561,324 @@ function initGalaxyCanvas() {
   // the between-level slot reveals the banked total as its token count. Use-it-or-lose-it: any
   // leftover is discarded when the slot is left (see slotMachine glue). Reset on a fresh game.
   let slotTokens = 0;
+  // ── POLYSLOTS lifecycle (step 1) ───────────────────────────────────────────────────────────
+  // The between-level slot is a small MODAL GAME STATE that OWNS the scorecard→startLevel window —
+  // not just an overlay. Existing handlers (the visibilitychange listeners, stopAndMenu, the
+  // gameplay loop) branch on isSlotActive() so the rest of the game defers to the slot while it's
+  // up. That ownership is what structurally prevents VO bleed, loops under menus, and resume limbo.
+  //   idle → entering → ready → spinning → resolving → exiting → disposed
+  //   idle     = never entered / clean rest state (re-armable)
+  //   entering = overlay mounting / token reveal animating in
+  //   ready    = sitting on the slot screen, awaiting a spin
+  //   spinning = reels in motion
+  //   resolving= reels stopped, payout being applied (atomic spend+credit — step 5)
+  //   exiting  = animating out, about to hand control back via startLevel()
+  //   disposed = torn down; nothing slot-owned is live. The next entry resets to entering.
+  const SLOT_STATE = Object.freeze({
+    IDLE: "idle",
+    ENTERING: "entering",
+    READY: "ready",
+    SPINNING: "spinning",
+    RESOLVING: "resolving",
+    EXITING: "exiting",
+    DISPOSED: "disposed",
+  });
+  let slotState = SLOT_STATE.IDLE;
+  // The two looping slot SFX (see the SFX-registry comment that names slot_ramp + slot_jackpot_loop).
+  // Teardown stops both even though the global visibilitychange handler's audioEngine.stopAllLoops()
+  // may already have silenced them on a background hide — we must still clear OUR bookkeeping so the
+  // slot's state can't desync from the audio engine.
+  const SLOT_LOOP_NAMES = ["slot_ramp", "slot_jackpot_loop"];
+  // Canonical teardown reasons. Pass slotTeardown() one of THESE constants, never a bare string —
+  // a typo'd constant is a ReferenceError, whereas a typo'd string ("exit"/"done") would silently
+  // miss the discard allowlist and strand a player's tokens. Note: there is deliberately no
+  // BACKGROUND reason — backgrounding is a pause/snapshot (step 4), not a teardown.
+  const SLOT_REASON = Object.freeze({
+    MENU: "menu",         // user backed out to the menu
+    NEW_GAME: "newgame",  // fresh-game reset
+    SLOT_EXIT: "slot-exit", // normal end of a slot session (step 3+)
+  });
+  // Token-discard policy (use-it-or-lose-it): only a REAL exit zeroes unused tokens, and only the
+  // reasons listed here. Explicit allowlist, not "everything except background" — teardown is
+  // disposal, and backgrounding is NOT a teardown (separate pause/snapshot path in step 4, so it
+  // must never reach slotTeardown). Unknown/unlisted reasons preserve the bank: a forgotten-to-list
+  // exit leaks tokens (recoverable) rather than silently nuking them (not).
+  const SLOT_TOKEN_DISCARD_REASONS = new Set([
+    SLOT_REASON.MENU, SLOT_REASON.NEW_GAME, SLOT_REASON.SLOT_EXIT,
+  ]);
+  // Teardown bookkeeping. Every slot timer / rAF / listener / loop-handle MUST be registered via the
+  // slotTrack* helpers below so slotTeardown() can guarantee a single, complete, idempotent cleanup —
+  // the same one-way discipline the scorecard (showLevelScoreReport) proved out.
+  const slotTimers = new Set();      // setTimeout handles
+  const slotListeners = [];          // { target, type, handler, opts } for removeEventListener
+  const slotLoopHandles = new Set(); // handles returned by audioEngine.playLoop(...) — see note below
+  let slotRaf = 0;                   // single in-flight requestAnimationFrame handle
+  let slotOverlay = null;            // DOM overlay root, mounted by enterSlot()
+  // Live-shell state (step 3). enterSlot() owns the between-level window: it mounts the cabinet
+  // overlay, shows the banked token count, locks input briefly, and hands control to startLevel()
+  // on exit via slotOnExit. Reels/payouts/jackpot/visibility are deliberately NOT here yet.
+  let slotOnExit = null;             // continue-to-next-level callback the slot now owns
+  let slotInputLockedUntil = 0;      // anti-misclick: taps/exits ignored until this timestamp
+  let slotContinueArmedAt = Infinity;// "TAP TO CONTINUE" only accepts taps after this timestamp
+  let slotContinueShown = false;     // true once the continue overlay is up
+  let slotPaused = false;            // true while backgrounded (step 4) — a PAUSE, never a teardown
+  const slotEls = {};                // cached child refs of the mounted overlay
+
+  // Single predicate the rest of the game branches on to detect slot ownership. Active == any live
+  // state; idle/disposed == not active. Exposed on the controller API (see return block) so the
+  // out-of-closure visibilitychange handlers can defer to the slot later too.
+  function isSlotActive() {
+    return slotState !== SLOT_STATE.IDLE && slotState !== SLOT_STATE.DISPOSED;
+  }
+
+  // Canonical registration helpers — future slot code MUST schedule through these (never raw
+  // setTimeout / rAF / addEventListener) so teardown catches everything. Each auto-untracks on
+  // natural completion so the bookkeeping sets don't grow unbounded.
+  function slotTrackTimeout(fn, ms) {
+    const id = setTimeout(() => { slotTimers.delete(id); fn(); }, ms);
+    slotTimers.add(id);
+    return id;
+  }
+  function slotTrackRaf(fn) {
+    slotRaf = requestAnimationFrame((t) => { slotRaf = 0; fn(t); });
+    return slotRaf;
+  }
+  function slotTrackListener(target, type, handler, opts) {
+    target.addEventListener(type, handler, opts);
+    slotListeners.push({ target, type, handler, opts });
+  }
+  // Loop SFX MUST be started through this so teardown can stop them by HANDLE, not just by name.
+  // audioEngine.stopLoop(name) only stops WebAudio loops stored in audioEngine.loops; playLoop()
+  // can fall back to playHtmlAudio(..., loop:true) (no ctx / not unlocked / buffer missing), and
+  // that handle is NOT in audioEngine.loops — stopLoop(name) would never reach it. Pass the
+  // playLoop(...) return value here: e.g. slotTrackLoop(audioEngine.playLoop("slot_ramp", {...})).
+  function slotTrackLoop(handle) {
+    if (handle) slotLoopHandles.add(handle);
+    return handle;
+  }
+
+  // Idempotent, DEFENSIVE one-way teardown == EXIT/DISPOSE (menu, fresh game, normal slot exit).
+  // NOT a pause: backgrounding must use the step-4 pause/snapshot path, never this. Safe to call
+  // repeatedly and from any real exit. It ALWAYS drains runtime artifacts (loops, timers, rAF,
+  // listeners, overlay) regardless of slotState — never trust the state flag to imply "nothing is
+  // live", because a desync (e.g. global stopAllLoops fired but our handle is still tracked) is
+  // exactly the bug we're guarding against. Parks state at DISPOSED and applies the token-discard
+  // policy. Deliberately does NOT call startLevel() — transition ownership (step 3) is the caller's.
+  function slotTeardown(reason = "unknown") {
+    const wasActive = isSlotActive();
+    // Stop loops both ways: by known name (WebAudio loops in audioEngine.loops) AND by tracked
+    // handle (catches HTML-fallback loops that stopLoop(name) can't reach).
+    for (let i = 0; i < SLOT_LOOP_NAMES.length; i += 1) {
+      try { audioEngine.stopLoop(SLOT_LOOP_NAMES[i]); } catch { /* already silenced — ignore */ }
+    }
+    slotLoopHandles.forEach((h) => { try { h.stop?.(); } catch { /* ignore */ } });
+    slotLoopHandles.clear();
+    slotTimers.forEach((id) => clearTimeout(id));
+    slotTimers.clear();
+    if (slotRaf) { cancelAnimationFrame(slotRaf); slotRaf = 0; }
+    for (let i = 0; i < slotListeners.length; i += 1) {
+      const { target, type, handler, opts } = slotListeners[i];
+      try { target.removeEventListener(type, handler, opts); } catch { /* ignore */ }
+    }
+    slotListeners.length = 0;
+    if (slotOverlay) {
+      try { slotOverlay.remove(); } catch { /* ignore */ }
+      slotOverlay = null;
+    }
+    // Reset live-shell state. slotOnExit is intentionally cleared here too — exitSlot() captures it
+    // BEFORE calling teardown, so the handoff still fires; this just prevents a stale callback.
+    slotOnExit = null;
+    slotInputLockedUntil = 0;
+    slotContinueArmedAt = Infinity;
+    slotContinueShown = false;
+    slotPaused = false;
+    for (const k in slotEls) delete slotEls[k];
+    // Use-it-or-lose-it: discard unused tokens only on a listed real exit. Centralised here so
+    // menu/normal exit can't forget; unlisted reasons preserve the bank (see SLOT_TOKEN_DISCARD_REASONS).
+    if (SLOT_TOKEN_DISCARD_REASONS.has(reason)) slotTokens = 0;
+    slotState = SLOT_STATE.DISPOSED;
+    if (wasActive) lvlTrace(`[slot] teardown reason=${reason}`); // quiet when there was nothing live
+  }
+
+  // ── POLYSLOTS live shell (step 3) ──────────────────────────────────────────────────────────
+  // Anti-misclick timings (from the prototype/SPEC §9): 600ms open lockout, SKIP after 2s, the
+  // TAP-TO-CONTINUE overlay armed 500ms after it appears so the final lever-tap can't dismiss it.
+  const SLOT_LOCKOUT_MS = 600;
+  const SLOT_SKIP_DELAY_MS = 2000;
+  const SLOT_CONTINUE_DELAY_MS = 500;
+  const SLOT_EXIT_FADE_MS = 420; // brief "ENTERING NEXT LEVEL…" beat before handing to startLevel()
+  // Frequency toggle. For now: open after every non-final level (the handoff seam only fires on the
+  // non-final path anyway). Flip to false to skip the slot entirely; later this can become a cadence.
+  const SLOT_OPEN_AFTER_EVERY_LEVEL = true;
+  function shouldOpenSlot() {
+    return SLOT_OPEN_AFTER_EVERY_LEVEL;
+  }
+
+  let _slotStylesInjected = false;
+  function ensureSlotStyles() {
+    if (_slotStylesInjected) return;
+    _slotStylesInjected = true;
+    const s = document.createElement("style");
+    s.id = "polyslotsStyles";
+    s.textContent = `
+      #polyslots{position:fixed;inset:0;z-index:9500;display:flex;align-items:center;justify-content:center;pointer-events:auto;background:radial-gradient(circle at 50% 42%,rgba(6,16,30,.93),rgba(1,4,10,.97));}
+      .ps-panel{position:relative;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;color:#dff;background:linear-gradient(180deg,rgba(5,18,32,.96),rgba(2,8,18,.99));border:1px solid rgba(0,255,209,.42);border-radius:16px;padding:32px 40px;min-width:min(420px,92vw);min-height:min(360px,70vh);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;box-shadow:0 0 48px rgba(0,255,209,.16),inset 0 0 24px rgba(0,255,209,.06);animation:psSlam 250ms cubic-bezier(.2,1.4,.4,1) both;}
+      @keyframes psSlam{from{transform:scale(2);opacity:0}to{transform:scale(1);opacity:1}}
+      @keyframes psBlink{0%,100%{opacity:.45}50%{opacity:.9}}
+      .ps-title{font-size:1.6rem;letter-spacing:.22em;color:#00FFD1;text-shadow:0 0 10px rgba(0,255,209,.6);margin-bottom:18px;}
+      .ps-tokens{font-size:1.1rem;letter-spacing:.1em;color:#b7c9ff;margin-bottom:8px;}
+      .ps-tokens b{color:#ffd700;font-size:1.4rem;}
+      .ps-stub{font-size:.8rem;letter-spacing:.14em;color:rgba(183,201,255,.4);margin-top:18px;}
+      .ps-hint{font-size:1rem;letter-spacing:.2em;color:rgba(183,201,255,.55);min-height:1.2em;margin-top:10px;}
+      .ps-hint.blink{animation:psBlink 1.2s ease-in-out infinite;}
+      .ps-skip{position:absolute;left:8%;bottom:7%;z-index:11;font-family:inherit;font-size:clamp(9px,2.3vw,12px);letter-spacing:.14em;color:rgba(183,201,255,.8);background:rgba(0,0,0,.3);border:1px solid rgba(0,255,209,.3);border-radius:8px;padding:6px 12px;opacity:0;pointer-events:none;transition:opacity .3s ease;cursor:pointer;}
+      .ps-skip.show{opacity:.85;pointer-events:auto;}
+      .ps-skip:hover{opacity:1;color:#00FFD1;}
+      .ps-continue{position:absolute;inset:0;z-index:12;display:flex;align-items:center;justify-content:center;border-radius:16px;background:rgba(2,8,18,.88);opacity:0;pointer-events:none;transition:opacity .3s ease;}
+      .ps-continue.show{opacity:1;pointer-events:auto;}
+      .ps-continue-inner{font-size:1.2rem;letter-spacing:.18em;color:#00FFD1;text-shadow:0 0 10px rgba(0,255,209,.5);}
+    `;
+    document.head.appendChild(s);
+  }
+
+  function buildSlotOverlay() {
+    const overlay = document.createElement("div");
+    overlay.id = "polyslots";
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.innerHTML = `
+      <div class="ps-panel">
+        <div class="ps-title">POLYSLOTS</div>
+        <div class="ps-tokens">TOKENS <b id="psTokenCount">0</b></div>
+        <div class="ps-hint" id="psHint">GET READY</div>
+        <div class="ps-stub">reels — step 4</div>
+        <div class="ps-continue" id="psContinue"><div class="ps-continue-inner" id="psContinueInner">TAP TO CONTINUE</div></div>
+      </div>
+      <button class="ps-skip" id="psSkip" type="button">SKIP ▸</button>
+    `;
+    (galaxyView || document.body).appendChild(overlay);
+    slotEls.root = overlay;
+    slotEls.tokenCount = overlay.querySelector("#psTokenCount");
+    slotEls.hint = overlay.querySelector("#psHint");
+    slotEls.skip = overlay.querySelector("#psSkip");
+    slotEls.continue = overlay.querySelector("#psContinue");
+    slotEls.continueInner = overlay.querySelector("#psContinueInner");
+    return overlay;
+  }
+
+  function setSlotHint(text, blink = true) {
+    if (!slotEls.hint) return;
+    slotEls.hint.textContent = text;
+    slotEls.hint.classList.toggle("blink", blink && !!text);
+  }
+
+  // Open the slot. onExit is the continue-to-next-level callback (the slot OWNS the startLevel()
+  // call from here on). Safe against double-entry: ignored while a slot is already live.
+  function enterSlot({ onExit } = {}) {
+    if (isSlotActive()) return;
+    slotState = SLOT_STATE.ENTERING;
+    slotOnExit = typeof onExit === "function" ? onExit : null;
+    slotContinueShown = false;
+    slotContinueArmedAt = Infinity;
+    slotInputLockedUntil = performance.now() + SLOT_LOCKOUT_MS;
+    ensureSlotStyles();
+    slotOverlay = buildSlotOverlay();
+    if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
+    setSlotHint("GET READY");
+    // Swallow taps on the cabinet so a stray fire-tap can't reach the canvas underneath.
+    slotTrackListener(slotEls.root, "pointerdown", (e) => e.stopPropagation(), { passive: false });
+    // SKIP ▸ → leave to the next level (gated by the open lockout).
+    slotTrackListener(slotEls.skip, "click", () => {
+      if (performance.now() < slotInputLockedUntil) return;
+      if (slotState === SLOT_STATE.READY) exitSlot();
+    });
+    // TAP TO CONTINUE overlay → leave (only after it's armed, so the final tap doesn't dismiss it).
+    slotTrackListener(slotEls.continue, "pointerdown", (e) => {
+      e.stopPropagation();
+      if (performance.now() >= slotContinueArmedAt) exitSlot();
+    }, { passive: false });
+    // After the lockout: become READY and invite the pull (reels land in step 4).
+    slotTrackTimeout(() => {
+      if (slotState !== SLOT_STATE.ENTERING) return;
+      slotState = SLOT_STATE.READY;
+      if (slotTokens > 0 && !slotContinueShown) setSlotHint("PULL THE LEVER");
+    }, SLOT_LOCKOUT_MS);
+    // SKIP appears after a beat (only if we're idle on the slot, not already leaving via continue).
+    slotTrackTimeout(() => {
+      if (!slotContinueShown && slotState === SLOT_STATE.READY) slotEls.skip?.classList.add("show");
+    }, SLOT_SKIP_DELAY_MS);
+    // No tokens banked → there's nothing to play; go straight to the continue overlay.
+    if (slotTokens <= 0) slotShowContinue();
+    lvlTrace(`[slot] enter tokens=${slotTokens}`);
+  }
+
+  // Full-panel TAP TO CONTINUE. Armed after a delay so the tap that emptied the bank (step 4) can't
+  // also dismiss it. In step 3 this only triggers when entering with 0 tokens.
+  function slotShowContinue() {
+    if (slotContinueShown) return;
+    slotContinueShown = true;
+    setSlotHint("");
+    slotEls.skip?.classList.remove("show");
+    slotEls.continue?.classList.add("show");
+    slotContinueArmedAt = performance.now() + SLOT_CONTINUE_DELAY_MS;
+  }
+
+  // The single NORMAL exit. Shows a brief "ENTERING NEXT LEVEL…" beat, then disposes the slot
+  // (SLOT_REASON.SLOT_EXIT → tokens discarded) and hands control to the next level. The onExit
+  // callback is captured before teardown so the handoff still fires after disposal.
+  function exitSlot() {
+    if (slotState === SLOT_STATE.EXITING || slotState === SLOT_STATE.DISPOSED) return;
+    slotState = SLOT_STATE.EXITING;
+    slotInputLockedUntil = Infinity; // freeze all further input during the exit beat
+    if (slotEls.continueInner) slotEls.continueInner.textContent = "ENTERING NEXT LEVEL…";
+    slotEls.continue?.classList.add("show");
+    slotTrackTimeout(() => {
+      const onExit = slotOnExit; // capture before teardown clears it
+      slotTeardown(SLOT_REASON.SLOT_EXIT);
+      onExit?.(); // hand off — this is the slot's owned startLevel() call
+    }, SLOT_EXIT_FADE_MS);
+  }
+
+  // ── App-switch handling (step 4) ───────────────────────────────────────────────────────────
+  // Backgrounding during the slot is a PAUSE, not a teardown — the existing arcade visibility-
+  // restore path is gated on arcadeActive (false during the slot), so without this the slot would
+  // get no resume handling. These run from the gameplay visibilitychange handler when isSlotActive().
+  function slotPauseForBackground() {
+    if (!isSlotActive() || slotPaused) return;
+    slotPaused = true;
+    // Silence slot loops (none in the shell yet; the global stopAllLoops also fires on hide). We
+    // must still clear our own handle bookkeeping so audio state can't desync — same rule as teardown.
+    for (let i = 0; i < SLOT_LOOP_NAMES.length; i += 1) {
+      try { audioEngine.stopLoop(SLOT_LOOP_NAMES[i]); } catch { /* ignore */ }
+    }
+    slotLoopHandles.forEach((h) => { try { h.stop?.(); } catch { /* ignore */ } });
+    slotLoopHandles.clear();
+    lvlTrace(`[slot] background pause state=${slotState}`);
+  }
+  function slotResumeFromBackground() {
+    if (!slotPaused) return;
+    slotPaused = false;
+    // An exit already in flight completes via its own timer — don't disturb it.
+    if (slotState === SLOT_STATE.EXITING || slotState === SLOT_STATE.DISPOSED) return;
+    // The overlay shouldn't get detached by anything during background, but re-attach defensively
+    // (without a teardown, so tokens survive) rather than strand the player on a blank screen.
+    if (slotOverlay && !slotOverlay.isConnected) (galaxyView || document.body).appendChild(slotOverlay);
+    const now = performance.now();
+    // Anti-misclick on return: re-arm the open lockout so a fumbled tap coming back doesn't instantly
+    // fire SKIP / CONTINUE, and re-arm the continue overlay if it was already up.
+    slotInputLockedUntil = now + SLOT_LOCKOUT_MS;
+    if (slotContinueShown) slotContinueArmedAt = now + SLOT_CONTINUE_DELAY_MS;
+    lvlTrace(`[slot] background resume state=${slotState}`);
+  }
+
+  // The single between-level seam (replaces the step-3 stub). Decides whether the slot takes the
+  // window — if so it OWNS the startLevel() call (passed as onExit); otherwise forwards straight on.
+  function handoffAfterScorecard(continueToNextLevel) {
+    if (shouldOpenSlot()) { enterSlot({ onExit: continueToNextLevel }); return; }
+    continueToNextLevel();
+  }
+  // referenced once the reel/overlay animation lands (step 4); silence no-unused-vars until then.
+  void slotTrackRaf; void slotTrackLoop;
+  // ───────────────────────────────────────────────────────────────────────────────────────────
   // 2026-06-10: multi-type powerup system (generalized from the single bomb powerup).
   // Types: timer (+30s), goldbars (+1000), quadshot (cluster fire), snowflake (freeze), bomb.
   let powerups = [];
@@ -7599,7 +7917,6 @@ function initGalaxyCanvas() {
   let _freezeBankMs = 0;        // remaining banked freeze time (ms); 0 == nothing to resume
   let _freezeActive = false;    // true == freeze running (clock paused); false == paused or empty
   let _freezeSessionId = 0;     // bumped only on a fresh activation (NOT on resume) — cold-toss gliders
-  let goldbarsForceSpawnedThisLevel = false; // DEBUG: revert before release
   let bombAimMode = false;
   // 2026-06-14: homing missile powerup — inventory, targeting + single in-flight missile.
   let playerMissileInventory = 0;
@@ -11251,7 +11568,6 @@ function initGalaxyCanvas() {
     _freezeActive = false;
     audioEngine.removeFreezeFilter();
     hudFreezeBtn?.classList.remove("hudFreezeBtn--active");
-    goldbarsForceSpawnedThisLevel = false;
     emergencyTimerSpawned = false; // 2026-06-16: re-arm the under-20s emergency timer drop
     firedGuaranteedSpawns.clear(); // 2026-06-16: re-arm cfg.guaranteedSpawn entries
     firedWaves.clear(); // 2026-06-23: re-arm cfg.waves second-wave surges
@@ -11677,7 +11993,9 @@ function initGalaxyCanvas() {
             // VO elements, see acquireVoElement), so the ctx lives for the whole session and music
             // carries over seamlessly across same-track level pairs. stopVO() still flushes in-flight VO.
             commBoxController.stopVO();
-            startLevel(currentLevelIndex + 1);
+            // STUB (slot step 3): single between-level seam. Forwards straight to the next level for
+            // now; later this is where the slot takes ownership and assumes the startLevel() call.
+            handoffAfterScorecard(() => startLevel(currentLevelIndex + 1));
           }, 420);
         },
       });
@@ -12158,6 +12476,7 @@ function initGalaxyCanvas() {
     arcadeLives = 0;
     arcadeScore = 0;
     playerBombInventory = 0;
+    slotTeardown(SLOT_REASON.NEW_GAME); // dispose any live slot before discarding its tokens
     slotTokens = 0; // 2026-06-26: discard banked POLYSLOTS tokens on a fresh run
     // 2026-06-10: reset powerup + active effect state
     powerups.length = 0;
@@ -13731,6 +14050,7 @@ function initGalaxyCanvas() {
     arcadeLives = 0;
     arcadeScore = 0;
     playerBombInventory = 0;
+    slotTeardown(SLOT_REASON.NEW_GAME); // dispose any live slot before discarding its tokens
     slotTokens = 0; // 2026-06-26: discard banked POLYSLOTS tokens on a fresh run
     quadShotUntil = 0;
     _freezeBankMs = 0;
@@ -14355,12 +14675,14 @@ function initGalaxyCanvas() {
         for (let pi = powerups.length - 1; pi >= 0; pi -= 1) {
           if (now - powerups[pi].spawnedAt > BOMB_POWERUP_LIFETIME_MS) powerups.splice(pi, 1);
         }
-        // DEBUG: revert before release — force a goldbars spawn in the level's final 15s
-        // (once per level, normal margins) so the gold pickup is easy to test.
-        if (!goldbarsForceSpawnedThisLevel && levelRemainingMs <= 15000 && levelRemainingMs > 0
-            && (!cfg.powerupOverride || cfg.powerupOverride.includes("goldbars"))
+        // DEBUG: revert before release — keep a goldbars on screen at ALL times in EVERY level
+        // (for slot-token testing). Deliberately ignores cfg.powerupOverride and re-spawns
+        // whenever none is present (powerups expire after BOMB_POWERUP_LIFETIME_MS=10s, so a
+        // one-shot spawn would NOT keep gold available throughout). Silent on respawn — the
+        // pickup itself plays "pickup_gold". Restore the final-15s gating + override check
+        // (see git history) or remove entirely before release.
+        if (elapsedMs >= LEVEL_START_SPAWN_DELAY_MS
             && !powerups.some((p) => p.type === "goldbars")) {
-          goldbarsForceSpawnedThisLevel = true;
           const goldPt = randomPowerupPoint();
           powerups.push({
             type: "goldbars",
@@ -14370,7 +14692,6 @@ function initGalaxyCanvas() {
             spawnedAt: now,
             opacity: 1.0,
           });
-          playGameSfx("blip", 0.8);
         }
         updateHudMissileInventory();
       }
@@ -16289,6 +16610,7 @@ function initGalaxyCanvas() {
   }
 
   function stopAndMenu() {
+    slotTeardown(SLOT_REASON.MENU); // tear the slot down BEFORE leaving — stopAndMenu won't clean it otherwise
     commBoxController.hide();
     stopGalaxyLoop();
     showModeSelect({ preserveArcade: false });
@@ -16340,6 +16662,9 @@ function initGalaxyCanvas() {
       // on screen on return) and remember whether the loop was actually running.
       if (plasmaCage.active) releasePlasmaCage(performance.now());
       setPlasmaOverlayVisible(false);
+      // Step 4: the slot owns this window (arcadeActive is false here, so the arcade restore below
+      // won't fire) — pause it explicitly. The unconditional music dim still runs alongside.
+      if (isSlotActive()) slotPauseForBackground();
       _wasLoopRunningOnHide = galaxyRunning;
       // 2026-06-09: freeze the level/landmine countdowns while backgrounded so they
       // don't drain in real time and desync the game on return.
@@ -16362,6 +16687,9 @@ function initGalaxyCanvas() {
       }
     } else if (!galaxyView.hidden) {
       setPlasmaOverlayVisible(false); // safety: never return with a stuck cage overlay
+      // Step 4: resume the slot to a sane, exitable shell (the arcade restore below stays skipped
+      // because arcadeActive is false during the slot). Music restore below runs unconditionally.
+      if (isSlotActive()) slotResumeFromBackground();
       resizeGalaxyCanvas();
       computePlayfield();
       // Restore music volume
@@ -16559,6 +16887,7 @@ function initGalaxyCanvas() {
     isArcade() {
       return engineMode === "arcade";
     },
+    isSlotActive, // slot owns the between-level window — out-of-closure handlers branch on this
     stopAndMenu,
     stop: stopGalaxyLoop,
     relayout: relayoutGalaxyCanvas,

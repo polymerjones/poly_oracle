@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-27 slot-5a-reels-music";
+const BUILD_TS = "2026-06-27 slot-cabinet-art+music-stop";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -7628,9 +7628,11 @@ function initGalaxyCanvas() {
   let slotReels = [];                // per-reel { canvas, ctx, cw, ch, strip, len, pos, vel, state, ... }
   let slotRampHandle = null;         // slot_ramp spin loop handle (tracked via slotTrackLoop)
   let slotLastFrameAt = 0;           // dt clock for the rAF loop
+  let slotLeverTravel = 140;         // knob travel px, recomputed from the track height (scale-correct)
   const slotLever = { value: 0, vel: 0, mode: "rest", grabOffset: 0, springTarget: 0 };
+  const slotSprites = {};            // symbol id -> Image (loaded from slotart/)
+  let _slotSpritesLoaded = false;
   let slotMusicEl = null;            // dedicated streaming <audio> (long tracks aren't decoded — see note)
-  let _musicGainBeforeSlot = null;   // shared music-bus gain saved at open, restored on exit
 
   // Single predicate the rest of the game branches on to detect slot ownership. Active == any live
   // state; idle/disposed == not active. Exposed on the controller API (see return block) so the
@@ -7682,7 +7684,7 @@ function initGalaxyCanvas() {
     slotLoopHandles.forEach((h) => { try { h.stop?.(); } catch { /* ignore */ } });
     slotLoopHandles.clear();
     slotRampHandle = null;
-    slotStopMusic(true); // stop the streamed slot track AND restore the ducked music bus
+    slotStopMusic(); // stop the streamed slot track (level music resumes via the next startLevel)
     slotTimers.forEach((id) => clearTimeout(id));
     slotTimers.clear();
     if (slotRaf) { cancelAnimationFrame(slotRaf); slotRaf = 0; }
@@ -7736,14 +7738,18 @@ function initGalaxyCanvas() {
   const SLOT_SYM_COLOR = { jackpot: "#aa78ff", quad: "#be6eff", missile: "#ff5050", bomb: "#ffaa3c", freeze: "#6ec8ff", goldbar: "#ffcd5a", wild: "#5ae6d2", alien: "#78eb78", blank: "#506e96" };
   const SLOT_SPIN_SPEED = 16, SLOT_SPIN_TIME_MS = 2600, SLOT_REEL_STAGGER_MS = 380;
   const SLOT_STOP_MIN_TRAVEL = 6, SLOT_STOP_DUR = 1.0;
-  const SLOT_LEVER_THRESHOLD = 0.6, SLOT_LEVER_STIFF = 120, SLOT_LEVER_DAMP = 9, SLOT_LEVER_TRAVEL_PX = 140;
+  const SLOT_LEVER_THRESHOLD = 0.6, SLOT_LEVER_STIFF = 120, SLOT_LEVER_DAMP = 9;
   const SLOT_BOUNCE_IMPULSE = 0.16, SLOT_BOUNCE_K = 200, SLOT_BOUNCE_DAMP = 16;
   const SLOT_DPR = Math.min(window.devicePixelRatio || 1, 2);
   // Long session-music tracks stream as <audio> (NOT decoded — see the GAME_SFX music note).
   const SLOT_MUSIC_URLS = ["assets/music/polyslots_music1.mp3", "assets/music/polyslots_music2.mp3"];
   const SLOT_MUSIC_VOL = 0.5;
-  void SLOT_SYMBOLS; // canonical symbol order — used by 5b payline evaluation; silence until then
 
+  function ensureSlotSprites() {
+    if (_slotSpritesLoaded) return;
+    _slotSpritesLoaded = true;
+    for (const id of SLOT_SYMBOLS) { const im = new Image(); im.src = "slotart/" + id + ".png"; slotSprites[id] = im; }
+  }
   function slotShuffle(a) {
     for (let i = a.length - 1; i > 0; i -= 1) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; }
     return a;
@@ -7774,6 +7780,10 @@ function initGalaxyCanvas() {
       r.ctx.setTransform(SLOT_DPR, 0, 0, SLOT_DPR, 0, 0);
       slotDrawReel(r);
     }
+    // Recompute the lever travel from the actual track height so the knob scales with the cabinet.
+    if (slotEls.track && slotEls.knob) {
+      slotLeverTravel = Math.max(40, slotEls.track.clientHeight - slotEls.knob.offsetHeight);
+    }
   }
   function slotDrawReel(r) {
     const ctx = r.ctx, mid = r.ch / 2, cx = r.cw / 2, len = r.len, rowH = r.ch / 3;
@@ -7784,15 +7794,25 @@ function initGalaxyCanvas() {
     for (let k = -2; k <= 2; k += 1) {
       const a = base + k, id = r.strip[((a % len) + len) % len], y = mid + (rp - a) * rowH;
       if (y < -rowH || y > r.ch + rowH) continue;
-      ctx.fillStyle = "#081421";
-      const cs = sz, x0 = cx - cs / 2, y0 = y - cs / 2;
-      ctx.fillRect(x0, y0, cs, cs);
-      ctx.strokeStyle = "rgba(120,150,185,0.22)"; ctx.lineWidth = 1; ctx.strokeRect(x0, y0, cs, cs);
-      // 5a: text faces (sprite art is deferred). Per-symbol colour stands in for the icon.
-      ctx.fillStyle = SLOT_SYM_COLOR[id] || "#9fb";
-      ctx.font = `700 ${Math.round(sz * 0.26)}px ui-monospace,monospace`;
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(SLOT_SYM_LABEL[id] || id, cx, y);
+      // per-symbol backlight glow behind the icon (lit-screen look)
+      const glow = SLOT_SYM_COLOR[id];
+      if (glow) {
+        ctx.save();
+        ctx.globalAlpha = 0.22;
+        ctx.fillStyle = glow;
+        ctx.beginPath(); ctx.arc(cx, y, sz * 0.5, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+      const img = slotSprites[id];
+      if (img && img.complete && img.naturalWidth) {
+        ctx.drawImage(img, cx - sz / 2, y - sz / 2, sz, sz);
+      } else {
+        // fallback until the sprite decodes: coloured label
+        ctx.fillStyle = SLOT_SYM_COLOR[id] || "#9fb";
+        ctx.font = `700 ${Math.round(sz * 0.24)}px ui-monospace,monospace`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(SLOT_SYM_LABEL[id] || id, cx, y);
+      }
     }
   }
 
@@ -7828,6 +7848,7 @@ function initGalaxyCanvas() {
     if (slotState !== SLOT_STATE.READY || slotTokens <= 0 || performance.now() < slotInputLockedUntil) return;
     slotTokens -= 1;
     if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
+    if (slotEls.tokensBox) { slotEls.tokensBox.classList.remove("tick"); void slotEls.tokensBox.offsetWidth; slotEls.tokensBox.classList.add("tick"); }
     slotState = SLOT_STATE.SPINNING;
     setSlotHint("");
     slotEls.skip?.classList.remove("show");
@@ -7860,7 +7881,7 @@ function initGalaxyCanvas() {
       if (Math.abs(slotLever.value) < 0.004 && Math.abs(slotLever.vel) < 0.02) { slotLever.value = 0; slotLever.vel = 0; slotLever.mode = "rest"; }
     }
     slotLever.value = Math.max(0, Math.min(1, slotLever.value));
-    if (slotEls.knob) slotEls.knob.style.transform = `translate(-50%, ${slotLever.value * SLOT_LEVER_TRAVEL_PX}px)`;
+    if (slotEls.knob) slotEls.knob.style.transform = `translateY(${slotLever.value * slotLeverTravel}px)`;
     slotEls.lever?.classList.toggle("disabled", !slotLeverEnabled());
     // reels
     for (const r of slotReels) {
@@ -7886,19 +7907,20 @@ function initGalaxyCanvas() {
     slotTrackRaf(slotFrame);
   }
 
-  function slotStartMusic() {
-    slotStopMusic(false); // clear any prior element without restoring the bus yet
-    // Duck the carried-over level music bus to silence while the slot's own track plays over it.
+  // Fully STOP the carried-over level music so ONLY the slot track plays — no two tracks at once.
+  // (We don't duck the bus; on slot exit startLevel() starts the next level's music fresh.)
+  function slotStopLevelMusic() {
     try {
-      if (audioEngine.musicGain && audioEngine.ctx) {
-        _musicGainBeforeSlot = audioEngine.musicGain.gain.value;
-        const t = audioEngine.ctx.currentTime;
-        audioEngine.musicGain.gain.cancelScheduledValues(t);
-        audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, t);
-        audioEngine.musicGain.gain.linearRampToValueAtTime(0, t + 0.3);
-      }
-      if (audioEngine.currentMusicHtml?.node) audioEngine.currentMusicHtml.node.volume = 0;
-    } catch { /* best-effort duck */ }
+      const cm = audioEngine.currentMusic;
+      if (cm && cm.source) { try { cm.source.stop(); } catch { /* already stopped */ } }
+      audioEngine.currentMusic = null;
+      if (audioEngine.currentMusicHtml?.node) { try { audioEngine.currentMusicHtml.node.pause(); } catch { /* ignore */ } }
+      audioEngine.currentMusicHtml = null;
+    } catch { /* best-effort stop */ }
+  }
+  function slotStartMusic() {
+    slotStopMusic();        // clear any prior slot element
+    slotStopLevelMusic();   // silence the level track entirely before the slot track starts
     const url = SLOT_MUSIC_URLS[(Math.random() * SLOT_MUSIC_URLS.length) | 0];
     slotMusicEl = new Audio(url);
     slotMusicEl.loop = true;
@@ -7906,19 +7928,8 @@ function initGalaxyCanvas() {
     slotMusicEl.volume = state.whisper ? SLOT_MUSIC_VOL * 0.5 : SLOT_MUSIC_VOL;
     slotMusicEl.play().catch(() => { /* may need the next gesture; handled by the lever/skip taps */ });
   }
-  function slotStopMusic(restoreBus = true) {
+  function slotStopMusic() {
     if (slotMusicEl) { try { slotMusicEl.pause(); } catch { /* ignore */ } slotMusicEl = null; }
-    if (restoreBus && _musicGainBeforeSlot != null) {
-      try {
-        if (audioEngine.musicGain && audioEngine.ctx) {
-          const t = audioEngine.ctx.currentTime;
-          audioEngine.musicGain.gain.cancelScheduledValues(t);
-          audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, t);
-          audioEngine.musicGain.gain.linearRampToValueAtTime(_musicGainBeforeSlot, t + 0.3);
-        }
-      } catch { /* ignore */ }
-      _musicGainBeforeSlot = null;
-    }
   }
 
   let _slotStylesInjected = false;
@@ -7928,30 +7939,45 @@ function initGalaxyCanvas() {
     const s = document.createElement("style");
     s.id = "polyslotsStyles";
     s.textContent = `
-      #polyslots{position:fixed;inset:0;z-index:9500;display:flex;align-items:center;justify-content:center;pointer-events:auto;background:radial-gradient(circle at 50% 42%,rgba(6,16,30,.93),rgba(1,4,10,.97));}
-      .ps-panel{position:relative;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;color:#dff;background:linear-gradient(180deg,rgba(5,18,32,.96),rgba(2,8,18,.99));border:1px solid rgba(0,255,209,.42);border-radius:16px;padding:32px 40px;min-width:min(420px,92vw);min-height:min(360px,70vh);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;box-shadow:0 0 48px rgba(0,255,209,.16),inset 0 0 24px rgba(0,255,209,.06);animation:psSlam 250ms cubic-bezier(.2,1.4,.4,1) both;}
-      @keyframes psSlam{from{transform:scale(2);opacity:0}to{transform:scale(1);opacity:1}}
-      @keyframes psBlink{0%,100%{opacity:.45}50%{opacity:.9}}
-      .ps-title{font-size:1.6rem;letter-spacing:.22em;color:#00FFD1;text-shadow:0 0 10px rgba(0,255,209,.6);margin-bottom:18px;}
-      .ps-tokens{font-size:1.1rem;letter-spacing:.1em;color:#b7c9ff;margin-bottom:8px;}
-      .ps-tokens b{color:#ffd700;font-size:1.4rem;}
-      .ps-stub{font-size:.8rem;letter-spacing:.14em;color:rgba(183,201,255,.4);margin-top:18px;}
-      .ps-hint{font-size:1rem;letter-spacing:.2em;color:rgba(183,201,255,.55);min-height:1.2em;margin-top:10px;}
-      .ps-hint.blink{animation:psBlink 1.2s ease-in-out infinite;}
-      .ps-skip{position:absolute;left:8%;bottom:7%;z-index:11;font-family:inherit;font-size:clamp(9px,2.3vw,12px);letter-spacing:.14em;color:rgba(183,201,255,.8);background:rgba(0,0,0,.3);border:1px solid rgba(0,255,209,.3);border-radius:8px;padding:6px 12px;opacity:0;pointer-events:none;transition:opacity .3s ease;cursor:pointer;}
+      #polyslots{position:fixed;inset:0;z-index:9500;display:flex;align-items:center;justify-content:center;pointer-events:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;background:radial-gradient(circle at 50% 42%,rgba(6,16,30,.93),rgba(1,4,10,.97));}
+      /* Cabinet skin: the whole machine is one art PNG; live bits are absolutely placed (ported 1:1
+         from prototypes/slot-machine.html — TUNE fractions are of the cabinet box). */
+      .ps-panel{position:relative;aspect-ratio:826/1806;width:min(420px,94vw,44vh);color:#dff;
+        background:url("slotart/cabinet.png") center/100% 100% no-repeat;
+        animation:psSlam 260ms cubic-bezier(.2,1.4,.4,1) both;
+        --reelL:6.9%;--reelT:19.82%;--reelW:69.98%;--reelH:35.27%;
+        --leverR:2%;--leverT:20%;--leverW:17%;--leverH:35%;
+        --resultT:55.8%;--hintT:61.3%;--hudT:67.5%;--btnT:75.5%;}
+      @keyframes psSlam{from{opacity:0;transform:scale(2)}to{opacity:1;transform:scale(1)}}
+      @keyframes psBlink{50%{opacity:.25}}
+      @keyframes psTick{0%{transform:scale(1)}40%{transform:scale(1.5);color:#fff}100%{transform:scale(1)}}
+      @keyframes psBump{40%{transform:scale(1.4)}}
+      .ps-lives,.ps-tokens{position:absolute;z-index:8;font-weight:800;font-size:clamp(15px,4vw,22px);transform:translateY(-50%);color:#39ff9a;text-shadow:0 0 9px rgba(57,255,154,.6);}
+      .ps-lives{top:12.8%;right:6.5%;} .ps-tokens{top:16.5%;right:6.5%;}
+      .ps-tokens.tick b{animation:psTick 380ms ease-out;} .ps-lives.bump b{animation:psTick 380ms ease-out;}
+      .ps-reels{position:absolute;left:var(--reelL);top:var(--reelT);width:var(--reelW);height:var(--reelH);display:flex;gap:4px;padding:4px;border-radius:6px;background:linear-gradient(180deg,#02060d,#050d18);box-shadow:inset 0 0 22px rgba(0,0,0,.9);z-index:3;}
+      .ps-reel{position:relative;flex:1;height:100%;overflow:hidden;border-radius:5px;background:linear-gradient(180deg,#0a1626,#060e1a);border:1px solid rgba(0,255,209,.10);}
+      .ps-reel canvas{display:block;width:100%;height:100%;}
+      .ps-payline{position:absolute;left:4px;right:4px;top:50%;height:32%;transform:translateY(-50%);border-top:2px solid rgba(0,255,209,.42);border-bottom:2px solid rgba(0,255,209,.42);pointer-events:none;z-index:4;border-radius:4px;box-shadow:0 0 18px rgba(0,255,209,.18);}
+      .ps-lever{position:absolute;right:var(--leverR);top:var(--leverT);width:var(--leverW);height:var(--leverH);display:flex;flex-direction:column;align-items:center;z-index:7;touch-action:none;}
+      .ps-track{position:relative;width:9px;flex:1;margin:4px 0;border-radius:6px;background:linear-gradient(180deg,#0b1422,#060c16);border:1px solid rgba(0,255,209,.18);box-shadow:inset 0 0 8px rgba(0,0,0,.8);}
+      .ps-knob{position:absolute;left:50%;top:0;width:30px;height:30px;margin-left:-15px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ff6b6b,#b00020 70%);border:2px solid rgba(255,255,255,.35);box-shadow:0 0 16px rgba(255,40,60,.55),inset 0 -4px 8px rgba(0,0,0,.4);cursor:grab;touch-action:none;z-index:5;}
+      .ps-knob::before{content:"";position:absolute;inset:-16px;border-radius:50%;}
+      .ps-knob:active{cursor:grabbing;}
+      .ps-lever.disabled .ps-knob{filter:grayscale(.7) brightness(.55);cursor:not-allowed;}
+      .ps-hint{position:absolute;left:0;right:0;top:var(--hintT);text-align:center;font-size:clamp(12px,3.4vw,16px);letter-spacing:.16em;color:rgba(0,255,209,.72);z-index:8;}
+      .ps-hint.blink{animation:psBlink 1.1s steps(2,jump-none) infinite;}
+      .ps-hud{position:absolute;left:0;right:0;top:var(--hudT);transform:translateY(-50%);display:flex;gap:clamp(8px,3.2vw,18px);justify-content:center;font-size:clamp(13px,3.4vw,17px);z-index:8;}
+      .ps-hud .ps-slot{display:flex;align-items:center;gap:3px;color:#cfe;}
+      .ps-hud .ps-slot b{color:#fff;font-weight:700;}
+      .ps-hud .ps-slot.nuke{color:#ff8a96;}
+      .ps-hud .ps-hudicon{width:clamp(22px,6vw,30px);height:clamp(22px,6vw,30px);object-fit:contain;}
+      .ps-skip{position:absolute;left:8%;top:var(--btnT);z-index:8;font-family:inherit;font-size:clamp(9px,2.3vw,12px);letter-spacing:.14em;color:rgba(183,201,255,.65);background:rgba(8,18,32,.92);border:1px solid rgba(0,255,209,.25);border-radius:8px;padding:6px 12px;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .4s;}
       .ps-skip.show{opacity:.85;pointer-events:auto;}
-      .ps-skip:hover{opacity:1;color:#00FFD1;}
-      .ps-continue{position:absolute;inset:0;z-index:12;display:flex;align-items:center;justify-content:center;border-radius:16px;background:rgba(2,8,18,.88);opacity:0;pointer-events:none;transition:opacity .3s ease;}
+      .ps-skip:hover{opacity:1;color:#00FFD1;border-color:rgba(0,255,209,.42);}
+      .ps-continue{position:absolute;inset:0;z-index:12;display:flex;align-items:center;justify-content:center;border-radius:14px;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .35s;background:radial-gradient(circle at 50% 50%,rgba(2,10,20,.86),rgba(1,4,10,.95));}
       .ps-continue.show{opacity:1;pointer-events:auto;}
-      .ps-continue-inner{font-size:1.2rem;letter-spacing:.18em;color:#00FFD1;text-shadow:0 0 10px rgba(0,255,209,.5);}
-      .ps-reels{display:flex;gap:6px;width:min(340px,78vw);height:min(210px,42vh);margin:6px auto 4px;padding:8px;background:rgba(1,5,12,.6);border:1px solid rgba(0,255,209,.22);border-radius:12px;}
-      .ps-reel{flex:1;position:relative;overflow:hidden;border-radius:8px;background:#040b14;}
-      .ps-reel canvas{position:absolute;inset:0;width:100%;height:100%;}
-      .ps-lever{position:absolute;right:6%;top:50%;transform:translateY(-50%);width:26px;height:170px;z-index:11;touch-action:none;}
-      .ps-lever.disabled{opacity:.4;pointer-events:none;}
-      .ps-track{position:absolute;left:50%;top:0;transform:translateX(-50%);width:8px;height:100%;background:linear-gradient(180deg,#16314a,#0a1828);border-radius:6px;box-shadow:inset 0 0 6px rgba(0,0,0,.7);}
-      .ps-knob{position:absolute;left:50%;top:0;transform:translate(-50%,0);width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ff5a5a,#a01818);box-shadow:0 2px 8px rgba(0,0,0,.6),inset 0 0 6px rgba(255,255,255,.3);cursor:grab;touch-action:none;}
-      .ps-lever:not(.disabled) .ps-knob:active{cursor:grabbing;}
+      .ps-continue-inner{font-size:1.2rem;letter-spacing:.18em;color:#00FFD1;text-align:center;text-shadow:0 0 16px rgba(0,255,209,.6);border:1px solid rgba(0,255,209,.42);border-radius:12px;padding:18px 28px;animation:psBlink 1.2s steps(2,jump-none) infinite;}
     `;
     document.head.appendChild(s);
   }
@@ -7962,22 +7988,32 @@ function initGalaxyCanvas() {
     overlay.setAttribute("aria-hidden", "true");
     overlay.innerHTML = `
       <div class="ps-panel">
-        <div class="ps-title">POLYSLOTS</div>
-        <div class="ps-tokens">TOKENS <b id="psTokenCount">0</b></div>
+        <span class="ps-lives" id="psLives"><b id="psLifeCount">0</b></span>
+        <span class="ps-tokens" id="psTokens"><b id="psTokenCount">0</b></span>
         <div class="ps-reels" id="psReels">
+          <div class="ps-payline"></div>
           <div class="ps-reel"><canvas id="psReelC0"></canvas></div>
           <div class="ps-reel"><canvas id="psReelC1"></canvas></div>
           <div class="ps-reel"><canvas id="psReelC2"></canvas></div>
         </div>
-        <div class="ps-hint" id="psHint">GET READY</div>
-        <div class="ps-lever" id="psLever"><div class="ps-track" id="psTrack"></div><div class="ps-knob" id="psKnob"></div></div>
+        <div class="ps-lever" id="psLever"><div class="ps-track" id="psTrack"><div class="ps-knob" id="psKnob"></div></div></div>
+        <div class="ps-hint blink" id="psHint">GET READY</div>
+        <div class="ps-hud" id="psHud">
+          <div class="ps-slot" data-k="quad"><img class="ps-hudicon" src="slotart/quad.png" alt=""><b id="psInvQuad">0</b></div>
+          <div class="ps-slot" data-k="bomb"><img class="ps-hudicon" src="slotart/bomb.png" alt=""><b id="psInvBomb">0</b></div>
+          <div class="ps-slot" data-k="missile"><img class="ps-hudicon" src="slotart/missile.png" alt=""><b id="psInvMissile">0</b></div>
+          <div class="ps-slot" data-k="freeze"><img class="ps-hudicon" src="slotart/freeze.png" alt=""><b id="psInvFreeze">0</b></div>
+          <div class="ps-slot nuke" data-k="nuke"><img class="ps-hudicon" src="slotart/nuke.png" alt=""><b id="psInvNuke">0</b></div>
+        </div>
+        <button class="ps-skip" id="psSkip" type="button">SKIP ▸</button>
         <div class="ps-continue" id="psContinue"><div class="ps-continue-inner" id="psContinueInner">TAP TO CONTINUE</div></div>
       </div>
-      <button class="ps-skip" id="psSkip" type="button">SKIP ▸</button>
     `;
     (galaxyView || document.body).appendChild(overlay);
     slotEls.root = overlay;
+    slotEls.tokensBox = overlay.querySelector("#psTokens");
     slotEls.tokenCount = overlay.querySelector("#psTokenCount");
+    slotEls.lifeCount = overlay.querySelector("#psLifeCount");
     slotEls.hint = overlay.querySelector("#psHint");
     slotEls.skip = overlay.querySelector("#psSkip");
     slotEls.continue = overlay.querySelector("#psContinue");
@@ -7996,6 +8032,18 @@ function initGalaxyCanvas() {
     slotEls.hint.classList.toggle("blink", blink && !!text);
   }
 
+  // Mirror the player's live game stats into the cabinet HUD. 5a is READ-ONLY (rewards land in 5b);
+  // this just makes the machine show real ♥ / inventory instead of zeros.
+  function slotSyncCabinetStats() {
+    if (slotEls.lifeCount) slotEls.lifeCount.textContent = String(arcadeLives);
+    const setInv = (id, n) => { const el = slotEls.root?.querySelector(id); if (el) el.textContent = String(n); };
+    setInv("#psInvQuad", 0); // quad is timed (no inventory count)
+    setInv("#psInvBomb", playerBombInventory);
+    setInv("#psInvMissile", playerMissileInventory);
+    setInv("#psInvFreeze", playerFreezeInventory);
+    setInv("#psInvNuke", 0); // nuke weapon not implemented yet (5b)
+  }
+
   // Open the slot. onExit is the continue-to-next-level callback (the slot OWNS the startLevel()
   // call from here on). Safe against double-entry: ignored while a slot is already live.
   function enterSlot({ onExit } = {}) {
@@ -8006,8 +8054,10 @@ function initGalaxyCanvas() {
     slotContinueArmedAt = Infinity;
     slotInputLockedUntil = performance.now() + SLOT_LOCKOUT_MS;
     ensureSlotStyles();
+    ensureSlotSprites();
     slotOverlay = buildSlotOverlay();
     if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
+    slotSyncCabinetStats(); // lives + current inventory in the cabinet HUD (read-only in 5a)
     setSlotHint("GET READY");
     // Swallow taps on the cabinet so a stray fire-tap can't reach the canvas underneath.
     slotTrackListener(slotEls.root, "pointerdown", (e) => e.stopPropagation(), { passive: false });
@@ -8028,13 +8078,13 @@ function initGalaxyCanvas() {
       slotLever.mode = "drag";
       try { slotEls.knob.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       const rect = slotEls.track.getBoundingClientRect();
-      slotLever.grabOffset = e.clientY - (rect.top + slotLever.value * SLOT_LEVER_TRAVEL_PX);
+      slotLever.grabOffset = e.clientY - (rect.top + slotLever.value * slotLeverTravel);
       e.preventDefault();
     }, { passive: false });
     slotTrackListener(slotEls.knob, "pointermove", (e) => {
       if (slotLever.mode !== "drag") return;
       const rect = slotEls.track.getBoundingClientRect();
-      slotLever.springTarget = Math.max(0, Math.min(1, (e.clientY - slotLever.grabOffset - rect.top) / SLOT_LEVER_TRAVEL_PX));
+      slotLever.springTarget = Math.max(0, Math.min(1, (e.clientY - slotLever.grabOffset - rect.top) / slotLeverTravel));
     });
     slotTrackListener(slotEls.knob, "pointerup", slotReleaseLever);
     slotTrackListener(slotEls.knob, "pointercancel", slotReleaseLever);

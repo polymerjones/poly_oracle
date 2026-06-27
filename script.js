@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-26 16:05 crystalball-decoder-free";
+const BUILD_TS = "2026-06-26 19:48 hide-freeze-probe";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -383,6 +383,26 @@ const GAME_SFX = {
   missile_fired: "gamesfx/missile_fired.mp3", // launch
   missile_prehit: "gamesfx/missile_prehit.mp3", // ~last 15% of flight
   missile_explo: "gamesfx/missile_explo.mp3", // impact
+  // 2026-06-26: POLYSLOTS between-level slot machine SFX pack (1:1 with the prototype's SND map).
+  // One-shots play via playGameSfx; slot_ramp + slot_jackpot_loop are loops via playLoop/stopLoop.
+  // NOTE: the long polyslots_* MUSIC tracks are intentionally NOT here — they stream as <audio>
+  // (decoding a ~3min MP3 balloons to ~40-60MB PCM; see the 2026-06-23 music-buffer note).
+  slot_recoil: "gamesfx/after_slot_arm_recoil_seq_start.mp3", // lever-pull recoil
+  slot_ramp: "gamesfx/slot-machine-ramp-and-spin.mp3", // reels spinning up (LOOP)
+  slot_reel_tick: "gamesfx/slot_reel_click_short.mp3", // rapid tick as a reel slows (THROTTLED ~45ms)
+  slot_reel_click: "gamesfx/slot_reel_click.mp3", // reel locks into place
+  slot_success: "gamesfx/slot_successful_level_pull.mp3", // win resolve
+  slot_jackpot: "gamesfx/slot_jackpot1.mp3", // jackpot hit
+  slot_jackpot_loop: "gamesfx/slot_jackpot_loop.mp3", // jackpot celebration bed (LOOP)
+  // Per-reward PAYOUT cues — each overrides the generic slot_success when its file exists; any
+  // that's missing falls back to slot_success automatically (loader skips absent files silently).
+  // Drop the mp3s into gamesfx/ to fill them. (points wins keep the generic slot_success.)
+  slot_payout_freeze: "gamesfx/slot_payout_freeze.mp3",
+  slot_payout_bomb: "gamesfx/slot_payout_bomb.mp3",
+  slot_payout_missile: "gamesfx/slot_payout_missile.mp3",
+  slot_payout_quad: "gamesfx/slot_payout_quad.mp3",
+  slot_payout_gold: "gamesfx/slot_payout_gold.mp3", // 3x / 2x goldbar token win
+  slot_payout_life: "gamesfx/slot_payout_life.mp3", // alien-scatter extra life
   item_pickup2: "gamesfx/item_pickup2.mp3", // unassigned - crunchy item pickup
   freeze: "gamesfx/freeze.mp3",
   unfreeze: "gamesfx/unfreeze.mp3",
@@ -7537,6 +7557,10 @@ function initGalaxyCanvas() {
   let placedBombs = [];
   let landmineSpawnedThisLevel = false;
   let playerBombInventory = 0;
+  // 2026-06-26: POLYSLOTS economy — goldbar pickups silently bank +1 token each during a level;
+  // the between-level slot reveals the banked total as its token count. Use-it-or-lose-it: any
+  // leftover is discarded when the slot is left (see slotMachine glue). Reset on a fresh game.
+  let slotTokens = 0;
   // 2026-06-10: multi-type powerup system (generalized from the single bomb powerup).
   // Types: timer (+30s), goldbars (+1000), quadshot (cluster fire), snowflake (freeze), bomb.
   let powerups = [];
@@ -11278,7 +11302,7 @@ function initGalaxyCanvas() {
   // shows up as one giant rawDt on the first frame after the app un-stalls. The summary is
   // painted just above the BUILD stamp so it's readable straight off the iPad. Flip
   // FREEZE_DIAG=false to remove once the L9 freeze is pinned. // DEBUG: revert before release
-  const FREEZE_DIAG = true;
+  const FREEZE_DIAG = false; // 2026-06-26: freezes resolved, on-screen worst-Δ probe hidden (flip true to re-arm)
   // 2026-06-26 EXPERIMENT: skip the L9→L10 boss-tier lookahead preload (boss video + boss music)
   // to test whether that resource spike is the L9-entry render-server crash. // DEBUG: revert before release
   const SKIP_BOSS_LOOKAHEAD = true;
@@ -11571,6 +11595,15 @@ function initGalaxyCanvas() {
     // that one line passes; everything else is suppressed. Cleared in startLevel().
     commBoxController.setLevelEndLock(true);
     stopWarningState();
+    // 2026-06-26: clear the big red ≤20s countdown number the instant the level completes so it
+    // doesn't linger behind/after the scorecard (noticed when a level is cleared inside the red
+    // warning window — arcadeActive flips false here so updateArcadeHud stops repainting/clearing it).
+    if (hudTimer) {
+      hudTimer.textContent = "";
+      hudTimer.classList.remove("visible", "slam", "warning", "critical");
+    }
+    _timerNumberVisible = false;
+    _timerSlammed = false;
     arcadeResumeAvailable = false;
     syncArcadeEntryLabel();
     const timeUsed = performance.now() - levelRunStartAt;
@@ -12125,6 +12158,7 @@ function initGalaxyCanvas() {
     arcadeLives = 0;
     arcadeScore = 0;
     playerBombInventory = 0;
+    slotTokens = 0; // 2026-06-26: discard banked POLYSLOTS tokens on a fresh run
     // 2026-06-10: reset powerup + active effect state
     powerups.length = 0;
     quadShotUntil = 0;
@@ -13697,6 +13731,7 @@ function initGalaxyCanvas() {
     arcadeLives = 0;
     arcadeScore = 0;
     playerBombInventory = 0;
+    slotTokens = 0; // 2026-06-26: discard banked POLYSLOTS tokens on a fresh run
     quadShotUntil = 0;
     _freezeBankMs = 0;
     _freezeActive = false;
@@ -15604,6 +15639,7 @@ function initGalaxyCanvas() {
     }
     if (pu.type === "goldbars") {
       addArcadeScore(1000);
+      slotTokens++; // 2026-06-26: silently bank a POLYSLOTS token for the between-level slot
       cssFlash("#ffd700", 0.22, 250);
       return;
     }

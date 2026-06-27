@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-27 slot-cabinet-art+music-stop";
+const BUILD_TS = "2026-06-27 slot-full-port (wins+fx+sounds)";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -383,26 +383,23 @@ const GAME_SFX = {
   missile_fired: "gamesfx/missile_fired.mp3", // launch
   missile_prehit: "gamesfx/missile_prehit.mp3", // ~last 15% of flight
   missile_explo: "gamesfx/missile_explo.mp3", // impact
-  // 2026-06-26: POLYSLOTS between-level slot machine SFX pack (1:1 with the prototype's SND map).
-  // One-shots play via playGameSfx; slot_ramp + slot_jackpot_loop are loops via playLoop/stopLoop.
-  // NOTE: the long polyslots_* MUSIC tracks are intentionally NOT here — they stream as <audio>
-  // (decoding a ~3min MP3 balloons to ~40-60MB PCM; see the 2026-06-23 music-buffer note).
-  slot_recoil: "gamesfx/after_slot_arm_recoil_seq_start.mp3", // lever-pull recoil
-  slot_ramp: "gamesfx/slot-machine-ramp-and-spin.mp3", // reels spinning up (LOOP)
-  slot_reel_tick: "gamesfx/slot_reel_click_short.mp3", // rapid tick as a reel slows (THROTTLED ~45ms)
-  slot_reel_click: "gamesfx/slot_reel_click.mp3", // reel locks into place
-  slot_success: "gamesfx/slot_successful_level_pull.mp3", // win resolve
-  slot_jackpot: "gamesfx/slot_jackpot1.mp3", // jackpot hit
-  slot_jackpot_loop: "gamesfx/slot_jackpot_loop.mp3", // jackpot celebration bed (LOOP)
-  // Per-reward PAYOUT cues — each overrides the generic slot_success when its file exists; any
-  // that's missing falls back to slot_success automatically (loader skips absent files silently).
-  // Drop the mp3s into gamesfx/ to fill them. (points wins keep the generic slot_success.)
+  // POLYSLOTS slot-machine SFX — the ACTUAL prototype sounds (from "prototypes/slot sound/"),
+  // copied into gamesfx/ with clean keys and played 1:1 with the prototype's SND map. The long
+  // polyslots_* MUSIC tracks are intentionally NOT here — they stream as <audio> (decoding a ~3min
+  // MP3 balloons to ~40-60MB PCM; see the 2026-06-23 music-buffer note).
+  slot_pull: "gamesfx/slot_pull.mp3", // lever pull + FULL spin as ONE sound (stopped when reels land)
+  slot_clunk: "gamesfx/slot_clunk.mp3", // reel locks into place (per reel, 3x max)
+  slot_win: "gamesfx/slot_win.mp3", // generic win resolve
+  slot_jackpot: "gamesfx/slot_jackpot.mp3", // jackpot hit
+  slot_bigwin: "gamesfx/slot_bigwin.mp3", // big-payout flourish layered on jackpot
+  slot_life: "gamesfx/slot_life.mp3", // alien-scatter extra life
+  slot_outoftokens: "gamesfx/slot_outoftokens.mp3", // played as TAP TO CONTINUE appears
+  // Per-reward PAYOUT cues — override slot_win when present; absent files fall back to slot_win.
   slot_payout_freeze: "gamesfx/slot_payout_freeze.mp3",
   slot_payout_bomb: "gamesfx/slot_payout_bomb.mp3",
   slot_payout_missile: "gamesfx/slot_payout_missile.mp3",
   slot_payout_quad: "gamesfx/slot_payout_quad.mp3",
   slot_payout_gold: "gamesfx/slot_payout_gold.mp3", // 3x / 2x goldbar token win
-  slot_payout_life: "gamesfx/slot_payout_life.mp3", // alien-scatter extra life
   item_pickup2: "gamesfx/item_pickup2.mp3", // unassigned - crunchy item pickup
   freeze: "gamesfx/freeze.mp3",
   unfreeze: "gamesfx/unfreeze.mp3",
@@ -7584,11 +7581,11 @@ function initGalaxyCanvas() {
     DISPOSED: "disposed",
   });
   let slotState = SLOT_STATE.IDLE;
-  // The two looping slot SFX (see the SFX-registry comment that names slot_ramp + slot_jackpot_loop).
-  // Teardown stops both even though the global visibilitychange handler's audioEngine.stopAllLoops()
-  // may already have silenced them on a background hide — we must still clear OUR bookkeeping so the
-  // slot's state can't desync from the audio engine.
-  const SLOT_LOOP_NAMES = ["slot_ramp", "slot_jackpot_loop"];
+  // The slot uses NO named looping SFX (faithful to the prototype: the pull sound is a single
+  // one-shot covering the whole spin, stored as a HANDLE in slotLoopHandles and stopped when the
+  // reels land / on teardown). Kept as an (empty) name list so the teardown's stopLoop() pass and
+  // the audio-desync guard stay in place for anything added later.
+  const SLOT_LOOP_NAMES = [];
   // Canonical teardown reasons. Pass slotTeardown() one of THESE constants, never a bare string —
   // a typo'd constant is a ReferenceError, whereas a typo'd string ("exit"/"done") would silently
   // miss the discard allowlist and strand a player's tokens. Note: there is deliberately no
@@ -7632,6 +7629,8 @@ function initGalaxyCanvas() {
   const slotLever = { value: 0, vel: 0, mode: "rest", grabOffset: 0, springTarget: 0 };
   const slotSprites = {};            // symbol id -> Image (loaded from slotart/)
   let _slotSpritesLoaded = false;
+  let slotNukeOwned = 0;             // per-game nuke flag (jackpot cap); reset on a new game
+  let slotPendingQuadShot = false;   // quad win is timed → applied at the next level start
   let slotMusicEl = null;            // dedicated streaming <audio> (long tracks aren't decoded — see note)
 
   // Single predicate the rest of the game branches on to detect slot ownership. Active == any live
@@ -7681,7 +7680,7 @@ function initGalaxyCanvas() {
     for (let i = 0; i < SLOT_LOOP_NAMES.length; i += 1) {
       try { audioEngine.stopLoop(SLOT_LOOP_NAMES[i]); } catch { /* already silenced — ignore */ }
     }
-    slotLoopHandles.forEach((h) => { try { h.stop?.(); } catch { /* ignore */ } });
+    slotLoopHandles.forEach((h) => slotStopHandle(h));
     slotLoopHandles.clear();
     slotRampHandle = null;
     slotStopMusic(); // stop the streamed slot track (level music resumes via the next startLevel)
@@ -7706,6 +7705,7 @@ function initGalaxyCanvas() {
     slotPaused = false;
     slotReels = [];
     slotLever.value = 0; slotLever.vel = 0; slotLever.mode = "rest"; slotLever.springTarget = 0;
+    slotWinFx.active = false; slotWinFx.lineActive = false; slotWinFx.parts.length = 0; slotWinFx.cells = []; slotWinFx.ctx = null;
     for (const k in slotEls) delete slotEls[k];
     // Use-it-or-lose-it: discard unused tokens only on a listed real exit. Centralised here so
     // menu/normal exit can't forget; unlisted reasons preserve the bank (see SLOT_TOKEN_DISCARD_REASONS).
@@ -7754,9 +7754,12 @@ function initGalaxyCanvas() {
     for (let i = a.length - 1; i > 0; i -= 1) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; }
     return a;
   }
-  function slotBuildStrip() {
+  function slotBuildStrip(exclude) {
     const arr = [];
-    for (const id in SLOT_STRIP_WEIGHTS) { for (let i = 0; i < SLOT_STRIP_WEIGHTS[id]; i += 1) arr.push(id); }
+    for (const id in SLOT_STRIP_WEIGHTS) {
+      const c = (exclude && exclude.has(id)) ? 0 : SLOT_STRIP_WEIGHTS[id];
+      for (let i = 0; i < c; i += 1) arr.push(id);
+    }
     return slotShuffle(arr);
   }
   function slotMakeReels() {
@@ -7779,6 +7782,13 @@ function initGalaxyCanvas() {
       r.canvas.height = Math.round(h * SLOT_DPR);
       r.ctx.setTransform(SLOT_DPR, 0, 0, SLOT_DPR, 0, 0);
       slotDrawReel(r);
+    }
+    // Size the win-FX overlay canvas to the reels container.
+    if (slotEls.winFx && slotWinFx.ctx) {
+      const fw = slotEls.winFx.clientWidth, fh = slotEls.winFx.clientHeight;
+      slotWinFx.cw = fw; slotWinFx.ch = fh;
+      slotEls.winFx.width = Math.round(fw * SLOT_DPR); slotEls.winFx.height = Math.round(fh * SLOT_DPR);
+      slotWinFx.ctx.setTransform(SLOT_DPR, 0, 0, SLOT_DPR, 0, 0);
     }
     // Recompute the lever travel from the actual track height so the knob scales with the cabinet.
     if (slotEls.track && slotEls.knob) {
@@ -7839,10 +7849,17 @@ function initGalaxyCanvas() {
     if (final < minPos) final += len;
     r.stopFrom = start; r.stopFinal = final; r.stopV0 = v0; r.stopT0 = performance.now(); r.state = "stopping";
   }
+  // audioEngine.play() returns {source,ended} (stop via source.stop()); playHtmlAudio()/playLoop()
+  // return {stop()}. Cover both so a tracked slot sound is actually silenced.
+  function slotStopHandle(h) {
+    if (!h) return;
+    try { h.stop?.(); } catch { /* ignore */ }
+    try { h.source?.stop?.(); } catch { /* ignore */ }
+  }
   function slotStopRamp() {
     const h = slotRampHandle;
     slotRampHandle = null;
-    if (h) { try { h.stop?.(); } catch { /* ignore */ } slotLoopHandles.delete(h); }
+    if (h) { slotStopHandle(h); slotLoopHandles.delete(h); }
   }
   function slotDoPull() {
     if (slotState !== SLOT_STATE.READY || slotTokens <= 0 || performance.now() < slotInputLockedUntil) return;
@@ -7852,19 +7869,313 @@ function initGalaxyCanvas() {
     slotState = SLOT_STATE.SPINNING;
     setSlotHint("");
     slotEls.skip?.classList.remove("show");
-    playGameSfx("slot_recoil", 0.8);
-    slotRampHandle = slotTrackLoop(audioEngine.playLoop("slot_ramp", { volume: 0.55 }));
-    slotReels.forEach((r) => { r.strip = slotBuildStrip(); r.len = r.strip.length; r.target = (Math.random() * r.len) | 0; });
+    slotClearWinFx();
+    slotEls.reels?.classList.remove("win");
+    if (slotEls.result) { slotEls.result.className = "ps-result"; slotEls.result.innerHTML = ""; }
+    // Single pull+spin sound (prototype's official_level_pull_full), stored as a handle so it can be
+    // stopped the instant all reels land. Tracked so teardown/background also stop it.
+    slotRampHandle = slotTrackLoop(audioEngine.play("slot_pull", { volume: 0.9 }));
+    // Capped powerups are pulled from the strip for this spin so their win literally can't appear.
+    const ex = slotCappedExclusions();
+    slotReels.forEach((r) => { r.strip = slotBuildStrip(ex); r.len = r.strip.length; r.target = (Math.random() * r.len) | 0; });
     slotStartSpin();
     slotReels.forEach((r, i) => slotTrackTimeout(() => slotCommandStop(r, r.target), SLOT_SPIN_TIME_MS + i * SLOT_REEL_STAGGER_MS));
   }
   function slotOnAllStopped() {
     slotStopRamp();
-    // 5a: no evaluation / payout / rewards yet (that's 5b). Just return to a pull-again ready state.
-    slotState = SLOT_STATE.READY;
+    slotApplyOutcome(); // evaluate the 3x3 grid, award the best line + scatter (ported from prototype)
+  }
+
+  // ── Paytable / evaluation / win FX (ported verbatim from prototypes/slot-machine.html) ─────────
+  const SLOT_PAYLINES = [{ n: "center", rows: [1, 1, 1] }, { n: "diag\\", rows: [0, 1, 2] }, { n: "diag/", rows: [2, 1, 0] }];
+  const SLOT_NUKE_CAP = 1;
+  const SLOT_POINTS = { jackpotOwned: 5000, wild3: 3000, jackpot2: 2500, pow2: 1000 };
+  const SLOT_TOK = { goldbar3: 3, goldbar2: 1 };
+  const SLOT_LINE_RANK = ["jackpot", "goldbar", "bomb", "missile", "quad", "freeze"];
+  const SLOT_WIN_FX_DUR = 1350, SLOT_MAXP = 150;
+  const SLOT_LINE_COL = { freeze: "150,225,255", bomb: "255,150,60", goldbar: "255,220,120", jackpot: "185,150,255", quad: "190,130,255", missile: "255,95,95", points: "40,255,150", _: "40,255,150" };
+  const SLOT_PW_LABEL = { quad: "QUAD SHOT!", missile: "MISSILE +1", bomb: "BOMB +1", freeze: "FREEZE +1" };
+  const SLOT_PW_SUB = { quad: "Active next level", missile: "Added to inventory", bomb: "Added to inventory", freeze: "Added to inventory" };
+  const slotWinFx = { active: false, points: [], cells: [], parts: [], start: 0, lineStart: 0, lineActive: false, type: null, frost: false, cw: 0, ch: 0, ctx: null, dirty: false };
+
+  function slotRoundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function slotDrawStar(ctx, x, y, r, col) {
+    ctx.save(); ctx.translate(x, y); ctx.fillStyle = col; ctx.beginPath();
+    for (let i = 0; i < 8; i += 1) { const a = i / 8 * 6.283, rr2 = i % 2 ? r * 0.4 : r; ctx.lineTo(Math.cos(a) * rr2, Math.sin(a) * rr2); }
+    ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+  function slotPushP(p) { if (slotWinFx.parts.length < SLOT_MAXP) slotWinFx.parts.push(p); }
+  function slotClearWinFx() {
+    slotWinFx.active = false; slotWinFx.lineActive = false; slotWinFx.parts.length = 0;
+    slotWinFx.cells = []; slotWinFx.frost = false; slotWinFx.type = null;
+    if (slotWinFx.ctx) slotWinFx.ctx.clearRect(0, 0, slotWinFx.cw, slotWinFx.ch);
+  }
+  function slotStartWinFX(win) {
+    if (!slotEls.reels) return;
+    const rr = slotEls.reels.getBoundingClientRect();
+    const pts = win.pl.rows.map((row, i) => {
+      const rc = slotReels[i].canvas.getBoundingClientRect(); const rowH = rc.height / 3;
+      return { x: rc.left - rr.left + rc.width / 2, y: rc.top - rr.top + (row * rowH + rowH / 2), half: Math.min(rc.width, rowH) / 2 };
+    });
+    slotWinFx.points = pts; slotWinFx.cells = pts; slotWinFx.lineStart = performance.now(); slotWinFx.start = slotWinFx.lineStart;
+    slotWinFx.lineActive = true; slotWinFx.active = true;
+    const p = win.prize;
+    slotWinFx.type = p.kind === "jackpot" ? "jackpot" : p.kind === "powerup" ? p.sym : p.kind === "tokens" ? "goldbar" : "points";
+    slotWinFx.frost = slotWinFx.type === "freeze";
+    slotSeedEffect(slotWinFx.type, pts);
+  }
+  function slotSeedEffect(type, cells) {
+    if (type === "jackpot") {
+      const cx = slotWinFx.cw / 2, cy = slotWinFx.ch / 2, hue = [165, 185, 280, 300];
+      for (let i = 0; i < 64; i += 1) { const a = Math.random() * 6.283, sp = 130 + Math.random() * 280;
+        slotPushP({ t: "spark", x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0, max: 0.8 + Math.random() * 0.8, size: 2 + Math.random() * 2, col: `hsl(${hue[i % 4]},100%,72%)`, grav: 50, drag: 1.5 }); }
+    }
+    for (const c of cells) {
+      if (type === "freeze") for (let i = 0; i < 6; i += 1) slotPushP({ t: "mist", x: c.x + (Math.random() - 0.5) * c.half, y: c.y + c.half * 0.35, vx: (Math.random() - 0.5) * 16, vy: -14 - Math.random() * 18, life: 0, max: 1.1 + Math.random() * 0.8, size: c.half * 0.55, col: "185,235,255", grav: -5, drag: 0.5 });
+      else if (type === "bomb") for (let i = 0; i < 11; i += 1) { const a = -1.57 + (Math.random() - 0.5) * 2.4, sp = 70 + Math.random() * 170;
+        slotPushP({ t: "ember", x: c.x, y: c.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0, max: 0.5 + Math.random() * 0.5, size: 1.5 + Math.random() * 2, col: `hsl(${18 + Math.random() * 32},100%,58%)`, grav: 260, drag: 1.1 }); }
+      else if (type === "goldbar") for (let i = 0; i < 7; i += 1) slotPushP({ t: "gleam", x: c.x + (Math.random() - 0.5) * c.half, y: c.y + (Math.random() - 0.5) * c.half, vx: 0, vy: 0, life: 0, max: 0.6 + Math.random() * 0.6, size: 3 + Math.random() * 4, col: "255,225,120", grav: 0, drag: 0, delay: Math.random() * 0.55 });
+      else for (let i = 0; i < 6; i += 1) { const a = Math.random() * 6.283, sp = 45 + Math.random() * 95;
+        slotPushP({ t: "spark", x: c.x, y: c.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0, max: 0.5 + Math.random() * 0.4, size: 1.5 + Math.random() * 1.5, col: "hsl(165,100%,72%)", grav: 35, drag: 1.4 }); }
+    }
+    if (cells.length > 1) { for (let i = 0; i <= 16; i += 1) slotSpawnLineP(type, slotPointOnPath(cells, i / 16)); }
+  }
+  function slotLineCol() { return SLOT_LINE_COL[slotWinFx.type] || SLOT_LINE_COL._; }
+  function slotPointOnPath(pts, f) {
+    const segs = []; let total = 0;
+    for (let i = 0; i < pts.length - 1; i += 1) { const L = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y); segs.push(L); total += L; }
+    let d = f * total, acc = 0;
+    for (let i = 0; i < pts.length - 1; i += 1) { if (acc + segs[i] >= d) { const t = (d - acc) / (segs[i] || 1); return { x: pts[i].x + (pts[i + 1].x - pts[i].x) * t, y: pts[i].y + (pts[i + 1].y - pts[i].y) * t }; } acc += segs[i]; }
+    return pts[pts.length - 1];
+  }
+  function slotSpawnLineP(type, pt) {
+    if (type === "freeze") slotPushP({ t: "mist", x: pt.x, y: pt.y, vx: (Math.random() - 0.5) * 10, vy: -8 - Math.random() * 12, life: 0, max: 0.9 + Math.random() * 0.7, size: 14 + Math.random() * 10, col: "185,235,255", grav: -4, drag: 0.5 });
+    else if (type === "bomb") slotPushP({ t: "ember", x: pt.x, y: pt.y, vx: (Math.random() - 0.5) * 40, vy: -18 - Math.random() * 40, life: 0, max: 0.45 + Math.random() * 0.4, size: 1.4 + Math.random() * 1.6, col: `hsl(${20 + Math.random() * 30},100%,60%)`, grav: 210, drag: 1.1 });
+    else if (type === "goldbar") slotPushP({ t: "gleam", x: pt.x, y: pt.y, vx: 0, vy: 0, life: 0, max: 0.5 + Math.random() * 0.5, size: 2.5 + Math.random() * 3, col: "255,225,120", grav: 0, drag: 0, delay: Math.random() * 0.4 });
+    else slotPushP({ t: "spark", x: pt.x, y: pt.y, vx: (Math.random() - 0.5) * 55, vy: (Math.random() - 0.5) * 55, life: 0, max: 0.4 + Math.random() * 0.4, size: 1.1 + Math.random() * 1.2, col: (SLOT_LINE_COL[type] || SLOT_LINE_COL._), grav: 20, drag: 1.4 });
+  }
+  function slotUpdateParticles(dt) {
+    const ps = slotWinFx.parts;
+    for (let i = ps.length - 1; i >= 0; i -= 1) { const p = ps[i];
+      if (p.delay > 0) { p.delay -= dt; continue; }
+      p.life += dt; if (p.life >= p.max) { ps.splice(i, 1); continue; }
+      p.vx -= p.vx * p.drag * dt; p.vy -= p.vy * p.drag * dt; p.vy += p.grav * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+    }
+  }
+  function slotDrawParticles(ctx) {
+    ctx.save(); ctx.globalCompositeOperation = "lighter";
+    for (const p of slotWinFx.parts) { if (p.delay > 0) continue; const k = 1 - p.life / p.max;
+      if (p.t === "mist") { const r = p.size * (1.3 - 0.6 * k); const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r); g.addColorStop(0, `rgba(${p.col},${0.3 * k})`); g.addColorStop(1, `rgba(${p.col},0)`); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 6.283); ctx.fill(); }
+      else if (p.t === "gleam") { slotDrawStar(ctx, p.x, p.y, p.size * (0.6 + 0.6 * Math.abs(Math.sin(p.life * 11))), `rgba(${p.col},${k})`); }
+      else { ctx.globalAlpha = k; ctx.fillStyle = (typeof p.col === "string" && p.col[0] === "h") ? p.col : `rgba(${p.col},1)`; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, 6.283); ctx.fill(); ctx.globalAlpha = 1; }
+    }
+    ctx.restore();
+  }
+  function slotTracePath(ctx, pts, reveal) {
+    const segs = []; let total = 0;
+    for (let i = 0; i < pts.length - 1; i += 1) { const L = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y); segs.push(L); total += L; }
+    const target = reveal * total; ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); let acc = 0;
+    for (let i = 0; i < pts.length - 1; i += 1) { const L = segs[i];
+      if (acc + L <= target) { ctx.lineTo(pts[i + 1].x, pts[i + 1].y); acc += L; }
+      else { const f = L ? (target - acc) / L : 0; ctx.lineTo(pts[i].x + (pts[i + 1].x - pts[i].x) * f, pts[i].y + (pts[i + 1].y - pts[i].y) * f); break; } }
+  }
+  function slotSampleWavy(pts, reveal, amp, freq, phase, n) {
+    const segs = []; let total = 0;
+    for (let i = 0; i < pts.length - 1; i += 1) { const L = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y); segs.push(L); total += L; }
+    const out = [], target = reveal * total || 1;
+    for (let s = 0; s <= n; s += 1) {
+      const d = target * s / n; let acc = 0, si = 0;
+      while (si < segs.length - 1 && acc + segs[si] < d) { acc += segs[si]; si += 1; }
+      const L = segs[si] || 1, f = (d - acc) / L;
+      const ax = pts[si].x, ay = pts[si].y, bx = pts[si + 1].x, by = pts[si + 1].y;
+      let tx = bx - ax, ty = by - ay; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      const taper = Math.sin((s / n) * Math.PI); const off = Math.sin(d * freq + phase) * amp * taper;
+      out.push({ x: ax + (bx - ax) * f - ty * off, y: ay + (by - ay) * f + tx * off });
+    }
+    return out;
+  }
+  function slotStrokePts(ctx, a) { ctx.beginPath(); ctx.moveTo(a[0].x, a[0].y); for (let i = 1; i < a.length; i += 1) ctx.lineTo(a[i].x, a[i].y); }
+  function slotDrawWinBand(now) {
+    const ctx = slotWinFx.ctx, pts = slotWinFx.points, t = now - slotWinFx.lineStart, col = slotLineCol();
+    const attack = Math.min(1, t / 90), decay = Math.max(0, 1 - (t - 90) / 980), env = attack * decay; if (env <= 0) return;
+    const flick = 0.72 + 0.28 * Math.sin(t / 47) * Math.sin(t / 19);
+    const reveal = Math.min(1, t / 140);
+    const baseHalf = slotWinFx.cells.length ? slotWinFx.cells[0].half : 24, half = baseHalf * (0.55 + 0.55 * env);
+    ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.shadowColor = `rgba(${col},${0.9 * env})`; ctx.shadowBlur = 30 * env;
+    ctx.lineWidth = half * 2.1; ctx.strokeStyle = `rgba(${col},${0.15 * env})`;
+    slotTracePath(ctx, pts, reveal); ctx.stroke();
+    for (let L = 0; L < 3; L += 1) {
+      const amp = half * (0.55 - L * 0.13), freq = 0.045 + L * 0.03, speed = 0.010 + L * 0.007;
+      ctx.shadowBlur = (16 - L * 4) * env; ctx.lineWidth = half * (0.95 - L * 0.24);
+      ctx.strokeStyle = `rgba(${col},${(0.32 - L * 0.07) * env * flick})`;
+      slotStrokePts(ctx, slotSampleWavy(pts, reveal, amp, freq, t * speed + L * 1.9, 40)); ctx.stroke();
+    }
+    ctx.shadowBlur = 10 * env; ctx.lineWidth = Math.max(2, half * 0.30);
+    ctx.strokeStyle = `rgba(255,255,255,${0.5 * env * flick})`;
+    slotTracePath(ctx, pts, reveal); ctx.stroke();
+    if (t < 160) { const a = 1 - t / 160; ctx.shadowColor = `rgba(${col},1)`; ctx.shadowBlur = 40;
+      ctx.lineWidth = half * 2.6; ctx.strokeStyle = `rgba(255,255,255,${0.55 * a})`;
+      slotTracePath(ctx, pts, 1); ctx.stroke(); }
+    ctx.restore();
+  }
+  function slotDrawFX(now, dt) {
+    const ctx = slotWinFx.ctx; if (!ctx) return;
+    const tline = now - slotWinFx.lineStart, lineActive = slotWinFx.lineActive && tline < SLOT_WIN_FX_DUR, teff = now - slotWinFx.start;
+    const glowActive = slotWinFx.cells.length && teff < 1700, frostActive = slotWinFx.frost && teff < 1700, jackpotActive = slotWinFx.type === "jackpot" && teff < 1700;
+    slotUpdateParticles(dt);
+    if (!lineActive && !glowActive && !frostActive && !slotWinFx.parts.length) { if (slotWinFx.dirty) { ctx.clearRect(0, 0, slotWinFx.cw, slotWinFx.ch); slotWinFx.dirty = false; } slotWinFx.active = false; return; }
+    ctx.clearRect(0, 0, slotWinFx.cw, slotWinFx.ch); slotWinFx.dirty = true;
+    if (jackpotActive) { const a = Math.max(0, 1 - teff / 1700) * (0.5 + 0.5 * Math.abs(Math.sin(teff / 90))); const cx = slotWinFx.cw / 2, cy = slotWinFx.ch / 2, R = Math.max(slotWinFx.cw, slotWinFx.ch) * 0.85;
+      ctx.save(); ctx.globalCompositeOperation = "lighter"; const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+      g.addColorStop(0, `rgba(180,140,255,${0.5 * a})`); g.addColorStop(0.4, `rgba(0,255,209,${0.22 * a})`); g.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, slotWinFx.cw, slotWinFx.ch); ctx.restore(); }
+    if (glowActive) { const a = Math.max(0, 1 - teff / 1700) * (0.6 + 0.4 * Math.abs(Math.sin(teff / 110)));
+      const col = slotWinFx.frost ? "150,225,255" : slotWinFx.type === "bomb" ? "255,150,60" : slotWinFx.type === "goldbar" ? "255,220,120" : slotWinFx.type === "jackpot" ? "180,150,255" : "40,255,170";
+      ctx.save(); ctx.globalCompositeOperation = "lighter";
+      for (const c of slotWinFx.cells) { const R = c.half * 1.5; const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, R); g.addColorStop(0, `rgba(${col},${0.5 * a})`); g.addColorStop(1, `rgba(${col},0)`); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(c.x, c.y, R, 0, 6.283); ctx.fill(); }
+      ctx.restore(); }
+    if (frostActive) { const a = Math.min(1, teff / 300) * Math.max(0, 1 - Math.max(0, teff - 1100) / 600);
+      for (const c of slotWinFx.cells) { const s = c.half * 2 * 0.96; const g = ctx.createLinearGradient(c.x - c.half, c.y - c.half, c.x + c.half, c.y + c.half);
+        g.addColorStop(0, `rgba(205,240,255,${0.30 * a})`); g.addColorStop(0.5, `rgba(140,205,255,${0.10 * a})`); g.addColorStop(1, `rgba(225,245,255,${0.32 * a})`);
+        ctx.fillStyle = g; slotRoundRect(ctx, c.x - s / 2, c.y - s / 2, s, s, 8); ctx.fill(); } }
+    if (lineActive) slotDrawWinBand(now);
+    slotDrawParticles(ctx);
+  }
+
+  // Grid read + line scoring (verbatim from the prototype; wild/scatter rules intact).
+  function slotReadGrid() {
+    return slotReels.map((r) => { const len = r.len, c = ((Math.round(r.pos) % len) + len) % len;
+      return [r.strip[(c + 1) % len], r.strip[c], r.strip[(c - 1 + len) % len]]; });
+  }
+  function slotCappedExclusions() {
+    const ex = new Set();
+    if (playerBombInventory >= MAX_BOMB_INVENTORY) ex.add("bomb");
+    if (playerMissileInventory >= MAX_MISSILE_INVENTORY) ex.add("missile");
+    if (playerFreezeInventory >= MAX_FREEZE_INVENTORY) ex.add("freeze");
+    return ex;
+  }
+  function slotEvalLine(syms) {
+    if (syms.includes("alien")) return { kind: "none" };
+    const wild = syms.filter((s) => s === "wild").length;
+    const reals = syms.filter((s) => s !== "wild");
+    if (reals.length === 0) return wild === 3 ? { kind: "triple", sym: "wild" } : { kind: "none" };
+    const counts = {}; reals.forEach((s) => { counts[s] = (counts[s] || 0) + 1; });
+    let best = null;
+    for (const s in counts) {
+      const eff = counts[s] + (s === "jackpot" ? 0 : wild);
+      if (!best || eff > best.eff || (eff === best.eff && SLOT_LINE_RANK.indexOf(s) < SLOT_LINE_RANK.indexOf(best.sym))) best = { sym: s, eff };
+    }
+    if (best.eff >= 3) return { kind: "triple", sym: best.sym };
+    if (best.eff >= 2) return { kind: "pair", sym: best.sym };
+    return { kind: "none" };
+  }
+  function slotPrizeForLine(res) {
+    if (res.kind === "triple") {
+      switch (res.sym) {
+        case "jackpot": return slotNukeOwned < SLOT_NUKE_CAP ? { kind: "jackpot" } : { kind: "points", value: SLOT_POINTS.jackpotOwned };
+        case "quad": case "missile": case "bomb": case "freeze": return { kind: "powerup", sym: res.sym };
+        case "goldbar": return { kind: "tokens", value: SLOT_TOK.goldbar3 };
+        case "wild": return { kind: "points", value: SLOT_POINTS.wild3 };
+        default: return { kind: "none" };
+      }
+    }
+    if (res.kind === "pair") {
+      switch (res.sym) {
+        case "jackpot": return { kind: "points", value: SLOT_POINTS.jackpot2 };
+        case "goldbar": return { kind: "tokens", value: SLOT_TOK.goldbar2 };
+        case "quad": case "missile": case "bomb": case "freeze": return { kind: "points", value: SLOT_POINTS.pow2 };
+        default: return { kind: "none" };
+      }
+    }
+    return { kind: "none" };
+  }
+  function slotEvaluate(grid) {
+    const wins = [];
+    for (const pl of SLOT_PAYLINES) {
+      const syms = grid.map((col, ri) => col[pl.rows[ri]]);
+      const res = slotEvalLine(syms), prize = slotPrizeForLine(res);
+      if (prize.kind !== "none") wins.push({ pl, res, prize });
+    }
+    const alienAnywhere = grid.some((col) => col.includes("alien"));
+    return { win: slotBestWin(wins), extraLife: alienAnywhere };
+  }
+  function slotBestWin(wins) {
+    const rank = (w) => ({ jackpot: 4, powerup: 3, tokens: 2, points: 1 })[w.prize.kind] || 0;
+    let best = null;
+    for (const w of wins) { if (!best || rank(w) > rank(best) || (rank(w) === rank(best) && (w.prize.value || 0) > (best.prize.value || 0))) best = w; }
+    return best;
+  }
+
+  function slotShowResult(cls, big, sub) {
+    if (!slotEls.result) return;
+    slotEls.result.className = "ps-result " + cls;
+    slotEls.result.innerHTML = `<div class="ps-big">${big}</div><div class="ps-sub">${sub}</div>`;
+  }
+  function slotAwardPowerup(sym) {
+    if (sym === "bomb") { playerBombInventory = Math.min(MAX_BOMB_INVENTORY, playerBombInventory + 1); updateHudBombInventory(); }
+    else if (sym === "missile") { playerMissileInventory = Math.min(MAX_MISSILE_INVENTORY, playerMissileInventory + 1); updateHudMissileInventory(); }
+    else if (sym === "freeze") { playerFreezeInventory = Math.min(MAX_FREEZE_INVENTORY, playerFreezeInventory + 1); updateHudFreezeInventory(); }
+    else if (sym === "quad") { slotPendingQuadShot = true; } // timed — applied at the next level start
+    slotSyncCabinetStats();
+  }
+  function slotJackpotPresent(extraLife) {
+    slotState = SLOT_STATE.RESOLVING;
+    playGameSfx("slot_jackpot", 1.0);
+    playGameSfx("slot_bigwin", 0.7);
+    slotNukeOwned = SLOT_NUKE_CAP;
+    // TODO(nuke weapon): the real Nuke is net-new (see SPEC §7 ⚠). For now the jackpot awards a big
+    // point bonus + full FX/sound; wire the actual weapon when it's built.
+    if (slotEls.result) {
+      slotEls.result.className = "ps-result jackpot";
+      slotEls.result.innerHTML = `<div class="ps-big">JACKPOT!</div><div class="ps-sub">+${SLOT_POINTS.jackpotOwned.toLocaleString()} PTS${extraLife ? " + EXTRA LIFE" : ""}</div>`;
+      const btn = document.createElement("button"); btn.className = "ps-claim"; btn.type = "button"; btn.textContent = "CLAIM";
+      slotTrackListener(btn, "click", () => {
+        addArcadeScore(SLOT_POINTS.jackpotOwned);
+        slotEls.result.className = "ps-result"; slotEls.result.innerHTML = "";
+        slotState = SLOT_STATE.READY; slotAfterResolve();
+      });
+      slotEls.result.appendChild(btn);
+    }
+  }
+  function slotApplyOutcome() {
+    const { win, extraLife } = slotEvaluate(slotReadGrid());
+    if (extraLife) { arcadeLives = clamp(arcadeLives + 1, 0, MAX_LIVES); renderLives(); if (slotEls.lifeCount) slotEls.lifeCount.textContent = String(arcadeLives); slotEls.lives?.classList.add("bump"); }
+    if (!win) {
+      if (extraLife) { slotShowResult("life", "EXTRA LIFE 👽", "Alien scatter!"); playGameSfx("slot_life", 0.9); }
+      else slotShowResult("none", "NO WIN", "Pull again");
+      slotState = SLOT_STATE.READY; slotAfterResolve(); return;
+    }
+    slotEls.reels?.classList.add("win");
+    slotStartWinFX(win);
+    const p = win.prize;
+    if (p.kind === "jackpot") { slotJackpotPresent(extraLife); return; }
+    // per-reward payout cue (falls back to slot_win when the reward-specific file is absent)
+    const payoutKey = p.kind === "tokens" ? "slot_payout_gold" : p.kind === "powerup" ? "slot_payout_" + p.sym : null;
+    playGameSfx(payoutKey && GAME_SFX[payoutKey] ? payoutKey : "slot_win", 0.92);
+    if (extraLife) playGameSfx("slot_life", 0.8);
+    let big, sub;
+    if (p.kind === "tokens") {
+      slotTokens += p.value; big = `+${p.value} TOKEN${p.value > 1 ? "S" : ""}`; sub = "Gold bars!";
+      if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
+      if (slotEls.tokensBox) { slotEls.tokensBox.classList.remove("tick"); void slotEls.tokensBox.offsetWidth; slotEls.tokensBox.classList.add("tick"); }
+    } else if (p.kind === "powerup") { slotAwardPowerup(p.sym); big = SLOT_PW_LABEL[p.sym]; sub = SLOT_PW_SUB[p.sym]; }
+    else { addArcadeScore(p.value); big = `+${p.value.toLocaleString()} PTS`; sub = (win.res.kind === "pair" ? "Matched pair" : "Bonus") + (extraLife ? " + EXTRA LIFE" : ""); }
+    slotShowResult("win", big, sub);
+    slotState = SLOT_STATE.READY; slotAfterResolve();
+  }
+  function slotAfterResolve() {
     if (slotTokens <= 0) { slotShowContinue(); return; }
     slotEls.skip?.classList.add("show");
-    setSlotHint("PULL AGAIN");
+    if (!slotEls.result || !slotEls.result.classList.contains("none")) setSlotHint("PULL AGAIN");
+    else setSlotHint("");
+  }
+  // Apply rewards that must land on the NEXT level (quad is timed). Called after startLevel().
+  function slotApplyPendingRewards() {
+    if (slotPendingQuadShot) { quadShotUntil = performance.now() + 12000; slotPendingQuadShot = false; }
   }
 
   function slotFrame(now) {
@@ -7889,7 +8200,7 @@ function initGalaxyCanvas() {
       else if (r.state === "stopping") {
         const s = Math.min(1, ((now - r.stopT0) / 1000) / SLOT_STOP_DUR), s2 = s * s, s3 = s2 * s;
         r.pos = r.stopFrom * (2 * s3 - 3 * s2 + 1) + (r.stopV0 * SLOT_STOP_DUR) * (s3 - 2 * s2 + s) + r.stopFinal * (-2 * s3 + 3 * s2);
-        if (s >= 1) { r.pos = r.stopFinal; r.bounce = 0; r.bounceVel = SLOT_BOUNCE_IMPULSE; r.state = "settle"; playGameSfx("slot_reel_click", 0.7); }
+        if (s >= 1) { r.pos = r.stopFinal; r.bounce = 0; r.bounceVel = SLOT_BOUNCE_IMPULSE; r.state = "settle"; playGameSfx("slot_clunk", 0.7); }
       } else if (r.state === "settle") {
         r.bounceVel += (0 - r.bounce) * SLOT_BOUNCE_K * dt; r.bounceVel -= r.bounceVel * SLOT_BOUNCE_DAMP * dt; r.bounce += r.bounceVel * dt;
         if (Math.abs(r.bounce) < 0.002 && Math.abs(r.bounceVel) < 0.02) {
@@ -7899,6 +8210,7 @@ function initGalaxyCanvas() {
       }
       slotDrawReel(r);
     }
+    if (slotWinFx.active) slotDrawFX(now, dt);
     slotTrackRaf(slotFrame);
   }
   function slotStartFrameLoop() {
@@ -7959,6 +8271,17 @@ function initGalaxyCanvas() {
       .ps-reel{position:relative;flex:1;height:100%;overflow:hidden;border-radius:5px;background:linear-gradient(180deg,#0a1626,#060e1a);border:1px solid rgba(0,255,209,.10);}
       .ps-reel canvas{display:block;width:100%;height:100%;}
       .ps-payline{position:absolute;left:4px;right:4px;top:50%;height:32%;transform:translateY(-50%);border-top:2px solid rgba(0,255,209,.42);border-bottom:2px solid rgba(0,255,209,.42);pointer-events:none;z-index:4;border-radius:4px;box-shadow:0 0 18px rgba(0,255,209,.18);}
+      .ps-reels.win .ps-payline{border-color:#00FFD1;box-shadow:0 0 26px rgba(0,255,209,.55);animation:psWinpulse .5s ease-in-out 3;}
+      @keyframes psWinpulse{50%{box-shadow:0 0 40px rgba(0,255,209,.9);}}
+      .ps-winfx{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none;}
+      .ps-result{position:absolute;left:var(--reelL);width:var(--reelW);top:var(--resultT);z-index:8;display:flex;flex-direction:column;align-items:center;gap:1px;text-align:center;pointer-events:none;}
+      .ps-result .ps-big{font-size:clamp(15px,4.2vw,22px);letter-spacing:.08em;color:#00FFD1;text-shadow:0 0 12px rgba(0,255,209,.6);}
+      .ps-result .ps-sub{font-size:clamp(10px,2.6vw,13px);letter-spacing:.05em;color:rgba(183,201,255,.65);}
+      .ps-result.none .ps-big{color:rgba(183,201,255,.65);text-shadow:none;}
+      .ps-result.life .ps-big{color:#ff7b8a;text-shadow:0 0 12px rgba(255,90,120,.6);}
+      .ps-result.jackpot .ps-big{font-size:clamp(18px,5vw,26px);color:#fff;text-shadow:0 0 10px #00FFD1,0 0 26px rgba(0,255,209,.8),0 0 40px rgba(0,255,209,.5);animation:psJflash .6s ease-in-out infinite;}
+      @keyframes psJflash{50%{text-shadow:0 0 16px #fff,0 0 40px #00FFD1,0 0 70px rgba(0,255,209,.9);}}
+      .ps-claim{margin-top:6px;pointer-events:auto;font-family:inherit;font-size:.78rem;letter-spacing:.1em;color:#04121c;background:#00FFD1;border:none;border-radius:8px;padding:7px 16px;cursor:pointer;font-weight:bold;box-shadow:0 0 18px rgba(0,255,209,.45);}
       .ps-lever{position:absolute;right:var(--leverR);top:var(--leverT);width:var(--leverW);height:var(--leverH);display:flex;flex-direction:column;align-items:center;z-index:7;touch-action:none;}
       .ps-track{position:relative;width:9px;flex:1;margin:4px 0;border-radius:6px;background:linear-gradient(180deg,#0b1422,#060c16);border:1px solid rgba(0,255,209,.18);box-shadow:inset 0 0 8px rgba(0,0,0,.8);}
       .ps-knob{position:absolute;left:50%;top:0;width:30px;height:30px;margin-left:-15px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ff6b6b,#b00020 70%);border:2px solid rgba(255,255,255,.35);box-shadow:0 0 16px rgba(255,40,60,.55),inset 0 -4px 8px rgba(0,0,0,.4);cursor:grab;touch-action:none;z-index:5;}
@@ -7995,8 +8318,10 @@ function initGalaxyCanvas() {
           <div class="ps-reel"><canvas id="psReelC0"></canvas></div>
           <div class="ps-reel"><canvas id="psReelC1"></canvas></div>
           <div class="ps-reel"><canvas id="psReelC2"></canvas></div>
+          <canvas class="ps-winfx" id="psWinFx"></canvas>
         </div>
         <div class="ps-lever" id="psLever"><div class="ps-track" id="psTrack"><div class="ps-knob" id="psKnob"></div></div></div>
+        <div class="ps-result" id="psResult"></div>
         <div class="ps-hint blink" id="psHint">GET READY</div>
         <div class="ps-hud" id="psHud">
           <div class="ps-slot" data-k="quad"><img class="ps-hudicon" src="slotart/quad.png" alt=""><b id="psInvQuad">0</b></div>
@@ -8011,6 +8336,7 @@ function initGalaxyCanvas() {
     `;
     (galaxyView || document.body).appendChild(overlay);
     slotEls.root = overlay;
+    slotEls.lives = overlay.querySelector("#psLives");
     slotEls.tokensBox = overlay.querySelector("#psTokens");
     slotEls.tokenCount = overlay.querySelector("#psTokenCount");
     slotEls.lifeCount = overlay.querySelector("#psLifeCount");
@@ -8018,11 +8344,14 @@ function initGalaxyCanvas() {
     slotEls.skip = overlay.querySelector("#psSkip");
     slotEls.continue = overlay.querySelector("#psContinue");
     slotEls.continueInner = overlay.querySelector("#psContinueInner");
+    slotEls.result = overlay.querySelector("#psResult");
     slotEls.reels = overlay.querySelector("#psReels");
     slotEls.lever = overlay.querySelector("#psLever");
     slotEls.track = overlay.querySelector("#psTrack");
     slotEls.knob = overlay.querySelector("#psKnob");
     slotEls.reelCanvas = [0, 1, 2].map((i) => overlay.querySelector("#psReelC" + i));
+    slotEls.winFx = overlay.querySelector("#psWinFx");
+    slotWinFx.ctx = slotEls.winFx ? slotEls.winFx.getContext("2d") : null;
     return overlay;
   }
 
@@ -8056,8 +8385,9 @@ function initGalaxyCanvas() {
     ensureSlotStyles();
     ensureSlotSprites();
     slotOverlay = buildSlotOverlay();
+    slotClearWinFx();
     if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
-    slotSyncCabinetStats(); // lives + current inventory in the cabinet HUD (read-only in 5a)
+    slotSyncCabinetStats(); // lives + current inventory in the cabinet HUD
     setSlotHint("GET READY");
     // Swallow taps on the cabinet so a stray fire-tap can't reach the canvas underneath.
     slotTrackListener(slotEls.root, "pointerdown", (e) => e.stopPropagation(), { passive: false });
@@ -8147,7 +8477,7 @@ function initGalaxyCanvas() {
     for (let i = 0; i < SLOT_LOOP_NAMES.length; i += 1) {
       try { audioEngine.stopLoop(SLOT_LOOP_NAMES[i]); } catch { /* ignore */ }
     }
-    slotLoopHandles.forEach((h) => { try { h.stop?.(); } catch { /* ignore */ } });
+    slotLoopHandles.forEach((h) => slotStopHandle(h));
     slotLoopHandles.clear();
     slotRampHandle = null;
     // Pause the streamed slot music (do NOT restore the bus — this is a pause, not an exit).
@@ -8177,7 +8507,11 @@ function initGalaxyCanvas() {
   // The single between-level seam (replaces the step-3 stub). Decides whether the slot takes the
   // window — if so it OWNS the startLevel() call (passed as onExit); otherwise forwards straight on.
   function handoffAfterScorecard(continueToNextLevel) {
-    if (shouldOpenSlot()) { enterSlot({ onExit: continueToNextLevel }); return; }
+    if (shouldOpenSlot()) {
+      // The slot owns startLevel(); after it runs, apply any reward that must land on the new level (quad).
+      enterSlot({ onExit: () => { continueToNextLevel(); slotApplyPendingRewards(); } });
+      return;
+    }
     continueToNextLevel();
   }
   // ───────────────────────────────────────────────────────────────────────────────────────────
@@ -12780,6 +13114,7 @@ function initGalaxyCanvas() {
     playerBombInventory = 0;
     slotTeardown(SLOT_REASON.NEW_GAME); // dispose any live slot before discarding its tokens
     slotTokens = 0; // 2026-06-26: discard banked POLYSLOTS tokens on a fresh run
+    slotNukeOwned = 0; slotPendingQuadShot = false; // reset per-game slot reward state
     // 2026-06-10: reset powerup + active effect state
     powerups.length = 0;
     quadShotUntil = 0;
@@ -14354,6 +14689,7 @@ function initGalaxyCanvas() {
     playerBombInventory = 0;
     slotTeardown(SLOT_REASON.NEW_GAME); // dispose any live slot before discarding its tokens
     slotTokens = 0; // 2026-06-26: discard banked POLYSLOTS tokens on a fresh run
+    slotNukeOwned = 0; slotPendingQuadShot = false; // reset per-game slot reward state
     quadShotUntil = 0;
     _freezeBankMs = 0;
     _freezeActive = false;

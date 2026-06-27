@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-27 slot-full-port (wins+fx+sounds)";
+const BUILD_TS = "2026-06-27 11:27";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -394,12 +394,6 @@ const GAME_SFX = {
   slot_bigwin: "gamesfx/slot_bigwin.mp3", // big-payout flourish layered on jackpot
   slot_life: "gamesfx/slot_life.mp3", // alien-scatter extra life
   slot_outoftokens: "gamesfx/slot_outoftokens.mp3", // played as TAP TO CONTINUE appears
-  // Per-reward PAYOUT cues — override slot_win when present; absent files fall back to slot_win.
-  slot_payout_freeze: "gamesfx/slot_payout_freeze.mp3",
-  slot_payout_bomb: "gamesfx/slot_payout_bomb.mp3",
-  slot_payout_missile: "gamesfx/slot_payout_missile.mp3",
-  slot_payout_quad: "gamesfx/slot_payout_quad.mp3",
-  slot_payout_gold: "gamesfx/slot_payout_gold.mp3", // 3x / 2x goldbar token win
   item_pickup2: "gamesfx/item_pickup2.mp3", // unassigned - crunchy item pickup
   freeze: "gamesfx/freeze.mp3",
   unfreeze: "gamesfx/unfreeze.mp3",
@@ -7720,6 +7714,7 @@ function initGalaxyCanvas() {
   const SLOT_LOCKOUT_MS = 600;
   const SLOT_SKIP_DELAY_MS = 2000;
   const SLOT_CONTINUE_DELAY_MS = 500;
+  const SLOT_FINAL_RESULT_HOLD_MS = 1000;
   const SLOT_EXIT_FADE_MS = 420; // brief "ENTERING NEXT LEVEL…" beat before handing to startLevel()
   // Frequency toggle. For now: open after every non-final level (the handoff seam only fires on the
   // non-final path anyway). Flip to false to skip the slot entirely; later this can become a cadence.
@@ -8119,7 +8114,12 @@ function initGalaxyCanvas() {
     if (sym === "bomb") { playerBombInventory = Math.min(MAX_BOMB_INVENTORY, playerBombInventory + 1); updateHudBombInventory(); }
     else if (sym === "missile") { playerMissileInventory = Math.min(MAX_MISSILE_INVENTORY, playerMissileInventory + 1); updateHudMissileInventory(); }
     else if (sym === "freeze") { playerFreezeInventory = Math.min(MAX_FREEZE_INVENTORY, playerFreezeInventory + 1); updateHudFreezeInventory(); }
-    else if (sym === "quad") { slotPendingQuadShot = true; } // timed — applied at the next level start
+    else if (sym === "quad") {
+      slotPendingQuadShot = true; // timed — applied at the next level start
+      playerMissileInventory = 0;
+      missileAimMode = false;
+      updateHudMissileInventory();
+    }
     slotSyncCabinetStats();
   }
   function slotJackpotPresent(extraLife) {
@@ -8127,6 +8127,7 @@ function initGalaxyCanvas() {
     playGameSfx("slot_jackpot", 1.0);
     playGameSfx("slot_bigwin", 0.7);
     slotNukeOwned = SLOT_NUKE_CAP;
+    slotSyncCabinetStats();
     // TODO(nuke weapon): the real Nuke is net-new (see SPEC §7 ⚠). For now the jackpot awards a big
     // point bonus + full FX/sound; wire the actual weapon when it's built.
     if (slotEls.result) {
@@ -8141,9 +8142,27 @@ function initGalaxyCanvas() {
       slotEls.result.appendChild(btn);
     }
   }
+  function slotFlashExtraLife() {
+    if (slotEls.lifeCount) slotEls.lifeCount.textContent = String(arcadeLives);
+    if (slotEls.lives) {
+      slotEls.lives.classList.remove("bump");
+      void slotEls.lives.offsetWidth;
+      slotEls.lives.classList.add("bump");
+    }
+    if (slotEls.lifeAward) {
+      slotEls.lifeAward.classList.remove("show");
+      void slotEls.lifeAward.offsetWidth;
+      slotEls.lifeAward.classList.add("show");
+      slotTrackTimeout(() => slotEls.lifeAward?.classList.remove("show"), 1150);
+    }
+  }
   function slotApplyOutcome() {
     const { win, extraLife } = slotEvaluate(slotReadGrid());
-    if (extraLife) { arcadeLives = clamp(arcadeLives + 1, 0, MAX_LIVES); renderLives(); if (slotEls.lifeCount) slotEls.lifeCount.textContent = String(arcadeLives); slotEls.lives?.classList.add("bump"); }
+    if (extraLife) {
+      arcadeLives = clamp(arcadeLives + 1, 0, MAX_LIVES);
+      renderLives();
+      slotFlashExtraLife();
+    }
     if (!win) {
       if (extraLife) { slotShowResult("life", "EXTRA LIFE 👽", "Alien scatter!"); playGameSfx("slot_life", 0.9); }
       else slotShowResult("none", "NO WIN", "Pull again");
@@ -8154,7 +8173,7 @@ function initGalaxyCanvas() {
     const p = win.prize;
     if (p.kind === "jackpot") { slotJackpotPresent(extraLife); return; }
     // per-reward payout cue (falls back to slot_win when the reward-specific file is absent)
-    const payoutKey = p.kind === "tokens" ? "slot_payout_gold" : p.kind === "powerup" ? "slot_payout_" + p.sym : null;
+    const payoutKey = p.kind === "tokens" ? "pickup_gold" : p.kind === "powerup" ? "slot_payout_" + p.sym : null;
     playGameSfx(payoutKey && GAME_SFX[payoutKey] ? payoutKey : "slot_win", 0.92);
     if (extraLife) playGameSfx("slot_life", 0.8);
     let big, sub;
@@ -8168,7 +8187,7 @@ function initGalaxyCanvas() {
     slotState = SLOT_STATE.READY; slotAfterResolve();
   }
   function slotAfterResolve() {
-    if (slotTokens <= 0) { slotShowContinue(); return; }
+    if (slotTokens <= 0) { slotShowContinue(SLOT_FINAL_RESULT_HOLD_MS); return; }
     slotEls.skip?.classList.add("show");
     if (!slotEls.result || !slotEls.result.classList.contains("none")) setSlotHint("PULL AGAIN");
     else setSlotHint("");
@@ -8251,10 +8270,26 @@ function initGalaxyCanvas() {
     const s = document.createElement("style");
     s.id = "polyslotsStyles";
     s.textContent = `
-      #polyslots{position:fixed;inset:0;z-index:9500;display:flex;align-items:center;justify-content:center;pointer-events:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;background:radial-gradient(circle at 50% 42%,rgba(6,16,30,.93),rgba(1,4,10,.97));}
+      #polyslots{position:fixed;inset:0;z-index:9500;display:flex;align-items:center;justify-content:center;pointer-events:auto;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;background:
+        radial-gradient(ellipse at 50% 40%,rgba(116,56,210,.38),rgba(28,16,82,.46) 36%,rgba(3,5,20,.94) 72%),
+        linear-gradient(145deg,rgba(21,5,54,.97),rgba(3,8,28,.98) 52%,rgba(42,7,74,.96));}
+      #polyslots::before{content:"";position:absolute;inset:-18%;z-index:0;pointer-events:none;background:
+        radial-gradient(circle at 18% 22%,rgba(182,104,255,.34),transparent 18%),
+        radial-gradient(circle at 78% 26%,rgba(92,205,255,.18),transparent 15%),
+        radial-gradient(circle at 42% 72%,rgba(246,105,255,.20),transparent 22%),
+        repeating-radial-gradient(circle at 50% 50%,rgba(255,255,255,.13) 0 1px,transparent 1px 13px);
+        filter:blur(.2px);opacity:.72;animation:psGalaxyDrift 18s linear infinite;}
+      #polyslots::after{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:
+        radial-gradient(circle at 22% 34%,rgba(255,255,255,.74) 0 1px,transparent 1.5px),
+        radial-gradient(circle at 64% 18%,rgba(202,224,255,.84) 0 1px,transparent 1.5px),
+        radial-gradient(circle at 83% 62%,rgba(255,255,255,.55) 0 1px,transparent 1.5px),
+        radial-gradient(circle at 36% 84%,rgba(176,248,255,.62) 0 1px,transparent 1.5px);
+        background-size:220px 180px,260px 210px,310px 240px,190px 160px;mix-blend-mode:screen;opacity:.72;animation:psStarDrift 24s linear infinite;}
+      @keyframes psGalaxyDrift{from{transform:translate3d(0,0,0) rotate(0deg)}to{transform:translate3d(-2%,1%,0) rotate(1turn)}}
+      @keyframes psStarDrift{from{background-position:0 0,0 0,0 0,0 0}to{background-position:220px 180px,-260px 210px,310px -240px,-190px -160px}}
       /* Cabinet skin: the whole machine is one art PNG; live bits are absolutely placed (ported 1:1
          from prototypes/slot-machine.html — TUNE fractions are of the cabinet box). */
-      .ps-panel{position:relative;aspect-ratio:826/1806;width:min(420px,94vw,44vh);color:#dff;
+      .ps-panel{position:relative;z-index:1;aspect-ratio:826/1806;width:min(420px,94vw,44vh);color:#dff;
         background:url("slotart/cabinet.png") center/100% 100% no-repeat;
         animation:psSlam 260ms cubic-bezier(.2,1.4,.4,1) both;
         --reelL:6.9%;--reelT:19.82%;--reelW:69.98%;--reelH:35.27%;
@@ -8267,6 +8302,10 @@ function initGalaxyCanvas() {
       .ps-lives,.ps-tokens{position:absolute;z-index:8;font-weight:800;font-size:clamp(15px,4vw,22px);transform:translateY(-50%);color:#39ff9a;text-shadow:0 0 9px rgba(57,255,154,.6);}
       .ps-lives{top:12.8%;right:6.5%;} .ps-tokens{top:16.5%;right:6.5%;}
       .ps-tokens.tick b{animation:psTick 380ms ease-out;} .ps-lives.bump b{animation:psTick 380ms ease-out;}
+      .ps-lifeaward{position:absolute;left:7%;top:12.2%;z-index:9;display:flex;align-items:center;gap:5px;opacity:0;transform:translateY(-50%) scale(.7);pointer-events:none;color:#9dff9d;font-weight:900;font-size:clamp(11px,3vw,15px);letter-spacing:.08em;text-shadow:0 0 12px rgba(120,255,120,.8);}
+      .ps-lifeaward img{width:clamp(24px,6vw,34px);height:clamp(24px,6vw,34px);object-fit:contain;filter:drop-shadow(0 0 10px rgba(120,255,120,.9));}
+      .ps-lifeaward.show{animation:psLifeAward 1050ms ease-out both;}
+      @keyframes psLifeAward{0%{opacity:0;transform:translateY(-50%) scale(.6)}18%{opacity:1;transform:translateY(-50%) scale(1.22)}58%{opacity:1;transform:translateY(-64%) scale(1)}100%{opacity:0;transform:translateY(-86%) scale(.92)}}
       .ps-reels{position:absolute;left:var(--reelL);top:var(--reelT);width:var(--reelW);height:var(--reelH);display:flex;gap:4px;padding:4px;border-radius:6px;background:linear-gradient(180deg,#02060d,#050d18);box-shadow:inset 0 0 22px rgba(0,0,0,.9);z-index:3;}
       .ps-reel{position:relative;flex:1;height:100%;overflow:hidden;border-radius:5px;background:linear-gradient(180deg,#0a1626,#060e1a);border:1px solid rgba(0,255,209,.10);}
       .ps-reel canvas{display:block;width:100%;height:100%;}
@@ -8300,7 +8339,7 @@ function initGalaxyCanvas() {
       .ps-skip:hover{opacity:1;color:#00FFD1;border-color:rgba(0,255,209,.42);}
       .ps-continue{position:absolute;inset:0;z-index:12;display:flex;align-items:center;justify-content:center;border-radius:14px;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .35s;background:radial-gradient(circle at 50% 50%,rgba(2,10,20,.86),rgba(1,4,10,.95));}
       .ps-continue.show{opacity:1;pointer-events:auto;}
-      .ps-continue-inner{font-size:1.2rem;letter-spacing:.18em;color:#00FFD1;text-align:center;text-shadow:0 0 16px rgba(0,255,209,.6);border:1px solid rgba(0,255,209,.42);border-radius:12px;padding:18px 28px;animation:psBlink 1.2s steps(2,jump-none) infinite;}
+      .ps-continue-inner{position:absolute;top:73.5%;left:50%;transform:translateX(-50%);font-size:clamp(.88rem,3.2vw,1.05rem);letter-spacing:.14em;color:#00FFD1;text-align:center;text-shadow:0 0 16px rgba(0,255,209,.6);border:1px solid rgba(0,255,209,.42);border-radius:10px;padding:12px 18px;min-width:62%;animation:psBlink 1.2s steps(2,jump-none) infinite;}
     `;
     document.head.appendChild(s);
   }
@@ -8313,6 +8352,7 @@ function initGalaxyCanvas() {
       <div class="ps-panel">
         <span class="ps-lives" id="psLives"><b id="psLifeCount">0</b></span>
         <span class="ps-tokens" id="psTokens"><b id="psTokenCount">0</b></span>
+        <div class="ps-lifeaward" id="psLifeAward"><img src="slotart/alien.png" alt=""><span>+1 LIFE</span></div>
         <div class="ps-reels" id="psReels">
           <div class="ps-payline"></div>
           <div class="ps-reel"><canvas id="psReelC0"></canvas></div>
@@ -8340,6 +8380,7 @@ function initGalaxyCanvas() {
     slotEls.tokensBox = overlay.querySelector("#psTokens");
     slotEls.tokenCount = overlay.querySelector("#psTokenCount");
     slotEls.lifeCount = overlay.querySelector("#psLifeCount");
+    slotEls.lifeAward = overlay.querySelector("#psLifeAward");
     slotEls.hint = overlay.querySelector("#psHint");
     slotEls.skip = overlay.querySelector("#psSkip");
     slotEls.continue = overlay.querySelector("#psContinue");
@@ -8370,7 +8411,7 @@ function initGalaxyCanvas() {
     setInv("#psInvBomb", playerBombInventory);
     setInv("#psInvMissile", playerMissileInventory);
     setInv("#psInvFreeze", playerFreezeInventory);
-    setInv("#psInvNuke", 0); // nuke weapon not implemented yet (5b)
+    setInv("#psInvNuke", slotNukeOwned);
   }
 
   // Open the slot. onExit is the continue-to-next-level callback (the slot OWNS the startLevel()
@@ -8384,6 +8425,7 @@ function initGalaxyCanvas() {
     slotInputLockedUntil = performance.now() + SLOT_LOCKOUT_MS;
     ensureSlotStyles();
     ensureSlotSprites();
+    commBoxController.hide();
     slotOverlay = buildSlotOverlay();
     slotClearWinFx();
     if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
@@ -8440,13 +8482,18 @@ function initGalaxyCanvas() {
 
   // Full-panel TAP TO CONTINUE. Armed after a delay so the tap that emptied the bank (step 4) can't
   // also dismiss it. In step 3 this only triggers when entering with 0 tokens.
-  function slotShowContinue() {
+  function slotShowContinue(delayMs = 0) {
     if (slotContinueShown) return;
+    if (delayMs > 0) {
+      slotTrackTimeout(() => slotShowContinue(0), delayMs);
+      return;
+    }
     slotContinueShown = true;
     setSlotHint("");
     slotEls.skip?.classList.remove("show");
     slotEls.continue?.classList.add("show");
     slotContinueArmedAt = performance.now() + SLOT_CONTINUE_DELAY_MS;
+    playGameSfx("slot_outoftokens", 0.8);
   }
 
   // The single NORMAL exit. Shows a brief "ENTERING NEXT LEVEL…" beat, then disposes the slot
@@ -9279,32 +9326,18 @@ function initGalaxyCanvas() {
   function showLevelIntro(levelNum) {
     if (!arcadeOverlay || !arcadeOverlayText || !arcadeOverlaySub || !arcadeOverlayBtn) return;
     if (overlayTimer) clearTimeout(overlayTimer);
-
-    showEl(arcadeOverlay);
-    arcadeOverlay.classList.add("show");
-    arcadeOverlay.setAttribute("aria-hidden", "false");
-    arcadeOverlayBtn.style.display = "none";
-    if (arcadeOverlayBtnSecondary) arcadeOverlayBtnSecondary.style.display = "none";
     // 2026-06-22: the level title (e.g. "RED HORIZON") no longer rides under the dimming intro
     // overlay — it shows as a standalone bottom banner that lingers and slow-fades on its own.
     const introCfg = ARCADE_LEVELS.find((l) => l.level === levelNum);
-    arcadeOverlaySub.textContent = "";
     showLevelTitleBanner(introCfg?.label || "");
-    arcadeOverlayText.textContent = `LEVEL ${levelNum}`;
-    arcadeOverlayText.classList.remove("fadeOut");
-    void arcadeOverlayText.offsetWidth;
-    arcadeOverlayText.classList.add("show");
-
-    overlayTimer = setTimeout(() => {
-      arcadeOverlayText.classList.add("fadeOut");
-      overlayTimer = setTimeout(() => {
-        arcadeOverlay.classList.remove("show");
-        arcadeOverlay.setAttribute("aria-hidden", "true");
-        arcadeOverlayText.classList.remove("show", "fadeOut");
-        hideEl(arcadeOverlay);
-        overlayTimer = null;
-      }, ARCADE_OVERLAY_FADE_MS);
-    }, 400);
+    arcadeOverlay.classList.remove("show");
+    arcadeOverlay.setAttribute("aria-hidden", "true");
+    arcadeOverlayText.classList.remove("show", "fadeOut");
+    arcadeOverlaySub.textContent = "";
+    arcadeOverlayBtn.style.display = "none";
+    if (arcadeOverlayBtnSecondary) arcadeOverlayBtnSecondary.style.display = "none";
+    hideEl(arcadeOverlay);
+    overlayTimer = null;
   }
 
   // 2026-06-22: standalone bottom-screen level title. Slides in, holds, then a very slow fade.

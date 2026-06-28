@@ -172,6 +172,9 @@ const pixiRenderer = (() => {
         roid02: 'astgfx/roid02.png',
         roid03: 'astgfx/roid03.png',
         hotroid01: 'astgfx/hotroid01.png',
+        debris: 'astgfx/debris_silver.png',
+        debris_ice: 'astgfx/debris_ice.png',
+        debris_redhot: 'astgfx/debris_redhot.png',
       };
       await Promise.all(
         Object.entries(spriteKeys).map(async ([key, src]) => {

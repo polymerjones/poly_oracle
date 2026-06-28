@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-27 11:27";
+const BUILD_TS = "2026-06-27 17:50";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -7319,11 +7319,10 @@ function initGalaxyCanvas() {
     roid02: "astgfx/roid02.png",
     roid03: "astgfx/roid03.png",
     hotroid01: "astgfx/hotroid01.png",
-    // 2026-06-26: L4 DEBRIS RUN ambient debris — real crumpled-foil debris art (silver default;
-    // ice/redhot variants on hand for future themed debris levels).
-    debris: "astgfx/roid_debris.png",
-    debris_ice: "astgfx/roid_debris_ice.png",
-    debris_redhot: "astgfx/roid_debris_redhot.png",
+    // 2026-06-27: L4 DEBRIS RUN ambient debris — cutout sprites from prototypes/space debris/cutout.
+    debris: "astgfx/debris_silver.png",
+    debris_ice: "astgfx/debris_ice.png",
+    debris_redhot: "astgfx/debris_redhot.png",
   };
   const asteroidSprites = {};
   Object.keys(asteroidSpritePaths).forEach((key) => {
@@ -7728,7 +7727,7 @@ function initGalaxyCanvas() {
   // scheduling via slotTrackTimeout, SFX via playGameSfx/slotTrackLoop, music via a streamed <audio>.
   // 5a is MECHANICS ONLY — no win evaluation, payouts, rewards, jackpot, or sprite art (text faces).
   const SLOT_SYMBOLS = ["jackpot", "quad", "missile", "bomb", "freeze", "goldbar", "wild", "alien", "blank"];
-  const SLOT_STRIP_WEIGHTS = { blank: 9, goldbar: 4, freeze: 4, bomb: 4, quad: 3, missile: 3, wild: 2, alien: 2, jackpot: 1 };
+  const SLOT_STRIP_WEIGHTS = { blank: 6, goldbar: 4, freeze: 5, bomb: 5, quad: 5, missile: 5, wild: 4, alien: 2, jackpot: 1 };
   const SLOT_SYM_LABEL = { jackpot: "ORB", quad: "QUAD", missile: "MSL", bomb: "BOMB", freeze: "FRZ", goldbar: "GOLD", wild: "WILD", alien: "ALN", blank: "·" };
   const SLOT_SYM_COLOR = { jackpot: "#aa78ff", quad: "#be6eff", missile: "#ff5050", bomb: "#ffaa3c", freeze: "#6ec8ff", goldbar: "#ffcd5a", wild: "#5ae6d2", alien: "#78eb78", blank: "#506e96" };
   const SLOT_SPIN_SPEED = 16, SLOT_SPIN_TIME_MS = 2600, SLOT_REEL_STAGGER_MS = 380;
@@ -8095,8 +8094,11 @@ function initGalaxyCanvas() {
       const res = slotEvalLine(syms), prize = slotPrizeForLine(res);
       if (prize.kind !== "none") wins.push({ pl, res, prize });
     }
-    const alienAnywhere = grid.some((col) => col.includes("alien"));
-    return { win: slotBestWin(wins), extraLife: alienAnywhere };
+    const extraLifeCells = [];
+    for (let ci = 0; ci < grid.length; ci += 1) {
+      if (grid[ci][1] === "alien") extraLifeCells.push(ci);
+    }
+    return { win: slotBestWin(wins), extraLife: extraLifeCells.length > 0, extraLifeCells };
   }
   function slotBestWin(wins) {
     const rank = (w) => ({ jackpot: 4, powerup: 3, tokens: 2, points: 1 })[w.prize.kind] || 0;
@@ -8142,7 +8144,7 @@ function initGalaxyCanvas() {
       slotEls.result.appendChild(btn);
     }
   }
-  function slotFlashExtraLife() {
+  function slotFlashExtraLife(extraLifeCells = []) {
     if (slotEls.lifeCount) slotEls.lifeCount.textContent = String(arcadeLives);
     if (slotEls.lives) {
       slotEls.lives.classList.remove("bump");
@@ -8155,13 +8157,33 @@ function initGalaxyCanvas() {
       slotEls.lifeAward.classList.add("show");
       slotTrackTimeout(() => slotEls.lifeAward?.classList.remove("show"), 1150);
     }
+    if (slotEls.alienFx && slotEls.reelCanvas) {
+      slotEls.alienFx.innerHTML = "";
+      const rr = slotEls.reels?.getBoundingClientRect();
+      if (rr) {
+        for (const ci of extraLifeCells) {
+          const canvas = slotEls.reelCanvas[ci];
+          const cr = canvas?.getBoundingClientRect();
+          if (!cr) continue;
+          const rowH = cr.height / 3;
+          const flash = document.createElement("div");
+          flash.className = "ps-alienflash";
+          flash.style.left = `${cr.left - rr.left + cr.width / 2}px`;
+          flash.style.top = `${cr.top - rr.top + rowH * 1.5}px`;
+          flash.style.width = `${Math.min(cr.width, rowH) * 1.18}px`;
+          flash.style.height = flash.style.width;
+          slotEls.alienFx.appendChild(flash);
+        }
+        slotTrackTimeout(() => { if (slotEls.alienFx) slotEls.alienFx.innerHTML = ""; }, 1150);
+      }
+    }
   }
   function slotApplyOutcome() {
-    const { win, extraLife } = slotEvaluate(slotReadGrid());
+    const { win, extraLife, extraLifeCells } = slotEvaluate(slotReadGrid());
     if (extraLife) {
       arcadeLives = clamp(arcadeLives + 1, 0, MAX_LIVES);
       renderLives();
-      slotFlashExtraLife();
+      slotFlashExtraLife(extraLifeCells);
     }
     if (!win) {
       if (extraLife) { slotShowResult("life", "EXTRA LIFE 👽", "Alien scatter!"); playGameSfx("slot_life", 0.9); }
@@ -8171,7 +8193,7 @@ function initGalaxyCanvas() {
     slotEls.reels?.classList.add("win");
     slotStartWinFX(win);
     const p = win.prize;
-    if (p.kind === "jackpot") { slotJackpotPresent(extraLife); return; }
+    if (p.kind === "jackpot") { if (extraLife) playGameSfx("slot_life", 0.9); slotJackpotPresent(extraLife); return; }
     // per-reward payout cue (falls back to slot_win when the reward-specific file is absent)
     const payoutKey = p.kind === "tokens" ? "pickup_gold" : p.kind === "powerup" ? "slot_payout_" + p.sym : null;
     playGameSfx(payoutKey && GAME_SFX[payoutKey] ? payoutKey : "slot_win", 0.92);
@@ -8270,7 +8292,7 @@ function initGalaxyCanvas() {
     const s = document.createElement("style");
     s.id = "polyslotsStyles";
     s.textContent = `
-      #polyslots{position:fixed;inset:0;z-index:9500;display:flex;align-items:center;justify-content:center;pointer-events:auto;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;background:
+      #polyslots{position:fixed;inset:0;z-index:9500;display:flex;align-items:flex-start;justify-content:center;pointer-events:auto;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;background:
         radial-gradient(ellipse at 50% 40%,rgba(116,56,210,.38),rgba(28,16,82,.46) 36%,rgba(3,5,20,.94) 72%),
         linear-gradient(145deg,rgba(21,5,54,.97),rgba(3,8,28,.98) 52%,rgba(42,7,74,.96));}
       #polyslots::before{content:"";position:absolute;inset:-18%;z-index:0;pointer-events:none;background:
@@ -8289,7 +8311,11 @@ function initGalaxyCanvas() {
       @keyframes psStarDrift{from{background-position:0 0,0 0,0 0,0 0}to{background-position:220px 180px,-260px 210px,310px -240px,-190px -160px}}
       /* Cabinet skin: the whole machine is one art PNG; live bits are absolutely placed (ported 1:1
          from prototypes/slot-machine.html — TUNE fractions are of the cabinet box). */
-      .ps-panel{position:relative;z-index:1;aspect-ratio:826/1806;width:min(420px,94vw,44vh);color:#dff;
+      .ps-gamehud{position:absolute;left:max(10px,env(safe-area-inset-left,0px));right:max(10px,env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px));z-index:3;display:flex;align-items:center;justify-content:space-between;gap:10px;color:#dff;}
+      .ps-modebtn{min-height:40px;border:1px solid rgba(255,255,255,.2);border-radius:999px;background:rgba(7,14,30,.76);color:#dff;padding:8px 12px;font:800 13px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em;}
+      .ps-score{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;font-size:clamp(12px,3.1vw,15px);font-weight:800;text-shadow:0 0 10px rgba(0,255,209,.45);}
+      .ps-score span{padding:7px 9px;border:1px solid rgba(255,255,255,.14);border-radius:999px;background:rgba(7,14,30,.64);}
+      .ps-panel{position:relative;z-index:1;aspect-ratio:826/1806;width:min(420px,94vw,40vh);margin-top:calc(60px + env(safe-area-inset-top,0px));color:#dff;
         background:url("slotart/cabinet.png") center/100% 100% no-repeat;
         animation:psSlam 260ms cubic-bezier(.2,1.4,.4,1) both;
         --reelL:6.9%;--reelT:19.82%;--reelW:69.98%;--reelH:35.27%;
@@ -8312,6 +8338,10 @@ function initGalaxyCanvas() {
       .ps-payline{position:absolute;left:4px;right:4px;top:50%;height:32%;transform:translateY(-50%);border-top:2px solid rgba(0,255,209,.42);border-bottom:2px solid rgba(0,255,209,.42);pointer-events:none;z-index:4;border-radius:4px;box-shadow:0 0 18px rgba(0,255,209,.18);}
       .ps-reels.win .ps-payline{border-color:#00FFD1;box-shadow:0 0 26px rgba(0,255,209,.55);animation:psWinpulse .5s ease-in-out 3;}
       @keyframes psWinpulse{50%{box-shadow:0 0 40px rgba(0,255,209,.9);}}
+      .ps-alienfx{position:absolute;inset:0;z-index:6;pointer-events:none;overflow:visible;}
+      .ps-alienflash{position:absolute;border-radius:50%;transform:translate(-50%,-50%);background:radial-gradient(circle,rgba(190,255,190,.96) 0 28%,rgba(57,255,80,.72) 44%,rgba(57,255,80,.16) 68%,rgba(57,255,80,0) 78%);box-shadow:0 0 18px rgba(57,255,80,.95),0 0 44px rgba(57,255,80,.75);animation:psAlienFlash 1050ms ease-out both;}
+      .ps-alienflash::after{content:"";position:absolute;inset:18%;background:url("slotart/alien.png") center/contain no-repeat;filter:drop-shadow(0 0 8px rgba(180,255,180,.95));}
+      @keyframes psAlienFlash{0%{opacity:0;transform:translate(-50%,-50%) scale(.45)}18%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}48%{opacity:1;transform:translate(-50%,-50%) scale(.95)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.55)}}
       .ps-winfx{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none;}
       .ps-result{position:absolute;left:var(--reelL);width:var(--reelW);top:var(--resultT);z-index:8;display:flex;flex-direction:column;align-items:center;gap:1px;text-align:center;pointer-events:none;}
       .ps-result .ps-big{font-size:clamp(15px,4.2vw,22px);letter-spacing:.08em;color:#00FFD1;text-shadow:0 0 12px rgba(0,255,209,.6);}
@@ -8324,7 +8354,7 @@ function initGalaxyCanvas() {
       .ps-lever{position:absolute;right:var(--leverR);top:var(--leverT);width:var(--leverW);height:var(--leverH);display:flex;flex-direction:column;align-items:center;z-index:7;touch-action:none;}
       .ps-track{position:relative;width:9px;flex:1;margin:4px 0;border-radius:6px;background:linear-gradient(180deg,#0b1422,#060c16);border:1px solid rgba(0,255,209,.18);box-shadow:inset 0 0 8px rgba(0,0,0,.8);}
       .ps-knob{position:absolute;left:50%;top:0;width:30px;height:30px;margin-left:-15px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ff6b6b,#b00020 70%);border:2px solid rgba(255,255,255,.35);box-shadow:0 0 16px rgba(255,40,60,.55),inset 0 -4px 8px rgba(0,0,0,.4);cursor:grab;touch-action:none;z-index:5;}
-      .ps-knob::before{content:"";position:absolute;inset:-16px;border-radius:50%;}
+      .ps-knob::before{content:"";position:absolute;inset:-28px;border-radius:50%;}
       .ps-knob:active{cursor:grabbing;}
       .ps-lever.disabled .ps-knob{filter:grayscale(.7) brightness(.55);cursor:not-allowed;}
       .ps-hint{position:absolute;left:0;right:0;top:var(--hintT);text-align:center;font-size:clamp(12px,3.4vw,16px);letter-spacing:.16em;color:rgba(0,255,209,.72);z-index:8;}
@@ -8349,6 +8379,10 @@ function initGalaxyCanvas() {
     overlay.id = "polyslots";
     overlay.setAttribute("aria-hidden", "true");
     overlay.innerHTML = `
+      <div class="ps-gamehud">
+        <button class="ps-modebtn" id="psModes" type="button">← Modes</button>
+        <div class="ps-score"><span>Score: <b id="psScoreVal">0</b></span><span>Lives: <b id="psTopLives">0</b></span></div>
+      </div>
       <div class="ps-panel">
         <span class="ps-lives" id="psLives"><b id="psLifeCount">0</b></span>
         <span class="ps-tokens" id="psTokens"><b id="psTokenCount">0</b></span>
@@ -8358,6 +8392,7 @@ function initGalaxyCanvas() {
           <div class="ps-reel"><canvas id="psReelC0"></canvas></div>
           <div class="ps-reel"><canvas id="psReelC1"></canvas></div>
           <div class="ps-reel"><canvas id="psReelC2"></canvas></div>
+          <div class="ps-alienfx" id="psAlienFx"></div>
           <canvas class="ps-winfx" id="psWinFx"></canvas>
         </div>
         <div class="ps-lever" id="psLever"><div class="ps-track" id="psTrack"><div class="ps-knob" id="psKnob"></div></div></div>
@@ -8377,6 +8412,9 @@ function initGalaxyCanvas() {
     (galaxyView || document.body).appendChild(overlay);
     slotEls.root = overlay;
     slotEls.lives = overlay.querySelector("#psLives");
+    slotEls.topLives = overlay.querySelector("#psTopLives");
+    slotEls.scoreVal = overlay.querySelector("#psScoreVal");
+    slotEls.modes = overlay.querySelector("#psModes");
     slotEls.tokensBox = overlay.querySelector("#psTokens");
     slotEls.tokenCount = overlay.querySelector("#psTokenCount");
     slotEls.lifeCount = overlay.querySelector("#psLifeCount");
@@ -8387,6 +8425,7 @@ function initGalaxyCanvas() {
     slotEls.continueInner = overlay.querySelector("#psContinueInner");
     slotEls.result = overlay.querySelector("#psResult");
     slotEls.reels = overlay.querySelector("#psReels");
+    slotEls.alienFx = overlay.querySelector("#psAlienFx");
     slotEls.lever = overlay.querySelector("#psLever");
     slotEls.track = overlay.querySelector("#psTrack");
     slotEls.knob = overlay.querySelector("#psKnob");
@@ -8406,6 +8445,8 @@ function initGalaxyCanvas() {
   // this just makes the machine show real ♥ / inventory instead of zeros.
   function slotSyncCabinetStats() {
     if (slotEls.lifeCount) slotEls.lifeCount.textContent = String(arcadeLives);
+    if (slotEls.topLives) slotEls.topLives.textContent = String(arcadeLives);
+    if (slotEls.scoreVal) slotEls.scoreVal.textContent = String(arcadeScore);
     const setInv = (id, n) => { const el = slotEls.root?.querySelector(id); if (el) el.textContent = String(n); };
     setInv("#psInvQuad", 0); // quad is timed (no inventory count)
     setInv("#psInvBomb", playerBombInventory);
@@ -8443,23 +8484,33 @@ function initGalaxyCanvas() {
       e.stopPropagation();
       if (performance.now() >= slotContinueArmedAt) exitSlot();
     }, { passive: false });
+    slotTrackListener(slotEls.modes, "click", (e) => {
+      e.stopPropagation();
+      slotTeardown(SLOT_REASON.MENU);
+      showModeSelect();
+    });
     // Lever (drag-only — anti-misclick). Spring physics run in slotFrame; a release past the
     // threshold triggers the pull.
-    slotTrackListener(slotEls.knob, "pointerdown", (e) => {
+    const slotBeginLeverDrag = (e) => {
       if (!slotLeverEnabled()) return;
       slotLever.mode = "drag";
-      try { slotEls.knob.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      try { slotEls.lever.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       const rect = slotEls.track.getBoundingClientRect();
-      slotLever.grabOffset = e.clientY - (rect.top + slotLever.value * slotLeverTravel);
+      const knobTop = rect.top + slotLever.value * slotLeverTravel;
+      slotLever.grabOffset = e.target === slotEls.knob
+        ? e.clientY - knobTop
+        : (slotEls.knob?.offsetHeight || 30) / 2;
+      slotLever.springTarget = Math.max(0, Math.min(1, (e.clientY - slotLever.grabOffset - rect.top) / slotLeverTravel));
       e.preventDefault();
-    }, { passive: false });
-    slotTrackListener(slotEls.knob, "pointermove", (e) => {
+    };
+    slotTrackListener(slotEls.lever, "pointerdown", slotBeginLeverDrag, { passive: false });
+    slotTrackListener(slotEls.lever, "pointermove", (e) => {
       if (slotLever.mode !== "drag") return;
       const rect = slotEls.track.getBoundingClientRect();
       slotLever.springTarget = Math.max(0, Math.min(1, (e.clientY - slotLever.grabOffset - rect.top) / slotLeverTravel));
     });
-    slotTrackListener(slotEls.knob, "pointerup", slotReleaseLever);
-    slotTrackListener(slotEls.knob, "pointercancel", slotReleaseLever);
+    slotTrackListener(slotEls.lever, "pointerup", slotReleaseLever);
+    slotTrackListener(slotEls.lever, "pointercancel", slotReleaseLever);
     // Build the reels and start the (cancellable) render/physics loop + slot music.
     slotMakeReels();
     requestAnimationFrame(slotSizeReels); // re-measure once CSS layout has settled
@@ -8556,7 +8607,20 @@ function initGalaxyCanvas() {
   function handoffAfterScorecard(continueToNextLevel) {
     if (shouldOpenSlot()) {
       // The slot owns startLevel(); after it runs, apply any reward that must land on the new level (quad).
-      enterSlot({ onExit: () => { continueToNextLevel(); slotApplyPendingRewards(); } });
+      enterSlot({ onExit: () => {
+        engineMode = "arcade";
+        setMenuOverlayOpen(false);
+        setGalaxyViewMode("arcade");
+        setGalaxyTool("draw");
+        if (!galaxyRunning) {
+          resizeGalaxyCanvas();
+          computePlayfield();
+          setTimeout(computePlayfield, 50);
+          startGalaxyLoop();
+        }
+        continueToNextLevel();
+        slotApplyPendingRewards();
+      } });
       return;
     }
     continueToNextLevel();
@@ -8567,13 +8631,12 @@ function initGalaxyCanvas() {
   let powerups = [];
   const POWERUP_MAX_ONSCREEN = 2;
   const POWERUP_WEIGHTS = [
-    // 2026-06-14: goldbars dropped 5 to make room for the missile's 15.
-    { type: "goldbars", weight: 10 }, // DEBUG: revert before release (normally 25)
-    { type: "timer", weight: 25 },
-    { type: "quadshot", weight: 25 },
-    { type: "snowflake", weight: 40 }, // DEBUG: revert before release (normally 10)
-    { type: "bomb", weight: 10 },
-    { type: "missile", weight: 15 }, // 2026-06-14: homing missile powerup
+    { type: "goldbars", weight: 8 },
+    { type: "timer", weight: 28 },
+    { type: "quadshot", weight: 26 },
+    { type: "snowflake", weight: 22 },
+    { type: "bomb", weight: 20 },
+    { type: "missile", weight: 20 }, // 2026-06-14: homing missile powerup
   ];
   const POWERUP_COLORS = {
     bomb: "#00ffcc",
@@ -15164,7 +15227,11 @@ function initGalaxyCanvas() {
           if (ambientLive < (df.maxDebris || 4)) {
             const dp = randomPerimeterPoint();
             const debris = spawnAsteroid(dp.x, dp.y, 1, true, "debris");
-            if (debris) debris.ambient = true;
+            if (debris) {
+              debris.ambient = true;
+              debris.r = 10 + Math.random() * 3;
+              debris.mass = debris.r * debris.r;
+            }
           }
           nextDebrisAt = now + (df.intervalMs || 1500);
         }

@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-27 17:50";
+const BUILD_TS = "2026-06-27 18:02";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -8123,6 +8123,7 @@ function initGalaxyCanvas() {
       updateHudMissileInventory();
     }
     slotSyncCabinetStats();
+    slotFlashRewardEl(slotEls.invSlots?.[sym]);
   }
   function slotJackpotPresent(extraLife) {
     slotState = SLOT_STATE.RESOLVING;
@@ -8130,6 +8131,7 @@ function initGalaxyCanvas() {
     playGameSfx("slot_bigwin", 0.7);
     slotNukeOwned = SLOT_NUKE_CAP;
     slotSyncCabinetStats();
+    slotFlashRewardEl(slotEls.invSlots?.nuke);
     // TODO(nuke weapon): the real Nuke is net-new (see SPEC §7 ⚠). For now the jackpot awards a big
     // point bonus + full FX/sound; wire the actual weapon when it's built.
     if (slotEls.result) {
@@ -8138,6 +8140,7 @@ function initGalaxyCanvas() {
       const btn = document.createElement("button"); btn.className = "ps-claim"; btn.type = "button"; btn.textContent = "CLAIM";
       slotTrackListener(btn, "click", () => {
         addArcadeScore(SLOT_POINTS.jackpotOwned);
+        slotFlashScorePayout();
         slotEls.result.className = "ps-result"; slotEls.result.innerHTML = "";
         slotState = SLOT_STATE.READY; slotAfterResolve();
       });
@@ -8150,7 +8153,9 @@ function initGalaxyCanvas() {
       slotEls.lives.classList.remove("bump");
       void slotEls.lives.offsetWidth;
       slotEls.lives.classList.add("bump");
+      slotFlashRewardEl(slotEls.lives);
     }
+    slotFlashRewardEl(slotEls.topLivesBox);
     if (slotEls.lifeAward) {
       slotEls.lifeAward.classList.remove("show");
       void slotEls.lifeAward.offsetWidth;
@@ -8203,8 +8208,14 @@ function initGalaxyCanvas() {
       slotTokens += p.value; big = `+${p.value} TOKEN${p.value > 1 ? "S" : ""}`; sub = "Gold bars!";
       if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
       if (slotEls.tokensBox) { slotEls.tokensBox.classList.remove("tick"); void slotEls.tokensBox.offsetWidth; slotEls.tokensBox.classList.add("tick"); }
+      slotFlashRewardEl(slotEls.tokensBox);
     } else if (p.kind === "powerup") { slotAwardPowerup(p.sym); big = SLOT_PW_LABEL[p.sym]; sub = SLOT_PW_SUB[p.sym]; }
-    else { addArcadeScore(p.value); big = `+${p.value.toLocaleString()} PTS`; sub = (win.res.kind === "pair" ? "Matched pair" : "Bonus") + (extraLife ? " + EXTRA LIFE" : ""); }
+    else {
+      addArcadeScore(p.value);
+      slotFlashScorePayout();
+      big = `+${p.value.toLocaleString()} PTS`;
+      sub = (win.res.kind === "pair" ? "Matched pair" : "Bonus") + (extraLife ? " + EXTRA LIFE" : "");
+    }
     slotShowResult("win", big, sub);
     slotState = SLOT_STATE.READY; slotAfterResolve();
   }
@@ -8315,6 +8326,10 @@ function initGalaxyCanvas() {
       .ps-modebtn{min-height:40px;border:1px solid rgba(255,255,255,.2);border-radius:999px;background:rgba(7,14,30,.76);color:#dff;padding:8px 12px;font:800 13px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em;}
       .ps-score{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;font-size:clamp(12px,3.1vw,15px);font-weight:800;text-shadow:0 0 10px rgba(0,255,209,.45);}
       .ps-score span{padding:7px 9px;border:1px solid rgba(255,255,255,.14);border-radius:999px;background:rgba(7,14,30,.64);}
+      .ps-score span.score-flash{animation:psScoreFlash 520ms ease-out both;}
+      @keyframes psScoreFlash{0%{transform:scale(1);border-color:rgba(255,255,255,.14);box-shadow:none}28%{transform:scale(1.16);border-color:#39ff9a;box-shadow:0 0 18px rgba(57,255,154,.85),0 0 34px rgba(57,255,154,.55);color:#fff}100%{transform:scale(1);border-color:rgba(255,255,255,.14);box-shadow:none}}
+      .ps-reward-flash{animation:psRewardFlash 620ms ease-out both;}
+      @keyframes psRewardFlash{0%{filter:brightness(1);text-shadow:0 0 9px rgba(57,255,154,.6)}24%{filter:brightness(1.9) drop-shadow(0 0 12px rgba(57,255,154,.95));text-shadow:0 0 18px rgba(57,255,154,1),0 0 32px rgba(57,255,154,.75)}58%{filter:brightness(1.35) drop-shadow(0 0 20px rgba(57,255,154,.7));text-shadow:0 0 14px rgba(57,255,154,.85)}100%{filter:brightness(1);text-shadow:0 0 9px rgba(57,255,154,.6)}}
       .ps-panel{position:relative;z-index:1;aspect-ratio:826/1806;width:min(420px,94vw,40vh);margin-top:calc(60px + env(safe-area-inset-top,0px));color:#dff;
         background:url("slotart/cabinet.png") center/100% 100% no-repeat;
         animation:psSlam 260ms cubic-bezier(.2,1.4,.4,1) both;
@@ -8381,7 +8396,7 @@ function initGalaxyCanvas() {
     overlay.innerHTML = `
       <div class="ps-gamehud">
         <button class="ps-modebtn" id="psModes" type="button">← Modes</button>
-        <div class="ps-score"><span>Score: <b id="psScoreVal">0</b></span><span>Lives: <b id="psTopLives">0</b></span></div>
+        <div class="ps-score"><span id="psScoreBox">Score: <b id="psScoreVal">0</b></span><span id="psTopLivesBox">Lives: <b id="psTopLives">0</b></span></div>
       </div>
       <div class="ps-panel">
         <span class="ps-lives" id="psLives"><b id="psLifeCount">0</b></span>
@@ -8412,7 +8427,9 @@ function initGalaxyCanvas() {
     (galaxyView || document.body).appendChild(overlay);
     slotEls.root = overlay;
     slotEls.lives = overlay.querySelector("#psLives");
+    slotEls.topLivesBox = overlay.querySelector("#psTopLivesBox");
     slotEls.topLives = overlay.querySelector("#psTopLives");
+    slotEls.scoreBox = overlay.querySelector("#psScoreBox");
     slotEls.scoreVal = overlay.querySelector("#psScoreVal");
     slotEls.modes = overlay.querySelector("#psModes");
     slotEls.tokensBox = overlay.querySelector("#psTokens");
@@ -8430,6 +8447,13 @@ function initGalaxyCanvas() {
     slotEls.track = overlay.querySelector("#psTrack");
     slotEls.knob = overlay.querySelector("#psKnob");
     slotEls.reelCanvas = [0, 1, 2].map((i) => overlay.querySelector("#psReelC" + i));
+    slotEls.invSlots = {
+      quad: overlay.querySelector('.ps-slot[data-k="quad"]'),
+      bomb: overlay.querySelector('.ps-slot[data-k="bomb"]'),
+      missile: overlay.querySelector('.ps-slot[data-k="missile"]'),
+      freeze: overlay.querySelector('.ps-slot[data-k="freeze"]'),
+      nuke: overlay.querySelector('.ps-slot[data-k="nuke"]'),
+    };
     slotEls.winFx = overlay.querySelector("#psWinFx");
     slotWinFx.ctx = slotEls.winFx ? slotEls.winFx.getContext("2d") : null;
     return overlay;
@@ -8453,6 +8477,20 @@ function initGalaxyCanvas() {
     setInv("#psInvMissile", playerMissileInventory);
     setInv("#psInvFreeze", playerFreezeInventory);
     setInv("#psInvNuke", slotNukeOwned);
+  }
+  function slotFlashRewardEl(el) {
+    if (!el) return;
+    el.classList.remove("ps-reward-flash");
+    void el.offsetWidth;
+    el.classList.add("ps-reward-flash");
+    slotTrackTimeout(() => el.classList.remove("ps-reward-flash"), 660);
+  }
+  function slotFlashScorePayout() {
+    if (!slotEls.scoreBox) return;
+    slotEls.scoreBox.classList.remove("score-flash");
+    void slotEls.scoreBox.offsetWidth;
+    slotEls.scoreBox.classList.add("score-flash");
+    slotTrackTimeout(() => slotEls.scoreBox?.classList.remove("score-flash"), 560);
   }
 
   // Open the slot. onExit is the continue-to-next-level callback (the slot OWNS the startLevel()
@@ -8936,6 +8974,7 @@ function initGalaxyCanvas() {
   }
 
   function renderScore() {
+    if (slotEls.scoreVal) slotEls.scoreVal.textContent = String(arcadeScore);
     if (!hudScore) return;
     hudScore.textContent = `Score: ${arcadeScore}`;
   }

@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-29 11:52";
+const BUILD_TS = "2026-06-29 14:05";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -394,6 +394,12 @@ const GAME_SFX = {
   slot_bigwin: "gamesfx/slot_bigwin.mp3", // big-payout flourish layered on jackpot
   slot_life: "gamesfx/slot_life.mp3", // alien-scatter extra life
   slot_outoftokens: "gamesfx/slot_outoftokens.mp3", // played as TAP TO CONTINUE appears
+  combo_marksman: "combo_fx/marksman_combo.mp3",
+  combo_net_ufo_net: "combo_fx/net-ufo-net-combo.mp3",
+  combo_pyro: "combo_fx/pyro_combo.mp3",
+  combo_xtra_pyro: "combo_fx/xtra_pyro_combo.mp3",
+  combo_freeze_berserk: "combo_fx/freeze_berserk_combo.mp3",
+  combo_big_bomb: "combo_fx/bigbomb_combo.mp3",
   item_pickup2: "gamesfx/item_pickup2.mp3", // unassigned - crunchy item pickup
   freeze: "gamesfx/freeze.mp3",
   unfreeze: "gamesfx/unfreeze.mp3",
@@ -7727,7 +7733,7 @@ function initGalaxyCanvas() {
   // scheduling via slotTrackTimeout, SFX via playGameSfx/slotTrackLoop, music via a streamed <audio>.
   // 5a is MECHANICS ONLY — no win evaluation, payouts, rewards, jackpot, or sprite art (text faces).
   const SLOT_SYMBOLS = ["jackpot", "quad", "missile", "bomb", "freeze", "goldbar", "wild", "alien", "blank"];
-  const SLOT_STRIP_WEIGHTS = { blank: 6, goldbar: 4, freeze: 5, bomb: 5, quad: 5, missile: 5, wild: 4, alien: 2, jackpot: 1 };
+  const SLOT_STRIP_WEIGHTS = { blank: 5, goldbar: 3, freeze: 9, bomb: 9, quad: 9, missile: 9, wild: 3, alien: 2, jackpot: 1 };
   const SLOT_SYM_LABEL = { jackpot: "ORB", quad: "QUAD", missile: "MSL", bomb: "BOMB", freeze: "FRZ", goldbar: "GOLD", wild: "WILD", alien: "ALN", blank: "·" };
   const SLOT_SYM_COLOR = { jackpot: "#aa78ff", quad: "#be6eff", missile: "#ff5050", bomb: "#ffaa3c", freeze: "#6ec8ff", goldbar: "#ffcd5a", wild: "#5ae6d2", alien: "#78eb78", blank: "#506e96" };
   const SLOT_SPIN_SPEED = 16, SLOT_SPIN_TIME_MS = 2600, SLOT_REEL_STAGGER_MS = 380;
@@ -7779,7 +7785,8 @@ function initGalaxyCanvas() {
     }
     // Size the win-FX overlay canvas to the reels container.
     if (slotEls.winFx && slotWinFx.ctx) {
-      const fw = slotEls.winFx.clientWidth, fh = slotEls.winFx.clientHeight;
+      const wr = slotEls.winFx.getBoundingClientRect();
+      const fw = wr.width || slotEls.winFx.clientWidth, fh = wr.height || slotEls.winFx.clientHeight;
       slotWinFx.cw = fw; slotWinFx.ch = fh;
       slotEls.winFx.width = Math.round(fw * SLOT_DPR); slotEls.winFx.height = Math.round(fh * SLOT_DPR);
       slotWinFx.ctx.setTransform(SLOT_DPR, 0, 0, SLOT_DPR, 0, 0);
@@ -7861,6 +7868,7 @@ function initGalaxyCanvas() {
     if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
     if (slotEls.tokensBox) { slotEls.tokensBox.classList.remove("tick"); void slotEls.tokensBox.offsetWidth; slotEls.tokensBox.classList.add("tick"); }
     slotState = SLOT_STATE.SPINNING;
+    triggerGameplayHapticImpact(hapticImpactStyle.Medium);
     setSlotHint("");
     slotEls.skip?.classList.remove("show");
     slotClearWinFx();
@@ -7920,6 +7928,11 @@ function initGalaxyCanvas() {
     slotWinFx.type = p.kind === "jackpot" ? "jackpot" : p.kind === "powerup" ? p.sym : p.kind === "tokens" ? "goldbar" : "points";
     slotWinFx.frost = slotWinFx.type === "freeze";
     slotSeedEffect(slotWinFx.type, pts);
+  }
+  function slotClipWinFx(ctx) {
+    const inset = isIOSWebKit ? 2.5 : 1;
+    slotRoundRect(ctx, inset, inset, Math.max(0, slotWinFx.cw - inset * 2), Math.max(0, slotWinFx.ch - inset * 2), 7);
+    ctx.clip();
   }
   function slotSeedEffect(type, cells) {
     if (type === "jackpot") {
@@ -7998,7 +8011,7 @@ function initGalaxyCanvas() {
     const flick = 0.72 + 0.28 * Math.sin(t / 47) * Math.sin(t / 19);
     const reveal = Math.min(1, t / 140);
     const baseHalf = slotWinFx.cells.length ? slotWinFx.cells[0].half : 24, half = baseHalf * (0.55 + 0.55 * env);
-    ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.save(); slotClipWinFx(ctx); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round"; ctx.lineJoin = "round";
     ctx.shadowColor = `rgba(${col},${0.9 * env})`; ctx.shadowBlur = 30 * env;
     ctx.lineWidth = half * 2.1; ctx.strokeStyle = `rgba(${col},${0.15 * env})`;
     slotTracePath(ctx, pts, reveal); ctx.stroke();
@@ -8024,12 +8037,12 @@ function initGalaxyCanvas() {
     if (!lineActive && !glowActive && !frostActive && !slotWinFx.parts.length) { if (slotWinFx.dirty) { ctx.clearRect(0, 0, slotWinFx.cw, slotWinFx.ch); slotWinFx.dirty = false; } slotWinFx.active = false; return; }
     ctx.clearRect(0, 0, slotWinFx.cw, slotWinFx.ch); slotWinFx.dirty = true;
     if (jackpotActive) { const a = Math.max(0, 1 - teff / 1700) * (0.5 + 0.5 * Math.abs(Math.sin(teff / 90))); const cx = slotWinFx.cw / 2, cy = slotWinFx.ch / 2, R = Math.max(slotWinFx.cw, slotWinFx.ch) * 0.85;
-      ctx.save(); ctx.globalCompositeOperation = "lighter"; const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+      ctx.save(); slotClipWinFx(ctx); ctx.globalCompositeOperation = "lighter"; const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
       g.addColorStop(0, `rgba(180,140,255,${0.5 * a})`); g.addColorStop(0.4, `rgba(0,255,209,${0.22 * a})`); g.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = g; ctx.fillRect(0, 0, slotWinFx.cw, slotWinFx.ch); ctx.restore(); }
     if (glowActive) { const a = Math.max(0, 1 - teff / 1700) * (0.6 + 0.4 * Math.abs(Math.sin(teff / 110)));
       const col = slotWinFx.frost ? "150,225,255" : slotWinFx.type === "bomb" ? "255,150,60" : slotWinFx.type === "goldbar" ? "255,220,120" : slotWinFx.type === "jackpot" ? "180,150,255" : "40,255,170";
-      ctx.save(); ctx.globalCompositeOperation = "lighter";
+      ctx.save(); slotClipWinFx(ctx); ctx.globalCompositeOperation = "lighter";
       for (const c of slotWinFx.cells) { const R = c.half * 1.5; const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, R); g.addColorStop(0, `rgba(${col},${0.5 * a})`); g.addColorStop(1, `rgba(${col},0)`); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(c.x, c.y, R, 0, 6.283); ctx.fill(); }
       ctx.restore(); }
     if (frostActive) { const a = Math.min(1, teff / 300) * Math.max(0, 1 - Math.max(0, teff - 1100) / 600);
@@ -8183,6 +8196,15 @@ function initGalaxyCanvas() {
       }
     }
   }
+  function slotPayoutImpact(win, extraLife) {
+    const kind = win?.prize?.kind || (extraLife ? "life" : "none");
+    if (kind === "none") return;
+    const tier = kind === "jackpot" ? 3 : kind === "powerup" ? 2 : kind === "tokens" ? 1.5 : 1;
+    cssShake(isIOSNative ? 0.55 * tier : 0.85 * tier);
+    cssFlash(kind === "jackpot" ? "#ffffff" : kind === "powerup" ? "#00FFD1" : "#39ff9a", clamp(0.12 + tier * 0.08, 0, 0.42), 180 + tier * 70);
+    triggerGameplayHapticImpact(tier >= 2 ? hapticImpactStyle.Heavy : hapticImpactStyle.Medium);
+    if (tier >= 3) setTimeout(() => triggerGameplayHapticImpact(hapticImpactStyle.Heavy), 80);
+  }
   function slotApplyOutcome() {
     const { win, extraLife, extraLifeCells } = slotEvaluate(slotReadGrid());
     if (extraLife) {
@@ -8191,18 +8213,19 @@ function initGalaxyCanvas() {
       slotFlashExtraLife(extraLifeCells);
     }
     if (!win) {
-      if (extraLife) { slotShowResult("life", "EXTRA LIFE 👽", "Alien scatter!"); playGameSfx("slot_life", 0.9); }
+      if (extraLife) { slotPayoutImpact(null, true); slotShowResult("life", "EXTRA LIFE", "Alien scatter!"); playGameSfx("plasmarecharged1", 0.96, { important: true }); }
       else slotShowResult("none", "NO WIN", "Pull again");
       slotState = SLOT_STATE.READY; slotAfterResolve(); return;
     }
+    slotPayoutImpact(win, extraLife);
     slotEls.reels?.classList.add("win");
     slotStartWinFX(win);
     const p = win.prize;
-    if (p.kind === "jackpot") { if (extraLife) playGameSfx("slot_life", 0.9); slotJackpotPresent(extraLife); return; }
+    if (p.kind === "jackpot") { if (extraLife) playGameSfx("plasmarecharged1", 0.9, { important: true }); slotJackpotPresent(extraLife); return; }
     // per-reward payout cue (falls back to slot_win when the reward-specific file is absent)
     const payoutKey = p.kind === "tokens" ? "pickup_gold" : p.kind === "powerup" ? "slot_payout_" + p.sym : null;
     playGameSfx(payoutKey && GAME_SFX[payoutKey] ? payoutKey : "slot_win", 0.92);
-    if (extraLife) playGameSfx("slot_life", 0.8);
+    if (extraLife) playGameSfx("plasmarecharged1", 0.86, { important: true });
     let big, sub;
     if (p.kind === "tokens") {
       slotTokens += p.value; big = `+${p.value} TOKEN${p.value > 1 ? "S" : ""}`; sub = "Gold bars!";
@@ -8252,7 +8275,11 @@ function initGalaxyCanvas() {
       else if (r.state === "stopping") {
         const s = Math.min(1, ((now - r.stopT0) / 1000) / SLOT_STOP_DUR), s2 = s * s, s3 = s2 * s;
         r.pos = r.stopFrom * (2 * s3 - 3 * s2 + 1) + (r.stopV0 * SLOT_STOP_DUR) * (s3 - 2 * s2 + s) + r.stopFinal * (-2 * s3 + 3 * s2);
-        if (s >= 1) { r.pos = r.stopFinal; r.bounce = 0; r.bounceVel = SLOT_BOUNCE_IMPULSE; r.state = "settle"; playGameSfx("slot_clunk", 0.7); }
+        if (s >= 1) {
+          r.pos = r.stopFinal; r.bounce = 0; r.bounceVel = SLOT_BOUNCE_IMPULSE; r.state = "settle";
+          playGameSfx("slot_clunk", 0.7);
+          triggerGameplayHapticImpact(hapticImpactStyle.Light);
+        }
       } else if (r.state === "settle") {
         r.bounceVel += (0 - r.bounce) * SLOT_BOUNCE_K * dt; r.bounceVel -= r.bounceVel * SLOT_BOUNCE_DAMP * dt; r.bounce += r.bounceVel * dt;
         if (Math.abs(r.bounce) < 0.002 && Math.abs(r.bounceVel) < 0.02) {
@@ -8835,6 +8862,7 @@ function initGalaxyCanvas() {
   let shotsFired = 0;
   let shotsHit = 0;
   let ufosKilledThisLevel = 0;
+  let comboBonusThisLevel = 0;
   let ufo = null;
   let ufoDroneLoopHandle = null;
   let arcadeUfoSpawnAt = 0;
@@ -9296,8 +9324,8 @@ function initGalaxyCanvas() {
       x: pu.x,
       y: pu.y,
       start: performance.now(),
-      ttl: isIOSNative ? 360 : 460,
-      scale: pu.type === "bomb" ? 0.88 : 0.78,
+      ttl: isIOSNative ? 250 : 320,
+      scale: pu.type === "bomb" ? 1.32 : 1.17,
       rot: Math.random() * Math.PI * 2,
       flashRot: Math.random() * Math.PI * 2,
       flashScale: 0.84 + Math.random() * 0.24,
@@ -9308,9 +9336,9 @@ function initGalaxyCanvas() {
   }
 
   function fastFxFlicker(now, seed = 0, depth = 0.24) {
-    const a = Math.sin(now * 0.055 + seed) * 0.5 + 0.5;
-    const b = Math.sin(now * 0.117 + seed * 1.7) * 0.5 + 0.5;
-    return clamp(1 - depth + (a * 0.65 + b * 0.35) * depth * 2, 0.55, 1.28);
+    const a = Math.sin(now * 0.12 + seed) * 0.5 + 0.5;
+    const b = Math.sin(now * 0.27 + seed * 1.7) * 0.5 + 0.5;
+    return clamp(1 - depth + (a * 0.65 + b * 0.35) * depth * 2, 0.45, 1.62);
   }
 
   function drawFxSheetFrame(drawCtx, sheet, frame, x, y, size, rot = 0, tint = "") {
@@ -9348,6 +9376,14 @@ function initGalaxyCanvas() {
     drawCtx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
   }
 
+  function playComboSfx(key) {
+    const sfxKey = `combo_${key}`;
+    if (!GAME_SFX[sfxKey]) return;
+    playGameSfx(sfxKey, 0.92, { rate: 1.25, important: true });
+    setTimeout(() => playGameSfx(sfxKey, 0.32, { rate: 1.25, important: true }), 92);
+    setTimeout(() => playGameSfx(sfxKey, 0.18, { rate: 1.25, important: true }), 178);
+  }
+
   function awardCombo({ key, label, points, x, y, colors = ["255,255,255", "0,255,209"] }) {
     if (engineMode !== "arcade" || !arcadeActive) return;
     const now = performance.now();
@@ -9358,6 +9394,7 @@ function initGalaxyCanvas() {
     const cx = clamp(preferredX, marginX, Math.max(marginX, sim.width - marginX));
     const cy = clamp(preferredY, marginY, Math.max(marginY, sim.height - marginY));
     addArcadeScore(points);
+    comboBonusThisLevel += points;
     comboBanners.push({
       key,
       label,
@@ -9376,6 +9413,7 @@ function initGalaxyCanvas() {
     triggerGameplayHapticImpact(points >= 1000 ? hapticImpactStyle.Heavy : hapticImpactStyle.Medium);
     playGameSfx(points >= 1000 ? "level_up" : "bling", points >= 1000 ? 0.82 : 0.75, { important: true });
     playGameSfx("slot_life", 1.24, { important: true });
+    playComboSfx(key);
   }
 
   function drawComboFxOverlay(drawCtx, now) {
@@ -9390,16 +9428,17 @@ function initGalaxyCanvas() {
           powerupPickupBursts.splice(i, 1);
           continue;
         }
-        const frame = Math.min(powerupPickupFxSheet.frameCount - 1, Math.floor(t * powerupPickupFxSheet.frameCount));
-        const size = (isIOSNative ? 74 : 88) * b.scale * (1.02 + t * 0.34);
-        const fade = 1 - Math.max(0, t - 0.66) / 0.34;
-        const flicker = fastFxFlicker(now, b.flickerSeed, 0.28);
-        drawCtx.globalAlpha = clamp(0.9 * fade * flicker, 0, 1);
+        const frame = Math.min(powerupPickupFxSheet.frameCount - 1, Math.floor(t * powerupPickupFxSheet.frameCount * 1.75));
+        const pop = t < 0.42 ? 1 + t / 0.42 * 0.48 : 1.48 - ((t - 0.42) / 0.58) * 0.30;
+        const size = (isIOSNative ? 111 : 132) * b.scale * pop;
+        const fade = 1 - Math.max(0, t - 0.54) / 0.46;
+        const flicker = fastFxFlicker(now, b.flickerSeed, 0.42);
+        drawCtx.globalAlpha = clamp(1.08 * fade * flicker, 0, 1);
         drawFxSheetFrame(drawCtx, powerupPickupFxSheet, frame, b.x, b.y, size, b.rot, b.tint);
         if (powerupPickupFlashSheet.ready) {
-          const flashFrame = Math.min(powerupPickupFlashSheet.frameCount - 1, Math.floor(t * powerupPickupFlashSheet.frameCount * 1.24));
-          const flashSize = (isIOSNative ? 68 : 82) * b.scale * b.flashScale * (1.14 + t * 0.22);
-          drawCtx.globalAlpha = clamp(b.flashAlpha * fade * fastFxFlicker(now, b.flickerSeed + 2.4, 0.36), 0, 1);
+          const flashFrame = Math.min(powerupPickupFlashSheet.frameCount - 1, Math.floor(t * powerupPickupFlashSheet.frameCount * 2.05));
+          const flashSize = (isIOSNative ? 102 : 123) * b.scale * b.flashScale * pop;
+          drawCtx.globalAlpha = clamp((b.flashAlpha + 0.18) * fade * fastFxFlicker(now, b.flickerSeed + 2.4, 0.52), 0, 1);
           drawFxSheetFrame(drawCtx, powerupPickupFlashSheet, flashFrame, b.x, b.y, flashSize, b.flashRot + t * 0.55, b.tint);
         }
       }
@@ -9502,14 +9541,18 @@ function initGalaxyCanvas() {
       const base = clamp(maxW / Math.max(1, headline.length * 0.68), 20, 38);
       drawCtx.font = `900 ${Math.floor(base * slam)}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       drawCtx.lineWidth = Math.max(4, base * 0.18);
+      const glowPulse = 0.54 + 0.46 * Math.abs(Math.sin(now * 0.016 + b.start * 0.003));
+      const fillPulse = 0.74 + 0.26 * Math.abs(Math.sin(now * 0.026 + b.start * 0.005 + 1.2));
       drawCtx.strokeStyle = "rgba(0,0,0,0.78)";
-      drawCtx.shadowColor = `rgba(${b.colors[0]},${b.key === "marksman" ? 0.48 : 0.92})`;
-      drawCtx.shadowBlur = b.key === "marksman" ? (isIOSNative ? 4 : 8) : (isIOSNative ? 8 : 18);
-      drawCtx.fillStyle = "rgba(255,255,255,0.98)";
+      drawCtx.shadowColor = `rgba(${b.colors[0]},${(b.key === "marksman" ? 0.42 : 0.78) * glowPulse})`;
+      drawCtx.shadowBlur = (b.key === "marksman" ? (isIOSNative ? 4 : 8) : (isIOSNative ? 8 : 18)) * glowPulse;
+      drawCtx.fillStyle = `rgba(255,255,255,${0.76 + 0.22 * fillPulse})`;
       drawCtx.strokeText(headline, safeX, safeY, maxW);
       drawCtx.fillText(headline, safeX, safeY, maxW);
       drawCtx.font = `800 ${Math.floor(base * 0.58 * slam)}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
-      drawCtx.fillStyle = `rgba(${b.colors[1] || b.colors[0]},0.98)`;
+      drawCtx.shadowColor = `rgba(${b.colors[1] || b.colors[0]},${0.46 * glowPulse})`;
+      drawCtx.shadowBlur = (isIOSNative ? 5 : 10) * glowPulse;
+      drawCtx.fillStyle = `rgba(${b.colors[1] || b.colors[0]},${0.78 + 0.2 * fillPulse})`;
       drawCtx.strokeText(sub, safeX, clamp(safeY + base * 0.82, 66, Math.max(66, sim.height - 24)), maxW);
       drawCtx.fillText(sub, safeX, clamp(safeY + base * 0.82, 66, Math.max(66, sim.height - 24)), maxW);
       drawCtx.restore();
@@ -12759,6 +12802,14 @@ function initGalaxyCanvas() {
       if (dx * dx + dy * dy <= r2) big += 1;
     }
     if (big >= BIG_BOMB_GOLDBARS_THRESHOLD) {
+      awardCombo({
+        key: "big_bomb",
+        label: "BIG BOMB COMBO",
+        points: 500,
+        x,
+        y,
+        colors: ["255,215,0", "255,90,90"],
+      });
       spawnPowerupAt("goldbars", randomPowerupPoint());
       playGameSfx("bling", 0.85);
     }
@@ -13082,7 +13133,7 @@ function initGalaxyCanvas() {
     document.head.appendChild(s);
   }
 
-  function showLevelScoreReport({ levelNum, levelTimeMs, timeBonus, accuracy, accuracyBonus, ufosKilled, scoreBefore, scoreAfter, onDismiss }) {
+  function showLevelScoreReport({ levelNum, levelTimeMs, timeBonus, accuracy, accuracyBonus, comboBonus = 0, ufosKilled, scoreBefore, scoreAfter, onDismiss }) {
     ensureLsrStyles();
     document.getElementById("levelScoreReport")?.remove();
 
@@ -13092,6 +13143,7 @@ function initGalaxyCanvas() {
 
     const acStr = accuracyBonus > 0 ? ` +${accuracyBonus}` : "";
     const tbStr = timeBonus > 0 ? `+${timeBonus}` : "—";
+    const comboStr = comboBonus > 0 ? `+${comboBonus}` : "—";
     const panel = document.createElement("div");
     panel.className = "lsr-panel";
     panel.innerHTML = `
@@ -13101,6 +13153,7 @@ function initGalaxyCanvas() {
       <div class="lsr-row"><span class="lsr-lbl">LEVEL TIME</span><span class="lsr-val">${formatRunTime(levelTimeMs)}</span></div>
       <div class="lsr-row"><span class="lsr-lbl">ACCURACY</span><span class="lsr-val">${accuracy}%${acStr}</span></div>
       <div class="lsr-row"><span class="lsr-lbl">UFOs</span><span class="lsr-val">${ufosKilled}</span></div>
+      <div class="lsr-row"><span class="lsr-lbl">COMBOS</span><span class="lsr-val">${comboStr}</span></div>
       <div class="lsr-row"><span class="lsr-lbl">TIME BONUS</span><span class="lsr-val">${tbStr}</span></div>
       <div class="lsr-div">─────────────────</div>
       <div class="lsr-row lsr-total"><span class="lsr-lbl">TOTAL</span><span class="lsr-val" id="lsrTotalVal">${scoreBefore}</span></div>
@@ -13323,6 +13376,7 @@ function initGalaxyCanvas() {
         timeBonus,
         accuracy,
         accuracyBonus,
+        comboBonus: comboBonusThisLevel,
         ufosKilled: ufosKilledThisLevel,
         scoreBefore,
         scoreAfter,
@@ -13571,6 +13625,7 @@ function initGalaxyCanvas() {
     shotsFired = 0;
     shotsHit = 0;
     ufosKilledThisLevel = 0;
+    comboBonusThisLevel = 0;
     commBoxController.show();
     commBoxController.setDamageState("normal");
     showFpsOverlay();
@@ -16025,24 +16080,6 @@ function initGalaxyCanvas() {
         // expire after lifetime (powerup expiry keeps running even during a snowflake freeze)
         for (let pi = powerups.length - 1; pi >= 0; pi -= 1) {
           if (now - powerups[pi].spawnedAt > BOMB_POWERUP_LIFETIME_MS) powerups.splice(pi, 1);
-        }
-        // DEBUG: revert before release — keep a goldbars on screen at ALL times in EVERY level
-        // (for slot-token testing). Deliberately ignores cfg.powerupOverride and re-spawns
-        // whenever none is present (powerups expire after BOMB_POWERUP_LIFETIME_MS=10s, so a
-        // one-shot spawn would NOT keep gold available throughout). Silent on respawn — the
-        // pickup itself plays "pickup_gold". Restore the final-15s gating + override check
-        // (see git history) or remove entirely before release.
-        if (elapsedMs >= LEVEL_START_SPAWN_DELAY_MS
-            && !powerups.some((p) => p.type === "goldbars")) {
-          const goldPt = randomPowerupPoint();
-          powerups.push({
-            type: "goldbars",
-            x: goldPt.x,
-            y: goldPt.y,
-            r: 22,
-            spawnedAt: now,
-            opacity: 1.0,
-          });
         }
         updateHudMissileInventory();
       }

@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-29 14:20";
+const BUILD_TS = "2026-06-29 14:28";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -359,6 +359,7 @@ function bgKeyForLevel(levelNum) {
 
 const GAME_SFX = {
   orb_tap: "taporb.mp3",
+  orb_rub2: "gamesfx/orb_rub2.mp3",
   warp: "assets/newsfx/subswoosh.mp3",
   explosion_big: "gamesfx/explo1.mp3",
   explosion_med: "gamesfx/explo1.mp3",
@@ -847,12 +848,22 @@ const canonicalAnswers = [
   "Heck Yes",
   "Without a doubt",
   "Signs point to yes",
+  "The answer is yes",
+  "Yes, but keep your timing sharp",
+  "Yes - the path is open",
+  "It leans yes",
+  "Trust the yes you already felt",
   "Nope",
   "I don't think so",
   "Don't count on it",
+  "The answer is no",
+  "No - not with the current energy",
+  "It leans no",
+  "Not unless something changes first",
   "That is for God to decide",
   "Ask another day",
   "The stars say wait",
+  "Let the signal clear, then ask again",
   "You're asking the wrong question, think about it and ask another day",
   "Yes",
   "Not today",
@@ -889,28 +900,28 @@ function pickCanonicalAnswer() {
 const packs = {
   classic: {
     label: "Classic",
-    yes: ["The current aligns in your favor.", "The signal is clean. Proceed.", "Momentum says yes."],
-    no: ["Not this cycle.", "The signs ask for patience.", "Pause and return with clearer intent."],
+    yes: ["The current aligns in your favor.", "The signal is clean. Proceed.", "Momentum says yes.", "The door is open.", "Green light, but stay awake."],
+    no: ["Not this cycle.", "The signs ask for patience.", "Pause and return with clearer intent.", "The path is blocked for now.", "Let this one pass."],
   },
   romantic: {
     label: "Romantic",
-    yes: ["The heart says yes.", "Love is leaning your way.", "There is warmth ahead."],
-    no: ["Not from this person, not today.", "Protect your energy first.", "Wait for reciprocation."],
+    yes: ["The heart says yes.", "Love is leaning your way.", "There is warmth ahead.", "The feeling is not one-sided.", "Move gently, but move."],
+    no: ["Not from this person, not today.", "Protect your energy first.", "Wait for reciprocation.", "Do not chase what is not reaching back.", "Your peace is the answer."],
   },
   business: {
     label: "Business",
-    yes: ["The tradeoff is acceptable.", "Green light with discipline.", "Risk-adjusted yes."],
-    no: ["Return with better numbers.", "Hold capital for now.", "Not enough edge yet."],
+    yes: ["The tradeoff is acceptable.", "Green light with discipline.", "Risk-adjusted yes.", "The upside is real if you keep scope tight.", "Proceed, but write down the limits first."],
+    no: ["Return with better numbers.", "Hold capital for now.", "Not enough edge yet.", "The cost is hiding in the fine print.", "Wait for a cleaner opening."],
   },
   chaos: {
     label: "Chaos Goblin",
-    yes: ["Absolutely. Do it loud.", "Chaos approves.", "Yes, and make it weird."],
-    no: ["Nope. Universe said sit down.", "Hard no, tiny mortal.", "Not unless you enjoy drama."],
+    yes: ["Absolutely. Do it loud.", "Chaos approves.", "Yes, and make it weird.", "The weird door is open.", "Send it, but own the cleanup."],
+    no: ["Nope. Universe said sit down.", "Hard no, tiny mortal.", "Not unless you enjoy drama.", "The vibes have filed a complaint.", "No, that spiral has teeth."],
   },
   stoic: {
     label: "Stoic",
-    yes: ["Act with virtue and continue.", "This is within your control.", "Proceed without attachment."],
-    no: ["Decline what weakens you.", "Not essential. Let it go.", "Choose restraint."],
+    yes: ["Act with virtue and continue.", "This is within your control.", "Proceed without attachment.", "Do the next right thing.", "Yes, if your motive is clean."],
+    no: ["Decline what weakens you.", "Not essential. Let it go.", "Choose restraint.", "Silence is the stronger action.", "No answer is needed when discipline is clear."],
   },
 };
 
@@ -5738,7 +5749,7 @@ const orbRubDrone = {
     osc3.connect(osc3Gain);
     osc3Gain.connect(trem);
 
-    const target = state.whisper ? 0.18 : 0.36;
+    const target = state.whisper ? 0.24 : 0.48;
     out.gain.setValueAtTime(0, now);
     out.gain.linearRampToValueAtTime(target, now + 0.28);
 
@@ -5760,8 +5771,8 @@ const orbRubDrone = {
     const now = ctx.currentTime;
     out.gain.cancelScheduledValues(now);
     out.gain.setValueAtTime(out.gain.value, now);
-    out.gain.linearRampToValueAtTime(0, now + 0.24);
-    const stopAt = now + 0.28;
+    out.gain.linearRampToValueAtTime(0, now + 0.42);
+    const stopAt = now + 0.48;
     [n.osc1, n.osc2, n.osc3, n.lfo].forEach((o) => { try { o.stop(stopAt); } catch { /* ignore */ } });
     setTimeout(() => { try { out.disconnect(); } catch { /* ignore */ } }, 500);
   },
@@ -5806,9 +5817,10 @@ function scheduleRubHaptic() {
 let orbRub2Audio = null;
 let orbRub2FadeTimer = null;
 let orbRub2Active = false;
+let orbRub2WebAudio = null;
 const orbRub2TargetVol = () => (state.whisper ? 0.041 : 0.10); // 2026-06-23: another ~35% down on the rub layer
 const ORB_RUB2_FADE_IN_MS = 750;
-const ORB_RUB2_FADE_OUT_MS = 950;
+const ORB_RUB2_FADE_OUT_MS = 1200;
 
 // Ramp orbRub2 volume toward `target` over `ms` (setInterval — <audio>.volume has no ramp).
 function fadeOrbRub2(target, ms, onDone) {
@@ -5830,8 +5842,55 @@ function fadeOrbRub2(target, ms, onDone) {
   }, stepMs);
 }
 
+function stopOrbRub2WebAudioNow(handle = orbRub2WebAudio) {
+  if (!handle) return;
+  if (handle.stopTimer) clearTimeout(handle.stopTimer);
+  try { handle.source.stop(); } catch { /* ignore */ }
+  try { handle.source.disconnect(); } catch { /* ignore */ }
+  try { handle.gain.disconnect(); } catch { /* ignore */ }
+  if (orbRub2WebAudio === handle) orbRub2WebAudio = null;
+}
+
+function startOrbRub2WebAudio() {
+  const ctx = audioEngine.ensureContext?.();
+  const buffer = audioEngine.buffers?.get?.("orb_rub2");
+  if (!ctx || !audioEngine.masterGain || !audioEngine.unlocked || !buffer) return false;
+  if (orbRub2WebAudio) {
+    const handle = orbRub2WebAudio;
+    if (handle.stopTimer) {
+      clearTimeout(handle.stopTimer);
+      handle.stopTimer = null;
+    }
+    const now = handle.ctx.currentTime;
+    handle.gain.gain.cancelScheduledValues(now);
+    handle.gain.gain.setValueAtTime(handle.gain.gain.value, now);
+    handle.gain.gain.linearRampToValueAtTime(orbRub2TargetVol(), now + ORB_RUB2_FADE_IN_MS / 1000);
+    return true;
+  }
+
+  const now = ctx.currentTime;
+  const source = ctx.createBufferSource();
+  const gain = ctx.createGain();
+  source.buffer = buffer;
+  source.loop = true;
+  gain.gain.value = 0;
+  source.connect(gain);
+  gain.connect(audioEngine.masterGain);
+  source.start(now);
+  gain.gain.cancelScheduledValues(now);
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(orbRub2TargetVol(), now + ORB_RUB2_FADE_IN_MS / 1000);
+  const handle = { ctx, source, gain, stopTimer: null };
+  source.onended = () => {
+    if (orbRub2WebAudio === handle) orbRub2WebAudio = null;
+  };
+  orbRub2WebAudio = handle;
+  return true;
+}
+
 function startOrbRub2Loop() {
   try {
+    audioEngine.loadSound?.("orb_rub2", GAME_SFX.orb_rub2).catch?.(() => {});
     if (!orbRub2Audio) {
       orbRub2Audio = new Audio("gamesfx/orb_rub2.mp3");
       orbRub2Audio.loop = true;
@@ -5839,6 +5898,10 @@ function startOrbRub2Loop() {
     if (orbRub2Active) return; // already running this rub — let the loop continue, don't re-seek
     orbRub2Active = true;
     if (orbRub2FadeTimer) { clearInterval(orbRub2FadeTimer); orbRub2FadeTimer = null; }
+    if (startOrbRub2WebAudio()) {
+      try { orbRub2Audio.pause(); } catch { /* ignore */ }
+      return;
+    }
     orbRub2Audio.volume = 0;             // silence first so the restart-from-top seek is inaudible
     try { orbRub2Audio.currentTime = 0; } catch { /* ignore */ }
     if (orbRub2Audio.paused) orbRub2Audio.play().catch(() => {});
@@ -5848,6 +5911,18 @@ function startOrbRub2Loop() {
 function stopOrbRub2Loop() {
   if (!orbRub2Audio || !orbRub2Active) return;
   orbRub2Active = false;
+  if (orbRub2WebAudio) {
+    const handle = orbRub2WebAudio;
+    const { ctx, gain } = handle;
+    const now = ctx.currentTime;
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(gain.gain.value, now);
+    gain.gain.linearRampToValueAtTime(0, now + ORB_RUB2_FADE_OUT_MS / 1000);
+    handle.stopTimer = setTimeout(() => {
+      if (!orbRub2Active && orbRub2WebAudio === handle) stopOrbRub2WebAudioNow(handle);
+    }, ORB_RUB2_FADE_OUT_MS + 80);
+    return;
+  }
   fadeOrbRub2(0, ORB_RUB2_FADE_OUT_MS, () => {
     // Only pause if another rub didn't start during the fade-out (which flips Active back on).
     if (!orbRub2Active) { try { orbRub2Audio.pause(); } catch { /* ignore */ } }

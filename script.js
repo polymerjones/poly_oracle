@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-29 14:28";
+const BUILD_TS = "2026-06-29 15:06";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -695,23 +695,28 @@ const ARCADE_LEVELS = [
     mineLaunch: true,
     mineCount: 4,              // 4 mines spawn at level start
     mineFuseMs: 5000,          // shorter fuse than normal (normally 8000)
+    powerupOverride: ["timer", "freeze", "bomb", "goldbars"],
+    guaranteedSpawn: [
+      { type: "timer", atMs: 12000 },
+      { type: "freeze", atMs: 22000 },
+    ],
     musicKey: "L12_BOOM",
     musicVolume: 1.3, // 2026-06-24: L12_BOOM mastered quiet — boost per playtest
   },
   {
     level: 13,
     label: "MAKE IT BOOM PT 2",
-    time: 50,
-    totalToClear: 22,
-    startSpawn: 8,
-    spawnEveryMs: 6000,
-    maxOnScreen: 12,
+    time: 48,
+    totalToClear: 28,
+    startSpawn: 10,
+    spawnEveryMs: 4800,
+    maxOnScreen: 14,
     asteroidKinds: [3, 2, 2, 1], // mix of all sizes
     asteroidSpeedMult: 1.3,       // 2026-06-23: eased 1.4→1.3 so fast laser/net clearing is viable
     noUfo: false,
     ufoSpawnAt: 15,               // UFO arrives early
     mineLaunch: true,
-    mineCount: 3,
+    mineCount: 4,
     mineFuseMs: 5000,
     powerupOverride: ["missile", "missile", "goldbars"], // 2026-06-16: missile-weighted pool
     // 2026-06-23: CRUCIAL make-or-break timer. One +30s timer drops at 20s-remaining; collected it
@@ -719,17 +724,18 @@ const ARCADE_LEVELS = [
     // near-unwinnable. This is the level-saver — bombs/mines are a distraction; reward is fast laser +
     // dropping/clustering stroids (grab→release drops dead in place on L13, see launchStroidToss) for
     // a big plasma-net sweep.
-    guaranteedSpawn: [{ type: "timer", atMs: 30000 }],
+    guaranteedSpawn: [{ type: "timer", atMs: 28000 }],
+    waves: [{ count: 6, triggerAtRemaining: 18 }],
     musicKey: "L13_BOOM_PT2",
     musicVolume: 1.35, // 2026-06-24: L13_Boom_pt2 mastered quiet — boost per playtest (also covers L14 fallback)
   },
   {
     level: 14,
     label: "CRITICAL MASS",
-    time: 25,                    // very short timer
-    totalToClear: 40,            // lots of small fast asteroids
+    time: 50,                    // longer last-second timer-chain level
+    totalToClear: 80,            // doubled-length small fast asteroid swarm
     startSpawn: 15,
-    spawnEveryMs: 4000,
+    spawnEveryMs: 2700,
     maxOnScreen: 20,
     asteroidKinds: [1],          // ONLY kind 1 small asteroids
     spriteKey: "roidneon",       // 2026-06-23: code-generated neon skin (black/green/purple gradient map)
@@ -737,7 +743,13 @@ const ARCADE_LEVELS = [
     noUfo: true,
     noLandmines: true,
     powerupOverride: ["freeze", "quadshot", "timer", "timer"], // 2026-06-16: timer-weighted support
-    powerupIntervalMs: 10000,    // spawn every 10s
+    powerupIntervalMs: 9000,
+    guaranteedSpawn: [
+      { type: "timer", atMs: 17000 },
+      { type: "freeze", atMs: 26000 },
+      { type: "timer", atMs: 36000 },
+      { type: "timer", atMs: 44000 },
+    ],
     musicKey: "L14_CRITICAL",
   },
   {
@@ -5818,7 +5830,7 @@ let orbRub2Audio = null;
 let orbRub2FadeTimer = null;
 let orbRub2Active = false;
 let orbRub2WebAudio = null;
-const orbRub2TargetVol = () => (state.whisper ? 0.041 : 0.10); // 2026-06-23: another ~35% down on the rub layer
+const orbRub2TargetVol = () => (state.whisper ? 0.05 : 0.12); // 2026-06-29: a touch louder, still under the main rub drone
 const ORB_RUB2_FADE_IN_MS = 750;
 const ORB_RUB2_FADE_OUT_MS = 1200;
 
@@ -7633,7 +7645,7 @@ function initGalaxyCanvas() {
   let placedBombs = [];
   let landmineSpawnedThisLevel = false;
   let playerBombInventory = 0;
-  // 2026-06-26: POLYSLOTS economy — goldbar pickups silently bank +1 token each during a level;
+  // 2026-06-26: POLYSLOTS economy — goldbar pickups silently bank tokens during a level;
   // the between-level slot reveals the banked total as its token count. Use-it-or-lose-it: any
   // leftover is discarded when the slot is left (see slotMachine glue). Reset on a fresh game.
   let slotTokens = 0;
@@ -7710,7 +7722,9 @@ function initGalaxyCanvas() {
   let _slotSpritesLoaded = false;
   let slotNukeOwned = 0;             // per-game nuke flag (jackpot cap); reset on a new game
   let slotPendingQuadShot = false;   // quad win is timed → applied at the next level start
-  let slotMusicEl = null;            // dedicated streaming <audio> (long tracks aren't decoded — see note)
+  let slotMusicEl = null;            // legacy dedicated slot stream; kept for teardown safety
+  let slotLevelMusicGainBefore = null;
+  let slotLevelMusicHtmlVolBefore = null;
 
   // Single predicate the rest of the game branches on to detect slot ownership. Active == any live
   // state; idle/disposed == not active. Exposed on the controller API (see return block) so the
@@ -7821,9 +7835,7 @@ function initGalaxyCanvas() {
   const SLOT_LEVER_THRESHOLD = 0.6, SLOT_LEVER_STIFF = 120, SLOT_LEVER_DAMP = 9;
   const SLOT_BOUNCE_IMPULSE = 0.16, SLOT_BOUNCE_K = 200, SLOT_BOUNCE_DAMP = 16;
   const SLOT_DPR = Math.min(window.devicePixelRatio || 1, 2);
-  // Long session-music tracks stream as <audio> (NOT decoded — see the GAME_SFX music note).
-  const SLOT_MUSIC_URLS = ["assets/music/polyslots_music1.mp3", "assets/music/polyslots_music2.mp3"];
-  const SLOT_MUSIC_VOL = 0.5;
+  // Slot mode now keeps level music running underneath, ducked by slotDuckLevelMusic().
 
   function ensureSlotSprites() {
     if (_slotSpritesLoaded) return;
@@ -7949,6 +7961,9 @@ function initGalaxyCanvas() {
     if (slotEls.tokensBox) { slotEls.tokensBox.classList.remove("tick"); void slotEls.tokensBox.offsetWidth; slotEls.tokensBox.classList.add("tick"); }
     slotState = SLOT_STATE.SPINNING;
     triggerGameplayHapticImpact(hapticImpactStyle.Medium);
+    cssFlash("#00FFD1", 0.2, 180);
+    cssShake(isIOSNative ? 0.45 : 0.75);
+    playGameSfx("slot_clunk", 0.72);
     setSlotHint("");
     slotEls.skip?.classList.remove("show");
     slotClearWinFx();
@@ -8378,29 +8393,39 @@ function initGalaxyCanvas() {
     slotTrackRaf(slotFrame);
   }
 
-  // Fully STOP the carried-over level music so ONLY the slot track plays — no two tracks at once.
-  // (We don't duck the bus; on slot exit startLevel() starts the next level's music fresh.)
-  function slotStopLevelMusic() {
-    try {
-      const cm = audioEngine.currentMusic;
-      if (cm && cm.source) { try { cm.source.stop(); } catch { /* already stopped */ } }
-      audioEngine.currentMusic = null;
-      if (audioEngine.currentMusicHtml?.node) { try { audioEngine.currentMusicHtml.node.pause(); } catch { /* ignore */ } }
-      audioEngine.currentMusicHtml = null;
-    } catch { /* best-effort stop */ }
+  function slotDuckLevelMusic() {
+    slotLevelMusicGainBefore = audioEngine.musicGain?.gain?.value ?? MUSIC_MAX_GAIN;
+    slotLevelMusicHtmlVolBefore = audioEngine.currentMusicHtml?.node?.volume ?? MUSIC_MAX_GAIN;
+    const target = (state.whisper ? 0.28 : 0.42) * MUSIC_MAX_GAIN;
+    if (audioEngine.musicGain && audioEngine.ctx) {
+      const t = audioEngine.ctx.currentTime;
+      audioEngine.musicGain.gain.cancelScheduledValues(t);
+      audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, t);
+      audioEngine.musicGain.gain.linearRampToValueAtTime(target, t + 0.22);
+    }
+    if (audioEngine.currentMusicHtml?.node) audioEngine.currentMusicHtml.node.volume = state.whisper ? 0.18 : 0.32;
+  }
+  function slotRestoreLevelMusic() {
+    if (slotLevelMusicGainBefore == null && slotLevelMusicHtmlVolBefore == null) return;
+    const gainTarget = slotLevelMusicGainBefore ?? MUSIC_MAX_GAIN;
+    const htmlTarget = slotLevelMusicHtmlVolBefore ?? MUSIC_MAX_GAIN;
+    slotLevelMusicGainBefore = null;
+    slotLevelMusicHtmlVolBefore = null;
+    if (audioEngine.musicGain && audioEngine.ctx) {
+      const t = audioEngine.ctx.currentTime;
+      audioEngine.musicGain.gain.cancelScheduledValues(t);
+      audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, t);
+      audioEngine.musicGain.gain.linearRampToValueAtTime(gainTarget, t + 0.18);
+    }
+    if (audioEngine.currentMusicHtml?.node) audioEngine.currentMusicHtml.node.volume = htmlTarget;
   }
   function slotStartMusic() {
-    slotStopMusic();        // clear any prior slot element
-    slotStopLevelMusic();   // silence the level track entirely before the slot track starts
-    const url = SLOT_MUSIC_URLS[(Math.random() * SLOT_MUSIC_URLS.length) | 0];
-    slotMusicEl = new Audio(url);
-    slotMusicEl.loop = true;
-    slotMusicEl.playsInline = true;
-    slotMusicEl.volume = state.whisper ? SLOT_MUSIC_VOL * 0.5 : SLOT_MUSIC_VOL;
-    slotMusicEl.play().catch(() => { /* may need the next gesture; handled by the lever/skip taps */ });
+    slotStopMusic();
+    slotDuckLevelMusic();
   }
   function slotStopMusic() {
     if (slotMusicEl) { try { slotMusicEl.pause(); } catch { /* ignore */ } slotMusicEl = null; }
+    slotRestoreLevelMusic();
   }
 
   let _slotStylesInjected = false;
@@ -8939,6 +8964,7 @@ function initGalaxyCanvas() {
   let warningHapticInterval = null;
   let arcadeLives = 0;
   let arcadeScore = 0;
+  let arcadeScoreAtLevelStart = 0;
   let shotsFired = 0;
   let shotsHit = 0;
   let ufosKilledThisLevel = 0;
@@ -9033,6 +9059,7 @@ function initGalaxyCanvas() {
   powerupPickupFlashSheet.img.onload = () => { powerupPickupFlashSheet.ready = true; };
   powerupPickupFlashSheet.img.onerror = () => { powerupPickupFlashSheet.ready = false; };
   powerupPickupFlashSheet.img.src = "combo_fx/5_electric_elements.png";
+  const explosiveElectricFxSheet = powerupPickupFlashSheet;
   const COMBO_BANNER_TTL_MS = 2200;
   const COMBO_BANNER_FADE_START = 0.52;
   const COMBO_BANNER_BLAST_START = 0.5;
@@ -9041,6 +9068,7 @@ function initGalaxyCanvas() {
   let comboFxParticles = [];
   let smallStroidBursts = [];
   let bigStroidBursts = [];
+  let explosiveElectricBursts = [];
   let powerupPickupBursts = [];
   const fxTintCanvas = document.createElement("canvas");
   const fxTintCtx = fxTintCanvas.getContext("2d", { alpha: true });
@@ -9312,6 +9340,7 @@ function initGalaxyCanvas() {
     comboFxParticles.length = 0;
     smallStroidBursts.length = 0;
     bigStroidBursts.length = 0;
+    explosiveElectricBursts.length = 0;
     powerupPickupBursts.length = 0;
     comboBombBlastAwarded.clear();
   }
@@ -9417,6 +9446,32 @@ function initGalaxyCanvas() {
     });
   }
 
+  function spawnExplosiveElectricBurst(x, y, radius = 180, count = 5) {
+    if (prefersReducedMotion || !explosiveElectricFxSheet.ready) return;
+    const maxBursts = isIOSNative ? 8 : 14;
+    while (explosiveElectricBursts.length > Math.max(0, maxBursts - count)) explosiveElectricBursts.shift();
+    const colors = [
+      "rgba(255,38,0,0.82)",
+      "rgba(255,126,0,0.82)",
+      "rgba(255,224,40,0.82)",
+    ];
+    for (let i = 0; i < count; i += 1) {
+      const ang = Math.random() * Math.PI * 2;
+      const dist = radius * (0.12 + Math.random() * 0.42);
+      explosiveElectricBursts.push({
+        x: x + Math.cos(ang) * dist,
+        y: y + Math.sin(ang) * dist,
+        start: performance.now() + Math.random() * 80,
+        ttl: 360 + Math.random() * 180,
+        scale: 1.0 + Math.random() * 0.7,
+        rot: Math.random() * Math.PI * 2,
+        spin: (Math.random() < 0.5 ? -1 : 1) * (0.35 + Math.random() * 0.8),
+        tint: colors[(Math.random() * colors.length) | 0],
+        flickerSeed: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
   function fastFxFlicker(now, seed = 0, depth = 0.24) {
     const a = Math.sin(now * 0.12 + seed) * 0.5 + 0.5;
     const b = Math.sin(now * 0.27 + seed * 1.7) * 0.5 + 0.5;
@@ -9474,7 +9529,28 @@ function initGalaxyCanvas() {
     const preferredX = key === "marksman" ? sim.width / 2 : (Number.isFinite(x) ? x : sim.width / 2);
     const preferredY = Number.isFinite(y) ? y : sim.height * 0.36;
     const cx = clamp(preferredX, marginX, Math.max(marginX, sim.width - marginX));
-    const cy = clamp(preferredY, marginY, Math.max(marginY, sim.height - marginY));
+    let cy = clamp(preferredY, marginY, Math.max(marginY, sim.height - marginY));
+    const commRect = document.getElementById("commanderHUD")?.getBoundingClientRect();
+    const canvasRect = galaxyPlayCanvas?.getBoundingClientRect();
+    const commVisible = commRect && canvasRect && commRect.width > 20 && commRect.height > 20
+      && commRect.bottom > canvasRect.top && commRect.top < canvasRect.bottom;
+    if (commVisible) {
+      const commTop = commRect.top - canvasRect.top - 18;
+      const commBottom = commRect.bottom - canvasRect.top + 18;
+      const bannerHalfH = 58;
+      const overlapsY = cy + bannerHalfH > commTop && cy - bannerHalfH < commBottom;
+      const bannerHalfW = Math.min(Math.max(220, sim.width - 28), sim.width - 28) / 2;
+      const commLeft = commRect.left - canvasRect.left - 18;
+      const commRight = commRect.right - canvasRect.left + 18;
+      const overlapsX = cx + bannerHalfW > commLeft && cx - bannerHalfW < commRight;
+      if (overlapsX && overlapsY) {
+        const above = commTop - bannerHalfH;
+        const below = commBottom + bannerHalfH;
+        cy = above >= marginY
+          ? above
+          : clamp(below, marginY, Math.max(marginY, sim.height - marginY));
+      }
+    }
     addArcadeScore(points);
     comboBonusThisLevel += points;
     comboBanners.push({
@@ -9500,6 +9576,27 @@ function initGalaxyCanvas() {
 
   function drawComboFxOverlay(drawCtx, now) {
     if (!drawCtx) return;
+    if (explosiveElectricBursts.length && explosiveElectricFxSheet.ready) {
+      drawCtx.save();
+      drawCtx.globalCompositeOperation = "lighter";
+      for (let i = explosiveElectricBursts.length - 1; i >= 0; i -= 1) {
+        const b = explosiveElectricBursts[i];
+        const age = now - b.start;
+        if (age < 0) continue;
+        const t = clamp(age / b.ttl, 0, 1);
+        if (t >= 1) {
+          explosiveElectricBursts.splice(i, 1);
+          continue;
+        }
+        const frame = Math.min(explosiveElectricFxSheet.frameCount - 1, Math.floor(t * explosiveElectricFxSheet.frameCount * 1.7));
+        const pop = t < 0.22 ? 0.75 + (t / 0.22) * 0.5 : 1.25 - (t - 0.22) * 0.28;
+        const fade = 1 - Math.max(0, t - 0.52) / 0.48;
+        const size = (isIOSNative ? 128 : 154) * b.scale * pop;
+        drawCtx.globalAlpha = clamp(0.8 * fade * fastFxFlicker(now, b.flickerSeed, 0.5), 0, 0.8);
+        drawFxSheetFrame(drawCtx, explosiveElectricFxSheet, frame, b.x, b.y, size, b.rot + b.spin * t, b.tint);
+      }
+      drawCtx.restore();
+    }
     if (powerupPickupBursts.length && powerupPickupFxSheet.ready) {
       drawCtx.save();
       drawCtx.globalCompositeOperation = "lighter";
@@ -9763,7 +9860,7 @@ function initGalaxyCanvas() {
         comboState.freezeAwarded = false;
       }
       comboState.freezeKills += 1;
-      if (comboState.freezeKills > 8 && !comboState.freezeAwarded) {
+      if (comboState.freezeKills > 12 && !comboState.freezeAwarded) {
         comboState.freezeAwarded = true;
         awardCombo({
           key: "freeze_berserk",
@@ -11803,6 +11900,8 @@ function initGalaxyCanvas() {
           // airborne grace on BOTH so stroids launched from overlapping spots don't blow up
           // the instant they're released.
           if (now - tossed.tossedAt < 150 || now - other.tossedAt < 150) continue;
+          cssFlash("#ffaa44", 0.24, 180);
+          cssShake(1.15);
           detonateTossedAsteroid(tossed);
           detonateTossedAsteroid(other);
         } else {
@@ -12964,6 +13063,7 @@ function initGalaxyCanvas() {
     window.pixiRenderer?.triggerBombDetonation?.(x, y, radius);
     addWarpRing(x, y, "rgba(255,90,90,1)");
     spawnExplosion(x, y, 80, true);
+    spawnExplosiveElectricBurst(x, y, radius, halfRadius ? 4 : 7);
     triggerBombScreenFx();
     // chain: queue other armed mines caught in the blast (the just-exploded mine is already
     // removed from its container by the caller, so it can't re-trigger itself). chainDetonateMines
@@ -12998,6 +13098,7 @@ function initGalaxyCanvas() {
     window.pixiRenderer?.triggerBombDetonation?.(x, y, 1050);
     addWarpRing(x, y, "rgba(255,90,90,1)");
     spawnExplosion(x, y, 80, true);
+    spawnExplosiveElectricBurst(x, y, 700, 8);
     triggerBombScreenFx(); // 2026-06-24 PERF: throttled screen-wide FX (see triggerBombScreenFx)
   }
 
@@ -13084,6 +13185,7 @@ function initGalaxyCanvas() {
     updateHudQuadBadge();
     bombAimMode = false;
     hudBombBtn?.classList.remove("hudBombBtn--aiming");
+    updateHudBombInventory();
     // 2026-06-14: clear in-flight homing-missile state on level transitions / menu exit, but the
     // missile INVENTORY persists across levels (matches bomb) — only a full game reset
     // (startArcadeNew / startStuntMode) zeroes it.
@@ -13646,7 +13748,9 @@ function initGalaxyCanvas() {
         retryPending = false;
         setMenuOverlayOpen(false);
         arcadeLives = clamp(arcadeLives - 1, 0, MAX_LIVES);
+        arcadeScore = arcadeScoreAtLevelStart;
         renderLives();
+        renderScore();
         if (arcadeLives === 1) {
           // SPC levels: "You're not doing so hot, Cadet." in place of CMDR's low-lives line.
           if (!queueSpcBonusVO("SPC_not_doing_hot.mp3", { priority: "high" })) {
@@ -13725,6 +13829,7 @@ function initGalaxyCanvas() {
     currentLevelIndex = safeIdx;
     const cfg = ARCADE_LEVELS[safeIdx];
     const now = performance.now();
+    arcadeScoreAtLevelStart = arcadeScore;
     setSavedArcadeLevel(cfg.level);
     initMediaSession().then(() => updateMediaSessionLevel(cfg.level, cfg.label));
     galaxyView?.classList.toggle("level-10", cfg.level === 10);
@@ -13999,6 +14104,7 @@ function initGalaxyCanvas() {
     updateHudQuadBadge();
     bombAimMode = false;
     hudBombBtn?.classList.remove("hudBombBtn--aiming");
+    updateHudBombInventory();
     // 2026-06-14: reset homing-missile state on a fresh run
     playerMissileInventory = 0;
     missileReloadUntil = 0;
@@ -17469,7 +17575,7 @@ function initGalaxyCanvas() {
     }
     if (pu.type === "goldbars") {
       addArcadeScore(1000);
-      slotTokens++; // 2026-06-26: silently bank a POLYSLOTS token for the between-level slot
+      slotTokens += 3; // 2026-06-29: one in-level gold bar pickup = three POLYSLOTS pulls
       cssFlash("#ffd700", 0.22, 250);
       return;
     }
@@ -17706,6 +17812,7 @@ function initGalaxyCanvas() {
     // is small, so a huge burst here would starve the per-asteroid vaporize FX (they'd "just
     // disappear"). The staggered vaporize refills the budget across frames for fiery debris.
     spawnExplosion(tx, ty, 22, true, 1.3); // fiery impact core
+    spawnExplosiveElectricBurst(tx, ty, blastRadius, 5);
     window.pixiRenderer?.triggerBombDetonation?.(tx, ty, blastRadius);
     addWarpRing(tx, ty, "rgba(255,90,90,1)");
     missileImpactFlash = { x: tx, y: ty, start: performance.now() }; // localized impact flash

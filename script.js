@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-29 11:51";
+const BUILD_TS = "2026-06-29 11:52";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -17296,6 +17296,7 @@ function initGalaxyCanvas() {
     // gold bars get their own pickup sound; everything else keeps the generic blip
     if (pu.type === "goldbars") playGameSfx("pickup_gold", 0.9);
     else playGameSfx("blip", 0.9);
+    playGameSfx("crunch", 0.58);
     if (pu.type === "bomb") {
       if (playerBombInventory < MAX_BOMB_INVENTORY) {
         playerBombInventory++;

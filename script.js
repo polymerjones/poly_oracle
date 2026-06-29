@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-27 18:02";
+const BUILD_TS = "2026-06-29 11:51";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -8860,6 +8860,93 @@ function initGalaxyCanvas() {
   const ufoDeathFx = typeof window.UfoDeathEffect === "function"
     ? new window.UfoDeathEffect({ maxParticles: 320, preset: initialUfoFxPreset })
     : null;
+  const comboFxSheet = {
+    img: new Image(),
+    ready: false,
+    frameWidth: 128,
+    frameHeight: 128,
+    frameCount: 12,
+    columns: 12,
+    fps: 30,
+    padding: 2,
+  };
+  comboFxSheet.img.onload = () => { comboFxSheet.ready = true; };
+  comboFxSheet.img.onerror = () => { comboFxSheet.ready = false; };
+  comboFxSheet.img.src = "combo_fx/2_electric_elements.png";
+  const bigStroidFxSheet = {
+    img: new Image(),
+    ready: false,
+    frameWidth: 128,
+    frameHeight: 128,
+    frameCount: 12,
+    columns: 12,
+    fps: 30,
+    padding: 2,
+  };
+  bigStroidFxSheet.img.onload = () => { bigStroidFxSheet.ready = true; };
+  bigStroidFxSheet.img.onerror = () => { bigStroidFxSheet.ready = false; };
+  bigStroidFxSheet.img.src = "combo_fx/1_electric_elements.png";
+  const smallStroidFxSheet = {
+    img: new Image(),
+    ready: false,
+    frameWidth: 128,
+    frameHeight: 128,
+    frameCount: 16,
+    columns: 15,
+    fps: 30,
+    padding: 2,
+  };
+  smallStroidFxSheet.img.onload = () => { smallStroidFxSheet.ready = true; };
+  smallStroidFxSheet.img.onerror = () => { smallStroidFxSheet.ready = false; };
+  smallStroidFxSheet.img.src = "combo_fx/2d_cartoon_fx_electricity_5.png";
+  const powerupPickupFxSheet = {
+    img: new Image(),
+    ready: false,
+    frameWidth: 128,
+    frameHeight: 128,
+    frameCount: 16,
+    columns: 15,
+    fps: 30,
+    padding: 2,
+  };
+  powerupPickupFxSheet.img.onload = () => { powerupPickupFxSheet.ready = true; };
+  powerupPickupFxSheet.img.onerror = () => { powerupPickupFxSheet.ready = false; };
+  powerupPickupFxSheet.img.src = "combo_fx/2d_cartoon_fx_electricity_33.png";
+  const powerupPickupFlashSheet = {
+    img: new Image(),
+    ready: false,
+    frameWidth: 128,
+    frameHeight: 128,
+    frameCount: 16,
+    columns: 15,
+    fps: 30,
+    padding: 2,
+  };
+  powerupPickupFlashSheet.img.onload = () => { powerupPickupFlashSheet.ready = true; };
+  powerupPickupFlashSheet.img.onerror = () => { powerupPickupFlashSheet.ready = false; };
+  powerupPickupFlashSheet.img.src = "combo_fx/5_electric_elements.png";
+  const COMBO_BANNER_TTL_MS = 1450;
+  const COMBO_MAX_BANNERS = 2;
+  let comboBanners = [];
+  let comboFxParticles = [];
+  let smallStroidBursts = [];
+  let bigStroidBursts = [];
+  let powerupPickupBursts = [];
+  const fxTintCanvas = document.createElement("canvas");
+  const fxTintCtx = fxTintCanvas.getContext("2d", { alpha: true });
+  let comboBlastSeq = 0;
+  const comboBombBlastAwarded = new Set();
+  const comboState = {
+    marksmanHits: 0,
+    marksmanAwarded: false,
+    plasmaStage: 0,
+    freezeSessionId: -1,
+    freezeKills: 0,
+    freezeAwarded: false,
+    pyroChain: 0,
+    pyroAwarded2: false,
+    pyroAwarded3: false,
+  };
   const effects = {
     triggerUfoDeath(x, y, presetName = "") {
       ufoDeathFx?.trigger(x, y, presetName);
@@ -9099,6 +9186,451 @@ function initGalaxyCanvas() {
     if (engineMode !== "arcade") return;
     arcadeScore = Math.max(0, arcadeScore + Math.floor(points || 0));
     scheduleScoreRender();
+  }
+
+  function resetComboState() {
+    comboState.marksmanHits = 0;
+    comboState.marksmanAwarded = false;
+    comboState.plasmaStage = 0;
+    comboState.freezeSessionId = _freezeSessionId;
+    comboState.freezeKills = 0;
+    comboState.freezeAwarded = false;
+    comboState.pyroChain = 0;
+    comboState.pyroAwarded2 = false;
+    comboState.pyroAwarded3 = false;
+    comboBanners.length = 0;
+    comboFxParticles.length = 0;
+    smallStroidBursts.length = 0;
+    bigStroidBursts.length = 0;
+    powerupPickupBursts.length = 0;
+    comboBombBlastAwarded.clear();
+  }
+
+  function breakPyroCombo() {
+    comboState.pyroChain = 0;
+    comboState.pyroAwarded2 = false;
+    comboState.pyroAwarded3 = false;
+  }
+
+  function breakNetUfoNetCombo() {
+    comboState.plasmaStage = 0;
+  }
+
+  function spawnComboParticles(x, y, colors) {
+    if (prefersReducedMotion) return;
+    const maxParts = isIOSNative ? 30 : 54;
+    const room = Math.max(0, maxParts - comboFxParticles.length);
+    const count = Math.min(room, isIOSNative ? 16 : 28);
+    for (let i = 0; i < count; i += 1) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 90 + Math.random() * (isIOSNative ? 180 : 260);
+      comboFxParticles.push({
+        x,
+        y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: 0,
+        ttl: 420 + Math.random() * 360,
+        size: 1.4 + Math.random() * 2.4,
+        color: colors[(Math.random() * colors.length) | 0],
+      });
+    }
+  }
+
+  function spawnSmallStroidBurst(x, y) {
+    if (prefersReducedMotion || !smallStroidFxSheet.ready) return;
+    const maxBursts = isIOSNative ? 5 : 9;
+    if (smallStroidBursts.length >= maxBursts) smallStroidBursts.shift();
+    smallStroidBursts.push({
+      x,
+      y,
+      start: performance.now(),
+      ttl: isIOSNative ? 360 : 440,
+      scale: 0.52 + Math.random() * 0.18,
+      rot: Math.random() * Math.PI * 2,
+      flickerSeed: Math.random() * Math.PI * 2,
+    });
+  }
+
+  function explosionTintForSprite(spriteKey) {
+    if (spriteKey === "roid02") return "rgba(90,150,255,0.72)";
+    if (spriteKey === "roid03") return "rgba(255,180,45,0.68)";
+    if (spriteKey === "hotroid01") return "rgba(255,76,22,0.62)";
+    const _lvl = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
+    const levelTint = getAsteroidTintForLevel(_lvl);
+    if (levelTint) return levelTint;
+    return "rgba(0,255,209,0.72)";
+  }
+
+  function spawnBigStroidBurst(x, y, blastScale = 1, spriteKey = "roid01") {
+    if (prefersReducedMotion || !bigStroidFxSheet.ready) return;
+    const maxBursts = isIOSNative ? 4 : 7;
+    if (bigStroidBursts.length >= maxBursts) bigStroidBursts.shift();
+    bigStroidBursts.push({
+      x,
+      y,
+      start: performance.now(),
+      ttl: isIOSNative ? 420 : 520,
+      scale: clamp(0.98 * blastScale, 1.05, 1.95) * (0.92 + Math.random() * 0.18),
+      rot: Math.random() * Math.PI * 2,
+      tint: explosionTintForSprite(spriteKey),
+      flickerSeed: Math.random() * Math.PI * 2,
+    });
+  }
+
+  function powerupPickupTint(type) {
+    if (type === "timer") return "rgba(255,255,255,0.82)";
+    if (type === "missile") return "rgba(255,78,78,0.78)";
+    if (type === "goldbars") return "rgba(255,215,0,0.82)";
+    if (type === "quadshot") return "rgba(204,102,255,0.82)";
+    if (type === "snowflake") return "rgba(136,221,255,0.82)";
+    if (type === "bomb") return "rgba(0,255,204,0.82)";
+    return POWERUP_COLORS[type] || "rgba(0,255,204,0.82)";
+  }
+
+  function spawnPowerupPickupBurst(pu) {
+    if (prefersReducedMotion || !powerupPickupFxSheet.ready || !pu) return;
+    const maxBursts = isIOSNative ? 5 : 9;
+    if (powerupPickupBursts.length >= maxBursts) powerupPickupBursts.shift();
+    powerupPickupBursts.push({
+      x: pu.x,
+      y: pu.y,
+      start: performance.now(),
+      ttl: isIOSNative ? 360 : 460,
+      scale: pu.type === "bomb" ? 0.88 : 0.78,
+      rot: Math.random() * Math.PI * 2,
+      flashRot: Math.random() * Math.PI * 2,
+      flashScale: 0.84 + Math.random() * 0.24,
+      flashAlpha: 0.58 + Math.random() * 0.28,
+      tint: powerupPickupTint(pu.type),
+      flickerSeed: Math.random() * Math.PI * 2,
+    });
+  }
+
+  function fastFxFlicker(now, seed = 0, depth = 0.24) {
+    const a = Math.sin(now * 0.055 + seed) * 0.5 + 0.5;
+    const b = Math.sin(now * 0.117 + seed * 1.7) * 0.5 + 0.5;
+    return clamp(1 - depth + (a * 0.65 + b * 0.35) * depth * 2, 0.55, 1.28);
+  }
+
+  function drawFxSheetFrame(drawCtx, sheet, frame, x, y, size, rot = 0, tint = "") {
+    const sx = (frame % sheet.columns) * (sheet.frameWidth + sheet.padding);
+    const sy = Math.floor(frame / sheet.columns) * (sheet.frameHeight + sheet.padding);
+    drawCtx.translate(x, y);
+    drawCtx.rotate(rot);
+    if (tint && fxTintCtx) {
+      if (fxTintCanvas.width !== sheet.frameWidth || fxTintCanvas.height !== sheet.frameHeight) {
+        fxTintCanvas.width = sheet.frameWidth;
+        fxTintCanvas.height = sheet.frameHeight;
+      }
+      fxTintCtx.clearRect(0, 0, sheet.frameWidth, sheet.frameHeight);
+      fxTintCtx.globalCompositeOperation = "source-over";
+      fxTintCtx.globalAlpha = 1;
+      fxTintCtx.drawImage(sheet.img, sx, sy, sheet.frameWidth, sheet.frameHeight, 0, 0, sheet.frameWidth, sheet.frameHeight);
+      fxTintCtx.globalCompositeOperation = "source-atop";
+      fxTintCtx.fillStyle = tint;
+      fxTintCtx.fillRect(0, 0, sheet.frameWidth, sheet.frameHeight);
+      fxTintCtx.globalCompositeOperation = "source-over";
+      drawCtx.drawImage(fxTintCanvas, -size / 2, -size / 2, size, size);
+    } else {
+      drawCtx.drawImage(
+        sheet.img,
+        sx,
+        sy,
+        sheet.frameWidth,
+        sheet.frameHeight,
+        -size / 2,
+        -size / 2,
+        size,
+        size,
+      );
+    }
+    drawCtx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
+  }
+
+  function awardCombo({ key, label, points, x, y, colors = ["255,255,255", "0,255,209"] }) {
+    if (engineMode !== "arcade" || !arcadeActive) return;
+    const now = performance.now();
+    const marginX = Math.max(18, sim.width * 0.06);
+    const marginY = Math.max(54, sim.height * 0.12);
+    const preferredX = key === "marksman" ? sim.width / 2 : (Number.isFinite(x) ? x : sim.width / 2);
+    const preferredY = Number.isFinite(y) ? y : sim.height * 0.36;
+    const cx = clamp(preferredX, marginX, Math.max(marginX, sim.width - marginX));
+    const cy = clamp(preferredY, marginY, Math.max(marginY, sim.height - marginY));
+    addArcadeScore(points);
+    comboBanners.push({
+      key,
+      label,
+      points,
+      x: cx,
+      y: cy,
+      start: now,
+      colors,
+    });
+    if (comboBanners.length > COMBO_MAX_BANNERS) {
+      comboBanners.splice(0, comboBanners.length - COMBO_MAX_BANNERS);
+    }
+    spawnComboParticles(cx, cy, colors);
+    cssFlash(`rgba(${colors[0]},1)`, isIOSNative ? 0.14 : 0.22, 180);
+    cssShake(isIOSNative ? 0.55 : 0.85);
+    triggerGameplayHapticImpact(points >= 1000 ? hapticImpactStyle.Heavy : hapticImpactStyle.Medium);
+    playGameSfx(points >= 1000 ? "level_up" : "bling", points >= 1000 ? 0.82 : 0.75, { important: true });
+    playGameSfx("slot_life", 1.24, { important: true });
+  }
+
+  function drawComboFxOverlay(drawCtx, now) {
+    if (!drawCtx) return;
+    if (powerupPickupBursts.length && powerupPickupFxSheet.ready) {
+      drawCtx.save();
+      drawCtx.globalCompositeOperation = "lighter";
+      for (let i = powerupPickupBursts.length - 1; i >= 0; i -= 1) {
+        const b = powerupPickupBursts[i];
+        const t = clamp((now - b.start) / b.ttl, 0, 1);
+        if (t >= 1) {
+          powerupPickupBursts.splice(i, 1);
+          continue;
+        }
+        const frame = Math.min(powerupPickupFxSheet.frameCount - 1, Math.floor(t * powerupPickupFxSheet.frameCount));
+        const size = (isIOSNative ? 74 : 88) * b.scale * (1.02 + t * 0.34);
+        const fade = 1 - Math.max(0, t - 0.66) / 0.34;
+        const flicker = fastFxFlicker(now, b.flickerSeed, 0.28);
+        drawCtx.globalAlpha = clamp(0.9 * fade * flicker, 0, 1);
+        drawFxSheetFrame(drawCtx, powerupPickupFxSheet, frame, b.x, b.y, size, b.rot, b.tint);
+        if (powerupPickupFlashSheet.ready) {
+          const flashFrame = Math.min(powerupPickupFlashSheet.frameCount - 1, Math.floor(t * powerupPickupFlashSheet.frameCount * 1.24));
+          const flashSize = (isIOSNative ? 68 : 82) * b.scale * b.flashScale * (1.14 + t * 0.22);
+          drawCtx.globalAlpha = clamp(b.flashAlpha * fade * fastFxFlicker(now, b.flickerSeed + 2.4, 0.36), 0, 1);
+          drawFxSheetFrame(drawCtx, powerupPickupFlashSheet, flashFrame, b.x, b.y, flashSize, b.flashRot + t * 0.55, b.tint);
+        }
+      }
+      drawCtx.restore();
+    }
+    if (bigStroidBursts.length && bigStroidFxSheet.ready) {
+      drawCtx.save();
+      drawCtx.globalCompositeOperation = "lighter";
+      for (let i = bigStroidBursts.length - 1; i >= 0; i -= 1) {
+        const b = bigStroidBursts[i];
+        const t = clamp((now - b.start) / b.ttl, 0, 1);
+        if (t >= 1) {
+          bigStroidBursts.splice(i, 1);
+          continue;
+        }
+        const frame = Math.min(bigStroidFxSheet.frameCount - 1, Math.floor(t * bigStroidFxSheet.frameCount * 1.18));
+        const size = (isIOSNative ? 41 : 52) * b.scale * (1.08 + t * 0.18);
+        drawCtx.globalAlpha = clamp(0.8 * (1 - Math.max(0, t - 0.72) / 0.28) * fastFxFlicker(now, b.flickerSeed, 0.22), 0, 0.8);
+        drawFxSheetFrame(drawCtx, bigStroidFxSheet, frame, b.x, b.y, size, b.rot, b.tint);
+      }
+      drawCtx.restore();
+    }
+    if (smallStroidBursts.length && smallStroidFxSheet.ready) {
+      drawCtx.save();
+      drawCtx.globalCompositeOperation = "lighter";
+      for (let i = smallStroidBursts.length - 1; i >= 0; i -= 1) {
+        const b = smallStroidBursts[i];
+        const t = clamp((now - b.start) / b.ttl, 0, 1);
+        if (t >= 1) {
+          smallStroidBursts.splice(i, 1);
+          continue;
+        }
+        const frame = Math.min(smallStroidFxSheet.frameCount - 1, Math.floor(t * smallStroidFxSheet.frameCount));
+        const size = (isIOSNative ? 82 : 98) * b.scale * (1 + t * 0.28);
+        drawCtx.globalAlpha = clamp(0.82 * (1 - Math.max(0, t - 0.68) / 0.32) * fastFxFlicker(now, b.flickerSeed, 0.2), 0, 1);
+        drawFxSheetFrame(drawCtx, smallStroidFxSheet, frame, b.x, b.y, size, b.rot);
+      }
+      drawCtx.restore();
+    }
+    if (comboFxParticles.length) {
+      drawCtx.save();
+      drawCtx.globalCompositeOperation = "lighter";
+      for (let i = comboFxParticles.length - 1; i >= 0; i -= 1) {
+        const p = comboFxParticles[i];
+        p.life += 16.67;
+        if (p.life >= p.ttl) {
+          comboFxParticles.splice(i, 1);
+          continue;
+        }
+        const dt = 1 / 60;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vx *= 0.985;
+        p.vy *= 0.985;
+        const a = 1 - p.life / p.ttl;
+        drawCtx.fillStyle = `rgba(${p.color},${(0.82 * a).toFixed(3)})`;
+        drawCtx.beginPath();
+        drawCtx.arc(p.x, p.y, p.size * (0.65 + a * 0.5), 0, Math.PI * 2);
+        drawCtx.fill();
+      }
+      drawCtx.restore();
+    }
+    for (let i = comboBanners.length - 1; i >= 0; i -= 1) {
+      const b = comboBanners[i];
+      const t = clamp((now - b.start) / COMBO_BANNER_TTL_MS, 0, 1);
+      if (t >= 1) {
+        comboBanners.splice(i, 1);
+        continue;
+      }
+      const slam = t < 0.18 ? 1.55 - (t / 0.18) * 0.55 : 1 + Math.sin((t - 0.18) * Math.PI * 3) * 0.035 * (1 - t);
+      const alpha = t < 0.78 ? 1 : 1 - (t - 0.78) / 0.22;
+      const y = b.y - t * 42;
+      drawCtx.save();
+      drawCtx.globalCompositeOperation = "lighter";
+      drawCtx.globalAlpha = alpha;
+      if (comboFxSheet.ready && !prefersReducedMotion) {
+        const frame = Math.min(comboFxSheet.frameCount - 1, Math.floor(t * comboFxSheet.frameCount * 1.35));
+        const sx = (frame % comboFxSheet.columns) * (comboFxSheet.frameWidth + comboFxSheet.padding);
+        const sy = Math.floor(frame / comboFxSheet.columns) * (comboFxSheet.frameHeight + comboFxSheet.padding);
+        const size = (isIOSNative ? 190 : 240) * (1.15 - t * 0.25);
+        drawCtx.drawImage(
+          comboFxSheet.img,
+          sx,
+          sy,
+          comboFxSheet.frameWidth,
+          comboFxSheet.frameHeight,
+          b.x - size / 2,
+          y - size / 2,
+          size,
+          size,
+        );
+      }
+      drawCtx.textAlign = "center";
+      drawCtx.textBaseline = "middle";
+      const headline = b.label;
+      const sub = `+${b.points} pts`;
+      const maxW = Math.max(220, sim.width - 28);
+      const safeX = clamp(b.x, 14 + maxW / 2, Math.max(14 + maxW / 2, sim.width - 14 - maxW / 2));
+      const safeY = clamp(y, 46, Math.max(46, sim.height - 46));
+      const base = clamp(maxW / Math.max(1, headline.length * 0.68), 20, 38);
+      drawCtx.font = `900 ${Math.floor(base * slam)}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
+      drawCtx.lineWidth = Math.max(4, base * 0.18);
+      drawCtx.strokeStyle = "rgba(0,0,0,0.78)";
+      drawCtx.shadowColor = `rgba(${b.colors[0]},${b.key === "marksman" ? 0.48 : 0.92})`;
+      drawCtx.shadowBlur = b.key === "marksman" ? (isIOSNative ? 4 : 8) : (isIOSNative ? 8 : 18);
+      drawCtx.fillStyle = "rgba(255,255,255,0.98)";
+      drawCtx.strokeText(headline, safeX, safeY, maxW);
+      drawCtx.fillText(headline, safeX, safeY, maxW);
+      drawCtx.font = `800 ${Math.floor(base * 0.58 * slam)}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
+      drawCtx.fillStyle = `rgba(${b.colors[1] || b.colors[0]},0.98)`;
+      drawCtx.strokeText(sub, safeX, clamp(safeY + base * 0.82, 66, Math.max(66, sim.height - 24)), maxW);
+      drawCtx.fillText(sub, safeX, clamp(safeY + base * 0.82, 66, Math.max(66, sim.height - 24)), maxW);
+      drawCtx.restore();
+    }
+  }
+
+  function recordComboEvent(type, data = {}) {
+    if (engineMode !== "arcade" || stuntActive) return;
+    const x = Number.isFinite(data.x) ? data.x : sim.width / 2;
+    const y = Number.isFinite(data.y) ? data.y : sim.height * 0.34;
+    if (type === "laser_stroid_hit") {
+      comboState.marksmanHits += 1;
+      breakPyroCombo();
+      breakNetUfoNetCombo();
+      if (comboState.marksmanHits >= 10 && !comboState.marksmanAwarded) {
+        comboState.marksmanAwarded = true;
+        awardCombo({
+          key: "marksman",
+          label: "MARKSMAN COMBO",
+          points: 1000,
+          x,
+          y,
+          colors: ["80,220,255", "255,255,255"],
+        });
+      }
+      return;
+    }
+    if (type === "laser_miss" || type === "laser_non_stroid_hit") {
+      comboState.marksmanHits = 0;
+      comboState.marksmanAwarded = false;
+      breakPyroCombo();
+      breakNetUfoNetCombo();
+      return;
+    }
+    if (type === "bomb_tap") {
+      comboState.marksmanHits = 0;
+      comboState.marksmanAwarded = false;
+      breakNetUfoNetCombo();
+      return;
+    }
+    if (type === "ufo_shot") {
+      comboState.marksmanHits = 0;
+      comboState.marksmanAwarded = false;
+      breakPyroCombo();
+      if (comboState.plasmaStage === 1) comboState.plasmaStage = 2;
+      return;
+    }
+    if (type === "plasma_net") {
+      comboState.marksmanHits = 0;
+      breakPyroCombo();
+      if ((data.destroyedCount || 0) > 0) {
+        if (comboState.plasmaStage === 2) {
+          awardCombo({
+            key: "net_ufo_net",
+            label: "NET UFO NET COMBO",
+            points: 500,
+            x,
+            y,
+            colors: ["0,255,209", "255,85,255"],
+          });
+          comboState.plasmaStage = 0;
+        } else {
+          comboState.plasmaStage = 1;
+        }
+      } else {
+        breakNetUfoNetCombo();
+      }
+      return;
+    }
+    if (type === "ufo_destroyed") {
+      comboState.marksmanHits = 0;
+      breakPyroCombo();
+      if (comboState.plasmaStage === 1) comboState.plasmaStage = 2;
+      return;
+    }
+    if (type === "bomb_destroyed_stroids") {
+      comboState.marksmanHits = 0;
+      breakNetUfoNetCombo();
+      comboState.pyroChain += 1;
+      if (comboState.pyroChain >= 3 && !comboState.pyroAwarded3) {
+        comboState.pyroAwarded3 = true;
+        awardCombo({
+          key: "xtra_pyro",
+          label: "XTRA PYRO COMBO",
+          points: 2000,
+          x,
+          y,
+          colors: ["255,70,20", "255,220,80"],
+        });
+      } else if (comboState.pyroChain >= 2 && !comboState.pyroAwarded2) {
+        comboState.pyroAwarded2 = true;
+        awardCombo({
+          key: "pyro",
+          label: "PYRO COMBO",
+          points: 1000,
+          x,
+          y,
+          colors: ["255,120,30", "255,236,120"],
+        });
+      }
+      return;
+    }
+    if (type === "frozen_stroid_destroyed") {
+      if (comboState.freezeSessionId !== _freezeSessionId) {
+        comboState.freezeSessionId = _freezeSessionId;
+        comboState.freezeKills = 0;
+        comboState.freezeAwarded = false;
+      }
+      comboState.freezeKills += 1;
+      if (comboState.freezeKills > 8 && !comboState.freezeAwarded) {
+        comboState.freezeAwarded = true;
+        awardCombo({
+          key: "freeze_berserk",
+          label: "FREEZE BERSERK COMBO",
+          points: 1000,
+          x,
+          y,
+          colors: ["150,225,255", "255,255,255"],
+        });
+      }
+    }
   }
 
   function stopWarningState() {
@@ -10241,6 +10773,7 @@ function initGalaxyCanvas() {
     stopUfoDrone();
     ufosKilledThisLevel += 1;
     ufo = null;
+    recordComboEvent("ufo_destroyed", { x, y });
     // SPC levels: "There you go!" on a UFO kill; CMDR's quick laugh everywhere else.
     if (!queueSpcBonusVO("SPC_there_you_go.mp3")) {
       commBoxController.queueVO({
@@ -10258,6 +10791,7 @@ function initGalaxyCanvas() {
   function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1, asteroidKind = 3, spriteKey = "roid01") {
     if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
     const isLarge = asteroidKind >= 2;
+    const isBigAsteroid = asteroidKind >= 3 && !fire;
     const isSmallAsteroid = asteroidKind === 1 && !fire;
     const isMediumAsteroid = asteroidKind === 2 && !fire;
     const particleCount = isIOSNative
@@ -10268,17 +10802,20 @@ function initGalaxyCanvas() {
       if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
       if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
       const angle = Math.random() * Math.PI * 2;
-      const speed = 40 + Math.random() * 80;
+      const speed = isSmallAsteroid ? 160 + Math.random() * 240 : 40 + Math.random() * 80;
       const p = getParticle();
       p.x = x;
       p.y = y;
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
       p.life = 0;
-      p.ttl = (600 + Math.random() * 200) * (isMediumAsteroid ? 1.2 : 1);
-      p.size = (2.5 + Math.random() * 2) * (isMediumAsteroid ? 1.3 : 1);
-      p.alpha = 0.8 + Math.random() * 0.2;
-      if (Math.random() < 0.72) {
+      p.ttl = (isSmallAsteroid ? 280 + Math.random() * 180 : 600 + Math.random() * 200) * (isMediumAsteroid ? 1.2 : 1);
+      p.size = (isSmallAsteroid ? 1.6 + Math.random() * 1.7 : 2.5 + Math.random() * 2) * (isMediumAsteroid ? 1.3 : 1);
+      p.alpha = isSmallAsteroid ? 0.72 + Math.random() * 0.2 : 0.8 + Math.random() * 0.2;
+      if (isSmallAsteroid) {
+        const v = 190 + Math.floor(Math.random() * 62);
+        p.color = `rgba(${v},${v + Math.floor(Math.random() * 5)},${v + 8 + Math.floor(Math.random() * 10)},`;
+      } else if (Math.random() < 0.72) {
         p.color = `rgba(${245 + Math.floor(Math.random() * 10)},${238 + Math.floor(Math.random() * 14)},${210 + Math.floor(Math.random() * 24)},`;
       } else {
         p.color = `rgba(${242 + Math.floor(Math.random() * 13)},${188 + Math.floor(Math.random() * 44)},${70 + Math.floor(Math.random() * 50)},`;
@@ -10310,36 +10847,57 @@ function initGalaxyCanvas() {
       if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
       const angle = Math.random() * Math.PI * 2;
       const hot = spriteKey === "hotroid01";
-      const speed = hot ? 220 + Math.random() * 100 : 180 + Math.random() * 100;
+      const speed = isSmallAsteroid ? 300 + Math.random() * 190 : hot ? 220 + Math.random() * 100 : 180 + Math.random() * 100;
       const p = getParticle();
       p.x = x;
       p.y = y;
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
       p.life = 0;
-      p.ttl = 120 + Math.random() * 80;
-      p.size = 1.0 + Math.random();
+      p.ttl = isSmallAsteroid ? 95 + Math.random() * 70 : 120 + Math.random() * 80;
+      p.size = isSmallAsteroid ? 0.9 + Math.random() * 1.1 : 1.0 + Math.random();
       p.alpha = 0.9;
-      p.color = sparkColorForSprite();
+      if (isSmallAsteroid) {
+        const v = 215 + Math.floor(Math.random() * 40);
+        p.color = `rgba(${v},${v},${Math.min(255, v + 10)},`;
+      } else {
+        p.color = sparkColorForSprite();
+      }
       p.flicker = true;
       sim.particles.push(p);
     }
+    if (isSmallAsteroid) spawnSmallStroidBurst(x, y);
+    if (isBigAsteroid) spawnBigStroidBurst(x, y, blastScale, spriteKey);
     for (let i = 0; i < emitCount; i += 1) {
       if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
       if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
       const angle = Math.random() * Math.PI * 2;
-      const speed = isSmallAsteroid ? 60 + Math.random() * 140 : 30 + Math.random() * 110;
+      const speed = isSmallAsteroid ? 190 + Math.random() * 260 : 30 + Math.random() * 110;
       const p = getParticle();
       p.x = x;
       p.y = y;
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
       p.life = 0;
-      p.ttl = (isSmallAsteroid ? 480 + Math.random() * 220 : 320 + Math.random() * 180) * ttlScale * (isMediumAsteroid ? 1.2 : 1);
-      p.size = (isSmallAsteroid ? 1.7 + Math.random() * 2.4 : 1.7 + Math.random() * 2.4) * blastScale * (isMediumAsteroid ? 1.3 : 1);
-      p.alpha = 0.45 + Math.random() * 0.4;
+      p.ttl = (isSmallAsteroid ? 260 + Math.random() * 190 : 320 + Math.random() * 180) * ttlScale * (isMediumAsteroid ? 1.2 : 1);
+      p.size = (isSmallAsteroid ? 1.1 + Math.random() * 2.0 : 1.7 + Math.random() * 2.4) * blastScale * (isMediumAsteroid ? 1.3 : 1);
+      p.alpha = isSmallAsteroid ? 0.58 + Math.random() * 0.32 : 0.45 + Math.random() * 0.4;
       if (fire) {
         p.color = `rgba(${220 + Math.floor(Math.random() * 35)},${100 + Math.floor(Math.random() * 90)},${30 + Math.floor(Math.random() * 40)},`;
+      } else if (isSmallAsteroid) {
+        const tone = Math.random();
+        if (tone < 0.55) {
+          const v = 225 + Math.floor(Math.random() * 30);
+          p.color = `rgba(${v},${v},${Math.min(255, v + 8)},`;
+        } else if (tone < 0.88) {
+          const v = 170 + Math.floor(Math.random() * 55);
+          p.color = `rgba(${v},${v + Math.floor(Math.random() * 8)},${v + 14 + Math.floor(Math.random() * 14)},`;
+        } else {
+          p.color = "rgba(120,132,145,";
+          p.ttl *= 1.25;
+          p.size *= 1.15;
+          p.alpha = Math.max(p.alpha, 0.62);
+        }
       } else {
         const tone = Math.random();
         if (tone < (isSmallAsteroid ? 0.65 : 0.48)) {
@@ -10937,6 +11495,7 @@ function initGalaxyCanvas() {
     playAsteroidExplosionBoom(kind, boomStackVolume(bigBlast ? 0.9 : mediumBlast ? 0.9 : 0.76), 0.92 + Math.random() * 0.14);
     addArcadeScore(arcadeMultiplierPoints(kind >= 2 ? 25 : 10));
     trackKillStreak();
+    if (_freezeActive) recordComboEvent("frozen_stroid_destroyed", { x, y });
     return true;
   }
 
@@ -10952,6 +11511,7 @@ function initGalaxyCanvas() {
     addFrozenShatterFx(x, y, playSound); // ice particles (+ freeze_explode when playSound)
     addArcadeScore(arcadeMultiplierPoints(kind >= 2 ? 25 : 10));
     trackKillStreak();
+    recordComboEvent("frozen_stroid_destroyed", { x, y });
     return true;
   }
 
@@ -11323,6 +11883,7 @@ function initGalaxyCanvas() {
     addArcadeScore(arcadeMultiplierPoints(wasKind >= 2 ? 25 : 10));
     releaseAsteroid(a);
     trackKillStreak();
+    if (_freezeActive) recordComboEvent("frozen_stroid_destroyed", { x: baseX, y: baseY });
 
     if (wasKind > 1) {
       const childCount = wasKind === 3 ? (3 + Math.floor(Math.random() * 3)) : (2 + Math.floor(Math.random() * 2));
@@ -11406,6 +11967,7 @@ function initGalaxyCanvas() {
     const mediumBlast = a.kind === 2;
     addArcadeScore(arcadeMultiplierPoints(a.kind >= 2 ? 25 : 10));
     trackKillStreak();
+    if (_freezeActive) recordComboEvent("frozen_stroid_destroyed", { x: a.x, y: a.y });
     spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1, 1, a.kind, a.spriteKey);
     addFrozenShatterFx(a.x, a.y);
     triggerAsteroidSizeFeedback(a.kind);
@@ -11622,6 +12184,11 @@ function initGalaxyCanvas() {
     resetPlasmaCageGesture();
     if (charged) {
       const destroyedCount = destroyAsteroidsInPlasmaCage(rect);
+      recordComboEvent("plasma_net", {
+        destroyedCount,
+        x: rect.x + rect.w / 2,
+        y: rect.y + rect.h / 2,
+      });
       if (destroyedCount > 0) stuntNotify("plasma");
       else stuntNotify("plasma_miss"); // tutorial Phase 3 coaching on an empty net
       // In the tutorial a MISSED net stays hot so the cadet can retry immediately — but a
@@ -11773,8 +12340,10 @@ function initGalaxyCanvas() {
     if (ufoFxCtx) {
       ufoFxCtx.clearRect(0, 0, sim.width, sim.height);
       effects.draw(ufoFxCtx);
+      drawComboFxOverlay(ufoFxCtx, performance.now());
     } else {
       effects.draw(fallbackCtx);
+      drawComboFxOverlay(fallbackCtx, performance.now());
     }
   }
 
@@ -12273,10 +12842,13 @@ function initGalaxyCanvas() {
 
   function spawnBombShrapnel(x, y) {
     const count = 24;
+    const blastId = ++comboBlastSeq;
+    if (comboBombBlastAwarded.size > 64) comboBombBlastAwarded.clear();
     for (let i = 0; i < count; i += 1) {
       const angle = (i / count) * Math.PI * 2 + Math.random() * 0.3;
       const speed = 500 + Math.random() * 400;
       _bombShrapnel.push({
+        blastId,
         x,
         y,
         vx: Math.cos(angle) * speed,
@@ -12292,6 +12864,7 @@ function initGalaxyCanvas() {
       const angle = (i / 12) * Math.PI * 2;
       const speed = 250 + Math.random() * 150;
       _bombShrapnel.push({
+        blastId,
         x,
         y,
         vx: Math.cos(angle) * speed,
@@ -12315,6 +12888,7 @@ function initGalaxyCanvas() {
 
   function clearGameplayEntities() {
     resetStroidToss();
+    resetComboState();
     sim.tossedAsteroid = null;
     while (sim.asteroids.length) releaseAsteroid(sim.asteroids.pop());
     while (sim.particles.length) releaseParticle(sim.particles.pop());
@@ -15540,6 +16114,10 @@ function initGalaxyCanvas() {
               playAsteroidExplosionBoom(a.kind, 0.7, 1.0);
               const idx = sim.asteroids.indexOf(a);
               if (idx >= 0) {
+                if (!comboBombBlastAwarded.has(sh.blastId)) {
+                  comboBombBlastAwarded.add(sh.blastId);
+                  recordComboEvent("bomb_destroyed_stroids", { x: a.x, y: a.y });
+                }
                 vaporizeAsteroidByIndex(idx);
               }
               if (!sh.isPulse) break;
@@ -16674,6 +17252,7 @@ function initGalaxyCanvas() {
       stuntNotify("mine_tap"); // tutorial Phase 6: player engaged the bomb (arm / detonate)
       if (quadActive) explodeLandmine();
       else armLandmine();
+      recordComboEvent("bomb_tap", { x: sx, y: sy });
       return true;
     }
     // 2026-06-10: placed bombs use the same tap behavior (spawned → arm, armed → detonate)
@@ -16682,11 +17261,13 @@ function initGalaxyCanvas() {
       triggerCrosshairFire();
       if (quadActive) explodePlacedBomb(tappedBomb);
       else armMineEntity(tappedBomb, (opts) => explodePlacedBomb(tappedBomb, opts));
+      recordComboEvent("bomb_tap", { x: sx, y: sy });
       return true;
     }
     if (ufo && isPointOnUfo(sx, sy)) {
       triggerCrosshairFire();
       hitUfo(quadActive);
+      recordComboEvent("ufo_shot", { x: sx, y: sy });
       return true;
     }
     const hitIndex = findHitAsteroidIndex(sx, sy);
@@ -16701,14 +17282,17 @@ function initGalaxyCanvas() {
       } else {
         splitAsteroidByIndex(hitIndex);
       }
+      recordComboEvent("laser_stroid_hit", { x: sx, y: sy });
       stuntNotify("shoot");
       return true;
     }
+    recordComboEvent("laser_miss", { x: sx, y: sy });
     return false;
   }
 
   // 2026-06-10: per-type powerup collection effects.
   function collectPowerup(pu) {
+    spawnPowerupPickupBurst(pu);
     // gold bars get their own pickup sound; everything else keeps the generic blip
     if (pu.type === "goldbars") playGameSfx("pickup_gold", 0.9);
     else playGameSfx("blip", 0.9);
@@ -16849,6 +17433,7 @@ function initGalaxyCanvas() {
     // The crosshair doubles as the blast-zone marker (radius MISSILE_BLAST_RADIUS), drawn in
     // drawMissileFx while the missile is in flight.
     missileCrosshair = { x, y, placedAt: performance.now() };
+    recordComboEvent("laser_non_stroid_hit", { x, y });
     playGameSfx("missile_lockon", 0.9);
     triggerGameplayHapticImpact(hapticImpactStyle.Medium); // target-lock confirm buzz
     fireMissile(x, y);

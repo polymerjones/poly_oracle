@@ -1,0 +1,16 @@
+{
+  "name": "5_electric_elements",
+  "image": "5_electric_elements.png",
+  "frameWidth": 128,
+  "frameHeight": 128,
+  "frameCount": 16,
+  "columns": 15,
+  "rows": 2,
+  "fps": 30,
+  "loop": false,
+  "anchor": {
+    "x": 0.5,
+    "y": 0.5
+  },
+  "padding": 2
+}

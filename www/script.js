@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-29 14:05";
+const BUILD_TS = "2026-06-29 14:20";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -3415,7 +3415,7 @@ const audioEngine = {
     if (index >= 0) voices.splice(index, 1);
     if (!voices.length) this.voices.delete(name);
   },
-  playHtmlAudio(name, { volume = 1, rate = 1, loop = false } = {}) {
+  playHtmlAudio(name, { volume = 1, rate = 1, loop = false, preservePitch = false } = {}) {
     const src = GAME_SFX?.[name];
     if (!src) return { stop() {}, ended: Promise.resolve() };
     const pool = this.htmlAudioPool.get(src) || [];
@@ -3435,6 +3435,11 @@ const audioEngine = {
     }
     node.loop = !!loop;
     node.playbackRate = clamp(rate, 0.5, 2);
+    if (preservePitch) {
+      node.preservesPitch = true;
+      node.mozPreservesPitch = true;
+      node.webkitPreservesPitch = true;
+    }
     node.volume = clamp(volume, 0, 1);
     try {
       node.currentTime = 0;
@@ -7725,7 +7730,7 @@ function initGalaxyCanvas() {
   // non-final path anyway). Flip to false to skip the slot entirely; later this can become a cadence.
   const SLOT_OPEN_AFTER_EVERY_LEVEL = true;
   function shouldOpenSlot() {
-    return SLOT_OPEN_AFTER_EVERY_LEVEL;
+    return SLOT_OPEN_AFTER_EVERY_LEVEL && slotTokens > 0;
   }
 
   // ── POLYSLOTS reel engine (step 5a) ────────────────────────────────────────────────────────
@@ -8953,7 +8958,9 @@ function initGalaxyCanvas() {
   powerupPickupFlashSheet.img.onload = () => { powerupPickupFlashSheet.ready = true; };
   powerupPickupFlashSheet.img.onerror = () => { powerupPickupFlashSheet.ready = false; };
   powerupPickupFlashSheet.img.src = "combo_fx/5_electric_elements.png";
-  const COMBO_BANNER_TTL_MS = 1450;
+  const COMBO_BANNER_TTL_MS = 2200;
+  const COMBO_BANNER_FADE_START = 0.52;
+  const COMBO_BANNER_BLAST_START = 0.5;
   const COMBO_MAX_BANNERS = 2;
   let comboBanners = [];
   let comboFxParticles = [];
@@ -9379,9 +9386,9 @@ function initGalaxyCanvas() {
   function playComboSfx(key) {
     const sfxKey = `combo_${key}`;
     if (!GAME_SFX[sfxKey]) return;
-    playGameSfx(sfxKey, 0.92, { rate: 1.25, important: true });
-    setTimeout(() => playGameSfx(sfxKey, 0.32, { rate: 1.25, important: true }), 92);
-    setTimeout(() => playGameSfx(sfxKey, 0.18, { rate: 1.25, important: true }), 178);
+    playGameSfx(sfxKey, 0.92, { rate: 1.25, preservePitch: true, important: true });
+    setTimeout(() => playGameSfx(sfxKey, 0.32, { rate: 1.25, preservePitch: true, important: true }), 92);
+    setTimeout(() => playGameSfx(sfxKey, 0.18, { rate: 1.25, preservePitch: true, important: true }), 178);
   }
 
   function awardCombo({ key, label, points, x, y, colors = ["255,255,255", "0,255,209"] }) {
@@ -9509,7 +9516,7 @@ function initGalaxyCanvas() {
         continue;
       }
       const slam = t < 0.18 ? 1.55 - (t / 0.18) * 0.55 : 1 + Math.sin((t - 0.18) * Math.PI * 3) * 0.035 * (1 - t);
-      const alpha = t < 0.78 ? 1 : 1 - (t - 0.78) / 0.22;
+      const alpha = t < COMBO_BANNER_FADE_START ? 1 : 1 - (t - COMBO_BANNER_FADE_START) / (1 - COMBO_BANNER_FADE_START);
       const y = b.y - t * 42;
       drawCtx.save();
       drawCtx.globalCompositeOperation = "lighter";
@@ -9549,6 +9556,25 @@ function initGalaxyCanvas() {
       drawCtx.fillStyle = `rgba(255,255,255,${0.76 + 0.22 * fillPulse})`;
       drawCtx.strokeText(headline, safeX, safeY, maxW);
       drawCtx.fillText(headline, safeX, safeY, maxW);
+      if (!prefersReducedMotion && smallStroidFxSheet.ready && t >= COMBO_BANNER_BLAST_START) {
+        const headlineWidth = Math.min(maxW, drawCtx.measureText(headline).width * 1.08);
+        const blastCount = Math.max(5, Math.min(9, Math.ceil(headlineWidth / Math.max(42, base * 1.55))));
+        const blastDuration = 0.36;
+        const blastStagger = 0.052;
+        drawCtx.save();
+        drawCtx.globalCompositeOperation = "lighter";
+        for (let j = 0; j < blastCount; j += 1) {
+          const local = (t - COMBO_BANNER_BLAST_START - j * blastStagger) / blastDuration;
+          if (local < 0 || local > 1) continue;
+          const frame = Math.min(smallStroidFxSheet.frameCount - 1, Math.floor(local * smallStroidFxSheet.frameCount * 1.24));
+          const x = safeX - headlineWidth / 2 + headlineWidth * ((j + 0.5) / blastCount);
+          const yJitter = Math.sin(j * 1.73 + b.start * 0.003) * base * 0.16;
+          const size = base * (1.35 + 0.42 * Math.sin((j + 1) * 1.19)) * (1 + local * 0.38);
+          drawCtx.globalAlpha = clamp(alpha * (1 - Math.max(0, local - 0.68) / 0.32) * 0.92, 0, 0.92);
+          drawFxSheetFrame(drawCtx, smallStroidFxSheet, frame, x, safeY + yJitter, size, j * 0.48);
+        }
+        drawCtx.restore();
+      }
       drawCtx.font = `800 ${Math.floor(base * 0.58 * slam)}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       drawCtx.shadowColor = `rgba(${b.colors[1] || b.colors[0]},${0.46 * glowPulse})`;
       drawCtx.shadowBlur = (isIOSNative ? 5 : 10) * glowPulse;
@@ -9607,7 +9633,7 @@ function initGalaxyCanvas() {
         if (comboState.plasmaStage === 2) {
           awardCombo({
             key: "net_ufo_net",
-            label: "NET UFO NET COMBO",
+            label: "NET-UFO-NET COMBO!",
             points: 500,
             x,
             y,
@@ -10333,6 +10359,15 @@ function initGalaxyCanvas() {
         _iosAudioFrameBudget = 1;
         _iosAudioLastFrame = frameNow;
       }
+    }
+    if (opts.preservePitch) {
+      audioEngine.playHtmlAudio(name, {
+        volume: finalVolume,
+        rate: opts.rate || 1,
+        loop: false,
+        preservePitch: true,
+      });
+      return;
     }
     if (opts.forceHtmlOnIOS && isIOSWebKit && !isIOSNative) {
       audioEngine.playHtmlAudio(name, {

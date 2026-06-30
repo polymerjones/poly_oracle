@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-29 15:06";
+const BUILD_TS = "2026-06-30 09:22";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -453,6 +453,24 @@ const GAME_SFX = {
   plasmarecharged1: "gamesfx/plasmarecharged1.mp3",
 };
 
+const CORE_PRELOAD_SFX_KEYS = [
+  "orb_tap",
+  "menu_hit",
+  "menu_back",
+  "bling",
+  "explosion_med",
+  "explosion_big",
+  "advfire",
+];
+
+function sfxMapForKeys(keys) {
+  const out = {};
+  for (const key of keys) {
+    if (GAME_SFX[key]) out[key] = GAME_SFX[key];
+  }
+  return out;
+}
+
 const PRACTICE_MAX_ASTEROIDS = 40;
 const PRACTICE_SPAWN_COOLDOWN_MS = 1000;
 const PRACTICE_ENABLED = false;
@@ -649,7 +667,8 @@ const ARCADE_LEVELS = [
   { level: 6, label: "THE SWARM", time: 58, totalToClear: 14, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13,
     spriteKey: "roid01", // 2026-06-23: silver stroids for the whole level
     musicVolume: 1.15 }, // 2026-06-17: +15% music gain for this level
-  { level: 7, label: "Into The Deep", time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13 },
+  { level: 7, label: "Into The Deep", time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13,
+    guaranteedSpawn: [{ type: "goldbars", atMs: 30000 }] },
   { level: 8, label: "DEEP FREEZE", time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14,
     // 2026-06-24: mid-level skin shift — asteroids spawned after the shift mark come in ice-blue
     // (earlier ones keep their skin). Honored by pickArcadeSpriteOverride at the spawn call.
@@ -674,7 +693,7 @@ const ARCADE_LEVELS = [
   // hotroid sprites, ramping density/time. "YOU WIN" now fires after clearing level 15.
   { level: 11, label: "AFTERSHOCK", time: 78, totalToClear: 27, startSpawn: 7, spawnEveryMs: 1350, maxOnScreen: 15,
     musicVolume: 1.45, // 2026-06-24: L11_Swarm track is mastered quiet — boosted again per playtest
-    guaranteedSpawn: [{ type: "quadshot", atMs: 12000 }], // 2026-06-16: early quadshot drop
+    guaranteedSpawn: [{ type: "quadshot", atMs: 12000 }, { type: "goldbars", atMs: 42000 }],
     waves: [{ count: 9, triggerAtRemaining: 34 }] }, // 2026-06-23: aftershock surge — 9 rocks burst in once ~34s remain
   // 2026-06-15: levels 12-15 are the "second act" with per-level mechanics. New config fields
   // (asteroidKinds, asteroidSpeedMult, mineLaunch/mineCount/mineFuseMs, noUfo, ufoSpawnAt,
@@ -869,8 +888,6 @@ const canonicalAnswers = [
   "I don't think so",
   "Don't count on it",
   "The answer is no",
-  "No - not with the current energy",
-  "It leans no",
   "Not unless something changes first",
   "That is for God to decide",
   "Ask another day",
@@ -3271,9 +3288,7 @@ function mountRetryFuzzy() {
   retryFuzzyInstance = createFuzzyText(c, preset);
 }
 
-let _soundsLoading = false;
-let _soundsLoaded = false;
-let _soundsLoadPromise = null;
+let _soundLoadChain = Promise.resolve();
 let _musicWasPlaying = false;
 let _musicCurrentTime = 0;
 let _musicResumeKey = "";
@@ -3378,9 +3393,9 @@ const audioEngine = {
     }
   },
   loadMany(mapNameToUrl) {
-    if (_soundsLoaded) return Promise.resolve();
-    if (_soundsLoading) return _soundsLoadPromise || Promise.resolve();
     const soundMap = mapNameToUrl || {};
+    const missingKeys = Object.keys(soundMap).filter((key) => !this.buffers.has(key));
+    if (!missingKeys.length) return Promise.resolve();
     const priorityKeys = [
       "explosion_med",
       "explosion_big",
@@ -3390,26 +3405,21 @@ const audioEngine = {
       "plasmarecharged",
     ];
     const orderedKeys = [
-      ...priorityKeys.filter((key) => soundMap[key]),
-      ...Object.keys(soundMap).filter((key) => !priorityKeys.includes(key)),
+      ...priorityKeys.filter((key) => missingKeys.includes(key)),
+      ...missingKeys.filter((key) => !priorityKeys.includes(key)),
     ];
-    _soundsLoading = true;
-    _soundsLoadPromise = (async () => {
-      try {
-        for (let i = 0; i < orderedKeys.length; i += 1) {
-          const name = orderedKeys[i];
-          try {
-            await this.loadSound(name, soundMap[name]);
-          } catch {
-            // Skip individual failed sounds and continue loading the rest.
-          }
+    const run = async () => {
+      for (let i = 0; i < orderedKeys.length; i += 1) {
+        const name = orderedKeys[i];
+        try {
+          await this.loadSound(name, soundMap[name]);
+        } catch {
+          // Skip individual failed sounds and continue loading the rest.
         }
-        _soundsLoaded = true;
-      } finally {
-        _soundsLoading = false;
       }
-    })();
-    return _soundsLoadPromise;
+    };
+    _soundLoadChain = _soundLoadChain.then(run, run);
+    return _soundLoadChain;
   },
   enforcePolyphony(name, maxVoices = this.maxVoicesPerSound, mode = "drop_newest") {
     const voices = this.voices.get(name);
@@ -3595,6 +3605,7 @@ const audioEngine = {
     }
   },
   async loadMusicBuffer(url) {
+    if (isIOSNative) return null;
     this.ensureMusic();
     if (!this.ctx) return null;
     if (this.musicBuffers.has(url)) {
@@ -3972,7 +3983,100 @@ function resumeBackgroundMusic() {
 }
 
 function preloadSfx() {
-  audioEngine.loadMany(GAME_SFX);
+  audioEngine.loadMany(isIOSNative ? sfxMapForKeys(CORE_PRELOAD_SFX_KEYS) : GAME_SFX);
+}
+
+let arcadeWarmupPromise = null;
+let arcadeWarmupOverlay = null;
+
+function setArcadeWarmupVisible(visible, text = "LOADING") {
+  if (!galaxyView) return;
+  if (!arcadeWarmupOverlay) {
+    if (!document.getElementById("arcadeWarmupStyles")) {
+      const style = document.createElement("style");
+      style.id = "arcadeWarmupStyles";
+      style.textContent = "@keyframes arcadeWarmupSpin{to{transform:rotate(1turn)}}";
+      document.head.appendChild(style);
+    }
+    arcadeWarmupOverlay = document.createElement("div");
+    arcadeWarmupOverlay.id = "arcadeWarmup";
+    arcadeWarmupOverlay.innerHTML = '<div class="arcadeWarmupInner"><span></span><b></b></div>';
+    Object.assign(arcadeWarmupOverlay.style, {
+      position: "fixed",
+      inset: "0",
+      zIndex: "9800",
+      display: "none",
+      alignItems: "center",
+      justifyContent: "center",
+      pointerEvents: "auto",
+      background: "radial-gradient(circle at 50% 42%, rgba(8,18,34,.92), rgba(1,4,10,.98))",
+      color: "#dff",
+      fontFamily: "ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace",
+      letterSpacing: ".16em",
+      textAlign: "center",
+    });
+    const inner = arcadeWarmupOverlay.querySelector(".arcadeWarmupInner");
+    Object.assign(inner.style, {
+      display: "grid",
+      gap: "14px",
+      placeItems: "center",
+      textShadow: "0 0 18px rgba(0,255,209,.7)",
+    });
+    const ring = arcadeWarmupOverlay.querySelector("span");
+    Object.assign(ring.style, {
+      width: "54px",
+      height: "54px",
+      borderRadius: "50%",
+      border: "2px solid rgba(0,255,209,.18)",
+      borderTopColor: "#00FFD1",
+      animation: "arcadeWarmupSpin .82s linear infinite",
+      boxShadow: "0 0 22px rgba(0,255,209,.35)",
+    });
+    (galaxyView || document.body).appendChild(arcadeWarmupOverlay);
+  }
+  const label = arcadeWarmupOverlay.querySelector("b");
+  if (label) label.textContent = text;
+  arcadeWarmupOverlay.style.display = visible ? "flex" : "none";
+}
+
+async function warmImageSet(images) {
+  const list = Object.values(images || {}).filter(Boolean);
+  await Promise.all(list.map((img) => {
+    if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+    if (typeof img.decode === "function") return img.decode().catch(() => {});
+    return new Promise((resolve) => {
+      img.onload = () => resolve();
+      img.onerror = () => resolve();
+      setTimeout(resolve, 1200);
+    });
+  }));
+}
+
+async function warmArcadeAssets(levelNum = 1) {
+  if (arcadeWarmupPromise) return arcadeWarmupPromise;
+  setArcadeWarmupVisible(true, "WARMING UP");
+  const minHold = delay(420);
+  arcadeWarmupPromise = (async () => {
+    try {
+      await audioEngine.unlock?.();
+      await audioEngine.loadMany?.(GAME_SFX);
+      const bgKey = bgKeyForLevel(levelNum);
+      preloadGalaxyBackgroundKey(bgKey);
+      await Promise.race([
+        audioEngine.loadMusicBuffer?.(getMusicForLevel(levelNum)) || Promise.resolve(),
+        delay(1800),
+      ]);
+      if (typeof ensureSlotSprites === "function") {
+        ensureSlotSprites();
+        await Promise.race([warmImageSet(slotSprites), delay(900)]);
+      }
+      await minHold;
+    } finally {
+      setArcadeWarmupVisible(false);
+      arcadeWarmupPromise = null;
+    }
+  })();
+  return arcadeWarmupPromise;
 }
 
 async function playSfxAndWait(name, { volume = 1, rate = 1, detune = 0, maxWaitMs = 8000 } = {}) {
@@ -6783,7 +6887,7 @@ async function submitLeaderboardScore(initials, score) {
 
 function showInitialsEntry(score, runMsg = "") {
   const safeScore = Math.max(0, Math.floor(Number(score) || 0));
-  galaxyCanvasController?.playArcadeMenuMusic?.();
+  galaxyCanvasController?.playArcadeMenuMusic?.({ fullVolume: true });
   const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
     <form id="initialsForm" class="initialsForm">
       <p class="leaderboardSub">Score ${safeScore}. Enter initials.${runMsg ? ` ${runMsg}` : ""}</p>
@@ -7789,6 +7893,7 @@ function initGalaxyCanvas() {
       try { slotOverlay.remove(); } catch { /* ignore */ }
       slotOverlay = null;
     }
+    galaxyView?.classList.remove("slot-active");
     // Reset live-shell state. slotOnExit is intentionally cleared here too — exitSlot() captures it
     // BEFORE calling teardown, so the handoff still fires; this just prevents a stale callback.
     slotOnExit = null;
@@ -7830,11 +7935,13 @@ function initGalaxyCanvas() {
   const SLOT_STRIP_WEIGHTS = { blank: 5, goldbar: 3, freeze: 9, bomb: 9, quad: 9, missile: 9, wild: 3, alien: 2, jackpot: 1 };
   const SLOT_SYM_LABEL = { jackpot: "ORB", quad: "QUAD", missile: "MSL", bomb: "BOMB", freeze: "FRZ", goldbar: "GOLD", wild: "WILD", alien: "ALN", blank: "·" };
   const SLOT_SYM_COLOR = { jackpot: "#aa78ff", quad: "#be6eff", missile: "#ff5050", bomb: "#ffaa3c", freeze: "#6ec8ff", goldbar: "#ffcd5a", wild: "#5ae6d2", alien: "#78eb78", blank: "#506e96" };
-  const SLOT_SPIN_SPEED = 16, SLOT_SPIN_TIME_MS = 2600, SLOT_REEL_STAGGER_MS = 380;
+  const SLOT_SPIN_SPEED = isIOSNative ? 19 : 16;
+  const SLOT_SPIN_TIME_MS = isIOSNative ? 1900 : 2600;
+  const SLOT_REEL_STAGGER_MS = isIOSNative ? 260 : 380;
   const SLOT_STOP_MIN_TRAVEL = 6, SLOT_STOP_DUR = 1.0;
   const SLOT_LEVER_THRESHOLD = 0.6, SLOT_LEVER_STIFF = 120, SLOT_LEVER_DAMP = 9;
   const SLOT_BOUNCE_IMPULSE = 0.16, SLOT_BOUNCE_K = 200, SLOT_BOUNCE_DAMP = 16;
-  const SLOT_DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const SLOT_DPR = isIOSNative ? 1 : Math.min(window.devicePixelRatio || 1, 2);
   // Slot mode now keeps level music running underneath, ducked by slotDuckLevelMusic().
 
   function ensureSlotSprites() {
@@ -8452,6 +8559,9 @@ function initGalaxyCanvas() {
         background-size:220px 180px,260px 210px,310px 240px,190px 160px;mix-blend-mode:screen;opacity:.72;animation:psStarDrift 24s linear infinite;}
       @keyframes psGalaxyDrift{from{transform:translate3d(0,0,0) rotate(0deg)}to{transform:translate3d(-2%,1%,0) rotate(1turn)}}
       @keyframes psStarDrift{from{background-position:0 0,0 0,0 0,0 0}to{background-position:220px 180px,-260px 210px,310px -240px,-190px -160px}}
+      #polyslots.ios-lite::before,#polyslots.ios-lite::after{animation:none;}
+      #polyslots.ps-flash{animation:psOverlayFlash 360ms ease-out both;}
+      @keyframes psOverlayFlash{0%{filter:brightness(2.1)}100%{filter:brightness(1)}}
       /* Cabinet skin: the whole machine is one art PNG; live bits are absolutely placed (ported 1:1
          from prototypes/slot-machine.html — TUNE fractions are of the cabinet box). */
       .ps-gamehud{position:absolute;left:max(10px,env(safe-area-inset-left,0px));right:max(10px,env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px));z-index:3;display:flex;align-items:center;justify-content:space-between;gap:10px;color:#dff;}
@@ -8464,11 +8574,11 @@ function initGalaxyCanvas() {
       @keyframes psRewardFlash{0%{filter:brightness(1);text-shadow:0 0 9px rgba(57,255,154,.6)}24%{filter:brightness(1.9) drop-shadow(0 0 12px rgba(57,255,154,.95));text-shadow:0 0 18px rgba(57,255,154,1),0 0 32px rgba(57,255,154,.75)}58%{filter:brightness(1.35) drop-shadow(0 0 20px rgba(57,255,154,.7));text-shadow:0 0 14px rgba(57,255,154,.85)}100%{filter:brightness(1);text-shadow:0 0 9px rgba(57,255,154,.6)}}
       .ps-panel{position:relative;z-index:1;aspect-ratio:826/1806;width:min(420px,94vw,40vh);margin-top:calc(60px + env(safe-area-inset-top,0px));color:#dff;
         background:url("slotart/cabinet.png") center/100% 100% no-repeat;
-        animation:psSlam 260ms cubic-bezier(.2,1.4,.4,1) both;
+        animation:psSlam 240ms cubic-bezier(.2,1.4,.4,1) both;
         --reelL:6.9%;--reelT:19.82%;--reelW:69.98%;--reelH:35.27%;
         --leverR:2%;--leverT:20%;--leverW:17%;--leverH:35%;
         --resultT:55.8%;--hintT:61.3%;--hudT:67.5%;--btnT:75.5%;}
-      @keyframes psSlam{from{opacity:0;transform:scale(2)}to{opacity:1;transform:scale(1)}}
+      @keyframes psSlam{0%{opacity:0;transform:scale(2.35) rotate(-2deg)}58%{opacity:1;transform:scale(.92) rotate(.5deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
       @keyframes psBlink{50%{opacity:.25}}
       @keyframes psTick{0%{transform:scale(1)}40%{transform:scale(1.5);color:#fff}100%{transform:scale(1)}}
       @keyframes psBump{40%{transform:scale(1.4)}}
@@ -8638,6 +8748,12 @@ function initGalaxyCanvas() {
     ensureSlotSprites();
     commBoxController.hide();
     slotOverlay = buildSlotOverlay();
+    slotOverlay.classList.add("ps-flash");
+    if (isIOSNative) {
+      slotOverlay.classList.add("ios-lite");
+      [bgVideoA, bgVideoB].forEach((v) => { try { v?.pause(); } catch {} });
+    }
+    galaxyView?.classList.add("slot-active");
     slotClearWinFx();
     if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
     slotSyncCabinetStats(); // lives + current inventory in the cabinet HUD
@@ -9060,9 +9176,9 @@ function initGalaxyCanvas() {
   powerupPickupFlashSheet.img.onerror = () => { powerupPickupFlashSheet.ready = false; };
   powerupPickupFlashSheet.img.src = "combo_fx/5_electric_elements.png";
   const explosiveElectricFxSheet = powerupPickupFlashSheet;
-  const COMBO_BANNER_TTL_MS = 2200;
-  const COMBO_BANNER_FADE_START = 0.52;
-  const COMBO_BANNER_BLAST_START = 0.5;
+  const COMBO_BANNER_TTL_MS = isIOSNative ? 1450 : 1700;
+  const COMBO_BANNER_FADE_START = 0.42;
+  const COMBO_BANNER_BLAST_START = 0.34;
   const COMBO_MAX_BANNERS = 2;
   let comboBanners = [];
   let comboFxParticles = [];
@@ -9516,9 +9632,8 @@ function initGalaxyCanvas() {
   function playComboSfx(key) {
     const sfxKey = `combo_${key}`;
     if (!GAME_SFX[sfxKey]) return;
-    playGameSfx(sfxKey, 0.92, { rate: 1.25, preservePitch: true, important: true });
-    setTimeout(() => playGameSfx(sfxKey, 0.32, { rate: 1.25, preservePitch: true, important: true }), 92);
-    setTimeout(() => playGameSfx(sfxKey, 0.18, { rate: 1.25, preservePitch: true, important: true }), 178);
+    playGameSfx(sfxKey, 0.98, { rate: 1.45, preservePitch: true, important: true });
+    setTimeout(() => playGameSfx(sfxKey, 0.24, { rate: 1.55, preservePitch: true, important: true }), 70);
   }
 
   function awardCombo({ key, label, points, x, y, colors = ["255,255,255", "0,255,209"] }) {
@@ -9588,7 +9703,7 @@ function initGalaxyCanvas() {
           explosiveElectricBursts.splice(i, 1);
           continue;
         }
-        const frame = Math.min(explosiveElectricFxSheet.frameCount - 1, Math.floor(t * explosiveElectricFxSheet.frameCount * 1.7));
+        const frame = Math.min(explosiveElectricFxSheet.frameCount - 1, Math.floor(t * explosiveElectricFxSheet.frameCount * 2.25));
         const pop = t < 0.22 ? 0.75 + (t / 0.22) * 0.5 : 1.25 - (t - 0.22) * 0.28;
         const fade = 1 - Math.max(0, t - 0.52) / 0.48;
         const size = (isIOSNative ? 128 : 154) * b.scale * pop;
@@ -9607,7 +9722,7 @@ function initGalaxyCanvas() {
           powerupPickupBursts.splice(i, 1);
           continue;
         }
-        const frame = Math.min(powerupPickupFxSheet.frameCount - 1, Math.floor(t * powerupPickupFxSheet.frameCount * 1.75));
+        const frame = Math.min(powerupPickupFxSheet.frameCount - 1, Math.floor(t * powerupPickupFxSheet.frameCount * 2.2));
         const pop = t < 0.42 ? 1 + t / 0.42 * 0.48 : 1.48 - ((t - 0.42) / 0.58) * 0.30;
         const size = (isIOSNative ? 111 : 132) * b.scale * pop;
         const fade = 1 - Math.max(0, t - 0.54) / 0.46;
@@ -9615,7 +9730,7 @@ function initGalaxyCanvas() {
         drawCtx.globalAlpha = clamp(1.08 * fade * flicker, 0, 1);
         drawFxSheetFrame(drawCtx, powerupPickupFxSheet, frame, b.x, b.y, size, b.rot, b.tint);
         if (powerupPickupFlashSheet.ready) {
-          const flashFrame = Math.min(powerupPickupFlashSheet.frameCount - 1, Math.floor(t * powerupPickupFlashSheet.frameCount * 2.05));
+          const flashFrame = Math.min(powerupPickupFlashSheet.frameCount - 1, Math.floor(t * powerupPickupFlashSheet.frameCount * 2.55));
           const flashSize = (isIOSNative ? 102 : 123) * b.scale * b.flashScale * pop;
           drawCtx.globalAlpha = clamp((b.flashAlpha + 0.18) * fade * fastFxFlicker(now, b.flickerSeed + 2.4, 0.52), 0, 1);
           drawFxSheetFrame(drawCtx, powerupPickupFlashSheet, flashFrame, b.x, b.y, flashSize, b.flashRot + t * 0.55, b.tint);
@@ -9633,7 +9748,7 @@ function initGalaxyCanvas() {
           bigStroidBursts.splice(i, 1);
           continue;
         }
-        const frame = Math.min(bigStroidFxSheet.frameCount - 1, Math.floor(t * bigStroidFxSheet.frameCount * 1.18));
+        const frame = Math.min(bigStroidFxSheet.frameCount - 1, Math.floor(t * bigStroidFxSheet.frameCount * 1.65));
         const size = (isIOSNative ? 41 : 52) * b.scale * (1.08 + t * 0.18);
         drawCtx.globalAlpha = clamp(0.8 * (1 - Math.max(0, t - 0.72) / 0.28) * fastFxFlicker(now, b.flickerSeed, 0.22), 0, 0.8);
         drawFxSheetFrame(drawCtx, bigStroidFxSheet, frame, b.x, b.y, size, b.rot, b.tint);
@@ -9650,7 +9765,7 @@ function initGalaxyCanvas() {
           smallStroidBursts.splice(i, 1);
           continue;
         }
-        const frame = Math.min(smallStroidFxSheet.frameCount - 1, Math.floor(t * smallStroidFxSheet.frameCount));
+        const frame = Math.min(smallStroidFxSheet.frameCount - 1, Math.floor(t * smallStroidFxSheet.frameCount * 1.55));
         const size = (isIOSNative ? 82 : 98) * b.scale * (1 + t * 0.28);
         drawCtx.globalAlpha = clamp(0.82 * (1 - Math.max(0, t - 0.68) / 0.32) * fastFxFlicker(now, b.flickerSeed, 0.2), 0, 1);
         drawFxSheetFrame(drawCtx, smallStroidFxSheet, frame, b.x, b.y, size, b.rot);
@@ -9694,7 +9809,7 @@ function initGalaxyCanvas() {
       drawCtx.globalCompositeOperation = "lighter";
       drawCtx.globalAlpha = alpha;
       if (comboFxSheet.ready && !prefersReducedMotion) {
-        const frame = Math.min(comboFxSheet.frameCount - 1, Math.floor(t * comboFxSheet.frameCount * 1.35));
+        const frame = Math.min(comboFxSheet.frameCount - 1, Math.floor(t * comboFxSheet.frameCount * 1.85));
         const sx = (frame % comboFxSheet.columns) * (comboFxSheet.frameWidth + comboFxSheet.padding);
         const sy = Math.floor(frame / comboFxSheet.columns) * (comboFxSheet.frameHeight + comboFxSheet.padding);
         const size = (isIOSNative ? 190 : 240) * (1.15 - t * 0.25);
@@ -9898,7 +10013,7 @@ function initGalaxyCanvas() {
     audioEngine.unlock();
     const url = getMusicForLevel(levelNum);
     // 2026-06-17: a level can boost its music via cfg.musicVolume (e.g. L6 = 1.15).
-    const volume = ARCADE_LEVELS.find((l) => l.level === levelNum)?.musicVolume || 1;
+    const volume = (ARCADE_LEVELS.find((l) => l.level === levelNum)?.musicVolume || 1) * 1.08;
     audioEngine.playMusic(url, url, { crossfadeMs: 250, volume });
     const nextUrl = getMusicForLevel(levelNum + 1);
     // 2026-06-26 EXPERIMENT: also skip the boss-music decode prefetch at L9 so the boss-tier
@@ -9908,10 +10023,10 @@ function initGalaxyCanvas() {
     }
   }
 
-  function playArcadeMenuMusic() {
+  function playArcadeMenuMusic(opts = {}) {
     audioEngine.unlock();
-    // 2026-06-24: menu theme sounded quiet on desktop but fine on iOS — bump desktop only.
-    audioEngine.playMusic("ARCADE_MENU", MUSIC.ARCADE_MENU, { crossfadeMs: 250, volume: isIOSWebKit ? 1 : 1.15 });
+    const volume = opts.fullVolume ? 1 : 0.72;
+    audioEngine.playMusic("ARCADE_MENU", MUSIC.ARCADE_MENU, { crossfadeMs: 250, volume });
     audioEngine.loadMusicBuffer(getMusicForLevel(1)).catch(() => {});
     audioEngine.loadMusicBuffer(getMusicForLevel(0)).catch(() => {});
   }
@@ -14141,10 +14256,12 @@ function initGalaxyCanvas() {
     playArcadeMenuMusic();
   }
 
-  function startArcadeAtLevel(levelNum) {
+  async function startArcadeAtLevel(levelNum) {
     arcadeLevelSelectOpen = false; // 2026-06-24: grid is dismissed — re-enable comms for the run
     audioEngine.unlock?.();
-    audioEngine.loadMany?.(GAME_SFX);
+    const numericLevel = Math.floor(Number(levelNum));
+    const safeLevel = Number.isFinite(numericLevel) ? numericLevel : 1;
+    await warmArcadeAssets(safeLevel);
     hideArcadeOverlay();
     arcadeScore = 0;
     renderScore();
@@ -14159,8 +14276,7 @@ function initGalaxyCanvas() {
     resizeGalaxyCanvas();
     computePlayfield();
     setTimeout(computePlayfield, 50);
-    const numericLevel = Math.floor(Number(levelNum));
-    const idx = clamp((Number.isFinite(numericLevel) ? numericLevel : 1) - 1, 0, ARCADE_LEVELS.length - 1);
+    const idx = clamp(safeLevel - 1, 0, ARCADE_LEVELS.length - 1);
     startLevel(idx);
     startGalaxyLoop();
   }
@@ -18390,8 +18506,8 @@ function initGalaxyCanvas() {
     openArcadeLevelSelect() {
       openArcadeLevelSelect();
     },
-    playArcadeMenuMusic() {
-      playArcadeMenuMusic();
+    playArcadeMenuMusic(opts = {}) {
+      playArcadeMenuMusic(opts);
     },
     startArcadeAtLevel(levelNum) {
       startArcadeAtLevel(levelNum);

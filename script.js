@@ -184,12 +184,12 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-30 10:30";
+const BUILD_TS = "2026-06-30 11:39";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
 const STORAGE_GAME_BEATEN = "poly-oracle-game-beaten";
-const DISABLE_VIDEO_BG = false;
+const DISABLE_VIDEO_BG = true;
 
 const _flashDiv = document.getElementById("screenFlashDiv");
 let _flashTimer = null;
@@ -343,18 +343,10 @@ function isStuntTrainingComplete() {
   catch { return false; }
 }
 
-const BG = {
-  L1_3: "galaxybg1b-h264.mp4",
-  L4_7: "level5-h264.mp4",
-  L8_9: "level8-h264.mp4",
-  L10: "newbossbg.mp4",
-};
+const BG = {};
 
-function bgKeyForLevel(levelNum) {
-  if (levelNum >= 10) return "L10";
-  if (levelNum >= 8) return "L8_9";
-  if (levelNum >= 4) return "L4_7";
-  return "L1_3";
+function bgKeyForLevel(_levelNum) {
+  return "";
 }
 
 const GAME_SFX = {
@@ -692,12 +684,13 @@ const ARCADE_LEVELS = [
     spriteKey: "roid01", // 2026-06-23: silver stroids for the whole level
     musicVolume: 1.15 }, // 2026-06-17: +15% music gain for this level
   { level: 7, label: "Into The Deep", time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13,
-    guaranteedSpawn: [{ type: "goldbars", atMs: 30000 }] },
+    guaranteedSpawn: [{ type: "goldbars", atMs: 14000 }, { type: "goldbars", atMs: 36000 }] },
   { level: 8, label: "DEEP FREEZE", time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14,
     // 2026-06-24: mid-level skin shift — asteroids spawned after the shift mark come in ice-blue
     // (earlier ones keep their skin). Honored by pickArcadeSpriteOverride at the spawn call.
     // 2026-06-26: shift pulled 18s→10s so more of the level spawns blue.
-    spriteShift: { afterMs: 10000, key: "roidice" } },
+    spriteShift: { afterMs: 10000, key: "roidice" },
+    guaranteedSpawn: [{ type: "goldbars", atMs: 30000 }] },
   { level: 9, label: "DANGER CLOSE", time: 68, totalToClear: 21, startSpawn: 6, spawnEveryMs: 1500, maxOnScreen: 14,
     spriteKey: "roid01", // 2026-06-23: silver stroids for the whole level
     musicRamp: { atMs: 25000, toMult: 1.4, rampMs: 4000 }, // 2026-06-24: noticeable swell ~25s in
@@ -705,6 +698,7 @@ const ARCADE_LEVELS = [
       { type: "bomb", atMs: 8000 },
       { type: "bomb", atMs: 20000 },
       { type: "quadshot", atMs: 12000 },
+      { type: "goldbars", atMs: 44000 },
     ] }, // 2026-06-17: two bombs + a quadshot near the start
   { level: 10, label: "RED HORIZON", time: 75, totalToClear: 24, startSpawn: 7, spawnEveryMs: 1400, maxOnScreen: 14,
     musicVolume: 1.15, // 2026-06-24: boss music up a touch from the start
@@ -814,7 +808,7 @@ const ARCADE_LEVELS = [
       { count: 10, triggerAtRemaining: 20 }, // 2026-06-23: wired — surge fires in the main loop
     ],
     // 2026-06-16: missile-heavy mix with every type available, dropping every 12s.
-    powerupOverride: ["missile", "missile", "timer", "freeze", "quadshot", "bomb"],
+    powerupOverride: ["missile", "missile", "timer", "freeze", "quadshot", "bomb", "goldbars"],
     powerupIntervalMs: 12000,
     speedEscalation: true,       // 2026-06-16: live asteroids ramp speed over the level (cap 2.5x)
     musicVolume: 1.4,            // 2026-06-25: L15 was too quiet — it plays the L10 boss track as a
@@ -8951,7 +8945,7 @@ function initGalaxyCanvas() {
   let powerups = [];
   const POWERUP_MAX_ONSCREEN = 2;
   const POWERUP_WEIGHTS = [
-    { type: "goldbars", weight: 8 },
+    { type: "goldbars", weight: 25 },
     { type: "timer", weight: 28 },
     { type: "quadshot", weight: 26 },
     { type: "snowflake", weight: 22 },
@@ -9210,8 +9204,8 @@ function initGalaxyCanvas() {
   powerupPickupFlashSheet.img.onerror = () => { powerupPickupFlashSheet.ready = false; };
   powerupPickupFlashSheet.img.src = "combo_fx/5_electric_elements.png";
   const explosiveElectricFxSheet = powerupPickupFlashSheet;
-  const COMBO_BANNER_TTL_MS = isIOSNative ? 1450 : 1700;
-  const COMBO_BANNER_FADE_START = 0.42;
+  const COMBO_BANNER_TTL_MS = isIOSNative ? 2200 : 2400;
+  const COMBO_BANNER_FADE_START = 0.26;
   const COMBO_BANNER_BLAST_START = 0.34;
   const COMBO_MAX_BANNERS = 2;
   let comboBanners = [];
@@ -9725,7 +9719,8 @@ function initGalaxyCanvas() {
 
   function drawComboFxOverlay(drawCtx, now) {
     if (!drawCtx) return;
-    if (explosiveElectricBursts.length && explosiveElectricFxSheet.ready) {
+    const underFramePressure = isIOSNative && !!sim._frameBudgetExceeded;
+    if (!underFramePressure && explosiveElectricBursts.length && explosiveElectricFxSheet.ready) {
       drawCtx.save();
       drawCtx.globalCompositeOperation = "lighter";
       for (let i = explosiveElectricBursts.length - 1; i >= 0; i -= 1) {
@@ -9746,7 +9741,7 @@ function initGalaxyCanvas() {
       }
       drawCtx.restore();
     }
-    if (powerupPickupBursts.length && powerupPickupFxSheet.ready) {
+    if (!underFramePressure && powerupPickupBursts.length && powerupPickupFxSheet.ready) {
       drawCtx.save();
       drawCtx.globalCompositeOperation = "lighter";
       for (let i = powerupPickupBursts.length - 1; i >= 0; i -= 1) {
@@ -9772,7 +9767,7 @@ function initGalaxyCanvas() {
       }
       drawCtx.restore();
     }
-    if (bigStroidBursts.length && bigStroidFxSheet.ready) {
+    if (!underFramePressure && bigStroidBursts.length && bigStroidFxSheet.ready) {
       drawCtx.save();
       drawCtx.globalCompositeOperation = "lighter";
       for (let i = bigStroidBursts.length - 1; i >= 0; i -= 1) {
@@ -9789,7 +9784,7 @@ function initGalaxyCanvas() {
       }
       drawCtx.restore();
     }
-    if (smallStroidBursts.length && smallStroidFxSheet.ready) {
+    if (!underFramePressure && smallStroidBursts.length && smallStroidFxSheet.ready) {
       drawCtx.save();
       drawCtx.globalCompositeOperation = "lighter";
       for (let i = smallStroidBursts.length - 1; i >= 0; i -= 1) {
@@ -9837,12 +9832,19 @@ function initGalaxyCanvas() {
         continue;
       }
       const slam = t < 0.18 ? 1.55 - (t / 0.18) * 0.55 : 1 + Math.sin((t - 0.18) * Math.PI * 3) * 0.035 * (1 - t);
-      const alpha = t < COMBO_BANNER_FADE_START ? 1 : 1 - (t - COMBO_BANNER_FADE_START) / (1 - COMBO_BANNER_FADE_START);
-      const y = b.y - t * 42;
+      const fadeT = t < COMBO_BANNER_FADE_START
+        ? 0
+        : clamp((t - COMBO_BANNER_FADE_START) / (1 - COMBO_BANNER_FADE_START), 0, 1);
+      const alpha = 1 - (fadeT * fadeT * (3 - 2 * fadeT));
+      if (alpha <= 0.015) {
+        comboBanners.splice(i, 1);
+        continue;
+      }
+      const y = b.y - t * 24;
       drawCtx.save();
       drawCtx.globalCompositeOperation = "lighter";
       drawCtx.globalAlpha = alpha;
-      if (comboFxSheet.ready && !prefersReducedMotion) {
+      if (comboFxSheet.ready && !prefersReducedMotion && !underFramePressure) {
         const frame = Math.min(comboFxSheet.frameCount - 1, Math.floor(t * comboFxSheet.frameCount * 1.85));
         const sx = (frame % comboFxSheet.columns) * (comboFxSheet.frameWidth + comboFxSheet.padding);
         const sy = Math.floor(frame / comboFxSheet.columns) * (comboFxSheet.frameHeight + comboFxSheet.padding);
@@ -9877,7 +9879,7 @@ function initGalaxyCanvas() {
       drawCtx.fillStyle = `rgba(255,255,255,${0.76 + 0.22 * fillPulse})`;
       drawCtx.strokeText(headline, safeX, safeY, maxW);
       drawCtx.fillText(headline, safeX, safeY, maxW);
-      if (!prefersReducedMotion && smallStroidFxSheet.ready && t >= COMBO_BANNER_BLAST_START) {
+      if (!prefersReducedMotion && !underFramePressure && smallStroidFxSheet.ready && t >= COMBO_BANNER_BLAST_START) {
         const headlineWidth = Math.min(maxW, drawCtx.measureText(headline).width * 1.08);
         const blastCount = Math.max(5, Math.min(9, Math.ceil(headlineWidth / Math.max(42, base * 1.55))));
         const blastDuration = 0.36;
@@ -9914,8 +9916,8 @@ function initGalaxyCanvas() {
       comboState.marksmanHits += 1;
       breakPyroCombo();
       breakNetUfoNetCombo();
-      if (comboState.marksmanHits >= 10 && !comboState.marksmanAwarded) {
-        comboState.marksmanAwarded = true;
+      if (comboState.marksmanHits >= 10) {
+        comboState.marksmanHits = 0;
         awardCombo({
           key: "marksman",
           label: "MARKSMAN COMBO",
@@ -10058,7 +10060,6 @@ function initGalaxyCanvas() {
   }
 
   function playArcadeMenuMusic(opts = {}) {
-    if (isIOSNative && !opts.fullVolume) return;
     audioEngine.unlock();
     const volume = opts.fullVolume ? 1 : 0.72;
     audioEngine.playMusic("ARCADE_MENU", MUSIC.ARCADE_MENU, { crossfadeMs: 250, volume });
@@ -11190,6 +11191,7 @@ function initGalaxyCanvas() {
 
   function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1, asteroidKind = 3, spriteKey = "roid01") {
     if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
+    const underFramePressure = isIOSNative && !!sim._frameBudgetExceeded;
     const isLarge = asteroidKind >= 2;
     const isBigAsteroid = asteroidKind >= 3 && !fire;
     const isSmallAsteroid = asteroidKind === 1 && !fire;
@@ -11197,7 +11199,11 @@ function initGalaxyCanvas() {
     const particleCount = isIOSNative
       ? (isLarge ? Math.ceil(count / 2) : Math.ceil(count / 3))
       : count;
-    const emitCount = prefersReducedMotion ? Math.min(6, particleCount) : particleCount;
+    const emitCount = prefersReducedMotion
+      ? Math.min(6, particleCount)
+      : underFramePressure
+        ? Math.min(6, Math.ceil(particleCount / 2))
+        : particleCount;
     function pushAsteroidChunk() {
       if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
       if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
@@ -12742,10 +12748,8 @@ function initGalaxyCanvas() {
     if (ufoFxCtx) {
       ufoFxCtx.clearRect(0, 0, sim.width, sim.height);
       effects.draw(ufoFxCtx);
-      drawComboFxOverlay(ufoFxCtx, performance.now());
     } else {
       effects.draw(fallbackCtx);
-      drawComboFxOverlay(fallbackCtx, performance.now());
     }
   }
 
@@ -17132,6 +17136,7 @@ function initGalaxyCanvas() {
       // KEEP LAST: the missile crosshair (drawMissileFx) must render AFTER drawPowerups on the same
       // overlay so it's never hidden behind a powerup sprite (Part 5, 2026-06-17).
       drawMissileFx(ufoFxCtx || ctx, now);
+      drawComboFxOverlay(ufoFxCtx || ctx, now);
       return;
     }
     setPlasmaOverlayVisible(true);
@@ -17498,8 +17503,14 @@ function initGalaxyCanvas() {
     drawAndStepTapBlasts(ufoFxCtx || ctx);
     // KEEP LAST (over powerups): crosshair must sit above powerup sprites (Part 5, 2026-06-17).
     drawMissileFx(ufoFxCtx || ctx, now);
+    drawComboFxOverlay(ufoFxCtx || ctx, now);
 
-    const particleLimit = _frameBudgetExceeded ? Math.min(40, sim.particles.length) : sim.particles.length;
+    if (_frameBudgetExceeded && isIOSNative && sim.particles.length > 22) {
+      const dropCount = sim.particles.length - 22;
+      const dropped = sim.particles.splice(0, dropCount);
+      for (let i = 0; i < dropped.length; i += 1) releaseParticle(dropped[i]);
+    }
+    const particleLimit = _frameBudgetExceeded ? Math.min(22, sim.particles.length) : sim.particles.length;
     for (let i = 0; i < particleLimit; i += 1) {
       const p = sim.particles[i];
       let alpha = (1 - p.life / p.ttl) * p.alpha;

@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-30 14:19";
+const BUILD_TS = "2026-06-30 15:38";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -7973,7 +7973,9 @@ function initGalaxyCanvas() {
   // scheduling via slotTrackTimeout, SFX via playGameSfx/slotTrackLoop, music via a streamed <audio>.
   // 5a is MECHANICS ONLY — no win evaluation, payouts, rewards, jackpot, or sprite art (text faces).
   const SLOT_SYMBOLS = ["jackpot", "quad", "missile", "bomb", "freeze", "goldbar", "wild", "alien", "blank"];
-  const SLOT_STRIP_WEIGHTS = { blank: 5, goldbar: 3, freeze: 9, bomb: 9, quad: 9, missile: 9, wild: 3, alien: 2, jackpot: 1 };
+  // 2026-06-30: bumped the four weapon symbols 9 → 12 so weapon-powerup triples land noticeably
+  // more often (a weapon triple is ~2.4× more likely per payline). Tune-able single constant.
+  const SLOT_STRIP_WEIGHTS = { blank: 5, goldbar: 3, freeze: 12, bomb: 12, quad: 12, missile: 12, wild: 3, alien: 2, jackpot: 1 };
   const SLOT_SYM_LABEL = { jackpot: "ORB", quad: "QUAD", missile: "MSL", bomb: "BOMB", freeze: "FRZ", goldbar: "GOLD", wild: "WILD", alien: "ALN", blank: "·" };
   const SLOT_SYM_COLOR = { jackpot: "#aa78ff", quad: "#be6eff", missile: "#ff5050", bomb: "#ffaa3c", freeze: "#6ec8ff", goldbar: "#ffcd5a", wild: "#5ae6d2", alien: "#78eb78", blank: "#506e96" };
   const SLOT_SPIN_SPEED = isIOSNative ? 19 : 16;
@@ -8974,6 +8976,10 @@ function initGalaxyCanvas() {
     missile: "#ffd700", // gold ring glow
   };
   let quadShotUntil = 0;
+  // 2026-06-30: a quad-shot tap fires 4 projectiles; without this they'd each register a marksman
+  // hit and trivialize the 10-hit combo. resolveShotAt(..., deferMarksman) sets this when it kills
+  // a rock so handleArcadeTap can record exactly ONE marksman event per quad volley (see below).
+  let _quadHitAsteroid = false;
   const QUADSHOT_SEEK_RADIUS = 120;
   // 2026-06-10: freeze is now a collectible inventory item activated from the HUD (like bombs)
   let playerFreezeInventory = 0;
@@ -14415,14 +14421,17 @@ function initGalaxyCanvas() {
   // each step's action, detected via stuntNotify() calls at the existing
   // action-completion sites (shoot / plasma / toss / bomb / freeze).
   // ──────────────────────────────────────────────────────────────────────────
-  function startStuntMode() {
+  async function startStuntMode() {
     // 2026-06-24: the audioEngine.teardown() that used to run here is GONE. Backing out of Training
     // and restarting it was laggy because the SPC tutorial (VO-heavy) piled up MediaElementSource
     // nodes; teardown released them by closing the ctx but caused freezes + audio-loss. The leak is
     // now fixed at source (one persistent "SPC" VO element, see acquireVoElement), so the ctx persists.
     commBoxController.stopVO();
-    audioEngine.unlock?.();
-    audioEngine.loadMany?.(gameplayPreloadSfxMap());
+    // 2026-06-30: a user who opens the app and goes straight to Training bypassed the main-game
+    // "WARMING UP" pass, so first-run gameplay hitched. Reuse the same warmup (unlock + full SFX +
+    // sprite GPU-prime) so Training/Practice are as smooth as the main game. warmArcadeAssets already
+    // unlocks audio and loads the gameplay SFX map, so no separate loadMany is needed here.
+    await warmArcadeAssets(1);
     hideArcadeOverlay();
     tapBlasts = [];
     // fresh, pressure-free state
@@ -15898,7 +15907,7 @@ function initGalaxyCanvas() {
   // We pin the level-4 spawn config (currentLevelIndex = 3) so the endless update block reads a
   // moderate-density cfg (continuous spawnEveryMs trickle; L1/L2 have spawnEveryMs:0 → empty), but
   // we copy those values directly instead of calling startLevel()/startArcadeAtLevel().
-  function startStuntPractice({ fromTutorial = false, preserveSpcOutro = false } = {}) {
+  async function startStuntPractice({ fromTutorial = false, preserveSpcOutro = false } = {}) {
     if (preserveSpcOutro) cleanupTutorialStateForPractice();
     else cleanupTutorial();
     stuntActive = false;
@@ -15940,8 +15949,11 @@ function initGalaxyCanvas() {
     //    When handed off from training, all of this is already live, so we leave it untouched
     //    (no music/theme change = seamless continuation). ──
     if (!fromTutorial) {
-      audioEngine.unlock?.();
-      audioEngine.loadMany?.(gameplayPreloadSfxMap());
+      // 2026-06-30: cold-start Practice (menu button, no tutorial behind us) gets the same
+      // "WARMING UP" pass as the main game so first-run gameplay is smooth. When handed off from
+      // training the assets are already warm, so the fromTutorial branch skips this. warmArcadeAssets
+      // already unlocks audio + loads the gameplay SFX map.
+      await warmArcadeAssets(1);
       hideArcadeOverlay();
       engineMode = "arcade";
       setMenuOverlayOpen(false);
@@ -17689,7 +17701,10 @@ function initGalaxyCanvas() {
     // destruction sound layers instead of being dropped.
     const quadActive = performance.now() < quadShotUntil;
     _sfxBudgetExempt = quadActive;
-    const hitSomething = resolveShotAt(x, y, now, isTouch);
+    // 2026-06-30: under quadshot, defer marksman accounting on every projectile and record one
+    // combined hit/miss for the whole volley below — so a quad tap counts as a single marksman hit.
+    if (quadActive) _quadHitAsteroid = false;
+    const hitSomething = resolveShotAt(x, y, now, isTouch, quadActive);
     if (quadActive) addShockwave(x, y); // localized heat-shimmer bloom on the primary quad blast
     // Tutorial chatter is skipped by tapping the subtle "TAP TO SKIP" hint above the comm box
     // (the hint text is its own tap target) — the old double-tap-empty-space detection is gone.
@@ -17722,8 +17737,11 @@ function initGalaxyCanvas() {
         // phase-lock into a low resonant comb-filter boom under sustained fire (de-correlates them).
         playGameSfx("advfire", 0.42, { important: true, detune: (Math.random() - 0.5) * 160 });
         addShockwave(ex, ey); // each cluster blast gets its own localized shimmer ring
-        if (resolveShotAt(ex, ey, now, isTouch)) extraHit = true;
+        if (resolveShotAt(ex, ey, now, isTouch, true)) extraHit = true;
       }
+      // the whole quad volley (primary + cluster) registers as a single marksman event: a hit if
+      // any projectile killed a rock, otherwise a miss (which still breaks the combo, as before).
+      recordComboEvent(_quadHitAsteroid ? "laser_stroid_hit" : "laser_miss", { x, y });
     }
     _sfxBudgetExempt = false;
     if (hitSomething || extraHit) draw(now);
@@ -17732,7 +17750,7 @@ function initGalaxyCanvas() {
   // 2026-06-10: resolves one shot at (sx, sy) — visual (X-blast on iOS touch, laser on
   // desktop) plus the standard hit checks. Extracted from handleArcadeTap so quadshot can
   // fire extra cluster shots through the identical path. Returns true if it hit anything.
-  function resolveShotAt(sx, sy, now, isTouch) {
+  function resolveShotAt(sx, sy, now, isTouch, deferMarksman = false) {
     if (isIOSWebKit && isTouch) {
       tapBlasts.push({ x: sx, y: sy, life: 1.0 });
     } else {
@@ -17785,11 +17803,14 @@ function initGalaxyCanvas() {
       } else {
         splitAsteroidByIndex(hitIndex);
       }
-      recordComboEvent("laser_stroid_hit", { x: sx, y: sy });
+      // 2026-06-30: under quadshot, defer to handleArcadeTap so the 4-projectile volley counts as
+      // one marksman hit (flag the kill instead of incrementing here).
+      if (deferMarksman) _quadHitAsteroid = true;
+      else recordComboEvent("laser_stroid_hit", { x: sx, y: sy });
       stuntNotify("shoot");
       return true;
     }
-    recordComboEvent("laser_miss", { x: sx, y: sy });
+    if (!deferMarksman) recordComboEvent("laser_miss", { x: sx, y: sy });
     return false;
   }
 

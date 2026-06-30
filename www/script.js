@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-30 11:39";
+const BUILD_TS = "2026-06-30 14:19";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -484,7 +484,13 @@ function sfxMapForKeys(keys) {
 }
 
 function gameplayPreloadSfxMap() {
-  return isIOSNative ? sfxMapForKeys(IOS_GAMEPLAY_PRELOAD_SFX_KEYS) : GAME_SFX;
+  // 2026-06-30: warm the FULL gameplay SFX set on iOS too (was a curated ~24-key subset).
+  // Decoded SFX buffers are short/cheap — the iOS memory pressure that drove the subset was
+  // music PCM (40-60MB/track, capped separately at MUSIC_BUFFER_CACHE_MAX), not SFX. Loading
+  // everything during WARMING UP kills the first-play decode hitch (missile/freeze/quad/bomb/
+  // plasma/explosion-variants). loadMany is idempotent, so the per-level re-calls are no-ops.
+  // IOS_GAMEPLAY_PRELOAD_SFX_KEYS is retained as the documented critical-first list.
+  return GAME_SFX;
 }
 
 const PRACTICE_MAX_ASTEROIDS = 40;
@@ -4007,6 +4013,9 @@ function preloadSfx() {
 
 let arcadeWarmupPromise = null;
 let arcadeWarmupOverlay = null;
+// 2026-06-30: assigned inside initGalaxyCanvas (the giant galaxy closure) so the top-level
+// WARMING UP routine can pre-decode + GPU-prime the gameplay sprites it otherwise can't reach.
+let warmGameplaySprites = null;
 
 function afterNextPaint() {
   return new Promise((resolve) => {
@@ -4092,9 +4101,13 @@ async function warmArcadeAssets(levelNum = 1) {
         audioEngine.loadMusicBuffer?.(getMusicForLevel(levelNum)) || Promise.resolve(),
         delay(1800),
       ]);
-      if (typeof ensureSlotSprites === "function") {
-        ensureSlotSprites();
-        await Promise.race([warmImageSet(slotSprites), delay(900)]);
+      // 2026-06-30: pre-decode + GPU-prime ALL gameplay sprites (asteroids incl. generated tint
+      // skins, powerups, combo-FX sheets, AND the slot symbols) so first combo / first pickup /
+      // first tinted-rock level / first slot reveal no longer hitch. This supersedes the old
+      // slotSprites warm here, whose guard was dead code (closure-local symbols, unreachable
+      // from this top-level scope). Longer warmup, drop-free play (intentional per playtest).
+      if (typeof warmGameplaySprites === "function") {
+        await Promise.race([warmGameplaySprites(), delay(1800)]);
       }
       await minHold;
     } finally {
@@ -9204,6 +9217,36 @@ function initGalaxyCanvas() {
   powerupPickupFlashSheet.img.onerror = () => { powerupPickupFlashSheet.ready = false; };
   powerupPickupFlashSheet.img.src = "combo_fx/5_electric_elements.png";
   const explosiveElectricFxSheet = powerupPickupFlashSheet;
+  // 2026-06-30: top-level hook for the WARMING UP screen — pre-decode + GPU-prime every
+  // gameplay sprite so first combo / first powerup pickup / first tinted-rock level no longer
+  // trigger a one-off decode+upload frame drop. warmImageSet (img.decode + timeout) is the
+  // top-level helper; the 1px drawImage forces the texture upload ahead of first real draw.
+  warmGameplaySprites = async function warmGameplaySpritesImpl() {
+    // Build the generated tint skins now so their toDataURL-backed Images exist to be warmed
+    // too — otherwise the first tinted-rock level (L3/L8/L12/L14) still hitches on first draw.
+    try { buildGeneratedAsteroidSprites(); } catch {}
+    // Slot symbols too: the old slotSprites warm in warmArcadeAssets was dead (its guard
+    // referenced closure-local symbols from top-level scope, always false), so the slot art
+    // decoded on first slot-machine reveal — that's the between-level slot lag. Warm it here.
+    try { ensureSlotSprites(); } catch {}
+    const sprites = Object.assign({}, asteroidSprites, powerupSprites, slotSprites);
+    [comboFxSheet, bigStroidFxSheet, smallStroidFxSheet, powerupPickupFxSheet, powerupPickupFlashSheet]
+      .forEach((s, i) => { if (s && s.img) sprites["_fx" + i] = s.img; });
+    await warmImageSet(sprites);
+    try {
+      const primeCv = document.createElement("canvas");
+      primeCv.width = 1;
+      primeCv.height = 1;
+      const primeCtx = primeCv.getContext("2d");
+      if (primeCtx) {
+        for (const img of Object.values(sprites)) {
+          if (img && img.complete && img.naturalWidth > 0) {
+            try { primeCtx.drawImage(img, 0, 0, 1, 1); } catch {}
+          }
+        }
+      }
+    } catch {}
+  };
   const COMBO_BANNER_TTL_MS = isIOSNative ? 2200 : 2400;
   const COMBO_BANNER_FADE_START = 0.26;
   const COMBO_BANNER_BLAST_START = 0.34;
@@ -13620,7 +13663,9 @@ function initGalaxyCanvas() {
       const isDoubleTap = tapNow - lastTapAt < 350;
       lastTapAt = tapNow;
       if (!hintVisible && !scoreRevealComplete) {
-        completeScorecardReveal();
+        // 2026-06-30: stray firing taps were skipping the write-on the instant the scorecard
+        // appeared. Swallow taps in the first second; after that a tap still fast-forwards.
+        if (tapNow - shownAt >= 1000) completeScorecardReveal();
         return;
       }
       // 2026-06-26: stray firing taps were skipping the scorecard. Only skip via either
@@ -13628,7 +13673,21 @@ function initGalaxyCanvas() {
       if (hintVisible || (isDoubleTap && tapNow - shownAt >= 1000)) dismiss();
     }, { passive: false });
 
-    autoTimer = setTimeout(dismiss, 7000);
+    // 2026-06-30: don't auto-advance while the level-complete comm is still talking. After the
+    // base 7s, re-poll until the VO goes idle, then dismiss. Hard cap (+8s) so a stuck/never-
+    // played VO can't pin the scorecard open. Manual dismiss paths are unaffected.
+    const autoAdvanceDeadline = performance.now() + 7000 + 8000;
+    function scheduleAutoDismiss(ms) {
+      autoTimer = setTimeout(() => {
+        if (dismissed) return;
+        if (commBoxController.isVOActive() && performance.now() < autoAdvanceDeadline) {
+          scheduleAutoDismiss(300);
+          return;
+        }
+        dismiss();
+      }, ms);
+    }
+    scheduleAutoDismiss(7000);
 
     // Row-by-row tally reveal: dividers + rows appear one at a time, 200ms apart
     const revealEls = Array.from(panel.querySelectorAll(".lsr-div, .lsr-row"));

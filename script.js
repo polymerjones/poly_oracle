@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-30 09:22";
+const BUILD_TS = "2026-06-30 10:30";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -463,12 +463,36 @@ const CORE_PRELOAD_SFX_KEYS = [
   "advfire",
 ];
 
+const IOS_GAMEPLAY_PRELOAD_SFX_KEYS = [
+  ...CORE_PRELOAD_SFX_KEYS,
+  "explosion_small",
+  "explosion_small_alt",
+  "explosion_med_alt",
+  "warp",
+  "level_up",
+  "gameover",
+  "scorecount",
+  "pickup_gold",
+  "slot_pull",
+  "slot_clunk",
+  "slot_win",
+  "slot_outoftokens",
+  "ufo_spawn",
+  "ufo_hit1",
+  "ufo_destroy",
+  "plasmarecharged",
+];
+
 function sfxMapForKeys(keys) {
   const out = {};
   for (const key of keys) {
     if (GAME_SFX[key]) out[key] = GAME_SFX[key];
   }
   return out;
+}
+
+function gameplayPreloadSfxMap() {
+  return isIOSNative ? sfxMapForKeys(IOS_GAMEPLAY_PRELOAD_SFX_KEYS) : GAME_SFX;
 }
 
 const PRACTICE_MAX_ASTEROIDS = 40;
@@ -3983,11 +4007,18 @@ function resumeBackgroundMusic() {
 }
 
 function preloadSfx() {
+  if (isIOSNative) return;
   audioEngine.loadMany(isIOSNative ? sfxMapForKeys(CORE_PRELOAD_SFX_KEYS) : GAME_SFX);
 }
 
 let arcadeWarmupPromise = null;
 let arcadeWarmupOverlay = null;
+
+function afterNextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
 
 function setArcadeWarmupVisible(visible, text = "LOADING") {
   if (!galaxyView) return;
@@ -4058,8 +4089,9 @@ async function warmArcadeAssets(levelNum = 1) {
   const minHold = delay(420);
   arcadeWarmupPromise = (async () => {
     try {
+      await afterNextPaint();
       await audioEngine.unlock?.();
-      await audioEngine.loadMany?.(GAME_SFX);
+      await audioEngine.loadMany?.(gameplayPreloadSfxMap());
       const bgKey = bgKeyForLevel(levelNum);
       preloadGalaxyBackgroundKey(bgKey);
       await Promise.race([
@@ -4121,6 +4153,7 @@ function addListeners() {
   const primeMediaOnGesture = () => {
     if (mediaPrimed) return;
     mediaPrimed = true;
+    if (isIOSNative) return;
     audioEngine.unlock();
     primeBackgroundMedia();
   };
@@ -4128,6 +4161,7 @@ function addListeners() {
   document.addEventListener("touchstart", primeMediaOnGesture, { once: true, passive: true });
   document.addEventListener("keydown", primeMediaOnGesture, { once: true });
   const resumeAudioOnGesture = () => {
+    if (isIOSNative && !audioEngine.ctx) return;
     audioEngine.resume();
     try {
       if ("speechSynthesis" in window) window.speechSynthesis.resume();
@@ -10024,6 +10058,7 @@ function initGalaxyCanvas() {
   }
 
   function playArcadeMenuMusic(opts = {}) {
+    if (isIOSNative && !opts.fullVolume) return;
     audioEngine.unlock();
     const volume = opts.fullVolume ? 1 : 0.72;
     audioEngine.playMusic("ARCADE_MENU", MUSIC.ARCADE_MENU, { crossfadeMs: 250, volume });
@@ -13523,6 +13558,7 @@ function initGalaxyCanvas() {
     let autoTimer = null;
     const tallyTimers = [];
     let tallyDone = false;
+    let scoreRevealComplete = false;
     let writeLoopHandle = null;
     let countupRaf = 0;
 
@@ -13530,6 +13566,31 @@ function initGalaxyCanvas() {
       if (writeLoopHandle) {
         try { audioEngine.stopLoop("write_on_text_loop"); } catch {}
         writeLoopHandle = null;
+      }
+    }
+
+    function completeScorecardReveal() {
+      if (dismissed || scoreRevealComplete) return;
+      scoreRevealComplete = true;
+      tallyTimers.forEach(t => clearTimeout(t));
+      tallyTimers.length = 0;
+      if (countupRaf) { cancelAnimationFrame(countupRaf); countupRaf = 0; }
+      stopWriteLoop();
+      revealEls.forEach((el) => el.classList.add("in"));
+      const hint = panel.querySelector(".lsr-hint");
+      hint?.classList.add("in");
+      hintVisible = true;
+      const totalEl = panel.querySelector("#lsrTotalVal");
+      if (totalEl) {
+        totalEl.textContent = scoreAfter;
+        totalEl.classList.remove("score-tick-flash");
+        totalEl.classList.add("score-final-flash");
+        setTimeout(() => totalEl.classList.remove("score-final-flash"), 300);
+      }
+      if (!tallyDone) {
+        tallyDone = true;
+        playGameSfx("level_up", 0.9);
+        cssFlash("#00FFD1", 0.24, 240);
       }
     }
 
@@ -13554,6 +13615,10 @@ function initGalaxyCanvas() {
       const tapNow = performance.now();
       const isDoubleTap = tapNow - lastTapAt < 350;
       lastTapAt = tapNow;
+      if (!hintVisible && !scoreRevealComplete) {
+        completeScorecardReveal();
+        return;
+      }
       // 2026-06-26: stray firing taps were skipping the scorecard. Only skip via either
       // (a) a deliberate double-tap once it's been up ≥1s, or (b) a single tap once TAP TO CONTINUE shows.
       if (hintVisible || (isDoubleTap && tapNow - shownAt >= 1000)) dismiss();
@@ -13940,7 +14005,7 @@ function initGalaxyCanvas() {
     setLevelBackgroundDefocus(false); // 2026-06-26: lift the scorecard bg blur as the next level's bg comes in
     const safeIdx = clamp(idx, 0, ARCADE_LEVELS.length - 1);
     audioEngine.unlock?.();
-    audioEngine.loadMany?.(GAME_SFX);
+    audioEngine.loadMany?.(gameplayPreloadSfxMap());
     currentLevelIndex = safeIdx;
     const cfg = ARCADE_LEVELS[safeIdx];
     const now = performance.now();
@@ -14159,7 +14224,7 @@ function initGalaxyCanvas() {
 
   function startArcadeFromSave() {
     audioEngine.unlock?.();
-    audioEngine.loadMany?.(GAME_SFX);
+    audioEngine.loadMany?.(gameplayPreloadSfxMap());
     hideArcadeOverlay();
     if (arcadeResumeAvailable && arcadeActive) {
       const now = performance.now();
@@ -14258,7 +14323,6 @@ function initGalaxyCanvas() {
 
   async function startArcadeAtLevel(levelNum) {
     arcadeLevelSelectOpen = false; // 2026-06-24: grid is dismissed — re-enable comms for the run
-    audioEngine.unlock?.();
     const numericLevel = Math.floor(Number(levelNum));
     const safeLevel = Number.isFinite(numericLevel) ? numericLevel : 1;
     await warmArcadeAssets(safeLevel);
@@ -14295,7 +14359,7 @@ function initGalaxyCanvas() {
     // now fixed at source (one persistent "SPC" VO element, see acquireVoElement), so the ctx persists.
     commBoxController.stopVO();
     audioEngine.unlock?.();
-    audioEngine.loadMany?.(GAME_SFX);
+    audioEngine.loadMany?.(gameplayPreloadSfxMap());
     hideArcadeOverlay();
     tapBlasts = [];
     // fresh, pressure-free state
@@ -15814,7 +15878,7 @@ function initGalaxyCanvas() {
     //    (no music/theme change = seamless continuation). ──
     if (!fromTutorial) {
       audioEngine.unlock?.();
-      audioEngine.loadMany?.(GAME_SFX);
+      audioEngine.loadMany?.(gameplayPreloadSfxMap());
       hideArcadeOverlay();
       engineMode = "arcade";
       setMenuOverlayOpen(false);
@@ -15895,7 +15959,7 @@ function initGalaxyCanvas() {
     if (!PRACTICE_ENABLED) return;
     stuntActive = false;
     audioEngine.unlock?.();
-    audioEngine.loadMany?.(GAME_SFX);
+    audioEngine.loadMany?.(gameplayPreloadSfxMap());
     hideArcadeOverlay();
     stopWarningState();
     engineMode = "practice";
@@ -18550,7 +18614,7 @@ function initGalaxyCanvas() {
       setTimeout(() => {
         if (!stuntActive && !practiceEndless) return;
         audioEngine.unlock?.();
-        audioEngine.loadMany?.(GAME_SFX);
+        audioEngine.loadMany?.(gameplayPreloadSfxMap());
         resizeGalaxyCanvas();
         computePlayfield();
         if (!galaxyRunning) startGalaxyLoop();

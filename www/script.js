@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-01 15:48";
+const BUILD_TS = "2026-07-01 16:39";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -371,6 +371,10 @@ const GAME_SFX = {
   menu_back: "gamesfx/menu_back_hit.mp3", // mode-menu "← Back" button
   pickup_weapon: "gamesfx/pickup_weapon.mp3", // layered on quadshot pickup
   weaponclick_pickupbomb: "gamesfx/weaponclick_pickupbomb.mp3", // layered on bomb pickup
+  // 2026-07-01: Pulse Cannon sound pack — charge-up on activation, alternating fire1/fire2 per shot
+  pulse_cannon_charge: "gamesfx/pulse_cannon_charge.mp3",
+  pulse_cannon_fire1: "gamesfx/pulse_cannon_fire1.mp3",
+  pulse_cannon_fire2: "gamesfx/pulse_cannon_fire2.mp3",
   // 2026-06-14: homing missile powerup sound pack
   missile_lockon: "gamesfx/missile_lockon.mp3", // crosshair placed / target acquired
   missile_fired: "gamesfx/missile_fired.mp3", // launch
@@ -1444,6 +1448,8 @@ const hudMissileCount = document.getElementById("hudMissileCount");
 const hudMissileReload = document.getElementById("hudMissileReload");
 const hudQuadBadge = document.getElementById("hudQuadBadge");
 const hudQuadTime = document.getElementById("hudQuadTime");
+const hudPulseBadge = document.getElementById("hudPulseBadge");
+const hudPulseTime = document.getElementById("hudPulseTime");
 
 function formatRunTime(ms) {
   const s = Math.floor(ms / 1000);
@@ -4485,6 +4491,12 @@ function addListeners() {
       galaxyCanvasController?.toggleMissileAim?.();
     });
   }
+  if (hudPulseBadge) {
+    // 2026-07-01: tapping the Pulse Cannon badge cancels the weapon early.
+    hudPulseBadge.addEventListener("click", () => {
+      galaxyCanvasController?.cancelPulse?.();
+    });
+  }
   if (btnArcadeNew) {
     btnArcadeNew.addEventListener("click", () => galaxyCanvasController?.startArcadeNew?.());
   }
@@ -5974,28 +5986,20 @@ const orbRubDrone = {
     const osc3Gain = ctx.createGain();
     osc3Gain.gain.value = 0.16;
 
-    // 2026-07-01: subtle 1.5kHz presence so the rub is audible on phone/tablet speakers. Routed
-    // straight to `out` (post-lowpass) so the 480Hz filter doesn't swallow it; kept quiet + sine
-    // (softest) so it adds air without being harsh. Gets out's fade in/out envelope for free.
-    const osc4 = ctx.createOscillator();
-    osc4.type = "sine";
-    osc4.frequency.value = 1500;
-    const osc4Gain = ctx.createGain();
-    osc4Gain.gain.value = 0.045;
+    // 2026-07-01: removed the 1.5kHz "presence" oscillator — it read as a harsh high-pitched hum
+    // on device. The drone stays warm/low; audibility on phone speakers comes from the loop layer.
 
     osc1.connect(trem);
     osc2.connect(trem);
     osc3.connect(osc3Gain);
     osc3Gain.connect(trem);
-    osc4.connect(osc4Gain);
-    osc4Gain.connect(out);
 
     const target = state.whisper ? 0.24 : 0.48;
     out.gain.setValueAtTime(0, now);
     out.gain.linearRampToValueAtTime(target, now + 0.28);
 
-    [osc1, osc2, osc3, osc4, lfo].forEach((o) => o.start(now));
-    this.nodes = { ctx, out, osc1, osc2, osc3, osc4, lfo };
+    [osc1, osc2, osc3, lfo].forEach((o) => o.start(now));
+    this.nodes = { ctx, out, osc1, osc2, osc3, lfo };
   },
   setPulseRate(hz) {
     const n = this.nodes;
@@ -6014,7 +6018,7 @@ const orbRubDrone = {
     out.gain.setValueAtTime(out.gain.value, now);
     out.gain.linearRampToValueAtTime(0, now + 0.42);
     const stopAt = now + 0.48;
-    [n.osc1, n.osc2, n.osc3, n.osc4, n.lfo].forEach((o) => { try { o.stop(stopAt); } catch { /* ignore */ } });
+    [n.osc1, n.osc2, n.osc3, n.lfo].forEach((o) => { try { o.stop(stopAt); } catch { /* ignore */ } });
     setTimeout(() => { try { out.disconnect(); } catch { /* ignore */ } }, 500);
   },
 };
@@ -7762,6 +7766,7 @@ function initGalaxyCanvas() {
     snowflake: "powerups/powerup_freeze.png",
     missile: "powerups/powerup_missile.png",
     bomb: "powerups/powerup_bomb.png", // 2026-06-26: framed bomb sprite (was canvas-drawn 💣)
+    pulse: "powerups/powerup_pulse.png", // 2026-07-01: Pulse Cannon timed rapid-fire weapon
   };
   const powerupSprites = {};
   Object.keys(powerupSpritePaths).forEach((key) => {
@@ -9142,6 +9147,7 @@ function initGalaxyCanvas() {
     { type: "snowflake", weight: 22 },
     { type: "bomb", weight: 20 },
     { type: "missile", weight: 20 }, // 2026-06-14: homing missile powerup
+    { type: "pulse", weight: 20 }, // 2026-07-01: Pulse Cannon (gated to level >= 5)
   ];
   const POWERUP_COLORS = {
     bomb: "#00ffcc",
@@ -9150,6 +9156,7 @@ function initGalaxyCanvas() {
     quadshot: "#cc66ff",
     snowflake: "#88ddff",
     missile: "#ffd700", // gold ring glow
+    pulse: "#00ffc8", // teal ring glow
   };
   let quadShotUntil = 0;
   // 2026-06-30: a quad-shot tap fires 4 projectiles; without this they'd each register a marksman
@@ -9157,6 +9164,22 @@ function initGalaxyCanvas() {
   // a rock so handleArcadeTap can record exactly ONE marksman event per quad volley (see below).
   let _quadHitAsteroid = false;
   const QUADSHOT_SEEK_RADIUS = 120;
+  // 2026-07-01: Pulse Cannon — a 10s timed rapid-fire weapon. Modeled on quadShotUntil (a plain
+  // expiry timestamp + HUD badge), but adds a new input mode: press-and-HOLD turret rapid fire.
+  // While active, tap-and-hold sweeps a stream of pulse shots (and Plasma-Net-on-hold is disabled).
+  const PULSE_CANNON_DURATION_MS = 10000;
+  const PULSE_PAIR_DELAY_MS = 35; // gap between the two shots of a pulse pair
+  const PULSE_BURST_DELAY_MS = 130; // pause after a pair → ~12 shots/s (2 / (35+130)ms)
+  const PULSE_CANNON_SWEEP_DEG = 7; // max turret sweep off the aim line (tunable)
+  let pulseCannonUntil = 0;
+  let pulseFiring = false; // input currently held → streaming shots
+  let nextPulseShotAt = 0;
+  let pulseBurstIndex = 0; // 0/1 within a pair (1 == mid-pair, use the short delay)
+  let pulseSweepPhase = 0; // oscillator driving the left↔right turret sweep
+  let pulseFireToggle = 0; // alternates the fire1/fire2 report
+  let _pulseShot = false; // set around resolveShotAt so the projectile renders as a pulse bolt
+  const pulseMuzzle = { active: false, x: 0, y: 0, angle: 0, recoil: 0, phase: 0 };
+  const pulseCannonActive = () => performance.now() < pulseCannonUntil;
   // 2026-06-10: freeze is now a collectible inventory item activated from the HUD (like bombs)
   let playerFreezeInventory = 0;
   const MAX_FREEZE_INVENTORY = 3;
@@ -9212,6 +9235,8 @@ function initGalaxyCanvas() {
   const MISSILE_BLAST_RADIUS = 350;
   // DEBUG: revert before release — missile unlocks at level >= 5 (currently >= 1)
   const missileUnlocked = (level) => level >= 1;
+  // 2026-07-01: Pulse Cannon unlocks at level >= 5 (drop to >= 1 temporarily to test on low levels).
+  const pulseUnlocked = (level) => level >= 5;
   let nextBombPowerupAt = performance.now()
     + BOMB_POWERUP_INTERVAL_MIN
     + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
@@ -9219,7 +9244,8 @@ function initGalaxyCanvas() {
   function pickPowerupType(level = 99) {
     // 2026-06-14: the missile only enters the pool once unlocked for this level.
     const pool = POWERUP_WEIGHTS.filter(
-      (w) => w.type !== "missile" || missileUnlocked(level),
+      (w) => (w.type !== "missile" || missileUnlocked(level))
+        && (w.type !== "pulse" || pulseUnlocked(level)),
     );
     const total = pool.reduce((s, w) => s + w.weight, 0);
     let roll = Math.random() * total;
@@ -9666,6 +9692,29 @@ function initGalaxyCanvas() {
       const label = `${Math.ceil(remaining / 1000)}s`;
       if (hudQuadTime.textContent !== label) hudQuadTime.textContent = label;
     }
+  }
+
+  // Pulse Cannon HUD badge — mirrors the quad badge (art + seconds remaining). Unlike quad, this
+  // badge is TAPPABLE: tapping it cancels the weapon early (see cancelPulseCannon wiring below).
+  function updateHudPulseBadge() {
+    if (!hudPulseBadge) return;
+    const remaining = pulseCannonUntil - performance.now();
+    const active = remaining > 0;
+    hudPulseBadge.classList.toggle("active", active);
+    hudPulseBadge.setAttribute("aria-hidden", active ? "false" : "true");
+    if (active && hudPulseTime) {
+      const label = `${Math.ceil(remaining / 1000)}s`;
+      if (hudPulseTime.textContent !== label) hudPulseTime.textContent = label;
+    }
+  }
+
+  // Player tapped the Pulse Cannon badge — forfeit any remaining duration and stop firing at once.
+  function cancelPulseCannon() {
+    if (!pulseCannonActive()) return;
+    pulseCannonUntil = 0;
+    stopPulseFiring();
+    updateHudPulseBadge();
+    playGameSfx("blip", 0.6);
   }
 
   function getArcadeScoreMultiplier(now = performance.now()) {
@@ -12755,6 +12804,7 @@ function initGalaxyCanvas() {
   }
 
   function beginPlasmaCage(start, current, now) {
+    if (pulseCannonActive()) return false; // Pulse Cannon replaces hold-to-net; auto-restores on expiry
     if (tutorialBlockPlasmaToss) return false; // tutorial laser step only teaches the laser
     if (!isPlasmaCageReady(now)) return false;
     plasmaCage.active = true;
@@ -13640,6 +13690,7 @@ function initGalaxyCanvas() {
     // 2026-06-10: clear powerups, active effects, and aim state on level transitions / menu exit
     powerups.length = 0;
     quadShotUntil = 0;
+    pulseCannonUntil = 0; stopPulseFiring();
     // 2026-06-21: discard any banked freeze on level transition (bank does NOT persist across
     // levels). Silent — no unfreeze SFX on a level/menu change — but still tear down the lingering
     // FX (icy music filter + HUD glow) so a level that ends mid-freeze doesn't carry them forward.
@@ -13655,6 +13706,7 @@ function initGalaxyCanvas() {
     // carry forward; only a full game reset (startArcadeNew / startStuntMode) zeroes it.
     updateHudFreezeInventory();
     updateHudQuadBadge();
+    updateHudPulseBadge();
     bombAimMode = false;
     hudBombBtn?.classList.remove("hudBombBtn--aiming");
     updateHudBombInventory();
@@ -14615,11 +14667,13 @@ function initGalaxyCanvas() {
     // 2026-06-10: reset powerup + active effect state
     powerups.length = 0;
     quadShotUntil = 0;
+    pulseCannonUntil = 0; stopPulseFiring();
     _freezeBankMs = 0;
     _freezeActive = false;
     playerFreezeInventory = 0;
     updateHudFreezeInventory();
     updateHudQuadBadge();
+    updateHudPulseBadge();
     bombAimMode = false;
     hudBombBtn?.classList.remove("hudBombBtn--aiming");
     updateHudBombInventory();
@@ -14709,6 +14763,7 @@ function initGalaxyCanvas() {
     playerBombInventory = 0;
     playerFreezeInventory = 0;
     quadShotUntil = 0;
+    pulseCannonUntil = 0; stopPulseFiring();
     _freezeBankMs = 0;
     _freezeActive = false;
     bombAimMode = false;
@@ -14760,6 +14815,7 @@ function initGalaxyCanvas() {
     updateHudBombInventory();
     updateHudFreezeInventory();
     updateHudQuadBadge();
+    updateHudPulseBadge();
 
     resizeGalaxyCanvas();
     computePlayfield();
@@ -16192,6 +16248,7 @@ function initGalaxyCanvas() {
     slotTokens = 0; // 2026-06-26: discard banked POLYSLOTS tokens on a fresh run
     slotNukeOwned = 0; slotPendingQuadShot = false; // reset per-game slot reward state
     quadShotUntil = 0;
+    pulseCannonUntil = 0; stopPulseFiring();
     _freezeBankMs = 0;
     _freezeActive = false;
     playerFreezeInventory = 0;
@@ -16209,6 +16266,7 @@ function initGalaxyCanvas() {
     updateHudMissileInventory();
     updateHudFreezeInventory();
     updateHudQuadBadge();
+    updateHudPulseBadge();
     updateHudBombInventory();
     renderLives();
     renderScore();
@@ -16591,6 +16649,33 @@ function initGalaxyCanvas() {
 
     // Arcade, endless Practice, and Training all use quadShotUntil as the active-effect source.
     if (engineMode === "arcade" && arcadeActive) updateHudQuadBadge();
+    if (engineMode === "arcade" && arcadeActive) updateHudPulseBadge();
+    // Pulse Cannon rapid-fire pump: fire a swept shot whenever the cadence timer is due while the
+    // input is held. Two quick shots (PULSE_PAIR_DELAY_MS) then a longer pause (PULSE_BURST_DELAY_MS).
+    if (pulseFiring && !pulseCannonActive()) stopPulseFiring(); // expired mid-hold → drop the muzzle
+    if (pulseFiring && galaxyGesture) {
+      // Keep the muzzle jet glued to the ship front along the current aim (tracks even between shots).
+      const cx = sim.width / 2;
+      const cy = sim.height / 2;
+      const aim = galaxyGesture.current || galaxyGesture.start;
+      const ang = Math.atan2(aim.y - cy, aim.x - cx);
+      pulseMuzzle.active = true;
+      pulseMuzzle.angle = ang;
+      pulseMuzzle.x = cx + Math.cos(ang) * (46 - pulseMuzzle.recoil);
+      pulseMuzzle.y = cy + Math.sin(ang) * (46 - pulseMuzzle.recoil);
+      // catch-up guard: after a stall/background jump, don't machine-gun a backlog of shots
+      if (now > nextPulseShotAt + 400) nextPulseShotAt = now;
+      while (now >= nextPulseShotAt) {
+        firePulseShot(now);
+        pulseBurstIndex ^= 1;
+        nextPulseShotAt += pulseBurstIndex ? PULSE_PAIR_DELAY_MS : PULSE_BURST_DELAY_MS;
+      }
+    }
+    // Muzzle FX loop phase advances while visible; recoil eases back to 0 each frame.
+    if (pulseMuzzle.active) {
+      pulseMuzzle.phase += dt * 0.03;
+      if (pulseMuzzle.recoil > 0) pulseMuzzle.recoil = Math.max(0, pulseMuzzle.recoil - dt * 0.03);
+    }
 
     if (engineMode === "arcade" && arcadeActive && !stuntActive) {
       const cfg = ARCADE_LEVELS[currentLevelIndex];
@@ -17138,14 +17223,17 @@ function initGalaxyCanvas() {
   }
 
   // 2026-06-09: localized X blast that replaces the laser on iOS touch taps.
-  function drawTapBlast(tctx, x, y, life) {
+  function drawTapBlast(tctx, x, y, life, pulse = false) {
+    // 2026-07-01: Pulse Cannon bolts render the same teal X but thicker + brighter with a bigger
+    // bloom so the weapon reads as a beefier projectile than the normal laser.
+    const wMul = pulse ? 1.6 : 1;
     // Layer 1 — radial flash (only while bright)
     if (life > 0.6) {
       const flashAlpha = (life - 0.6) / 0.4;
-      const flashR = (1 - life) * 40 + 6;
+      const flashR = ((1 - life) * 40 + 6) * (pulse ? 1.4 : 1);
       const grad = tctx.createRadialGradient(x, y, 0, x, y, flashR);
-      grad.addColorStop(0, `rgba(160,255,230,${(flashAlpha * 0.9).toFixed(3)})`);
-      grad.addColorStop(0.5, `rgba(0,255,200,${(flashAlpha * 0.4).toFixed(3)})`);
+      grad.addColorStop(0, `rgba(180,255,240,${(flashAlpha * (pulse ? 1 : 0.9)).toFixed(3)})`);
+      grad.addColorStop(0.5, `rgba(0,255,200,${(flashAlpha * (pulse ? 0.55 : 0.4)).toFixed(3)})`);
       grad.addColorStop(1, "rgba(0,200,160,0)");
       tctx.save();
       tctx.fillStyle = grad;
@@ -17156,11 +17244,11 @@ function initGalaxyCanvas() {
     }
 
     // Layer 2 — ghost X (outer, expands, low opacity)
-    const ghostSize = 10 + (1 - life) * 14;
+    const ghostSize = (10 + (1 - life) * 14) * (pulse ? 1.2 : 1);
     tctx.save();
     tctx.globalAlpha = life * 0.18;
     tctx.strokeStyle = "#00ffcc";
-    tctx.lineWidth = 6;
+    tctx.lineWidth = 6 * wMul;
     tctx.beginPath();
     tctx.moveTo(x - ghostSize, y - ghostSize);
     tctx.lineTo(x + ghostSize, y + ghostSize);
@@ -17170,11 +17258,11 @@ function initGalaxyCanvas() {
     tctx.restore();
 
     // Layer 3 — main X (crisp teal)
-    const size = 8 + (1 - life) * 5;
+    const size = (8 + (1 - life) * 5) * (pulse ? 1.15 : 1);
     tctx.save();
     tctx.globalAlpha = life * 0.95;
-    tctx.strokeStyle = "#00ffcc";
-    tctx.lineWidth = 2.5;
+    tctx.strokeStyle = pulse ? "#66ffe6" : "#00ffcc";
+    tctx.lineWidth = 2.5 * wMul;
     tctx.lineCap = "round";
     tctx.beginPath();
     tctx.moveTo(x - size, y - size);
@@ -17209,10 +17297,48 @@ function initGalaxyCanvas() {
     if (!tctx || tapBlasts.length === 0) return;
     for (let i = tapBlasts.length - 1; i >= 0; i -= 1) {
       const b = tapBlasts[i];
-      drawTapBlast(tctx, b.x, b.y, b.life);
+      drawTapBlast(tctx, b.x, b.y, b.life, b.pulse);
       b.life -= 0.055;
       if (b.life <= 0) tapBlasts.splice(i, 1);
     }
+  }
+
+  // 2026-07-01: ONE reusable looping teal electrical/plasma muzzle jet on the ship front — shown
+  // only while the Pulse Cannon input is held (no per-shot object). Additive teal core + a few
+  // flickering arcs whose phase advances each frame so it reads as a continuous plasma vent.
+  function drawPulseMuzzle(tctx) {
+    if (!tctx || !pulseMuzzle.active) return;
+    const { x, y, angle, phase } = pulseMuzzle;
+    tctx.save();
+    tctx.globalCompositeOperation = "lighter";
+    // soft core bloom
+    const coreR = 11 + Math.sin(phase * 1.7) * 2;
+    const grad = tctx.createRadialGradient(x, y, 0, x, y, coreR);
+    grad.addColorStop(0, "rgba(200,255,245,0.9)");
+    grad.addColorStop(0.45, "rgba(0,255,200,0.5)");
+    grad.addColorStop(1, "rgba(0,200,160,0)");
+    tctx.fillStyle = grad;
+    tctx.beginPath();
+    tctx.arc(x, y, coreR, 0, Math.PI * 2);
+    tctx.fill();
+    // a few short flickering forward arcs (electrical vent), fanned around the aim angle
+    tctx.strokeStyle = "rgba(120,255,230,0.85)";
+    tctx.lineWidth = 2;
+    tctx.lineCap = "round";
+    for (let j = 0; j < 3; j += 1) {
+      const spread = (j - 1) * 0.28 + Math.sin(phase * 2.3 + j * 2.1) * 0.16;
+      const len = 12 + ((Math.sin(phase * 3.1 + j * 1.7) + 1) * 0.5) * 9;
+      const a = angle + spread;
+      const midA = a + Math.sin(phase * 4.0 + j) * 0.22;
+      const mx = x + Math.cos(midA) * len * 0.55;
+      const my = y + Math.sin(midA) * len * 0.55;
+      tctx.globalAlpha = 0.55 + ((Math.sin(phase * 5 + j * 3) + 1) * 0.5) * 0.4;
+      tctx.beginPath();
+      tctx.moveTo(x, y);
+      tctx.quadraticCurveTo(mx, my, x + Math.cos(a) * len, y + Math.sin(a) * len);
+      tctx.stroke();
+    }
+    tctx.restore();
   }
 
   // 2026-06-11: spawn + advance the fire trail behind an in-flight tossed asteroid. Stepped
@@ -17536,6 +17662,7 @@ function initGalaxyCanvas() {
       drawPlacedBombsOverlay(ufoFxCtx || ctx);
       drawFreezeOverlay(ufoFxCtx || ctx);
       drawAndStepTapBlasts(ufoFxCtx || ctx);
+      drawPulseMuzzle(ufoFxCtx || ctx);
       // KEEP LAST: the missile crosshair (drawMissileFx) must render AFTER drawPowerups on the same
       // overlay so it's never hidden behind a powerup sprite (Part 5, 2026-06-17).
       drawMissileFx(ufoFxCtx || ctx, now);
@@ -17905,6 +18032,7 @@ function initGalaxyCanvas() {
     drawPlacedBombsOverlay(ufoFxCtx || ctx);
     drawFreezeOverlay(ufoFxCtx || ctx);
     drawAndStepTapBlasts(ufoFxCtx || ctx);
+    drawPulseMuzzle(ufoFxCtx || ctx);
     // KEEP LAST (over powerups): crosshair must sit above powerup sprites (Part 5, 2026-06-17).
     drawMissileFx(ufoFxCtx || ctx, now);
     drawComboFxOverlay(ufoFxCtx || ctx, now);
@@ -18085,8 +18213,11 @@ function initGalaxyCanvas() {
   // desktop) plus the standard hit checks. Extracted from handleArcadeTap so quadshot can
   // fire extra cluster shots through the identical path. Returns true if it hit anything.
   function resolveShotAt(sx, sy, now, isTouch, deferMarksman = false) {
+    // 2026-07-01: _pulseShot tags this projectile as a Pulse Cannon bolt so it renders thicker +
+    // brighter than a normal laser (set by firePulseShot around the call, cleared after).
+    const pulse = _pulseShot;
     if (isIOSWebKit && isTouch) {
-      tapBlasts.push({ x: sx, y: sy, life: 1.0 });
+      tapBlasts.push({ x: sx, y: sy, life: 1.0, pulse });
     } else {
       laserBeams.push({
         x1: sim.width / 2,
@@ -18094,6 +18225,7 @@ function initGalaxyCanvas() {
         x2: sx,
         y2: sy,
         startedAt: now,
+        pulse,
       });
     }
     shotsFired += 1;
@@ -18148,6 +18280,46 @@ function initGalaxyCanvas() {
     return false;
   }
 
+  // 2026-07-01: Pulse Cannon single shot. Aims at the held pointer, applies a small oscillating
+  // turret sweep (so the stream reads as a rotating cannon, deliberately less precise than a laser),
+  // fires through resolveShotAt, and plays an alternating fire report. Marksman is deferred: a pulse
+  // shot only records a combo HIT (never a miss), so the weapon's spray can't break the player's combo.
+  function firePulseShot(now) {
+    if (!galaxyGesture) return;
+    const cx = sim.width / 2;
+    const cy = sim.height / 2;
+    const aim = galaxyGesture.current || galaxyGesture.start;
+    let dx = aim.x - cx;
+    let dy = aim.y - cy;
+    let dist = Math.hypot(dx, dy);
+    if (dist < 1) { dx = 0; dy = -1; dist = 1; } // straight-up fallback for a dead-centre press
+    const baseAngle = Math.atan2(dy, dx);
+    const sweep = Math.sin(pulseSweepPhase) * (PULSE_CANNON_SWEEP_DEG * Math.PI / 180);
+    pulseSweepPhase += 0.6; // advance the oscillator → center → right → center → left …
+    const ang = baseAngle + sweep;
+    const sx = clamp(cx + Math.cos(ang) * dist, 0, sim.width);
+    const sy = clamp(cy + Math.sin(ang) * dist, 0, sim.height);
+    _pulseShot = true;
+    const hit = resolveShotAt(sx, sy, now, galaxyGesture.isTouch === true, true);
+    _pulseShot = false;
+    if (hit) recordComboEvent("laser_stroid_hit", { x: sx, y: sy });
+    // alternating fire1/fire2 with pitch jitter so a sustained stream never combs into one harsh tone
+    playGameSfx(pulseFireToggle ? "pulse_cannon_fire2" : "pulse_cannon_fire1", 0.7, {
+      important: true,
+      detune: (Math.random() - 0.5) * 90,
+    });
+    pulseFireToggle ^= 1;
+    pulseMuzzle.recoil = 2; // subtle kick; drawn as a 1-2px muzzle offset, never touches gameplay
+  }
+
+  // Stop the held rapid-fire stream (input released, weapon expired, or cancelled) and hide the muzzle.
+  function stopPulseFiring() {
+    pulseFiring = false;
+    pulseBurstIndex = 0;
+    pulseMuzzle.active = false;
+    pulseMuzzle.recoil = 0;
+  }
+
   // 2026-06-10: per-type powerup collection effects.
   function collectPowerup(pu) {
     spawnPowerupPickupBurst(pu);
@@ -18189,6 +18361,18 @@ function initGalaxyCanvas() {
       playGameSfx("pickup_weapon", 0.9); // layered quadshot-pickup sound
       cssFlash("#cc66ff", 0.22, 250);
       // 2026-06-14: quad shot supersedes the missile weapon — clear missile inventory + aim.
+      playerMissileInventory = 0;
+      missileAimMode = false;
+      updateHudMissileInventory();
+      return;
+    }
+    if (pu.type === "pulse") {
+      // 2026-07-01: Pulse Cannon — a 10s timed rapid-fire weapon (hold to sweep-fire). Plays a
+      // charge-up on activation; supersedes the missile weapon like quad shot does.
+      pulseCannonUntil = performance.now() + PULSE_CANNON_DURATION_MS;
+      updateHudPulseBadge();
+      playGameSfx("pulse_cannon_charge", 0.9);
+      cssFlash("#00ffc8", 0.22, 250);
       playerMissileInventory = 0;
       missileAimMode = false;
       updateHudMissileInventory();
@@ -18669,6 +18853,20 @@ function initGalaxyCanvas() {
       // 2026-06-09: track touch vs mouse so iOS taps can use the X blast
       isTouch: event.pointerType === "touch" || event.type === "touchstart",
     };
+    // 2026-07-01: Pulse Cannon — a plain press (not a grab/aim) begins HELD rapid fire immediately,
+    // firing the first shot now. Stroid/mine grabs (mode "stroidToss") keep priority and skip pulse.
+    // A press ON a powerup is left to the normal tap path (handleArcadeTap) so it still gets collected
+    // — resolveShotAt (the pulse fire path) doesn't collect powerups.
+    const pressOnPowerup = powerups.some((pu) => Math.hypot(point.x - pu.x, point.y - pu.y) <= pu.r * 1.8);
+    if (
+      engineMode === "arcade" && arcadeActive && mode === "tap"
+      && pulseCannonActive() && !missileAimMode && !bombAimMode && !pressOnPowerup
+    ) {
+      pulseFiring = true;
+      firePulseShot(now); // shot A of the first pair — its partner follows PULSE_PAIR_DELAY_MS later
+      pulseBurstIndex = 1;
+      nextPulseShotAt = now + PULSE_PAIR_DELAY_MS;
+    }
     if (typeof galaxyPlayCanvas.setPointerCapture === "function" && event.pointerId != null) {
       try {
         galaxyPlayCanvas.setPointerCapture(event.pointerId);
@@ -18694,7 +18892,9 @@ function initGalaxyCanvas() {
     const dx = point.x - galaxyGesture.start.x;
     const dy = point.y - galaxyGesture.start.y;
     const dragged = Math.hypot(dx, dy) > PLASMA_CAGE_DRAG_THRESHOLD;
-    if (engineMode === "arcade" && arcadeActive && dragged) {
+    // While Pulse Cannon is firing, a drag steers the turret aim (via galaxyGesture.current, already
+    // updated above) — it must NOT spawn a Plasma Net. Suppress the whole cage branch.
+    if (engineMode === "arcade" && arcadeActive && dragged && !pulseFiring) {
       if (!plasmaCage.active && galaxyGesture.mode !== "cage") {
         galaxyGesture.mode = "cage";
         galaxyGesture.canceled = !beginPlasmaCage(galaxyGesture.start, point, now);
@@ -18710,6 +18910,7 @@ function initGalaxyCanvas() {
   // 2026-06-11: a canceled pointer/touch (iOS edge gestures, system interruptions) must release
   // any in-progress grab and clear the gesture, or the grabbed stroid stays pinned in place.
   function onGalaxyPointerCancel() {
+    if (pulseFiring) stopPulseFiring();
     if (stroidToss.active) cancelStroidToss();
     // 2026-06-26: an iOS edge-gesture pointercancel used to silently DISCARD an in-progress
     // plasma net — players "lost" the net by dragging to the screen edge. Fire it instead so the
@@ -18738,6 +18939,14 @@ function initGalaxyCanvas() {
       } catch {
         // ignore capture failures
       }
+    }
+    // 2026-07-01: Pulse Cannon hold released — stop the stream + hide the muzzle. The initial shot
+    // already fired on pointerdown, so DON'T fall through to handleArcadeTap (no double-fire).
+    if (pulseFiring) {
+      stopPulseFiring();
+      galaxyGesture = null;
+      draw(now);
+      return;
     }
     if (plasmaCage.active) {
       releasePlasmaCage(now);
@@ -19078,6 +19287,11 @@ function initGalaxyCanvas() {
     activateFreeze() {
       if (!arcadeActive || engineMode !== "arcade") return;
       toggleFreezeFromInventory();
+    },
+    // 2026-07-01: HUD Pulse Cannon badge — tap to cancel the weapon early (forfeit remaining time).
+    cancelPulse() {
+      if (!arcadeActive || engineMode !== "arcade") return;
+      cancelPulseCannon();
     },
     // 2026-06-14: HUD missile button — toggle aim mode; the next canvas tap sets the target.
     toggleMissileAim() {

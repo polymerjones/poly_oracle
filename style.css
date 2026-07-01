@@ -2647,6 +2647,14 @@ select:focus-visible {
   opacity: 0;
   transform: translateY(18px);
 }
+/* 2026-07-01: when a Stroid is behind the commander/SPC mug or the comms text box, duck the whole HUD
+   so the real rock on the canvas underneath shows through — the cheapest "ghost" (no extra draw pass /
+   silhouette canvas). Excludes the collapsed state so a dismissing HUD still fades fully out. Toggled
+   from update() via updateStroidBehindHud, throttled to ~15Hz and only while a rock actually overlaps. */
+#commanderHUD.comm-see-through:not(.comm-collapsed) {
+  opacity: 0.32;
+  transition: opacity 0.18s ease;
+}
 
 /* Chamfered framed panel = cyan backing (.commFrame) + dark inner fill (.commFill),
    double clip-path so the border ring follows the diagonal corner cuts; layered

@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-01 10:21";
+const BUILD_TS = "2026-07-01 14:50";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -393,6 +393,15 @@ const GAME_SFX = {
   combo_xtra_pyro: "combo_fx/xtra_pyro_combo.mp3",
   combo_freeze_berserk: "combo_fx/freeze_berserk_combo.mp3",
   combo_big_bomb: "combo_fx/bigbomb_combo.mp3",
+  // 2026-07-01: SPC menu voiceovers — classic-arcade callouts on mode-select buttons. Played with
+  // the combo-style dual-layer chain (at normal speed) via playMenuVo.
+  menuvo_arcade_mode: "vo/gamemenu_arcade_mode.mp3",
+  menuvo_arcade: "vo/gamemenu_arcade.mp3",
+  menuvo_stunt_mode: "vo/gamemenu_stunt_mode.mp3",
+  menuvo_training: "vo/gamemenu_training.mp3",
+  menuvo_practice: "vo/gamemenu_practice.mp3",
+  menuvo_new_game: "vo/gamemenu_new_game.mp3",
+  menuvo_level_select: "vo/gamemenu_level_select.mp3",
   item_pickup2: "gamesfx/item_pickup2.mp3", // unassigned - crunchy item pickup
   freeze: "gamesfx/freeze.mp3",
   unfreeze: "gamesfx/unfreeze.mp3",
@@ -720,10 +729,13 @@ const ARCADE_LEVELS = [
   // 2026-06-15: second act — the run no longer ends at level 10. Levels 11-15 reuse the
   // level-10 boss music + background (musicForLevel/bgKeyForLevel both clamp at >=10) and the
   // hotroid sprites, ramping density/time. "YOU WIN" now fires after clearing level 15.
-  { level: 11, label: "AFTERSHOCK", time: 78, totalToClear: 27, startSpawn: 7, spawnEveryMs: 1350, maxOnScreen: 15,
+  // 2026-07-01: L11 ran too short — doubled (was time 78 / clear 27). A landmine now auto-drops at
+  // the midpoint (~78s, the old endpoint) via levelHasLandmine(11); the normal spawner keeps
+  // scattering rocks through the back half, plus a second surge.
+  { level: 11, label: "AFTERSHOCK", time: 156, totalToClear: 52, startSpawn: 7, spawnEveryMs: 1350, maxOnScreen: 15,
     musicVolume: 1.45, // 2026-06-24: L11_Swarm track is mastered quiet — boosted again per playtest
-    guaranteedSpawn: [{ type: "quadshot", atMs: 12000 }, { type: "goldbars", atMs: 42000 }],
-    waves: [{ count: 9, triggerAtRemaining: 34 }] }, // 2026-06-23: aftershock surge — 9 rocks burst in once ~34s remain
+    guaranteedSpawn: [{ type: "quadshot", atMs: 12000 }, { type: "goldbars", atMs: 42000 }, { type: "goldbars", atMs: 110000 }],
+    waves: [{ count: 9, triggerAtRemaining: 78 }, { count: 9, triggerAtRemaining: 34 }] }, // aftershock surges — back-half + finale
   // 2026-06-15: levels 12-15 are the "second act" with per-level mechanics. New config fields
   // (asteroidKinds, asteroidSpeedMult, mineLaunch/mineCount/mineFuseMs, noUfo, ufoSpawnAt,
   // powerupOverride, powerupIntervalMs, label, musicKey) are honored by the engine. waves is now
@@ -3697,7 +3709,7 @@ const audioEngine = {
       this.musicBuffers.delete(key);
     }
   },
-  async playMusic(key, url, { crossfadeMs = 250, volume = 1 } = {}) {
+  async playMusic(key, url, { crossfadeMs = 250, volume = 1, fadeUpMs = 0 } = {}) {
     if (!url) return;
     this.ensureMusic();
     // 2026-06-22: in-flight guard. currentMusic/currentMusicHtml aren't set until the awaits below
@@ -3709,12 +3721,12 @@ const audioEngine = {
     if (this.currentMusicHtml && this.currentMusicHtml.key === key) return;
     this._pendingMusicKey = key;
     try {
-      return await this._playMusicInner(key, url, { crossfadeMs, volume });
+      return await this._playMusicInner(key, url, { crossfadeMs, volume, fadeUpMs });
     } finally {
       if (this._pendingMusicKey === key) this._pendingMusicKey = null;
     }
   },
-  async _playMusicInner(key, url, { crossfadeMs = 250, volume = 1 } = {}) {
+  async _playMusicInner(key, url, { crossfadeMs = 250, volume = 1, fadeUpMs = 0 } = {}) {
     if (!this.unlocked) {
       try {
         await this.unlock();
@@ -3755,7 +3767,11 @@ const audioEngine = {
     source.start(now);
     gain.gain.cancelScheduledValues(now);
     gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(volume, now + crossfadeMs / 1000);
+    // 2026-07-01: fadeUpMs => "soft intro" — fade in quickly to a few dB down, then swell to full
+    // over fadeUpMs so the menu theme eases in instead of hitting at full volume. (used by the menu.)
+    const introVol = fadeUpMs > 0 ? volume * 0.6 : volume;
+    gain.gain.linearRampToValueAtTime(introVol, now + crossfadeMs / 1000);
+    if (fadeUpMs > 0) gain.gain.linearRampToValueAtTime(volume, now + crossfadeMs / 1000 + fadeUpMs / 1000);
     if (this.currentMusic) {
       const old = this.currentMusic;
       try {
@@ -4514,6 +4530,27 @@ function addListeners() {
   // then re-dispatches the click after the pause so each button's own navigation handler runs
   // untouched. Locked/disabled cards stay silent; extra taps during the pause are ignored.
   const MENU_PRESS_DELAY = 320;
+  // 2026-07-01: SPC voice callouts on the mode-select buttons (classic-arcade style). Uses the same
+  // dual-layer processing as the Combo voice FX (playComboSfx) but at normal speed, per playtest —
+  // full menu phrases stay intelligible. Keyed off button id; Resume/Scores/Back get no callout.
+  const MENU_VO = {
+    btnArcade: ["menuvo_arcade_mode", "menuvo_arcade"], // random alternate per user request
+    btnArcadeStunt: ["menuvo_stunt_mode"],
+    btnArcadeNew: ["menuvo_new_game"],
+    btnArcadeLevelSelect: ["menuvo_level_select"],
+    btnStuntTraining: ["menuvo_training"],
+    btnStuntPractice: ["menuvo_practice"],
+    btnPractice: ["menuvo_practice"],
+  };
+  function playMenuVo(btnId) {
+    const choices = MENU_VO[btnId];
+    if (!choices) return;
+    const key = choices[(Math.random() * choices.length) | 0];
+    const fn = window.playGameSfx;
+    if (typeof fn !== "function") return;
+    fn(key, 0.98, { rate: 1.0, preservePitch: true, important: true });
+    setTimeout(() => fn(key, 0.24, { rate: 1.0, preservePitch: true, important: true }), 70);
+  }
   if (galaxyModeSelect) {
     let menuNavPending = false;
     galaxyModeSelect.addEventListener("click", (e) => {
@@ -4525,8 +4562,11 @@ function addListeners() {
       if (menuNavPending) return; // ignore extra taps while the press-pause is running
       menuNavPending = true;
       const isBack = btn.classList.contains("modeBackBtn");
-      audioEngine.play(isBack ? "menu_back" : "menu_hit", { volume: 0.6 });
+      // 2026-07-01: back bumped to 1.2 (~2x of 0.6), forward select to 0.9 (~1.5x) now that it
+      // carries an SPC voice callout underneath.
+      audioEngine.play(isBack ? "menu_back" : "menu_hit", { volume: isBack ? 1.2 : 0.9 });
       if (!isBack) {
+        playMenuVo(btn.id);
         btn.classList.remove("modeBtn--select");
         void btn.offsetWidth; // restart the flash on rapid re-taps
         btn.classList.add("modeBtn--select");
@@ -5336,7 +5376,8 @@ async function runTapBurst() {
     const progress = Math.min(1, (now - t0) / REVEAL.TAP_BURST_MS);
     const interval = lerp(REVEAL.TAP_INTERVAL_MS_START, REVEAL.TAP_INTERVAL_MS_END, progress);
     if (now >= nextAt) {
-      audioEngine.play(SFX.TAP, { volume: 0.45, rate: 0.96 + Math.random() * 0.1 });
+      // 2026-07-01: orb-tap SFX removed during Reveal per playtest — the taps muddied the
+      // reveal intro/voice mix. Visual burst (sparkle + bg flash) stays.
       triggerOrbSparkle(1);
       triggerBgFlashPinkPurple(0.35);
       nextAt = now + interval;
@@ -5390,7 +5431,7 @@ async function revealAnswer() {
     startCrystalOverlay();
     // 2026-06-15: reveal SFX levels pulled down a touch and normalized so the spoken
     // question/answer (TTS at full volume, fired after these) reads clearly over the bed.
-    audioEngine.play(SFX.MAIN, { volume: 0.82, rate: 1.0 });
+    audioEngine.play(SFX.MAIN, { volume: 0.95, rate: 1.0 }); // 2026-07-01: reveal intro up (was 0.82) so it isn't buried under the TTS voice on iPhone
 
     const burstPromise = runTapBurst();
     const burstFlashInterval = setInterval(() => {
@@ -5872,8 +5913,8 @@ function spawnSparkles(count, sizeMultiplier = 1, brightnessMultiplier = 1) {
 // Press and drag on the orb: a bright tip follows the finger and leaves behind
 // glow marks that bloom and fade over a couple seconds, while a low magical drone
 // pulses until release. Additive to the existing orb tap; reveal is untouched.
-const ORB_RUB_PULSE_EDGE = 1.25; // drone/haptic pulse Hz at the orb edge (slow)
-const ORB_RUB_PULSE_CENTER = 3.2; // pulse Hz dead-center (fast)
+const ORB_RUB_PULSE_EDGE = 0.9; // 2026-07-01: wider tempo spread per playtest (was 1.25) — slower edge
+const ORB_RUB_PULSE_CENTER = 4.4; // 2026-07-01: faster center (was 3.2) — bigger overall BPM range
 const orbRub = document.getElementById("orbRub");
 let orbRubbing = false;
 let orbRubLastX = 0;
@@ -5931,17 +5972,28 @@ const orbRubDrone = {
     const osc3Gain = ctx.createGain();
     osc3Gain.gain.value = 0.16;
 
+    // 2026-07-01: subtle 1.5kHz presence so the rub is audible on phone/tablet speakers. Routed
+    // straight to `out` (post-lowpass) so the 480Hz filter doesn't swallow it; kept quiet + sine
+    // (softest) so it adds air without being harsh. Gets out's fade in/out envelope for free.
+    const osc4 = ctx.createOscillator();
+    osc4.type = "sine";
+    osc4.frequency.value = 1500;
+    const osc4Gain = ctx.createGain();
+    osc4Gain.gain.value = 0.045;
+
     osc1.connect(trem);
     osc2.connect(trem);
     osc3.connect(osc3Gain);
     osc3Gain.connect(trem);
+    osc4.connect(osc4Gain);
+    osc4Gain.connect(out);
 
     const target = state.whisper ? 0.24 : 0.48;
     out.gain.setValueAtTime(0, now);
     out.gain.linearRampToValueAtTime(target, now + 0.28);
 
-    [osc1, osc2, osc3, lfo].forEach((o) => o.start(now));
-    this.nodes = { ctx, out, osc1, osc2, osc3, lfo };
+    [osc1, osc2, osc3, osc4, lfo].forEach((o) => o.start(now));
+    this.nodes = { ctx, out, osc1, osc2, osc3, osc4, lfo };
   },
   setPulseRate(hz) {
     const n = this.nodes;
@@ -5960,7 +6012,7 @@ const orbRubDrone = {
     out.gain.setValueAtTime(out.gain.value, now);
     out.gain.linearRampToValueAtTime(0, now + 0.42);
     const stopAt = now + 0.48;
-    [n.osc1, n.osc2, n.osc3, n.lfo].forEach((o) => { try { o.stop(stopAt); } catch { /* ignore */ } });
+    [n.osc1, n.osc2, n.osc3, n.osc4, n.lfo].forEach((o) => { try { o.stop(stopAt); } catch { /* ignore */ } });
     setTimeout(() => { try { out.disconnect(); } catch { /* ignore */ } }, 500);
   },
 };
@@ -6005,7 +6057,7 @@ let orbRub2Audio = null;
 let orbRub2FadeTimer = null;
 let orbRub2Active = false;
 let orbRub2WebAudio = null;
-const orbRub2TargetVol = () => (state.whisper ? 0.05 : 0.12); // 2026-06-29: a touch louder, still under the main rub drone
+const orbRub2TargetVol = () => (state.whisper ? 0.068 : 0.162); // 2026-07-01: +35% per playtest (was 0.05/0.12), still under the main rub drone
 const ORB_RUB2_FADE_IN_MS = 750;
 const ORB_RUB2_FADE_OUT_MS = 1200;
 
@@ -6081,6 +6133,7 @@ function startOrbRub2Loop() {
     if (!orbRub2Audio) {
       orbRub2Audio = new Audio("gamesfx/orb_rub2.mp3");
       orbRub2Audio.loop = true;
+      orbRub2Audio.volume = 0; // 2026-07-01: start silent so a first-load play() can't emit an un-ramped blip before the fade engages
     }
     if (orbRub2Active) return; // already running this rub — let the loop continue, don't re-seek
     orbRub2Active = true;
@@ -6118,6 +6171,7 @@ function stopOrbRub2Loop() {
 
 // Start the drone + the synced hard-pulse haptic loop (both idempotent).
 function beginRubFeedback() {
+  if (!orbRubbing) return; // 2026-07-01: never start rub audio unless a hold is genuinely in progress
   orbRubDrone.start();
   startOrbRub2Loop();
   if (!orbRubHapticTimer) scheduleRubHaptic();
@@ -6166,7 +6220,10 @@ function onOrbRubStart(event) {
   audioEngine.unlock();
   // Bring the drone + haptic in on a short hold (or first movement) so quick taps stay silent.
   clearTimeout(orbRubDroneTimer);
-  orbRubDroneTimer = setTimeout(() => { if (orbRubbing) beginRubFeedback(); }, 150);
+  // 2026-07-01: hold gate raised 150->260ms so a normal tap (incl. sluggish first-open taps) releases
+  // before rub audio starts — rub should only sound during a real press-and-hold. Movement still
+  // brings feedback in immediately (onOrbRubMove).
+  orbRubDroneTimer = setTimeout(() => { if (orbRubbing) beginRubFeedback(); }, 260);
   if (event.pointerId !== undefined && orb.setPointerCapture) {
     try { orb.setPointerCapture(event.pointerId); } catch { /* ignore */ }
   }
@@ -8134,14 +8191,30 @@ function initGalaxyCanvas() {
     slotRampHandle = null;
     if (h) { slotStopHandle(h); slotLoopHandles.delete(h); }
   }
+  // 2026-07-01: the lever pull used a full-viewport cssFlash (#screenFlashDiv, inset:0), which forced
+  // a fullscreen compositor repaint over the animating reels every pull → a visible hitch. Swap it
+  // for a localized glow pop on the reels frame — only the small slot region repaints, still exciting.
+  let _slotLeverFlashTimer = null;
+  function slotLeverFlash() {
+    const el = slotEls.reels;
+    if (!el) return;
+    if (_slotLeverFlashTimer) clearTimeout(_slotLeverFlashTimer);
+    el.style.transition = "none";
+    el.style.boxShadow = "0 0 0 3px rgba(0,255,209,0.85), 0 0 26px rgba(0,255,209,0.6)";
+    _slotLeverFlashTimer = setTimeout(() => {
+      el.style.transition = "box-shadow 200ms ease-out";
+      el.style.boxShadow = "";
+      _slotLeverFlashTimer = null;
+    }, 16);
+  }
   function slotDoPull() {
     if (slotState !== SLOT_STATE.READY || slotTokens <= 0 || performance.now() < slotInputLockedUntil) return;
     slotTokens -= 1;
     if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
     if (slotEls.tokensBox) { slotEls.tokensBox.classList.remove("tick"); void slotEls.tokensBox.offsetWidth; slotEls.tokensBox.classList.add("tick"); }
     slotState = SLOT_STATE.SPINNING;
-    triggerGameplayHapticImpact(hapticImpactStyle.Medium);
-    cssFlash("#00FFD1", 0.2, 180);
+    triggerGameplayHapticImpact(hapticImpactStyle.Heavy); // 2026-07-01: lever pull bumped Medium->Heavy per playtest
+    slotLeverFlash(); // 2026-07-01: localized glow instead of the full-screen cssFlash (see slotLeverFlash)
     cssShake(isIOSNative ? 0.45 : 0.75);
     playGameSfx("slot_clunk", 0.72);
     setSlotHint("");
@@ -8197,16 +8270,21 @@ function initGalaxyCanvas() {
     // lands on the winning symbols rather than the full 3-cell payline. Fall back to the whole
     // line if idx is missing (jackpot/legacy paths always populate it).
     const idx = win.res?.idx || win.pl.rows.map((_, i) => i);
-    const pts = win.pl.rows.map((row, i) => {
+    const allPts = win.pl.rows.map((row, i) => {
       const rc = slotReels[i].canvas.getBoundingClientRect(); const rowH = rc.height / 3;
       return { x: rc.left - rr.left + rc.width / 2, y: rc.top - rr.top + (row * rowH + rowH / 2), half: Math.min(rc.width, rowH) / 2 };
-    }).filter((_, i) => idx.includes(i));
-    slotWinFx.points = pts; slotWinFx.cells = pts; slotWinFx.lineStart = performance.now(); slotWinFx.start = slotWinFx.lineStart;
+    });
+    // 2026-07-01: the payout STREAK traces the full payline so it travels across all three cells like
+    // a real slot line (a diagonal/vertical PAIR win previously only lit its 2 winning cells → the
+    // streak looked like it flashed just one corner). The bright per-symbol GLOW + particles stay on
+    // only the winning cells (idx) so non-matching corners don't pop.
+    const cellPts = allPts.filter((_, i) => idx.includes(i));
+    slotWinFx.points = allPts; slotWinFx.cells = cellPts; slotWinFx.lineStart = performance.now(); slotWinFx.start = slotWinFx.lineStart;
     slotWinFx.lineActive = true; slotWinFx.active = true;
     const p = win.prize;
     slotWinFx.type = p.kind === "jackpot" ? "jackpot" : p.kind === "powerup" ? p.sym : p.kind === "tokens" ? "goldbar" : "points";
     slotWinFx.frost = slotWinFx.type === "freeze";
-    slotSeedEffect(slotWinFx.type, pts);
+    slotSeedEffect(slotWinFx.type, cellPts);
   }
   function slotClipWinFx(ctx) {
     const inset = isIOSWebKit ? 2.5 : 1;
@@ -8566,7 +8644,7 @@ function initGalaxyCanvas() {
         if (s >= 1) {
           r.pos = r.stopFinal; r.bounce = 0; r.bounceVel = SLOT_BOUNCE_IMPULSE; r.state = "settle";
           playGameSfx("slot_clunk", 0.7);
-          triggerGameplayHapticImpact(hapticImpactStyle.Light);
+          triggerGameplayHapticImpact(hapticImpactStyle.Medium); // 2026-07-01: reel-stop bumped Light->Medium per playtest
         }
       } else if (r.state === "settle") {
         r.bounceVel += (0 - r.bounce) * SLOT_BOUNCE_K * dt; r.bounceVel -= r.bounceVel * SLOT_BOUNCE_DAMP * dt; r.bounce += r.bounceVel * dt;
@@ -9310,6 +9388,7 @@ function initGalaxyCanvas() {
   let comboBanners = [];
   let comboFxParticles = [];
   let smallStroidBursts = [];
+  let mediumStroidBursts = []; // 2026-07-01: medium (kind 2) kills now get a sprite burst too, with per-hit aspect/rotation variety
   let bigStroidBursts = [];
   let explosiveElectricBursts = [];
   let powerupPickupBursts = [];
@@ -9586,6 +9665,7 @@ function initGalaxyCanvas() {
     comboBanners.length = 0;
     comboFxParticles.length = 0;
     smallStroidBursts.length = 0;
+    mediumStroidBursts.length = 0;
     bigStroidBursts.length = 0;
     explosiveElectricBursts.length = 0;
     powerupPickupBursts.length = 0;
@@ -9664,6 +9744,26 @@ function initGalaxyCanvas() {
     });
   }
 
+  // 2026-07-01: medium asteroids previously had no sprite burst (only particle chunks). Reuse the big
+  // burst artwork but randomize X scale, Y scale (independent → circle vs ellipse) and rotation per hit
+  // so repeated medium kills don't look identical. scaleX/scaleY diverge to stretch the sprite.
+  function spawnMediumStroidBurst(x, y, spriteKey = "roid01") {
+    if (prefersReducedMotion || !bigStroidFxSheet.ready) return;
+    const maxBursts = isIOSNative ? 4 : 7;
+    if (mediumStroidBursts.length >= maxBursts) mediumStroidBursts.shift();
+    mediumStroidBursts.push({
+      x,
+      y,
+      start: performance.now(),
+      ttl: isIOSNative ? 380 : 460,
+      scaleX: 0.82 + Math.random() * 0.55, // ~0.82–1.37
+      scaleY: 0.82 + Math.random() * 0.55, // independent of scaleX → aspect variety
+      rot: Math.random() * Math.PI * 2,
+      tint: explosionTintForSprite(spriteKey),
+      flickerSeed: Math.random() * Math.PI * 2,
+    });
+  }
+
   function powerupPickupTint(type) {
     if (type === "timer") return "rgba(255,255,255,0.82)";
     if (type === "missile") return "rgba(255,78,78,0.78)";
@@ -9725,7 +9825,9 @@ function initGalaxyCanvas() {
     return clamp(1 - depth + (a * 0.65 + b * 0.35) * depth * 2, 0.45, 1.62);
   }
 
-  function drawFxSheetFrame(drawCtx, sheet, frame, x, y, size, rot = 0, tint = "") {
+  // 2026-07-01: sizeY lets callers draw the frame as an ellipse (non-square) for per-explosion aspect
+  // variety; defaults to `size` (square) so all existing callers are unchanged.
+  function drawFxSheetFrame(drawCtx, sheet, frame, x, y, size, rot = 0, tint = "", sizeY = size) {
     const sx = (frame % sheet.columns) * (sheet.frameWidth + sheet.padding);
     const sy = Math.floor(frame / sheet.columns) * (sheet.frameHeight + sheet.padding);
     drawCtx.translate(x, y);
@@ -9743,7 +9845,7 @@ function initGalaxyCanvas() {
       fxTintCtx.fillStyle = tint;
       fxTintCtx.fillRect(0, 0, sheet.frameWidth, sheet.frameHeight);
       fxTintCtx.globalCompositeOperation = "source-over";
-      drawCtx.drawImage(fxTintCanvas, -size / 2, -size / 2, size, size);
+      drawCtx.drawImage(fxTintCanvas, -size / 2, -sizeY / 2, size, sizeY);
     } else {
       drawCtx.drawImage(
         sheet.img,
@@ -9752,9 +9854,9 @@ function initGalaxyCanvas() {
         sheet.frameWidth,
         sheet.frameHeight,
         -size / 2,
-        -size / 2,
+        -sizeY / 2,
         size,
-        size,
+        sizeY,
       );
     }
     drawCtx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
@@ -9763,8 +9865,10 @@ function initGalaxyCanvas() {
   function playComboSfx(key) {
     const sfxKey = `combo_${key}`;
     if (!GAME_SFX[sfxKey]) return;
-    playGameSfx(sfxKey, 0.98, { rate: 1.45, preservePitch: true, important: true });
-    setTimeout(() => playGameSfx(sfxKey, 0.24, { rate: 1.55, preservePitch: true, important: true }), 70);
+    // 2026-07-01: the net-ufo-net callout sat too hot in the mix — trim just this one.
+    const [v1, v2] = key === "net_ufo_net" ? [0.85, 0.18] : [0.98, 0.24];
+    playGameSfx(sfxKey, v1, { rate: 1.45, preservePitch: true, important: true });
+    setTimeout(() => playGameSfx(sfxKey, v2, { rate: 1.55, preservePitch: true, important: true }), 70);
   }
 
   function awardCombo({ key, label, points, x, y, colors = ["255,255,255", "0,255,209"] }) {
@@ -9884,6 +9988,24 @@ function initGalaxyCanvas() {
         const size = (isIOSNative ? 41 : 52) * b.scale * (1.08 + t * 0.18);
         drawCtx.globalAlpha = clamp(0.8 * (1 - Math.max(0, t - 0.72) / 0.28) * fastFxFlicker(now, b.flickerSeed, 0.22), 0, 0.8);
         drawFxSheetFrame(drawCtx, bigStroidFxSheet, frame, b.x, b.y, size, b.rot, b.tint);
+      }
+      drawCtx.restore();
+    }
+    if (!underFramePressure && mediumStroidBursts.length && bigStroidFxSheet.ready) {
+      drawCtx.save();
+      drawCtx.globalCompositeOperation = "lighter";
+      for (let i = mediumStroidBursts.length - 1; i >= 0; i -= 1) {
+        const b = mediumStroidBursts[i];
+        const t = clamp((now - b.start) / b.ttl, 0, 1);
+        if (t >= 1) {
+          mediumStroidBursts.splice(i, 1);
+          continue;
+        }
+        const frame = Math.min(bigStroidFxSheet.frameCount - 1, Math.floor(t * bigStroidFxSheet.frameCount * 1.6));
+        const base = (isIOSNative ? 40 : 50) * (1.06 + t * 0.2);
+        drawCtx.globalAlpha = clamp(0.78 * (1 - Math.max(0, t - 0.7) / 0.3) * fastFxFlicker(now, b.flickerSeed, 0.22), 0, 0.8);
+        // width = base*scaleX, height = base*scaleY → per-hit ellipse/rotation variety
+        drawFxSheetFrame(drawCtx, bigStroidFxSheet, frame, b.x, b.y, base * b.scaleX, b.rot, b.tint, base * b.scaleY);
       }
       drawCtx.restore();
     }
@@ -10165,7 +10287,9 @@ function initGalaxyCanvas() {
   function playArcadeMenuMusic(opts = {}) {
     audioEngine.unlock();
     const volume = opts.fullVolume ? 1 : 0.72;
-    audioEngine.playMusic("ARCADE_MENU", MUSIC.ARCADE_MENU, { crossfadeMs: 250, volume });
+    // 2026-07-01: ease the theme in a few dB down and swell to normal over ~5s when the menu first
+    // appears (skip the soft intro on the fullVolume path, which is a mid-session resume).
+    audioEngine.playMusic("ARCADE_MENU", MUSIC.ARCADE_MENU, { crossfadeMs: 250, volume, fadeUpMs: opts.fullVolume ? 0 : 5000 });
     audioEngine.loadMusicBuffer(getMusicForLevel(1)).catch(() => {});
     audioEngine.loadMusicBuffer(getMusicForLevel(0)).catch(() => {});
   }
@@ -11155,7 +11279,9 @@ function initGalaxyCanvas() {
   function levelHasLandmine(levelNum) {
     // 2026-06-10: progressive introduction — L1 clean, L2 first landmine, L3 UFOs, L4 powerups.
     if (levelNum < 2) return false;
-    return levelNum === 2 || levelNum === 3 || levelNum === 5 || levelNum === 8;
+    // 2026-07-01: L11 doubled in length — the auto-spawn at levelDurationMs/2 drops a landmine
+    // at the old ~78s endpoint (now the midpoint pivot).
+    return levelNum === 2 || levelNum === 3 || levelNum === 5 || levelNum === 8 || levelNum === 11;
   }
 
   function setupUfoSpawnForLevel(cfg) {
@@ -11376,6 +11502,7 @@ function initGalaxyCanvas() {
       sim.particles.push(p);
     }
     if (isSmallAsteroid) spawnSmallStroidBurst(x, y);
+    if (isMediumAsteroid) spawnMediumStroidBurst(x, y, spriteKey);
     if (isBigAsteroid) spawnBigStroidBurst(x, y, blastScale, spriteKey);
     for (let i = 0; i < emitCount; i += 1) {
       if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
@@ -16291,9 +16418,48 @@ function initGalaxyCanvas() {
     }, delay);
   }
 
+  // 2026-07-01: reveal Stroids hidden behind the comms HUD (commander/SPC mug + text box). The HUD is a
+  // DOM overlay above the play canvas, so ducking its opacity lets the real rock underneath show through
+  // — a zero-cost "ghost" (no extra draw pass / silhouette canvas). Gated to when the HUD is actually on
+  // screen AND a rock overlaps its rect, and throttled to ~15Hz, so it costs essentially nothing.
+  let _commHudEl = null;
+  let _stroidBehindHudNext = 0;
+  let _stroidBehindHud = false;
+  function updateStroidBehindHud(now) {
+    if (now < _stroidBehindHudNext) return;
+    _stroidBehindHudNext = now + 66; // ~15Hz
+    if (!_commHudEl) _commHudEl = document.getElementById("commanderHUD");
+    const hud = _commHudEl;
+    if (!hud) return;
+    const commRect = hud.getBoundingClientRect();
+    const canvasRect = galaxyPlayCanvas?.getBoundingClientRect();
+    // display:none / collapsed / off-canvas → treat as not obstructing (getBoundingClientRect is ~0).
+    const visible = canvasRect && commRect.width > 20 && commRect.height > 20
+      && commRect.bottom > canvasRect.top && commRect.top < canvasRect.bottom
+      && !hud.classList.contains("comm-collapsed");
+    let behind = false;
+    if (visible) {
+      // HUD rect in sim/canvas space (sim coords == canvas CSS px; see awardCombo for the same mapping).
+      const hx0 = commRect.left - canvasRect.left, hy0 = commRect.top - canvasRect.top;
+      const hx1 = commRect.right - canvasRect.left, hy1 = commRect.bottom - canvasRect.top;
+      const list = sim.asteroids;
+      for (let i = 0; i < list.length; i += 1) {
+        const a = list[i];
+        if (a.ambient) continue;
+        const r = a.r || 0;
+        if (a.x + r > hx0 && a.x - r < hx1 && a.y + r > hy0 && a.y - r < hy1) { behind = true; break; }
+      }
+    }
+    if (behind !== _stroidBehindHud) {
+      _stroidBehindHud = behind;
+      hud.classList.toggle("comm-see-through", behind);
+    }
+  }
+
   function update(dt, now) {
     const _frameBudgetExceeded = isIOSNative && dt > 32;
     sim._frameBudgetExceeded = _frameBudgetExceeded;
+    updateStroidBehindHud(now);
     updatePlasmaRechargeSound(now);
     const driftScale = prefersReducedMotion ? 0 : 1;
     for (let i = 0; i < sim.stars.length; i += 1) {

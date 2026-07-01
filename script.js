@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-01 16:39";
+const BUILD_TS = "2026-07-01 16:44";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6984,7 +6984,14 @@ async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubm
   const closeText = afterSubmit ? "Done" : "Back";
   galaxyCanvasController?.playArcadeMenuMusic?.();
   // SPC callout when the board is opened for browsing (not on the post-submit "Done" re-render).
-  if (!afterSubmit) window.playGameSfx?.("menuvo_polyversescoreboard", 0.7, { important: true });
+  // Uses the same dual-layer echo chain as playMenuVo so it matches the other menu voiceovers.
+  if (!afterSubmit) {
+    const _voFn = window.playGameSfx;
+    if (typeof _voFn === "function") {
+      _voFn("menuvo_polyversescoreboard", 0.7, { rate: 1.0, preservePitch: true, important: true });
+      setTimeout(() => _voFn("menuvo_polyversescoreboard", 0.17, { rate: 1.0, preservePitch: true, important: true }), 70);
+    }
+  }
   renderLeaderboardShell("POLYVERSE SCOREBOARD", `<p class="leaderboardSub">Loading global scores...</p>`);
   try {
     const rows = await fetchLeaderboardRows();

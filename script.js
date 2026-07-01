@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-01 14:50";
+const BUILD_TS = "2026-07-01 15:48";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -402,6 +402,7 @@ const GAME_SFX = {
   menuvo_practice: "vo/gamemenu_practice.mp3",
   menuvo_new_game: "vo/gamemenu_new_game.mp3",
   menuvo_level_select: "vo/gamemenu_level_select.mp3",
+  menuvo_polyversescoreboard: "vo/gamemenu_polyversescoreboard.mp3",
   item_pickup2: "gamesfx/item_pickup2.mp3", // unassigned - crunchy item pickup
   freeze: "gamesfx/freeze.mp3",
   unfreeze: "gamesfx/unfreeze.mp3",
@@ -4548,8 +4549,8 @@ function addListeners() {
     const key = choices[(Math.random() * choices.length) | 0];
     const fn = window.playGameSfx;
     if (typeof fn !== "function") return;
-    fn(key, 0.98, { rate: 1.0, preservePitch: true, important: true });
-    setTimeout(() => fn(key, 0.24, { rate: 1.0, preservePitch: true, important: true }), 70);
+    fn(key, 0.7, { rate: 1.0, preservePitch: true, important: true });
+    setTimeout(() => fn(key, 0.17, { rate: 1.0, preservePitch: true, important: true }), 70);
   }
   if (galaxyModeSelect) {
     let menuNavPending = false;
@@ -4562,9 +4563,10 @@ function addListeners() {
       if (menuNavPending) return; // ignore extra taps while the press-pause is running
       menuNavPending = true;
       const isBack = btn.classList.contains("modeBackBtn");
-      // 2026-07-01: back bumped to 1.2 (~2x of 0.6), forward select to 0.9 (~1.5x) now that it
-      // carries an SPC voice callout underneath.
-      audioEngine.play(isBack ? "menu_back" : "menu_hit", { volume: isBack ? 1.2 : 0.9 });
+      // 2026-07-01: forward select stays on the menu_hit blip at 0.9 (~1.5x) since it carries an
+      // SPC voice callout underneath. Back now reuses the (softened) level-complete chime.
+      if (isBack) window.playGameSfx?.("level_up", 0.5);
+      else audioEngine.play("menu_hit", { volume: 0.9 });
       if (!isBack) {
         playMenuVo(btn.id);
         btn.classList.remove("modeBtn--select");
@@ -6977,6 +6979,8 @@ function renderLeaderboardRows(rows, highlightId = "") {
 async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubmit = false } = {}) {
   const closeText = afterSubmit ? "Done" : "Back";
   galaxyCanvasController?.playArcadeMenuMusic?.();
+  // SPC callout when the board is opened for browsing (not on the post-submit "Done" re-render).
+  if (!afterSubmit) window.playGameSfx?.("menuvo_polyversescoreboard", 0.7, { important: true });
   renderLeaderboardShell("POLYVERSE SCOREBOARD", `<p class="leaderboardSub">Loading global scores...</p>`);
   try {
     const rows = await fetchLeaderboardRows();
@@ -7439,6 +7443,17 @@ function initGalaxyCanvas() {
     desynchronized: true,
     willReadFrequently: false,
   });
+  // Combo BANNERS render on their own top-most layer (above the Commander comm box, z-index 9000)
+  // so a combo popup near the bottom-left is never hidden behind the HUD. Only the banner text/fx
+  // lives here — ambient ufoFx (sparks, freeze tint, powerups) stays on ufoFxCanvas below the
+  // commander so gameplay FX never cover the portrait. Cleared only while a banner is on screen.
+  const comboBannerCanvas = document.createElement("canvas");
+  const comboBannerCtx = comboBannerCanvas.getContext("2d", {
+    alpha: true,
+    desynchronized: true,
+    willReadFrequently: false,
+  });
+  let _comboBannerDirty = false; // true while the combo layer holds pixels (so we clear once on idle)
   plasmaOverlayCanvas.setAttribute("aria-hidden", "true");
   plasmaOverlayCanvas.style.position = "absolute";
   plasmaOverlayCanvas.style.pointerEvents = "none";
@@ -7457,6 +7472,17 @@ function initGalaxyCanvas() {
   ufoFxCanvas.style.zIndex = "3";
   ufoFxCanvas.style.inset = "auto";
   galaxyView.appendChild(ufoFxCanvas);
+  comboBannerCanvas.setAttribute("aria-hidden", "true");
+  // Fixed + parented next to #commanderHUD so it shares the root stacking context: galaxyView is a
+  // fixed z-index:20 context, so a canvas inside it can never paint above the commander (9000) no
+  // matter its z-index. As a commanderHUD sibling at 9500 it clears the comm box (below the 10000
+  // menu overlays). Geometry mirrors galaxyPlayCanvas each frame (galaxyView is fixed inset:0, so
+  // the play canvas's offsets equal viewport coords).
+  comboBannerCanvas.style.position = "fixed";
+  comboBannerCanvas.style.pointerEvents = "none";
+  comboBannerCanvas.style.zIndex = "9500";
+  comboBannerCanvas.style.inset = "auto";
+  (document.getElementById("commanderHUD")?.parentNode || document.body).appendChild(comboBannerCanvas);
   [bgVideoA, bgVideoB].forEach((video) => {
     if (video) video.style.zIndex = "0";
   });
@@ -8031,7 +8057,8 @@ function initGalaxyCanvas() {
     slotPaused = false;
     slotReels = [];
     slotLever.value = 0; slotLever.vel = 0; slotLever.mode = "rest"; slotLever.springTarget = 0;
-    slotWinFx.active = false; slotWinFx.lineActive = false; slotWinFx.parts.length = 0; slotWinFx.cells = []; slotWinFx.ctx = null;
+    slotWinFx.active = false; slotWinFx.lineActive = false; slotWinFx.parts.length = 0; slotWinFx.lines = []; slotWinFx.frost = false; slotWinFx.ctx = null;
+    if (slotWinFxResizeObs) { try { slotWinFxResizeObs.disconnect(); } catch { /* ignore */ } slotWinFxResizeObs = null; }
     for (const k in slotEls) delete slotEls[k];
     // Use-it-or-lose-it: discard unused tokens only on a listed real exit. Centralised here so
     // menu/normal exit can't forget; unlisted reasons preserve the bank (see SLOT_TOKEN_DISCARD_REASONS).
@@ -8112,18 +8139,25 @@ function initGalaxyCanvas() {
       r.ctx.setTransform(SLOT_DPR, 0, 0, SLOT_DPR, 0, 0);
       slotDrawReel(r);
     }
-    // Size the win-FX overlay canvas to the reels container.
-    if (slotEls.winFx && slotWinFx.ctx) {
-      const wr = slotEls.winFx.getBoundingClientRect();
-      const fw = wr.width || slotEls.winFx.clientWidth, fh = wr.height || slotEls.winFx.clientHeight;
-      slotWinFx.cw = fw; slotWinFx.ch = fh;
-      slotEls.winFx.width = Math.round(fw * SLOT_DPR); slotEls.winFx.height = Math.round(fh * SLOT_DPR);
-      slotWinFx.ctx.setTransform(SLOT_DPR, 0, 0, SLOT_DPR, 0, 0);
-    }
+    slotSizeWinFx();
     // Recompute the lever travel from the actual track height so the knob scales with the cabinet.
     if (slotEls.track && slotEls.knob) {
       slotLeverTravel = Math.max(40, slotEls.track.clientHeight - slotEls.knob.offsetHeight);
     }
+  }
+  // Sync the win-FX overlay canvas backing store to the reels container's CURRENT size. Called both
+  // on layout changes AND right before a win (slotStartWinFX) — the cabinet is responsive (aspect-
+  // ratio + vw/vh + safe-area), so a canvas sized once at open can go stale and make the streak
+  // coordinates overflow toward the top-left origin. Keeping this in lockstep with the live reel
+  // rects is what makes the payout streak land on the actual winning cells.
+  function slotSizeWinFx() {
+    if (!slotEls.winFx || !slotWinFx.ctx) return;
+    const wr = slotEls.winFx.getBoundingClientRect();
+    const fw = wr.width || slotEls.winFx.clientWidth, fh = wr.height || slotEls.winFx.clientHeight;
+    if (!fw || !fh) return;
+    slotWinFx.cw = fw; slotWinFx.ch = fh;
+    slotEls.winFx.width = Math.round(fw * SLOT_DPR); slotEls.winFx.height = Math.round(fh * SLOT_DPR);
+    slotWinFx.ctx.setTransform(SLOT_DPR, 0, 0, SLOT_DPR, 0, 0);
   }
   function slotDrawReel(r) {
     const ctx = r.ctx, mid = r.ch / 2, cx = r.cw / 2, len = r.len, rowH = r.ch / 3;
@@ -8246,7 +8280,10 @@ function initGalaxyCanvas() {
   const SLOT_LINE_COL = { freeze: "150,225,255", bomb: "255,150,60", goldbar: "255,220,120", jackpot: "185,150,255", quad: "190,130,255", missile: "255,95,95", points: "40,255,150", _: "40,255,150" };
   const SLOT_PW_LABEL = { quad: "QUAD SHOT!", missile: "MISSILE +1", bomb: "BOMB +1", freeze: "FREEZE +1" };
   const SLOT_PW_SUB = { quad: "Active next level", missile: "Added to inventory", bomb: "Added to inventory", freeze: "Added to inventory" };
-  const slotWinFx = { active: false, points: [], cells: [], parts: [], start: 0, lineStart: 0, lineActive: false, type: null, frost: false, cw: 0, ch: 0, ctx: null, dirty: false };
+  // lines: one entry per winning payline ({ points, cells, type }) so every simultaneous win streaks
+  // across its own cells. parts: shared particle pool. frost: any freeze line is present.
+  const slotWinFx = { active: false, lines: [], parts: [], start: 0, lineStart: 0, lineActive: false, frost: false, cw: 0, ch: 0, ctx: null, dirty: false };
+  let slotWinFxResizeObs = null; // keeps the overlay canvas synced across rotation / viewport / safe-area shifts
 
   function slotRoundRect(ctx, x, y, w, h, r) {
     ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
@@ -8260,31 +8297,37 @@ function initGalaxyCanvas() {
   function slotPushP(p) { if (slotWinFx.parts.length < SLOT_MAXP) slotWinFx.parts.push(p); }
   function slotClearWinFx() {
     slotWinFx.active = false; slotWinFx.lineActive = false; slotWinFx.parts.length = 0;
-    slotWinFx.cells = []; slotWinFx.frost = false; slotWinFx.type = null;
+    slotWinFx.lines = []; slotWinFx.frost = false;
     if (slotWinFx.ctx) slotWinFx.ctx.clearRect(0, 0, slotWinFx.cw, slotWinFx.ch);
   }
-  function slotStartWinFX(win) {
-    if (!slotEls.reels) return;
+  function slotLineType(prize) {
+    return prize.kind === "jackpot" ? "jackpot" : prize.kind === "powerup" ? prize.sym : prize.kind === "tokens" ? "goldbar" : "points";
+  }
+  // 2026-07-01: streak now handles EVERY simultaneous winning line (center + diagonals), each tracing
+  // its own payline so the flash lands on the actual winning cells — not a fixed corner. Resync the
+  // overlay canvas first so its coordinate space matches the live reel rects (the top-left-collapse bug).
+  function slotStartWinFX(wins) {
+    if (!slotEls.reels || !wins || !wins.length) return;
+    slotSizeWinFx();
     const rr = slotEls.reels.getBoundingClientRect();
-    // Only the columns that actually formed the win (res.idx) get the band + glow, so the flash
-    // lands on the winning symbols rather than the full 3-cell payline. Fall back to the whole
-    // line if idx is missing (jackpot/legacy paths always populate it).
-    const idx = win.res?.idx || win.pl.rows.map((_, i) => i);
-    const allPts = win.pl.rows.map((row, i) => {
-      const rc = slotReels[i].canvas.getBoundingClientRect(); const rowH = rc.height / 3;
-      return { x: rc.left - rr.left + rc.width / 2, y: rc.top - rr.top + (row * rowH + rowH / 2), half: Math.min(rc.width, rowH) / 2 };
-    });
-    // 2026-07-01: the payout STREAK traces the full payline so it travels across all three cells like
-    // a real slot line (a diagonal/vertical PAIR win previously only lit its 2 winning cells → the
-    // streak looked like it flashed just one corner). The bright per-symbol GLOW + particles stay on
-    // only the winning cells (idx) so non-matching corners don't pop.
-    const cellPts = allPts.filter((_, i) => idx.includes(i));
-    slotWinFx.points = allPts; slotWinFx.cells = cellPts; slotWinFx.lineStart = performance.now(); slotWinFx.start = slotWinFx.lineStart;
+    slotWinFx.lines = [];
+    slotWinFx.frost = false;
+    for (const win of wins) {
+      // Only the columns that actually formed the win (res.idx) get the per-symbol GLOW + particles,
+      // so non-matching corners don't pop; the STREAK still traces the full payline across all 3 cells.
+      const idx = win.res?.idx || win.pl.rows.map((_, i) => i);
+      const allPts = win.pl.rows.map((row, i) => {
+        const rc = slotReels[i].canvas.getBoundingClientRect(); const rowH = rc.height / 3;
+        return { x: rc.left - rr.left + rc.width / 2, y: rc.top - rr.top + (row * rowH + rowH / 2), half: Math.min(rc.width, rowH) / 2 };
+      });
+      const cellPts = allPts.filter((_, i) => idx.includes(i));
+      const type = slotLineType(win.prize);
+      if (type === "freeze") slotWinFx.frost = true;
+      slotWinFx.lines.push({ points: allPts, cells: cellPts, type });
+      slotSeedEffect(type, cellPts);
+    }
+    slotWinFx.lineStart = performance.now(); slotWinFx.start = slotWinFx.lineStart;
     slotWinFx.lineActive = true; slotWinFx.active = true;
-    const p = win.prize;
-    slotWinFx.type = p.kind === "jackpot" ? "jackpot" : p.kind === "powerup" ? p.sym : p.kind === "tokens" ? "goldbar" : "points";
-    slotWinFx.frost = slotWinFx.type === "freeze";
-    slotSeedEffect(slotWinFx.type, cellPts);
   }
   function slotClipWinFx(ctx) {
     const inset = isIOSWebKit ? 2.5 : 1;
@@ -8307,7 +8350,7 @@ function initGalaxyCanvas() {
     }
     if (cells.length > 1) { for (let i = 0; i <= 16; i += 1) slotSpawnLineP(type, slotPointOnPath(cells, i / 16)); }
   }
-  function slotLineCol() { return SLOT_LINE_COL[slotWinFx.type] || SLOT_LINE_COL._; }
+  function slotLineCol(type) { return SLOT_LINE_COL[type] || SLOT_LINE_COL._; }
   function slotPointOnPath(pts, f) {
     const segs = []; let total = 0;
     for (let i = 0; i < pts.length - 1; i += 1) { const L = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y); segs.push(L); total += L; }
@@ -8363,11 +8406,14 @@ function initGalaxyCanvas() {
   }
   function slotStrokePts(ctx, a) { ctx.beginPath(); ctx.moveTo(a[0].x, a[0].y); for (let i = 1; i < a.length; i += 1) ctx.lineTo(a[i].x, a[i].y); }
   function slotDrawWinBand(now) {
-    const ctx = slotWinFx.ctx, pts = slotWinFx.points, t = now - slotWinFx.lineStart, col = slotLineCol();
+    for (const line of slotWinFx.lines) slotDrawWinBandLine(now, line);
+  }
+  function slotDrawWinBandLine(now, line) {
+    const ctx = slotWinFx.ctx, pts = line.points, t = now - slotWinFx.lineStart, col = slotLineCol(line.type);
     const attack = Math.min(1, t / 90), decay = Math.max(0, 1 - (t - 90) / 980), env = attack * decay; if (env <= 0) return;
     const flick = 0.72 + 0.28 * Math.sin(t / 47) * Math.sin(t / 19);
     const reveal = Math.min(1, t / 140);
-    const baseHalf = slotWinFx.cells.length ? slotWinFx.cells[0].half : 24, half = baseHalf * (0.55 + 0.55 * env);
+    const baseHalf = line.cells.length ? line.cells[0].half : 24, half = baseHalf * (0.55 + 0.55 * env);
     ctx.save(); slotClipWinFx(ctx); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round"; ctx.lineJoin = "round";
     ctx.shadowColor = `rgba(${col},${0.9 * env})`; ctx.shadowBlur = 30 * env;
     ctx.lineWidth = half * 2.1; ctx.strokeStyle = `rgba(${col},${0.15 * env})`;
@@ -8389,7 +8435,7 @@ function initGalaxyCanvas() {
   function slotDrawFX(now, dt) {
     const ctx = slotWinFx.ctx; if (!ctx) return;
     const tline = now - slotWinFx.lineStart, lineActive = slotWinFx.lineActive && tline < SLOT_WIN_FX_DUR, teff = now - slotWinFx.start;
-    const glowActive = slotWinFx.cells.length && teff < 1700, frostActive = slotWinFx.frost && teff < 1700, jackpotActive = slotWinFx.type === "jackpot" && teff < 1700;
+    const glowActive = slotWinFx.lines.some((l) => l.cells.length) && teff < 1700, frostActive = slotWinFx.frost && teff < 1700, jackpotActive = slotWinFx.lines.some((l) => l.type === "jackpot") && teff < 1700;
     slotUpdateParticles(dt);
     if (!lineActive && !glowActive && !frostActive && !slotWinFx.parts.length) { if (slotWinFx.dirty) { ctx.clearRect(0, 0, slotWinFx.cw, slotWinFx.ch); slotWinFx.dirty = false; } slotWinFx.active = false; return; }
     ctx.clearRect(0, 0, slotWinFx.cw, slotWinFx.ch); slotWinFx.dirty = true;
@@ -8398,14 +8444,17 @@ function initGalaxyCanvas() {
       g.addColorStop(0, `rgba(180,140,255,${0.5 * a})`); g.addColorStop(0.4, `rgba(0,255,209,${0.22 * a})`); g.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = g; ctx.fillRect(0, 0, slotWinFx.cw, slotWinFx.ch); ctx.restore(); }
     if (glowActive) { const a = Math.max(0, 1 - teff / 1700) * (0.6 + 0.4 * Math.abs(Math.sin(teff / 110)));
-      const col = slotWinFx.frost ? "150,225,255" : slotWinFx.type === "bomb" ? "255,150,60" : slotWinFx.type === "goldbar" ? "255,220,120" : slotWinFx.type === "jackpot" ? "180,150,255" : "40,255,170";
       ctx.save(); slotClipWinFx(ctx); ctx.globalCompositeOperation = "lighter";
-      for (const c of slotWinFx.cells) { const R = c.half * 1.5; const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, R); g.addColorStop(0, `rgba(${col},${0.5 * a})`); g.addColorStop(1, `rgba(${col},0)`); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(c.x, c.y, R, 0, 6.283); ctx.fill(); }
+      for (const line of slotWinFx.lines) {
+        const col = line.type === "freeze" ? "150,225,255" : line.type === "bomb" ? "255,150,60" : line.type === "goldbar" ? "255,220,120" : line.type === "jackpot" ? "180,150,255" : "40,255,170";
+        for (const c of line.cells) { const R = c.half * 1.5; const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, R); g.addColorStop(0, `rgba(${col},${0.5 * a})`); g.addColorStop(1, `rgba(${col},0)`); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(c.x, c.y, R, 0, 6.283); ctx.fill(); }
+      }
       ctx.restore(); }
     if (frostActive) { const a = Math.min(1, teff / 300) * Math.max(0, 1 - Math.max(0, teff - 1100) / 600);
-      for (const c of slotWinFx.cells) { const s = c.half * 2 * 0.96; const g = ctx.createLinearGradient(c.x - c.half, c.y - c.half, c.x + c.half, c.y + c.half);
-        g.addColorStop(0, `rgba(205,240,255,${0.30 * a})`); g.addColorStop(0.5, `rgba(140,205,255,${0.10 * a})`); g.addColorStop(1, `rgba(225,245,255,${0.32 * a})`);
-        ctx.fillStyle = g; slotRoundRect(ctx, c.x - s / 2, c.y - s / 2, s, s, 8); ctx.fill(); } }
+      for (const line of slotWinFx.lines) { if (line.type !== "freeze") continue;
+        for (const c of line.cells) { const s = c.half * 2 * 0.96; const g = ctx.createLinearGradient(c.x - c.half, c.y - c.half, c.x + c.half, c.y + c.half);
+          g.addColorStop(0, `rgba(205,240,255,${0.30 * a})`); g.addColorStop(0.5, `rgba(140,205,255,${0.10 * a})`); g.addColorStop(1, `rgba(225,245,255,${0.32 * a})`);
+          ctx.fillStyle = g; slotRoundRect(ctx, c.x - s / 2, c.y - s / 2, s, s, 8); ctx.fill(); } } }
     if (lineActive) slotDrawWinBand(now);
     slotDrawParticles(ctx);
   }
@@ -8477,7 +8526,7 @@ function initGalaxyCanvas() {
     for (let ci = 0; ci < grid.length; ci += 1) {
       if (grid[ci][1] === "alien") extraLifeCells.push(ci);
     }
-    return { win: slotBestWin(wins), extraLife: extraLifeCells.length > 0, extraLifeCells };
+    return { win: slotBestWin(wins), wins, extraLife: extraLifeCells.length > 0, extraLifeCells };
   }
   function slotBestWin(wins) {
     const rank = (w) => ({ jackpot: 4, powerup: 3, tokens: 2, points: 1 })[w.prize.kind] || 0;
@@ -8572,7 +8621,7 @@ function initGalaxyCanvas() {
     if (tier >= 3) setTimeout(() => triggerGameplayHapticImpact(hapticImpactStyle.Heavy), 80);
   }
   function slotApplyOutcome() {
-    const { win, extraLife, extraLifeCells } = slotEvaluate(slotReadGrid());
+    const { win, wins, extraLife, extraLifeCells } = slotEvaluate(slotReadGrid());
     if (extraLife) {
       arcadeLives = clamp(arcadeLives + 1, 0, MAX_LIVES);
       renderLives();
@@ -8585,7 +8634,7 @@ function initGalaxyCanvas() {
     }
     slotPayoutImpact(win, extraLife);
     slotEls.reels?.classList.add("win");
-    slotStartWinFX(win);
+    slotStartWinFX(wins);
     const p = win.prize;
     if (p.kind === "jackpot") { if (extraLife) playGameSfx("plasmarecharged1", 0.9, { important: true }); slotJackpotPresent(extraLife); return; }
     // per-reward payout cue (falls back to slot_win when the reward-specific file is absent)
@@ -8964,6 +9013,12 @@ function initGalaxyCanvas() {
     // Build the reels and start the (cancellable) render/physics loop + slot music.
     slotMakeReels();
     requestAnimationFrame(slotSizeReels); // re-measure once CSS layout has settled
+    // The cabinet is responsive; keep the reels + win-FX overlay synced as its box settles/changes
+    // (safe-area, rotation) so the payout streak always maps to the live cell positions.
+    if (typeof ResizeObserver === "function" && slotEls.reels && !slotWinFxResizeObs) {
+      slotWinFxResizeObs = new ResizeObserver(() => slotSizeReels());
+      try { slotWinFxResizeObs.observe(slotEls.reels); } catch { /* ignore */ }
+    }
     slotStartFrameLoop();
     slotStartMusic();
     // After the lockout: become READY and invite the pull.
@@ -10049,6 +10104,14 @@ function initGalaxyCanvas() {
       }
       drawCtx.restore();
     }
+  }
+
+  // Combo BANNERS (headline + points + slam fx) render on the dedicated top-most comboBannerCanvas
+  // (above the Commander comm box / HUD) so a combo popup is never hidden behind UI. Owns the
+  // comboBanners lifecycle (expiry splices). Ambient combo FX (bursts/particles) stay on ufoFx.
+  function drawComboBanners(drawCtx, now) {
+    if (!drawCtx || !comboBanners.length) return;
+    const underFramePressure = isIOSNative && !!sim._frameBudgetExceeded;
     for (let i = comboBanners.length - 1; i >= 0; i -= 1) {
       const b = comboBanners[i];
       const t = clamp((now - b.start) / COMBO_BANNER_TTL_MS, 0, 1);
@@ -10130,6 +10193,20 @@ function initGalaxyCanvas() {
       drawCtx.strokeText(sub, safeX, clamp(safeY + base * 0.82, 66, Math.max(66, sim.height - 24)), maxW);
       drawCtx.fillText(sub, safeX, clamp(safeY + base * 0.82, 66, Math.max(66, sim.height - 24)), maxW);
       drawCtx.restore();
+    }
+  }
+
+  // Renders combo banners on the top-most layer. Only touches the canvas while a banner is on
+  // screen (clearing once when the last one expires) so idle gameplay pays no per-frame cost.
+  function drawComboBannersLayer(now) {
+    if (!comboBannerCtx) return;
+    if (comboBanners.length) {
+      comboBannerCtx.clearRect(0, 0, sim.width, sim.height);
+      drawComboBanners(comboBannerCtx, now);
+      _comboBannerDirty = true;
+    } else if (_comboBannerDirty) {
+      comboBannerCtx.clearRect(0, 0, sim.width, sim.height);
+      _comboBannerDirty = false;
     }
   }
 
@@ -12894,6 +12971,17 @@ function initGalaxyCanvas() {
     ufoFxCanvas.width = galaxyPlayCanvas.width;
     ufoFxCanvas.height = galaxyPlayCanvas.height;
     ufoFxCtx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
+    // Combo banner overlay tracks the same geometry (it's position:fixed, but galaxyView is fixed
+    // inset:0 so the play canvas's left/top already equal viewport coords).
+    if (comboBannerCtx) {
+      comboBannerCanvas.style.left = galaxyPlayCanvas.style.left;
+      comboBannerCanvas.style.top = galaxyPlayCanvas.style.top;
+      comboBannerCanvas.style.width = galaxyPlayCanvas.style.width;
+      comboBannerCanvas.style.height = galaxyPlayCanvas.style.height;
+      comboBannerCanvas.width = galaxyPlayCanvas.width;
+      comboBannerCanvas.height = galaxyPlayCanvas.height;
+      comboBannerCtx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
+    }
   }
 
   function setPlasmaOverlayVisible(visible) {
@@ -14101,7 +14189,7 @@ function initGalaxyCanvas() {
     }
 
     // Triumphant chime layered over the boom barrage.
-    playGameSfx("level_up", 0.95);
+    playGameSfx("level_up", 0.55);
 
     // 2026-06-24: commander signs off the run with a "you win" line over the celebration (new CMDR
     // drop). Small delay so it lands after the chime/first boom rather than on top of them. The
@@ -16251,6 +16339,10 @@ function initGalaxyCanvas() {
 
   function showModeSelect({ preserveArcade = false, openArcadeMenu = false } = {}) {
     hideArcadeOverlay();
+    // The combo banner layer lives on a body-level canvas (above the HUD); wipe any lingering
+    // banner so it can't float over the mode-select menu when we leave mid-combo.
+    comboBanners.length = 0;
+    if (comboBannerCtx) { comboBannerCtx.clearRect(0, 0, sim.width, sim.height); _comboBannerDirty = false; }
     retryPending = false;
     stopWarningState();
     commBoxController.setLevelEndLock(false); // 2026-06-21 (Item 1b): never carry the level-end VO lock into menus (e.g. the final-level win path bypasses startLevel)
@@ -16423,14 +16515,27 @@ function initGalaxyCanvas() {
   // — a zero-cost "ghost" (no extra draw pass / silhouette canvas). Gated to when the HUD is actually on
   // screen AND a rock overlaps its rect, and throttled to ~15Hz, so it costs essentially nothing.
   let _commHudEl = null;
+  let _commTickerEl = null;
   let _stroidBehindHudNext = 0;
   let _stroidBehindHud = false;
+  // True if any non-ambient stroid overlaps the given rect (rect already in sim/canvas space).
+  function anyStroidInRect(hx0, hy0, hx1, hy1) {
+    const list = sim.asteroids;
+    for (let i = 0; i < list.length; i += 1) {
+      const a = list[i];
+      if (a.ambient) continue;
+      const r = a.r || 0;
+      if (a.x + r > hx0 && a.x - r < hx1 && a.y + r > hy0 && a.y - r < hy1) return true;
+    }
+    return false;
+  }
   function updateStroidBehindHud(now) {
     if (now < _stroidBehindHudNext) return;
     _stroidBehindHudNext = now + 66; // ~15Hz
     if (!_commHudEl) _commHudEl = document.getElementById("commanderHUD");
     const hud = _commHudEl;
     if (!hud) return;
+    if (!_commTickerEl) _commTickerEl = document.getElementById("commanderTicker");
     const commRect = hud.getBoundingClientRect();
     const canvasRect = galaxyPlayCanvas?.getBoundingClientRect();
     // display:none / collapsed / off-canvas → treat as not obstructing (getBoundingClientRect is ~0).
@@ -16439,15 +16544,22 @@ function initGalaxyCanvas() {
       && !hud.classList.contains("comm-collapsed");
     let behind = false;
     if (visible) {
-      // HUD rect in sim/canvas space (sim coords == canvas CSS px; see awardCombo for the same mapping).
+      // Portrait/mug rect in sim/canvas space (sim coords == canvas CSS px; see awardCombo).
+      // getBoundingClientRect on #commanderHUD only spans the in-flow portrait — the ticker text
+      // box is position:absolute, so it's tested separately below.
       const hx0 = commRect.left - canvasRect.left, hy0 = commRect.top - canvasRect.top;
       const hx1 = commRect.right - canvasRect.left, hy1 = commRect.bottom - canvasRect.top;
-      const list = sim.asteroids;
-      for (let i = 0; i < list.length; i += 1) {
-        const a = list[i];
-        if (a.ambient) continue;
-        const r = a.r || 0;
-        if (a.x + r > hx0 && a.x - r < hx1 && a.y + r > hy0 && a.y - r < hy1) { behind = true; break; }
+      behind = anyStroidInRect(hx0, hy0, hx1, hy1);
+      // Also ghost when a stroid hides behind the comms TEXT BOX, even if nothing's under the mug.
+      if (!behind && _commTickerEl) {
+        const op = parseFloat(getComputedStyle(_commTickerEl).opacity || "0");
+        const tRect = _commTickerEl.getBoundingClientRect();
+        if (op > 0.05 && tRect.width > 20 && tRect.height > 20
+          && tRect.bottom > canvasRect.top && tRect.top < canvasRect.bottom) {
+          behind = anyStroidInRect(
+            tRect.left - canvasRect.left, tRect.top - canvasRect.top,
+            tRect.right - canvasRect.left, tRect.bottom - canvasRect.top);
+        }
       }
     }
     if (behind !== _stroidBehindHud) {
@@ -17428,6 +17540,7 @@ function initGalaxyCanvas() {
       // overlay so it's never hidden behind a powerup sprite (Part 5, 2026-06-17).
       drawMissileFx(ufoFxCtx || ctx, now);
       drawComboFxOverlay(ufoFxCtx || ctx, now);
+      drawComboBannersLayer(now);
       return;
     }
     setPlasmaOverlayVisible(true);
@@ -17795,6 +17908,7 @@ function initGalaxyCanvas() {
     // KEEP LAST (over powerups): crosshair must sit above powerup sprites (Part 5, 2026-06-17).
     drawMissileFx(ufoFxCtx || ctx, now);
     drawComboFxOverlay(ufoFxCtx || ctx, now);
+    drawComboBannersLayer(now);
 
     if (_frameBudgetExceeded && isIOSNative && sim.particles.length > 22) {
       const dropCount = sim.particles.length - 22;

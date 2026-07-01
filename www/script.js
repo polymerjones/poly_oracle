@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-06-30 15:38";
+const BUILD_TS = "2026-07-01 10:21";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -566,6 +566,9 @@ const LANDMINE_FUSE_MS = 8000; // 2026-06-09: auto-armed ("armed" phase) countdo
 const BOMB_POWERUP_INTERVAL_MIN = 25000;
 const BOMB_POWERUP_INTERVAL_MAX = 35000;
 const BOMB_POWERUP_LIFETIME_MS = 10000;
+// 2026-07-01: short on-screen life for ~half of the gold-bar powerups so extra ones (once the token
+// bank is deep) fade fast instead of cluttering the field — see spawnPowerupAt.
+const GOLDBAR_SHORT_LIFETIME_MS = 6000;
 const MUSIC_MAX_GAIN = 1.0; // 2026-06-10: was 0.9, bumped to full
 // 2026-06-23 PERF: max decoded music tracks kept in memory (see audioEngine._evictMusicBuffers).
 // 2026-06-26: dropped 4→2 (currently-playing + prefetched-next only, no slack). Each entry is
@@ -690,7 +693,9 @@ const ARCADE_LEVELS = [
     spriteKey: "roid01", // 2026-06-23: silver stroids for the whole level
     musicVolume: 1.15 }, // 2026-06-17: +15% music gain for this level
   { level: 7, label: "Into The Deep", time: 60, totalToClear: 16, startSpawn: 5, spawnEveryMs: 1800, maxOnScreen: 13,
-    guaranteedSpawn: [{ type: "goldbars", atMs: 14000 }, { type: "goldbars", atMs: 36000 }] },
+    // 2026-07-01: was two guaranteed goldbars (14s + 36s) — trimmed to one; the double drop plus the
+    // weighted-pool goldbars made L7 pile up tokens to a disruptive degree.
+    guaranteedSpawn: [{ type: "goldbars", atMs: 14000 }] },
   { level: 8, label: "DEEP FREEZE", time: 64, totalToClear: 18, startSpawn: 6, spawnEveryMs: 1600, maxOnScreen: 14,
     // 2026-06-24: mid-level skin shift — asteroids spawned after the shift mark come in ice-blue
     // (earlier ones keep their skin). Honored by pickArcadeSpriteOverride at the spawn call.
@@ -1415,7 +1420,9 @@ const hudLives = document.getElementById("hudLives");
 const hudScore = document.getElementById("hudScore");
 const hudGameTimer = document.getElementById("hudGameTimer");
 const hudBombBtn = document.getElementById("hudBombBtn");
+const hudBombCount = document.getElementById("hudBombCount");
 const hudFreezeBtn = document.getElementById("hudFreezeBtn");
+const hudFreezeCount = document.getElementById("hudFreezeCount");
 // 2026-06-21: debounce the freeze HUD button so a fast double-tap can't toggle
 // freeze on-then-off and waste a charge (guards the shared toggleFreezeFromInventory path).
 let _lastFreezeToggleAt = 0;
@@ -1624,6 +1631,12 @@ const commBoxController = (() => {
     // dump1
     "vo-hairytakeemout.mp3",
     "vo-lets_blast_these_stroids.mp3",
+    // 2026-07-01: new CMDR "let's blast these stroids" drop (5 variations; _hehaha one ends on a laugh).
+    "cmdr_lets_blast_these_stroids_new1.mp3",
+    "cmdr_lets_blast_these_stroids_new2.mp3",
+    "cmdr_lets_blast_these_stroids_hehaha_new3.mp3",
+    "cmdr_lets_blast_these_stroids_new4.mp3",
+    "cmdr_lets_blast_these_stroids_new5.mp3",
     "vo-welcometothepolyverse.mp3",
     "vo-ufo_spotted_takeemout.mp3",
     // dump2
@@ -1684,6 +1697,17 @@ const commBoxController = (() => {
     // 2026-06-24: ominous intro lines (new CMDR drop) — sit alongside "this definitely concerns you".
     "CMDR_this_looks_like_a_world_of_trouble_cadet.mp3",
     "CMDR_this_looks_like_a_world_of_trouble_cadet_alternate.mp3",
+  ];
+
+  // 2026-07-01: CMDR "let's blast these 'stroids" intro pool — the original line plus 5 new drops
+  // (the _hehaha variant ends on a laugh). Rotated at the L1/L10 intro beats via pickFromPool.
+  const POOL_CMDR_BLAST = [
+    "vo-lets_blast_these_stroids.mp3",
+    "cmdr_lets_blast_these_stroids_new1.mp3",
+    "cmdr_lets_blast_these_stroids_new2.mp3",
+    "cmdr_lets_blast_these_stroids_hehaha_new3.mp3",
+    "cmdr_lets_blast_these_stroids_new4.mp3",
+    "cmdr_lets_blast_these_stroids_new5.mp3",
   ];
 
   const POOL_LEVEL_COMPLETE = [
@@ -1873,6 +1897,11 @@ const commBoxController = (() => {
     "gauntlet_intro.mp3": "THIS IS IT CADET. THE GAUNTLET. GIVE IT EVERYTHING YOU'VE GOT.",
     "vo-hairytakeemout.mp3": "IT'S HAIRY OUT THERE. TAKE 'EM OUT.",
     "vo-lets_blast_these_stroids.mp3": "LET'S BLAST THESE 'STROIDS.",
+    "cmdr_lets_blast_these_stroids_new1.mp3": "LET'S BLAST THESE 'STROIDS!",
+    "cmdr_lets_blast_these_stroids_new2.mp3": "LET'S BLAST THESE 'STROIDS!",
+    "cmdr_lets_blast_these_stroids_hehaha_new3.mp3": "LET'S BLAST THESE 'STROIDS! HE-HAH!",
+    "cmdr_lets_blast_these_stroids_new4.mp3": "LET'S BLAST THESE 'STROIDS!",
+    "cmdr_lets_blast_these_stroids_new5.mp3": "LET'S BLAST THESE 'STROIDS!",
     "vo-welcometothepolyverse.mp3": "WELCOME TO THE POLYVERSE.",
     "vo-ufo_spotted_takeemout.mp3": "UFO SPOTTED. TAKE 'EM OUT.",
     "vo-cadet_theres_a_bomb.mp3": "CADET - THERE'S A BOMB.",
@@ -1909,7 +1938,7 @@ const commBoxController = (() => {
     "CMDR_get_the_alien_cadet_alternate.mp3": "GET THE ALIEN, CADET.",
     "CMDR_i_dont_know_where_they_found_you_cadet_but_youre_killin_it.mp3": "I DON'T KNOW WHERE THEY FOUND YOU, CADET, BUT YOU'RE KILLIN' IT.",
     "CMDR_id_be_lost_without_you_cadet_alternate.mp3": "I'D BE LOST WITHOUT YOU, CADET.",
-    "CMDR_level_7_start_were_getting_deeper.mp3": "WE'RE GETTING DEEPER.",
+    "CMDR_level_7_start_were_getting_deeper.mp3": "WE GETTING DEEPER INTO THE POLYVERSE.",
     "CMDR_this_looks_like_a_world_of_trouble_cadet.mp3": "THIS LOOKS LIKE A WORLD OF TROUBLE, CADET.",
     "CMDR_this_looks_like_a_world_of_trouble_cadet_alternate.mp3": "THIS LOOKS LIKE A WORLD OF TROUBLE, CADET.",
     "CMDR_you_really_are_doing_a_great_job_cadet.mp3": "YOU REALLY ARE DOING A GREAT JOB, CADET.",
@@ -2917,6 +2946,7 @@ const commBoxController = (() => {
     reactTo,
     pickFromPool,
     POOL_LEVEL_START,
+    POOL_CMDR_BLAST,
     POOL_LEVEL_COMPLETE,
     POOL_LEVEL_COMPLETE_LATE,
     POOL_UFO_SPOTTED,
@@ -8136,7 +8166,7 @@ function initGalaxyCanvas() {
   // ── Paytable / evaluation / win FX (ported verbatim from prototypes/slot-machine.html) ─────────
   const SLOT_PAYLINES = [{ n: "center", rows: [1, 1, 1] }, { n: "diag\\", rows: [0, 1, 2] }, { n: "diag/", rows: [2, 1, 0] }];
   const SLOT_NUKE_CAP = 1;
-  const SLOT_POINTS = { jackpotOwned: 5000, wild3: 3000, jackpot2: 2500, pow2: 1000 };
+  const SLOT_POINTS = { jackpotOwned: 5000, wild3: 3000, jackpot2: 2500 };
   const SLOT_TOK = { goldbar3: 3, goldbar2: 1 };
   const SLOT_LINE_RANK = ["jackpot", "goldbar", "bomb", "missile", "quad", "freeze"];
   const SLOT_WIN_FX_DUR = 1350, SLOT_MAXP = 150;
@@ -8163,10 +8193,14 @@ function initGalaxyCanvas() {
   function slotStartWinFX(win) {
     if (!slotEls.reels) return;
     const rr = slotEls.reels.getBoundingClientRect();
+    // Only the columns that actually formed the win (res.idx) get the band + glow, so the flash
+    // lands on the winning symbols rather than the full 3-cell payline. Fall back to the whole
+    // line if idx is missing (jackpot/legacy paths always populate it).
+    const idx = win.res?.idx || win.pl.rows.map((_, i) => i);
     const pts = win.pl.rows.map((row, i) => {
       const rc = slotReels[i].canvas.getBoundingClientRect(); const rowH = rc.height / 3;
       return { x: rc.left - rr.left + rc.width / 2, y: rc.top - rr.top + (row * rowH + rowH / 2), half: Math.min(rc.width, rowH) / 2 };
-    });
+    }).filter((_, i) => idx.includes(i));
     slotWinFx.points = pts; slotWinFx.cells = pts; slotWinFx.lineStart = performance.now(); slotWinFx.start = slotWinFx.lineStart;
     slotWinFx.lineActive = true; slotWinFx.active = true;
     const p = win.prize;
@@ -8314,15 +8348,22 @@ function initGalaxyCanvas() {
     if (syms.includes("alien")) return { kind: "none" };
     const wild = syms.filter((s) => s === "wild").length;
     const reals = syms.filter((s) => s !== "wild");
-    if (reals.length === 0) return wild === 3 ? { kind: "triple", sym: "wild" } : { kind: "none" };
+    if (reals.length === 0) return wild === 3 ? { kind: "triple", sym: "wild", idx: [0, 1, 2] } : { kind: "none" };
     const counts = {}; reals.forEach((s) => { counts[s] = (counts[s] || 0) + 1; });
     let best = null;
     for (const s in counts) {
       const eff = counts[s] + (s === "jackpot" ? 0 : wild);
       if (!best || eff > best.eff || (eff === best.eff && SLOT_LINE_RANK.indexOf(s) < SLOT_LINE_RANK.indexOf(best.sym))) best = { sym: s, eff };
     }
-    if (best.eff >= 3) return { kind: "triple", sym: best.sym };
-    if (best.eff >= 2) return { kind: "pair", sym: best.sym };
+    // 2026-07-01: track WHICH columns actually formed the win (matching symbol + any wild that
+    // counts toward it) so the win FX flashes only the winning symbols, not the whole payline —
+    // a goldbar pair on a diagonal was lighting up the non-matching corner cell. (jackpot ignores
+    // wilds, so a jackpot line only credits the real jackpot cells.)
+    const contributes = (s) => s === best.sym || (s === "wild" && best.sym !== "jackpot");
+    const idx = [];
+    for (let i = 0; i < syms.length; i += 1) if (contributes(syms[i])) idx.push(i);
+    if (best.eff >= 3) return { kind: "triple", sym: best.sym, idx };
+    if (best.eff >= 2) return { kind: "pair", sym: best.sym, idx };
     return { kind: "none" };
   }
   function slotPrizeForLine(res) {
@@ -8339,7 +8380,9 @@ function initGalaxyCanvas() {
       switch (res.sym) {
         case "jackpot": return { kind: "points", value: SLOT_POINTS.jackpot2 };
         case "goldbar": return { kind: "tokens", value: SLOT_TOK.goldbar2 };
-        case "quad": case "missile": case "bomb": case "freeze": return { kind: "points", value: SLOT_POINTS.pow2 };
+        // 2026-07-01: weapon PAIRS no longer pay — with weapon symbols dominating the strip a pair hit
+        // almost every spin (the flat "+1000 every pull" problem). Only a weapon TRIPLE (→ the powerup)
+        // rewards weapons now; pairs read as near-misses.
         default: return { kind: "none" };
       }
     }
@@ -9070,12 +9113,19 @@ function initGalaxyCanvas() {
   // human-friendly "freeze" alias for the snowflake (freeze) powerup used in level powerupOverrides.
   function spawnPowerupAt(type, pt = randomPowerupPoint()) {
     const normalized = type === "freeze" ? "snowflake" : type;
+    // 2026-07-01: gold-bar powerups pile up (disruptive once the token bank is deep), so ~half of
+    // them get a SHORT grab window (GOLDBAR_SHORT_LIFETIME_MS) instead of the full lifetime — you
+    // have to be quick to bank the extra ones. Every other powerup keeps the standard lifetime.
+    const lifeMs = normalized === "goldbars" && Math.random() < 0.5
+      ? GOLDBAR_SHORT_LIFETIME_MS
+      : BOMB_POWERUP_LIFETIME_MS;
     powerups.push({
       type: normalized,
       x: pt.x,
       y: pt.y,
       r: 22,
       spawnedAt: performance.now(),
+      lifeMs,
       opacity: 1.0,
     });
     return powerups[powerups.length - 1];
@@ -9402,7 +9452,8 @@ function initGalaxyCanvas() {
     // 2026-06-09: always visible — grayed-out empty slot at 0, full + count when stocked.
     const hasBombs = playerBombInventory > 0;
     hudBombBtn.style.display = "";
-    hudBombBtn.textContent = `\u{1F4A3} \xD7${playerBombInventory}`;
+    // 2026-07-01: icon lives in a static <img>; only the count text updates (was an emoji glyph).
+    if (hudBombCount) hudBombCount.textContent = `\xD7${playerBombInventory}`;
     hudBombBtn.disabled = !hasBombs;
     hudBombBtn.classList.toggle("has-bombs", hasBombs);
     // pulse for attention only when bombs are available and not currently aiming
@@ -9418,13 +9469,15 @@ function initGalaxyCanvas() {
     // freeze is still resumable. That state used to show a dead-looking "❄ ×0"; show a paused
     // glyph + lit pulsing glow instead so the player knows there's freeze left to tap.
     const pausedWithBank = !_freezeActive && _freezeBankMs > 0;
-    // Freeze active takes precedence: "❄ ON" while running (still tappable to unfreeze);
-    // "❄ ❚❚" while paused-with-bank; otherwise the inventory count.
-    hudFreezeBtn.textContent = _freezeActive
-      ? "❄ ON"
-      : pausedWithBank
-        ? "❄ ❚❚"
-        : `❄ \xD7${playerFreezeInventory}`;
+    // 2026-07-01: snowflake icon lives in a static <img>; the count span shows the state text.
+    // "ON" while running (still tappable to unfreeze); "❚❚" while paused-with-bank; else the count.
+    if (hudFreezeCount) {
+      hudFreezeCount.textContent = _freezeActive
+        ? "ON"
+        : pausedWithBank
+          ? "❚❚"
+          : `\xD7${playerFreezeInventory}`;
+    }
     // Keep enabled while there's banked time to pause/resume, even with empty inventory.
     hudFreezeBtn.disabled = !hasFreezes && _freezeBankMs <= 0;
     hudFreezeBtn.classList.toggle("has-freezes", hasFreezes);
@@ -9445,7 +9498,8 @@ function initGalaxyCanvas() {
     const has = count > 0;
     const reloading = nowM < missileReloadUntil;
     hudMissileBtn.style.display = "";
-    const label = `\u{1F680} \xD7${count}`;
+    // 2026-07-01: rocket icon lives in a static <img>; only the count text updates (was 🚀 glyph).
+    const label = `\xD7${count}`;
     if (hudMissileCount && hudMissileCount.textContent !== label) {
       hudMissileCount.textContent = label;
     }
@@ -9970,7 +10024,7 @@ function initGalaxyCanvas() {
         awardCombo({
           key: "marksman",
           label: "MARKSMAN COMBO",
-          points: 1000,
+          points: 500,
           x,
           y,
           colors: ["80,220,255", "255,255,255"],
@@ -10006,7 +10060,7 @@ function initGalaxyCanvas() {
           awardCombo({
             key: "net_ufo_net",
             label: "NET-UFO-NET COMBO!",
-            points: 500,
+            points: 1500,
             x,
             y,
             colors: ["0,255,209", "255,85,255"],
@@ -14245,7 +14299,7 @@ function initGalaxyCanvas() {
       // 2026-06-24: L10 — after the 8s hush the commander opens with the blast line (its only intro).
       if (levelNum === 10) {
         commBoxController.queueVO({
-          audioSrc: commBoxController.commVoSrc("vo-lets_blast_these_stroids.mp3"),
+          voFile: commBoxController.pickFromPool("cmdrBlast", commBoxController.POOL_CMDR_BLAST),
           event: "commander",
         });
         return;
@@ -14282,7 +14336,7 @@ function initGalaxyCanvas() {
           return;
         }
         commBoxController.queueVO({
-          audioSrc: commBoxController.commVoSrc("vo-lets_blast_these_stroids.mp3"),
+          voFile: commBoxController.pickFromPool("cmdrBlast", commBoxController.POOL_CMDR_BLAST),
         });
       }
       setTimeout(fireSecondVO, 800);
@@ -15584,7 +15638,7 @@ function initGalaxyCanvas() {
       // HUD icon, not arming — corrected text + dedicated SPC recording (vo/SPC_tap_the_bomb_icon_hud.mp3).
       spcVO("tap_the_bomb_icon_hud", "Tap the bomb icon on your HUD.", "talk_calm");
       showHudPointer("hudBombBtn", 0); // persist the arrow until the icon is tapped
-      showTaskInstructionDeferred("TAP THE 💣 ICON ON YOUR HUD");
+      showTaskInstructionDeferred("TAP THE BOMB ICON ON YOUR HUD");
       await waitFor(() => bombAimMode);
       hideHudPointer();
       hideTaskInstruction();
@@ -15657,7 +15711,7 @@ function initGalaxyCanvas() {
       // dedicated recording (vo/SPC_tap_freeze_on_hud_to_activate_it.mp3).
       spcVO("tap_freeze_on_hud_to_activate_it", "Tap the freeze button on your HUD to activate it.", "idle_soft");
       showHudPointer("hudFreezeBtn", 6000);
-      showTaskInstructionDeferred("TAP ❄ IN YOUR HUD TO ACTIVATE");
+      showTaskInstructionDeferred("TAP THE FREEZE ICON IN YOUR HUD TO ACTIVATE");
       await waitEvent("freeze");
       hideHudPointer();
       hideTaskInstruction();
@@ -15728,7 +15782,7 @@ function initGalaxyCanvas() {
       await waitPowerupCollected("missile");
       spcVO("66", "Tap the missile weapon in the HUD to arm a missile.", "alert");
       showHudPointer("hudMissileBtn", 6000);
-      showTaskInstructionDeferred("TAP 🚀 IN YOUR HUD");
+      showTaskInstructionDeferred("TAP THE MISSILE ICON IN YOUR HUD");
       await waitFor(() => missileAimMode);
       hideHudPointer();
       spcVO("67", "Now tap to set a target and watch the destruction.", "alert");
@@ -16550,7 +16604,7 @@ function initGalaxyCanvas() {
         }
         // expire after lifetime (powerup expiry keeps running even during a snowflake freeze)
         for (let pi = powerups.length - 1; pi >= 0; pi -= 1) {
-          if (now - powerups[pi].spawnedAt > BOMB_POWERUP_LIFETIME_MS) powerups.splice(pi, 1);
+          if (now - powerups[pi].spawnedAt > (powerups[pi].lifeMs ?? BOMB_POWERUP_LIFETIME_MS)) powerups.splice(pi, 1);
         }
         updateHudMissileInventory();
       }

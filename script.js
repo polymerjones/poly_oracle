@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-01 16:44";
+const BUILD_TS = "2026-07-01 16:54";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -18378,7 +18378,10 @@ function initGalaxyCanvas() {
       // charge-up on activation; supersedes the missile weapon like quad shot does.
       pulseCannonUntil = performance.now() + PULSE_CANNON_DURATION_MS;
       updateHudPulseBadge();
-      playGameSfx("pulse_cannon_charge", 0.9);
+      // 2026-07-01: `important` so the pickup-frame iOS 2-SFX budget (blip + crunch already
+      // fired this frame) can't drop the arm-up cue — the Pulse Cannon self-arms on pickup, so
+      // this charge sound IS the "weapon armed" confirmation and must land with the pickup.
+      playGameSfx("pulse_cannon_charge", 0.9, { important: true });
       cssFlash("#00ffc8", 0.22, 250);
       playerMissileInventory = 0;
       missileAimMode = false;

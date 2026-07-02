@@ -37,6 +37,10 @@ Every item below must be resolved before App Store submission:
 - [ ] Remove forced goldbars spawn in the level's final 15s (`goldbarsForceSpawnedThisLevel`)
 - [ ] Missile level gate → restore `missileUnlocked` to `level >= 5` (currently `>= 1`)
 - [ ] Remove forced missile spawn at level start (`missileForceSpawnedThisLevel`)
+- [ ] Pulse Cannon gate → DECIDE final policy. Currently `pulseUnlocked` is `level >= 1` and every
+      level force-spawns one Pulse Cannon (2026-07-01 "keep it on every level for now"), plus a
+      second later drop on `SECOND_PULSE_LEVELS`. Before ship, decide whether to restore
+      `pulseUnlocked` to `>= 5` and/or scope which levels guarantee/second-drop the weapon.
 - [ ] Search script.js for `DEBUG: revert before release` and resolve **all** hits
 - [ ] Verify `hasBeatenGame()` has no overrides
 

@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-01 17:20";
+const BUILD_TS = "2026-07-01 20:11";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -825,23 +825,33 @@ const ARCADE_LEVELS = [
     level: 15,
     label: "THE GAUNTLET",
     time: 60,
-    totalToClear: 50,
+    // 2026-07-01: beatability retune. Was totalToClear 50 of mostly big splitting rocks in 60s with
+    // ZERO guaranteed timers — effectively unwinnable (must spawn all 50 roots AND clear every child).
+    // Now 34 roots + 2 make-or-break timer drops (like L13/L14) + eased base speed + a smaller surge.
+    totalToClear: 34,
     startSpawn: 10,
     spawnEveryMs: 5000,
     maxOnScreen: 16,
     asteroidKinds: [3, 3, 2, 2, 1],
-    asteroidSpeedMult: 1.3,
+    asteroidSpeedMult: 1.2,      // 2026-07-01: eased 1.3→1.2 (speedEscalation still ramps it live)
     noUfo: false,
     ufoSpawnAt: 10,
     dualUfo: true,               // NOT yet wired — see setupUfoSpawnForLevel TODO
     mineLaunch: true,
     mineCount: 2,
     waves: [
-      { count: 10, triggerAtRemaining: 20 }, // 2026-06-23: wired — surge fires in the main loop
+      { count: 6, triggerAtRemaining: 20 }, // 2026-07-01: eased 10→6 surge to match the lower total
     ],
     // 2026-06-16: missile-heavy mix with every type available, dropping every 12s.
-    powerupOverride: ["missile", "missile", "timer", "freeze", "quadshot", "bomb", "goldbars"],
+    // 2026-07-01: + pulse so the Pulse Cannon is available in the finale (also force-spawned per level).
+    powerupOverride: ["missile", "missile", "timer", "freeze", "quadshot", "bomb", "goldbars", "pulse"],
     powerupIntervalMs: 12000,
+    // 2026-07-01: two guaranteed +30s timer drops — the level's make-or-break lifeline (mirrors the
+    // L13/L14 timer-chain design). Without these the clock can't cover clearing the splitting field.
+    guaranteedSpawn: [
+      { type: "timer", atMs: 18000 },
+      { type: "timer", atMs: 40000 },
+    ],
     speedEscalation: true,       // 2026-06-16: live asteroids ramp speed over the level (cap 2.5x)
     musicVolume: 1.4,            // 2026-06-25: L15 was too quiet — it plays the L10 boss track as a
                                  // fallback at default 1.0 gain (quieter than L10's own 1.15). Boost
@@ -3377,6 +3387,7 @@ const audioEngine = {
   musicGain: null,
   _freezeFilter: null,  // 2026-06-17: highpass (low-cut) in the freeze bandpass chain
   _freezeFilter2: null, // 2026-06-17: lowpass (high-cut) in the freeze bandpass chain
+  _pulseFilter: null,   // 2026-07-01: lowpass (high-cut) music dip while the Pulse Cannon runs
   musicBuffers: new Map(),
   currentMusic: null,
   currentMusicHtml: null,
@@ -3413,6 +3424,8 @@ const audioEngine = {
     this.musicGain = null;
     this._freezeFilter = null;
     this._freezeFilter2 = null;
+    this._pulseFilter = null;
+    this._musicGainBeforePulse = null;
     this._musicGainBeforeFreeze = null;
     this.currentMusic = null;
     this.currentMusicHtml = null;
@@ -3866,6 +3879,16 @@ const audioEngine = {
   applyFreezeFilter() {
     this.ensureMusic();
     if (!this.ctx || !this.musicGain || this._freezeFilter) return;
+    // 2026-07-01: freeze takes priority over the Pulse Cannon dip. If a pulse filter is already
+    // spliced, tear it down first (keeping its saved pre-pulse gain as the true baseline) so freeze
+    // splices cleanly — no double node in the chain, and thaw restores to the real level, not the
+    // ducked one. An in-flight pulse just loses its music dip for the freeze's duration; its later
+    // onPulseEnd/removePulseFilter no-ops safely.
+    let priorBase = null;
+    if (this._pulseFilter) {
+      priorBase = this._musicGainBeforePulse;
+      this.removePulseFilter();
+    }
     const dest = this.masterGain || this.ctx.destination;
     const hp = this.ctx.createBiquadFilter();
     hp.type = "highpass";
@@ -3887,10 +3910,11 @@ const audioEngine = {
     try {
       const g = this.musicGain.gain;
       const t = this.ctx.currentTime;
-      this._musicGainBeforeFreeze = g.value;
+      // If we just took over from a pulse dip, restore the pre-pulse level as the freeze baseline.
+      this._musicGainBeforeFreeze = priorBase != null ? priorBase : g.value;
       g.cancelScheduledValues(t);
       g.setValueAtTime(g.value, t);
-      g.linearRampToValueAtTime(g.value * 0.45, t + 0.35);
+      g.linearRampToValueAtTime(this._musicGainBeforeFreeze * 0.45, t + 0.35);
     } catch { /* ignore */ }
   },
   removeFreezeFilter() {
@@ -3916,6 +3940,55 @@ const audioEngine = {
     this.musicGain.connect(dest);
     this._freezeFilter = null;
     this._freezeFilter2 = null;
+  },
+  // 2026-07-01: Pulse Cannon music FX — a single lowpass (high-cut at 600Hz) spliced into
+  // musicGain→masterGain so the track dips/darkens while the weapon rips, then swells back on
+  // expiry. Gentler than the freeze bandpass (no low-cut, higher cutoff, lighter duck). Only the
+  // Web Audio path is filtered (see the iOS note on the freeze filter). If a freeze filter is
+  // already live it muffles harder, so the pulse filter stands down entirely to avoid a double
+  // splice — and won't touch musicGain on teardown either.
+  applyPulseFilter() {
+    this.ensureMusic();
+    if (!this.ctx || !this.musicGain || this._pulseFilter || this._freezeFilter) return;
+    const dest = this.masterGain || this.ctx.destination;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 600; // dim everything above 600Hz
+    lp.Q.value = 1;
+    lp.connect(dest);
+    try { this.musicGain.disconnect(dest); } catch { /* ignore */ }
+    this.musicGain.connect(lp);
+    this._pulseFilter = lp;
+    // Light duck (freeze drops to 0.45; keep the track present here) so the weapon reads without
+    // burying the music.
+    try {
+      const g = this.musicGain.gain;
+      const t = this.ctx.currentTime;
+      this._musicGainBeforePulse = g.value;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
+      g.linearRampToValueAtTime(g.value * 0.7, t + 0.2);
+    } catch { /* ignore */ }
+  },
+  removePulseFilter() {
+    if (!this._pulseFilter || !this.ctx || !this.musicGain) {
+      this._pulseFilter = null;
+      return;
+    }
+    try {
+      const g = this.musicGain.gain;
+      const t = this.ctx.currentTime;
+      const target = this._musicGainBeforePulse != null ? this._musicGainBeforePulse : g.value;
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
+      g.linearRampToValueAtTime(target, t + 0.3);
+    } catch { /* ignore */ }
+    this._musicGainBeforePulse = null;
+    const dest = this.masterGain || this.ctx.destination;
+    try { this.musicGain.disconnect(this._pulseFilter); } catch { /* ignore */ }
+    try { this._pulseFilter.disconnect(); } catch { /* ignore */ }
+    this.musicGain.connect(dest);
+    this._pulseFilter = null;
   },
   stopLoop(name) {
     const loop = this.loops.get(name);
@@ -9202,12 +9275,18 @@ function initGalaxyCanvas() {
   const PULSE_PAIR_DELAY_MS = 35; // gap between the two shots of a pulse pair
   const PULSE_BURST_DELAY_MS = 130; // pause after a pair → ~12 shots/s (2 / (35+130)ms)
   const PULSE_CANNON_SWEEP_DEG = 7; // max turret sweep off the aim line (tunable)
+  const PULSE_HIT_GLOW_MS = 550; // 2026-07-01: lifetime of the teal shard-hit highlight on split children
+  // 2026-07-01: every level gets one guaranteed Pulse Cannon early; these levels also get a SECOND
+  // drop later in the level (~58% elapsed) for an extra mid/late-level burst window.
+  const SECOND_PULSE_LEVELS = new Set([9, 11, 13, 14, 15]);
   let pulseCannonUntil = 0;
+  let pulseWasActive = false; // 2026-07-01: active→inactive edge latch for onPulseStart/onPulseEnd
   let pulseFiring = false; // input currently held → streaming shots
   let nextPulseShotAt = 0;
   let pulseBurstIndex = 0; // 0/1 within a pair (1 == mid-pair, use the short delay)
   let pulseSweepPhase = 0; // oscillator driving the left↔right turret sweep
   let pulseFireToggle = 0; // alternates the fire1/fire2 report
+  let pulseMarksmanTick = 0; // 2026-07-01: throttles pulse hits fed into the marksman combo (1 of 3)
   let _pulseShot = false; // set around resolveShotAt so the projectile renders as a pulse bolt
   const pulseMuzzle = { active: false, x: 0, y: 0, angle: 0, recoil: 0, phase: 0 };
   const pulseCannonActive = () => performance.now() < pulseCannonUntil;
@@ -9249,7 +9328,7 @@ function initGalaxyCanvas() {
   const MINE_CHAIN_PER_FRAME = 2;
   let missileImpactFlash = null; // { x, y, start } localized impact flash, drawn in drawMissileFx
   let missileForceSpawnedThisLevel = false; // DEBUG: revert before release
-  let pulseForceSpawnedThisLevel = 0; // DEBUG: force two Pulse Cannon drops per level
+  let pulseForceSpawnedThisLevel = 0; // 2026-07-01: Pulse Cannon drops placed this level (see SECOND_PULSE_LEVELS)
   // 2026-06-16: per-level emergency timer drop — on the listed levels, when the clock first
   // dips under 20s with no timer powerup on screen, force one out (reset in clearGameplayEntities).
   let emergencyTimerSpawned = false;
@@ -9729,9 +9808,12 @@ function initGalaxyCanvas() {
   // Pulse Cannon HUD badge — mirrors the quad badge (art + seconds remaining). Unlike quad, this
   // badge is TAPPABLE: tapping it cancels the weapon early (see cancelPulseCannon wiring below).
   function updateHudPulseBadge() {
-    if (!hudPulseBadge) return;
     const remaining = pulseCannonUntil - performance.now();
     const active = remaining > 0;
+    // 2026-07-01: natural-expiry edge — runs before the badge guard so the disarm cue + music
+    // swell-back fire even if the HUD element is missing. onPulseEnd is latch-guarded (idempotent).
+    if (!active && pulseWasActive) onPulseEnd();
+    if (!hudPulseBadge) return;
     hudPulseBadge.classList.toggle("active", active);
     hudPulseBadge.setAttribute("aria-hidden", active ? "false" : "true");
     if (active && hudPulseTime) {
@@ -9745,8 +9827,8 @@ function initGalaxyCanvas() {
     if (!pulseCannonActive()) return;
     pulseCannonUntil = 0;
     stopPulseFiring();
+    onPulseEnd(); // disarm cue + music swell-back (idempotent; edge already flipped)
     updateHudPulseBadge();
-    playGameSfx("blip", 0.6);
   }
 
   function getArcadeScoreMultiplier(now = performance.now()) {
@@ -11306,6 +11388,7 @@ function initGalaxyCanvas() {
     // .ambient from a previous L4 debris piece must not leak onto a real asteroid. The L4 debris
     // spawner sets .ambient = true on its returned piece (see the debris block in update()).
     a.ambient = false;
+    a._pulseHitAt = 0; // 2026-07-01: clear stale pulse-shard highlight from a pooled/reused asteroid
     const levelNum = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
     a.spriteKey = spriteKeyOverride || getAsteroidSpriteKeyForLevel(levelNum);
     a.rot = Math.random() * Math.PI * 2;
@@ -12666,7 +12749,11 @@ function initGalaxyCanvas() {
     }
   }
 
-  function splitAsteroidByIndex(targetIndex) {
+  // 2026-07-01: pulseImpact (optional {x,y}) = the Pulse Cannon bolt's landing point. When set, each
+  // split child is tagged with a short-lived directional teal highlight on the side that faced the
+  // shot, so a Pulse Cannon kill visibly "shears" the parent into glowing shards (see the asteroid
+  // render loop). Other kill sources (laser, toss) pass null and behave exactly as before.
+  function splitAsteroidByIndex(targetIndex, pulseImpact = null) {
     const a = removeAsteroidAt(targetIndex);
     if (!a) return;
     if (engineMode === "arcade") shotsHit += 1;
@@ -12683,6 +12770,7 @@ function initGalaxyCanvas() {
 
     if (wasKind > 1) {
       const childCount = wasKind === 3 ? (3 + Math.floor(Math.random() * 3)) : (2 + Math.floor(Math.random() * 2));
+      const pulseNow = pulseImpact ? performance.now() : 0;
       const spawnSplitChild = () => {
         if (sim.asteroids.length >= sim.maxAsteroids) return false;
         const child = spawnAsteroid(
@@ -12696,6 +12784,15 @@ function initGalaxyCanvas() {
         const boost = 1.5 + Math.random() * 0.7;
         child.vx += (child.vx / Math.max(1, Math.abs(child.vx))) * parentSpeed * 0.2 * boost;
         child.vy += (child.vy / Math.max(1, Math.abs(child.vy))) * parentSpeed * 0.2 * boost;
+        if (pulseImpact) {
+          // direction from the bolt impact toward this shard = the hit-facing side to light up
+          let hx = child.x - pulseImpact.x;
+          let hy = child.y - pulseImpact.y;
+          const hl = Math.hypot(hx, hy) || 1;
+          child._pulseHitAt = pulseNow;
+          child._pulseHitDirX = hx / hl;
+          child._pulseHitDirY = hy / hl;
+        }
         return true;
       };
       for (let i = 0; i < childCount; i += 1) {
@@ -13722,7 +13819,7 @@ function initGalaxyCanvas() {
     // 2026-06-10: clear powerups, active effects, and aim state on level transitions / menu exit
     powerups.length = 0;
     quadShotUntil = 0;
-    pulseCannonUntil = 0; stopPulseFiring();
+    pulseCannonUntil = 0; stopPulseFiring(); onPulseEnd(true);
     // 2026-06-21: discard any banked freeze on level transition (bank does NOT persist across
     // levels). Silent — no unfreeze SFX on a level/menu change — but still tear down the lingering
     // FX (icy music filter + HUD glow) so a level that ends mid-freeze doesn't carry them forward.
@@ -13731,7 +13828,7 @@ function initGalaxyCanvas() {
     audioEngine.removeFreezeFilter();
     hudFreezeBtn?.classList.remove("hudFreezeBtn--active");
     emergencyTimerSpawned = false; // 2026-06-16: re-arm the under-20s emergency timer drop
-    pulseForceSpawnedThisLevel = 0; // DEBUG: re-arm two Pulse Cannon test drops per level
+    pulseForceSpawnedThisLevel = 0; // 2026-07-01: re-arm the per-level guaranteed Pulse Cannon drop(s)
     firedGuaranteedSpawns.clear(); // 2026-06-16: re-arm cfg.guaranteedSpawn entries
     firedWaves.clear(); // 2026-06-23: re-arm cfg.waves second-wave surges
     appliedSpeedEscalation = 1; // 2026-06-16: reset L15 speed ramp
@@ -14700,7 +14797,7 @@ function initGalaxyCanvas() {
     // 2026-06-10: reset powerup + active effect state
     powerups.length = 0;
     quadShotUntil = 0;
-    pulseCannonUntil = 0; stopPulseFiring();
+    pulseCannonUntil = 0; stopPulseFiring(); onPulseEnd(true);
     _freezeBankMs = 0;
     _freezeActive = false;
     playerFreezeInventory = 0;
@@ -14796,7 +14893,7 @@ function initGalaxyCanvas() {
     playerBombInventory = 0;
     playerFreezeInventory = 0;
     quadShotUntil = 0;
-    pulseCannonUntil = 0; stopPulseFiring();
+    pulseCannonUntil = 0; stopPulseFiring(); onPulseEnd(true);
     _freezeBankMs = 0;
     _freezeActive = false;
     bombAimMode = false;
@@ -16043,6 +16140,12 @@ function initGalaxyCanvas() {
       }
       tutorialState.frozenTossBase = tutorialEvents.toss || 0;
       while ((tutorialEvents.toss || 0) <= tutorialState.frozenTossBase) {
+        // 2026-07-01: field-empty watchdog — never leave the cadet staring at an empty field while
+        // we're waiting for the frozen toss. A race where the last rock is shot AND the freeze bank
+        // drains together used to strand the step (player had to tap freeze to make rocks reappear).
+        // Restock here every iteration; new spawns are auto-frozen while _freezeActive (freeze is a
+        // global movement-skip), so they're immediately tossable.
+        if (tutorialAsteroidsAllCleared()) spawnTutorialAsteroids(3, 2);
         await waitFor(() =>
           (tutorialEvents.toss || 0) > tutorialState.frozenTossBase
           || tutorialAsteroidsAllCleared()
@@ -16281,7 +16384,7 @@ function initGalaxyCanvas() {
     slotTokens = 0; // 2026-06-26: discard banked POLYSLOTS tokens on a fresh run
     slotNukeOwned = 0; slotPendingQuadShot = 0; // reset per-game slot reward state
     quadShotUntil = 0;
-    pulseCannonUntil = 0; stopPulseFiring();
+    pulseCannonUntil = 0; stopPulseFiring(); onPulseEnd(true);
     _freezeBankMs = 0;
     _freezeActive = false;
     playerFreezeInventory = 0;
@@ -16980,12 +17083,15 @@ function initGalaxyCanvas() {
           }
         }
 
-        // DEBUG: force two Pulse Cannon drops on every level so the pickup/charge/fire loop is
-        // always testable, regardless of the level's normal powerupOverride pool.
-        const pulseDebugAtMs = pulseForceSpawnedThisLevel === 0
+        // 2026-07-01: Pulse Cannon availability. One guaranteed drop early on EVERY level; a subset
+        // of levels (SECOND_PULSE_LEVELS) get a second drop later in the level (~58% elapsed) for a
+        // fresh burst window rather than two back-to-back at the start.
+        const pulseMaxThisLevel = SECOND_PULSE_LEVELS.has(cfg.level) ? 2 : 1;
+        const pulseNextAtMs = pulseForceSpawnedThisLevel === 0
           ? LEVEL_START_SPAWN_DELAY_MS
-          : LEVEL_START_SPAWN_DELAY_MS + 5000;
-        if (pulseForceSpawnedThisLevel < 2 && elapsedMs >= pulseDebugAtMs) {
+          : levelDurationMs * 0.58;
+        if (pulseForceSpawnedThisLevel < pulseMaxThisLevel && elapsedMs >= pulseNextAtMs
+            && !powerups.some((p) => p.type === "pulse")) {
           pulseForceSpawnedThisLevel += 1;
           spawnPowerupAt("pulse", randomPowerupPoint());
           playGameSfx("bling", 0.8);
@@ -17267,17 +17373,21 @@ function initGalaxyCanvas() {
   }
 
   // 2026-06-09: localized X blast that replaces the laser on iOS touch taps.
-  function drawTapBlast(tctx, x, y, life, pulse = false) {
-    // 2026-07-01: Pulse Cannon bolts render the same teal X but thicker + brighter with a bigger
-    // bloom so the weapon reads as a beefier projectile than the normal laser.
-    const wMul = pulse ? 1.6 : 1;
-    // Layer 1 — radial flash (only while bright)
-    if (life > 0.6) {
+  // 2026-07-01: `hit` distinguishes a Pulse Cannon shot that struck a target from one swept into
+  // empty space. A pulse HIT renders the full beefy X + bloom (impactful); a pulse MISS renders only
+  // a small crisp spark — the big expanding "ghost X" and radial flash are suppressed so sweeping
+  // the rapid-fire stream across empty space no longer sprays oversized stray X's on screen.
+  function drawTapBlast(tctx, x, y, life, pulse = false, hit = false) {
+    const beef = pulse && hit;        // full beefy blast only on a real pulse hit
+    const pulseMiss = pulse && !hit;  // toned-down: skip the ghost-X + flash bloom
+    const wMul = beef ? 1.6 : 1;
+    // Layer 1 — radial flash (only while bright; suppressed on a pulse miss)
+    if (life > 0.6 && !pulseMiss) {
       const flashAlpha = (life - 0.6) / 0.4;
-      const flashR = ((1 - life) * 40 + 6) * (pulse ? 1.4 : 1);
+      const flashR = ((1 - life) * 40 + 6) * (beef ? 1.4 : 1);
       const grad = tctx.createRadialGradient(x, y, 0, x, y, flashR);
-      grad.addColorStop(0, `rgba(180,255,240,${(flashAlpha * (pulse ? 1 : 0.9)).toFixed(3)})`);
-      grad.addColorStop(0.5, `rgba(0,255,200,${(flashAlpha * (pulse ? 0.55 : 0.4)).toFixed(3)})`);
+      grad.addColorStop(0, `rgba(180,255,240,${(flashAlpha * (beef ? 1 : 0.9)).toFixed(3)})`);
+      grad.addColorStop(0.5, `rgba(0,255,200,${(flashAlpha * (beef ? 0.55 : 0.4)).toFixed(3)})`);
       grad.addColorStop(1, "rgba(0,200,160,0)");
       tctx.save();
       tctx.fillStyle = grad;
@@ -17287,22 +17397,24 @@ function initGalaxyCanvas() {
       tctx.restore();
     }
 
-    // Layer 2 — ghost X (outer, expands, low opacity)
-    const ghostSize = (10 + (1 - life) * 14) * (pulse ? 1.2 : 1);
-    tctx.save();
-    tctx.globalAlpha = life * 0.18;
-    tctx.strokeStyle = "#00ffcc";
-    tctx.lineWidth = 6 * wMul;
-    tctx.beginPath();
-    tctx.moveTo(x - ghostSize, y - ghostSize);
-    tctx.lineTo(x + ghostSize, y + ghostSize);
-    tctx.moveTo(x + ghostSize, y - ghostSize);
-    tctx.lineTo(x - ghostSize, y + ghostSize);
-    tctx.stroke();
-    tctx.restore();
+    // Layer 2 — ghost X (outer, expands, low opacity; suppressed on a pulse miss)
+    if (!pulseMiss) {
+      const ghostSize = (10 + (1 - life) * 14) * (beef ? 1.2 : 1);
+      tctx.save();
+      tctx.globalAlpha = life * 0.18;
+      tctx.strokeStyle = "#00ffcc";
+      tctx.lineWidth = 6 * wMul;
+      tctx.beginPath();
+      tctx.moveTo(x - ghostSize, y - ghostSize);
+      tctx.lineTo(x + ghostSize, y + ghostSize);
+      tctx.moveTo(x + ghostSize, y - ghostSize);
+      tctx.lineTo(x - ghostSize, y + ghostSize);
+      tctx.stroke();
+      tctx.restore();
+    }
 
-    // Layer 3 — main X (crisp teal)
-    const size = (8 + (1 - life) * 5) * (pulse ? 1.15 : 1);
+    // Layer 3 — main X (crisp teal). A pulse miss stays compact (no beef); a pulse hit is enlarged.
+    const size = (8 + (1 - life) * 5) * (beef ? 1.15 : pulseMiss ? 0.7 : 1);
     tctx.save();
     tctx.globalAlpha = life * 0.95;
     tctx.strokeStyle = pulse ? "#66ffe6" : "#00ffcc";
@@ -17341,7 +17453,7 @@ function initGalaxyCanvas() {
     if (!tctx || tapBlasts.length === 0) return;
     for (let i = tapBlasts.length - 1; i >= 0; i -= 1) {
       const b = tapBlasts[i];
-      drawTapBlast(tctx, b.x, b.y, b.life, b.pulse);
+      drawTapBlast(tctx, b.x, b.y, b.life, b.pulse, b.hit);
       b.life -= 0.055;
       if (b.life <= 0) tapBlasts.splice(i, 1);
     }
@@ -17811,6 +17923,36 @@ function initGalaxyCanvas() {
         ctx.lineWidth = 1;
         ctx.stroke();
       }
+      // 2026-07-01: Pulse Cannon shard highlight — a fading teal crescent on the side of a freshly
+      // split child that faced the bolt, so a Pulse Cannon kill reads as "sheared into glowing shards".
+      // TTL-gated + skipped under frame-budget pressure so dense L15 splits can't tank FPS.
+      if (a._pulseHitAt && !_frameBudgetExceeded) {
+        const age = now - a._pulseHitAt;
+        if (age >= 0 && age < PULSE_HIT_GLOW_MS) {
+          const k = 1 - age / PULSE_HIT_GLOW_MS; // 1 → 0 fade
+          const edgeAng = Math.atan2(a._pulseHitDirY, a._pulseHitDirX); // toward the hit-facing rim
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          ctx.globalAlpha = k * 0.85;
+          ctx.lineCap = "round";
+          // bright teal arc hugging the hit-facing rim (~110° wedge), thicker + brighter early
+          ctx.strokeStyle = "rgba(120,255,235,1)";
+          ctx.lineWidth = 3 + k * 2;
+          ctx.beginPath();
+          ctx.arc(a.x, a.y, a.r * 0.92, edgeAng - 0.95, edgeAng + 0.95);
+          ctx.stroke();
+          // soft outer bloom on the same wedge
+          ctx.globalAlpha = k * 0.4;
+          ctx.strokeStyle = "rgba(0,255,209,1)";
+          ctx.lineWidth = 6 + k * 4;
+          ctx.beginPath();
+          ctx.arc(a.x, a.y, a.r * 1.02, edgeAng - 0.8, edgeAng + 0.8);
+          ctx.stroke();
+          ctx.restore();
+        } else if (age >= PULSE_HIT_GLOW_MS) {
+          a._pulseHitAt = 0; // expired — stop testing this rock
+        }
+      }
       if (_plasmaCharged && _plasmaRect
           && a.x >= _plasmaRect.x && a.x <= _plasmaRect.x + _plasmaRect.w
           && a.y >= _plasmaRect.y && a.y <= _plasmaRect.y + _plasmaRect.h) {
@@ -18260,18 +18402,26 @@ function initGalaxyCanvas() {
     // 2026-07-01: _pulseShot tags this projectile as a Pulse Cannon bolt so it renders thicker +
     // brighter than a normal laser (set by firePulseShot around the call, cleared after).
     const pulse = _pulseShot;
+    // 2026-07-01: hold a ref to the blast we just created so the hit-check branches below can flag
+    // whether this shot actually struck a target. A Pulse Cannon MISS renders a toned-down blast
+    // (no oversized ghost-X) so sweeping into empty space stops spraying big stray X's (see drawTapBlast).
+    let _shotBlastRef = null;
     if (isIOSWebKit && isTouch) {
-      tapBlasts.push({ x: sx, y: sy, life: 1.0, pulse });
+      _shotBlastRef = { x: sx, y: sy, life: 1.0, pulse, hit: false };
+      tapBlasts.push(_shotBlastRef);
     } else {
-      laserBeams.push({
+      _shotBlastRef = {
         x1: sim.width / 2,
         y1: sim.height / 2,
         x2: sx,
         y2: sy,
         startedAt: now,
         pulse,
-      });
+        hit: false,
+      };
+      laserBeams.push(_shotBlastRef);
     }
+    const markShotHit = () => { if (_shotBlastRef) _shotBlastRef.hit = true; };
     shotsFired += 1;
     // 2026-06-23: while quadshot is active, bombs and UFOs die in one hit — the bomb skips its
     // arming step and detonates on the spot, the UFO is destroyed on the first hit — to sell the
@@ -18280,6 +18430,7 @@ function initGalaxyCanvas() {
     const quadActive = performance.now() < quadShotUntil;
     if (landmine && isPointOnMine(landmine, sx, sy)) {
       triggerCrosshairFire();
+      markShotHit();
       stuntNotify("mine_tap"); // tutorial Phase 6: player engaged the bomb (arm / detonate)
       if (quadActive) explodeLandmine();
       else armLandmine();
@@ -18290,6 +18441,7 @@ function initGalaxyCanvas() {
     const tappedBomb = placedBombs.find((b) => isPointOnMine(b, sx, sy));
     if (tappedBomb) {
       triggerCrosshairFire();
+      markShotHit();
       if (quadActive) explodePlacedBomb(tappedBomb);
       else armMineEntity(tappedBomb, (opts) => explodePlacedBomb(tappedBomb, opts));
       recordComboEvent("bomb_tap", { x: sx, y: sy });
@@ -18297,6 +18449,7 @@ function initGalaxyCanvas() {
     }
     if (ufo && isPointOnUfo(sx, sy)) {
       triggerCrosshairFire();
+      markShotHit();
       hitUfo(quadActive);
       recordComboEvent("ufo_shot", { x: sx, y: sy });
       return true;
@@ -18304,6 +18457,7 @@ function initGalaxyCanvas() {
     const hitIndex = findHitAsteroidIndex(sx, sy);
     if (hitIndex >= 0 && !tutorialFireBlocked) {
       triggerCrosshairFire();
+      markShotHit();
       // 2026-06-22: a tossed stroid (fiery or frozen — render-only difference) is an in-flight
       // projectile, not a normal rock. Blasting it detonates on the spot (reusing the impact FX
       // + sim.tossedAsteroid cleanup) instead of splitting it into children.
@@ -18311,7 +18465,9 @@ function initGalaxyCanvas() {
       if (hitRock && hitRock.tossed) {
         detonateTossedAsteroid(hitRock);
       } else {
-        splitAsteroidByIndex(hitIndex);
+        // 2026-07-01: on a Pulse Cannon kill, pass the bolt's impact point so the split children get a
+        // directional teal "just got hit" highlight on the side that faced the shot (see splitAsteroidByIndex).
+        splitAsteroidByIndex(hitIndex, pulse ? { x: sx, y: sy } : null);
       }
       // 2026-06-30: under quadshot, defer to handleArcadeTap so the 4-projectile volley counts as
       // one marksman hit (flag the kill instead of incrementing here).
@@ -18346,7 +18502,14 @@ function initGalaxyCanvas() {
     _pulseShot = true;
     const hit = resolveShotAt(sx, sy, now, galaxyGesture.isTouch === true, true);
     _pulseShot = false;
-    if (hit) recordComboEvent("laser_stroid_hit", { x: sx, y: sy });
+    // 2026-07-01: the Pulse Cannon sprays ~12 hits/s — feeding every hit into the 10-hit MARKSMAN
+    // counter trivializes it. Only every 3rd pulse hit counts toward marksman (so it still builds,
+    // but ~3x slower). Pulse still never records a MISS (resolveShotAt was called with deferMarksman),
+    // so the spray can't break the player's combo.
+    if (hit) {
+      pulseMarksmanTick = (pulseMarksmanTick + 1) % 3;
+      if (pulseMarksmanTick === 0) recordComboEvent("laser_stroid_hit", { x: sx, y: sy });
+    }
     // alternating fire1/fire2 with pitch jitter so a sustained stream never combs into one harsh tone
     playGameSfx(pulseFireToggle ? "pulse_cannon_fire2" : "pulse_cannon_fire1", 0.7, {
       important: true,
@@ -18362,6 +18525,26 @@ function initGalaxyCanvas() {
     pulseBurstIndex = 0;
     pulseMuzzle.active = false;
     pulseMuzzle.recoil = 0;
+  }
+
+  // 2026-07-01: Pulse Cannon arm/disarm music+FX hooks (mirrors onFreezeStart/freezePauseFx). The
+  // `pulseWasActive` latch (declared with the other pulse state) makes onPulseEnd fire exactly once
+  // on the active→inactive edge, whether the weapon lapses naturally (detected in updateHudPulseBadge),
+  // is tapped off (cancelPulseCannon), or is dropped by a level/reset path — all idempotently.
+  function onPulseStart() {
+    if (pulseWasActive) return;
+    pulseWasActive = true;
+    audioEngine.applyPulseFilter(); // dim music >600Hz + light duck while the cannon runs
+  }
+  function onPulseEnd(silent = false) {
+    if (!pulseWasActive) return;
+    pulseWasActive = false;
+    audioEngine.removePulseFilter(); // swell the music back to normal
+    if (silent) return; // level-end/reset — drop the filter without a disarm cue mid-transition
+    // Disarm cue — synthesized from existing sfx (no dedicated asset): the unfreeze whoosh leads as
+    // the "spin-down", with a subtle pitched-/slowed-down charge tail under it for weapon character.
+    playGameSfx("unfreeze", 0.7, { important: true, detune: -200 });
+    playGameSfx("pulse_cannon_charge", 0.35, { important: true, detune: -800, rate: 0.8 });
   }
 
   // 2026-06-10: per-type powerup collection effects.
@@ -18418,7 +18601,9 @@ function initGalaxyCanvas() {
       // 2026-07-01: `important` so the pickup-frame iOS 2-SFX budget (blip + crunch already
       // fired this frame) can't drop the arm-up cue — the Pulse Cannon self-arms on pickup, so
       // this charge sound IS the "weapon armed" confirmation and must land with the pickup.
-      playGameSfx("pulse_cannon_charge", 0.9, { important: true });
+      // Louder than the pickup blip so the "cannon charge" reads clearly (user request).
+      playGameSfx("pulse_cannon_charge", 1.2, { important: true });
+      onPulseStart(); // dim the music (>600Hz) + light duck for the weapon's duration
       cssFlash("#00ffc8", 0.22, 250);
       playerMissileInventory = 0;
       missileAimMode = false;

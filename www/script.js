@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-02 10:20";
+const BUILD_TS = "2026-07-02 10:39";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -4643,8 +4643,9 @@ function addListeners() {
     const key = choices[(Math.random() * choices.length) | 0];
     const fn = window.playGameSfx;
     if (typeof fn !== "function") return;
-    fn(key, 0.7, { rate: 1.0, preservePitch: true, important: true });
-    setTimeout(() => fn(key, 0.17, { rate: 1.0, preservePitch: true, important: true }), 70);
+    // 2026-07-02: menu VOs ("level select" etc.) were a touch too loud — dropped both layers.
+    fn(key, 0.5, { rate: 1.0, preservePitch: true, important: true });
+    setTimeout(() => fn(key, 0.12, { rate: 1.0, preservePitch: true, important: true }), 70);
   }
   if (galaxyModeSelect) {
     let menuNavPending = false;
@@ -7070,8 +7071,8 @@ async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubm
   if (!afterSubmit) {
     const _voFn = window.playGameSfx;
     if (typeof _voFn === "function") {
-      _voFn("menuvo_polyversescoreboard", 0.7, { rate: 1.0, preservePitch: true, important: true });
-      setTimeout(() => _voFn("menuvo_polyversescoreboard", 0.17, { rate: 1.0, preservePitch: true, important: true }), 70);
+      _voFn("menuvo_polyversescoreboard", 0.5, { rate: 1.0, preservePitch: true, important: true });
+      setTimeout(() => _voFn("menuvo_polyversescoreboard", 0.12, { rate: 1.0, preservePitch: true, important: true }), 70);
     }
   }
   renderLeaderboardShell("POLYVERSE SCOREBOARD", `<p class="leaderboardSub">Loading global scores...</p>`);
@@ -14749,9 +14750,9 @@ function initGalaxyCanvas() {
       // 2026-06-24: dedicated level-7 intro (new CMDR drop) — "we're getting deeper".
       levelStartVO = "CMDR_level_7_start_were_getting_deeper.mp3";
     } else if (levelNum === 15) {
-      // 2026-06-15 (Part 8): final-level commander line. Placeholder audio (vo/gauntlet_intro.mp3)
-      // falls back to the VO_CAPTIONS caption until Poly records it.
-      levelStartVO = "gauntlet_intro.mp3";
+      // 2026-07-02: L15 opens silent for 10s (no "THE GAUNTLET" intro) — then the CMDR opens with a
+      // "let's blast these 'stroids" line. Handled in the L10-style hush branch below.
+      levelStartVO = null;
     } else {
       levelStartVO = commBoxController.pickFromPool(
         "levelstart",
@@ -14762,10 +14763,12 @@ function initGalaxyCanvas() {
     // 2026-06-17: delay the first VO 800ms so the level-intro animation finishes before SPC/CMDR
     // starts talking (the comm box was popping up before the level had visually settled).
     // 2026-06-24: L10 stays silent for the first 8s — no intro chatter before the action gets going.
-    const firstVoDelayMs = levelNum === 10 ? 8000 : 800;
+    // 2026-07-02: L15 hushes for 10s, then opens with the CMDR blast line (like L10's 8s hush).
+    const firstVoDelayMs = levelNum === 10 ? 8000 : (levelNum === 15 ? 10000 : 800);
     setTimeout(() => {
       // 2026-06-24: L10 — after the 8s hush the commander opens with the blast line (its only intro).
-      if (levelNum === 10) {
+      // 2026-07-02: L15 does the same after its 10s hush.
+      if (levelNum === 10 || levelNum === 15) {
         commBoxController.queueVO({
           voFile: commBoxController.pickFromPool("cmdrBlast", commBoxController.POOL_CMDR_BLAST),
           event: "commander",
@@ -14784,10 +14787,10 @@ function initGalaxyCanvas() {
       const spcIntro = spcIntroFile ? commBoxController.spcBonusVoSrc(spcIntroFile) : null;
       if (spcIntro) {
         commBoxController.queueVO({ audioSrc: spcIntro, _spc: true });
-      } else {
+      } else if (levelStartVO) {
         // 2026-06-24: pass the intended filename (voFile) so triggerVO resolves audio when recorded
-        // and always types the caption — L15's placeholder gauntlet_intro.mp3 now shows its caption
-        // instead of a blank comm box under the commander mug.
+        // and always types the caption.
+        // 2026-07-02: L15 sets levelStartVO=null (silent open) — queue nothing in that case.
         commBoxController.queueVO({
           voFile: levelStartVO,
           event: "commander",

@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-01 20:30";
+const BUILD_TS = "2026-07-02 09:28";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -9546,6 +9546,21 @@ function initGalaxyCanvas() {
   powerupPickupFlashSheet.img.onerror = () => { powerupPickupFlashSheet.ready = false; };
   powerupPickupFlashSheet.img.src = "combo_fx/5_electric_elements.png";
   const explosiveElectricFxSheet = powerupPickupFlashSheet;
+  // 2026-07-02: Pulse Cannon fire signature — an expanding teal electric ring stamped at each
+  // swept shot point (replaces the old orbiting muzzle orb that read as a "phantom circle").
+  const pulseFireFxSheet = {
+    img: new Image(),
+    ready: false,
+    frameWidth: 128,
+    frameHeight: 128,
+    frameCount: 12,
+    columns: 12,
+    fps: 30,
+    padding: 2,
+  };
+  pulseFireFxSheet.img.onload = () => { pulseFireFxSheet.ready = true; };
+  pulseFireFxSheet.img.onerror = () => { pulseFireFxSheet.ready = false; };
+  pulseFireFxSheet.img.src = "combo_fx/4_electric_elements.png";
   // 2026-06-30: top-level hook for the WARMING UP screen — pre-decode + GPU-prime every
   // gameplay sprite so first combo / first powerup pickup / first tinted-rock level no longer
   // trigger a one-off decode+upload frame drop. warmImageSet (img.decode + timeout) is the
@@ -9559,7 +9574,7 @@ function initGalaxyCanvas() {
     // decoded on first slot-machine reveal — that's the between-level slot lag. Warm it here.
     try { ensureSlotSprites(); } catch {}
     const sprites = Object.assign({}, asteroidSprites, powerupSprites, slotSprites);
-    [comboFxSheet, bigStroidFxSheet, smallStroidFxSheet, powerupPickupFxSheet, powerupPickupFlashSheet]
+    [comboFxSheet, bigStroidFxSheet, smallStroidFxSheet, powerupPickupFxSheet, powerupPickupFlashSheet, pulseFireFxSheet]
       .forEach((s, i) => { if (s && s.img) sprites["_fx" + i] = s.img; });
     await warmImageSet(sprites);
     try {
@@ -9587,6 +9602,7 @@ function initGalaxyCanvas() {
   let bigStroidBursts = [];
   let explosiveElectricBursts = [];
   let powerupPickupBursts = [];
+  let pulseFireBursts = []; // 2026-07-02: teal electric-ring bursts stamped at each Pulse Cannon shot
   const fxTintCanvas = document.createElement("canvas");
   const fxTintCtx = fxTintCanvas.getContext("2d", { alpha: true });
   let comboBlastSeq = 0;
@@ -9890,6 +9906,7 @@ function initGalaxyCanvas() {
     bigStroidBursts.length = 0;
     explosiveElectricBursts.length = 0;
     powerupPickupBursts.length = 0;
+    pulseFireBursts.length = 0;
     comboBombBlastAwarded.clear();
   }
 
@@ -10040,6 +10057,25 @@ function initGalaxyCanvas() {
     }
   }
 
+  // 2026-07-02: stamp one expanding teal electric ring at a Pulse Cannon shot point (sx, sy).
+  // Called per shot; capped + skipped under frame pressure so the ~12 shots/s stream can't tank FPS.
+  function spawnPulseFireBurst(x, y) {
+    if (prefersReducedMotion || !pulseFireFxSheet.ready) return;
+    if (isIOSNative && sim._frameBudgetExceeded) return; // self-throttle when the frame is already tight
+    const maxBursts = isIOSNative ? 6 : 10;
+    if (pulseFireBursts.length >= maxBursts) pulseFireBursts.shift();
+    pulseFireBursts.push({
+      x,
+      y,
+      start: performance.now(),
+      ttl: isIOSNative ? 240 : 280,
+      scale: 0.9 + Math.random() * 0.3,
+      rot: Math.random() * Math.PI * 2, // random rotation per shot
+      tint: "rgba(90,255,225,0.85)", // laser-fire teal
+      flickerSeed: Math.random() * Math.PI * 2,
+    });
+  }
+
   function fastFxFlicker(now, seed = 0, depth = 0.24) {
     const a = Math.sin(now * 0.12 + seed) * 0.5 + 0.5;
     const b = Math.sin(now * 0.27 + seed * 1.7) * 0.5 + 0.5;
@@ -10166,6 +10202,26 @@ function initGalaxyCanvas() {
         const size = (isIOSNative ? 128 : 154) * b.scale * pop;
         drawCtx.globalAlpha = clamp(0.8 * fade * fastFxFlicker(now, b.flickerSeed, 0.5), 0, 0.8);
         drawFxSheetFrame(drawCtx, explosiveElectricFxSheet, frame, b.x, b.y, size, b.rot + b.spin * t, b.tint);
+      }
+      drawCtx.restore();
+    }
+    // 2026-07-02: Pulse Cannon fire rings — the expanding teal electric burst at each shot point,
+    // sized to the X-blast, random rotation, opacity flickering. Additive so it glows over the X.
+    if (!underFramePressure && pulseFireBursts.length && pulseFireFxSheet.ready) {
+      drawCtx.save();
+      drawCtx.globalCompositeOperation = "lighter";
+      for (let i = pulseFireBursts.length - 1; i >= 0; i -= 1) {
+        const b = pulseFireBursts[i];
+        const t = clamp((now - b.start) / b.ttl, 0, 1);
+        if (t >= 1) {
+          pulseFireBursts.splice(i, 1);
+          continue;
+        }
+        const frame = Math.min(pulseFireFxSheet.frameCount - 1, Math.floor(t * pulseFireFxSheet.frameCount));
+        const size = (isIOSNative ? 46 : 54) * b.scale; // ~X-blast sized
+        const fade = 1 - t; // expands + fades over its short life
+        drawCtx.globalAlpha = clamp(0.95 * fade * fastFxFlicker(now, b.flickerSeed, 0.5), 0, 0.95);
+        drawFxSheetFrame(drawCtx, pulseFireFxSheet, frame, b.x, b.y, size, b.rot, b.tint);
       }
       drawCtx.restore();
     }
@@ -17129,8 +17185,11 @@ function initGalaxyCanvas() {
         // of levels (SECOND_PULSE_LEVELS) get a second drop later in the level (~58% elapsed) for a
         // fresh burst window rather than two back-to-back at the start.
         const pulseMaxThisLevel = SECOND_PULSE_LEVELS.has(cfg.level) ? 2 : 1;
+        // 2026-07-02: first Pulse Cannon drop is offset to ~28% into the level so it no longer lands
+        // on the same frame as the level-start missile force-spawn (both used to fire at
+        // LEVEL_START_SPAWN_DELAY_MS). Second drop (SECOND_PULSE_LEVELS) stays at ~58%.
         const pulseNextAtMs = pulseForceSpawnedThisLevel === 0
-          ? LEVEL_START_SPAWN_DELAY_MS
+          ? Math.max(LEVEL_START_SPAWN_DELAY_MS + 8000, levelDurationMs * 0.28)
           : levelDurationMs * 0.58;
         if (pulseForceSpawnedThisLevel < pulseMaxThisLevel && elapsedMs >= pulseNextAtMs
             && !powerups.some((p) => p.type === "pulse")) {
@@ -17501,43 +17560,11 @@ function initGalaxyCanvas() {
     }
   }
 
-  // 2026-07-01: ONE reusable looping teal electrical/plasma muzzle jet on the ship front — shown
-  // only while the Pulse Cannon input is held (no per-shot object). Additive teal core + a few
-  // flickering arcs whose phase advances each frame so it reads as a continuous plasma vent.
-  function drawPulseMuzzle(tctx) {
-    if (!tctx || !pulseMuzzle.active) return;
-    const { x, y, angle, phase } = pulseMuzzle;
-    tctx.save();
-    tctx.globalCompositeOperation = "lighter";
-    // soft core bloom
-    const coreR = 11 + Math.sin(phase * 1.7) * 2;
-    const grad = tctx.createRadialGradient(x, y, 0, x, y, coreR);
-    grad.addColorStop(0, "rgba(200,255,245,0.9)");
-    grad.addColorStop(0.45, "rgba(0,255,200,0.5)");
-    grad.addColorStop(1, "rgba(0,200,160,0)");
-    tctx.fillStyle = grad;
-    tctx.beginPath();
-    tctx.arc(x, y, coreR, 0, Math.PI * 2);
-    tctx.fill();
-    // a few short flickering forward arcs (electrical vent), fanned around the aim angle
-    tctx.strokeStyle = "rgba(120,255,230,0.85)";
-    tctx.lineWidth = 2;
-    tctx.lineCap = "round";
-    for (let j = 0; j < 3; j += 1) {
-      const spread = (j - 1) * 0.28 + Math.sin(phase * 2.3 + j * 2.1) * 0.16;
-      const len = 12 + ((Math.sin(phase * 3.1 + j * 1.7) + 1) * 0.5) * 9;
-      const a = angle + spread;
-      const midA = a + Math.sin(phase * 4.0 + j) * 0.22;
-      const mx = x + Math.cos(midA) * len * 0.55;
-      const my = y + Math.sin(midA) * len * 0.55;
-      tctx.globalAlpha = 0.55 + ((Math.sin(phase * 5 + j * 3) + 1) * 0.5) * 0.4;
-      tctx.beginPath();
-      tctx.moveTo(x, y);
-      tctx.quadraticCurveTo(mx, my, x + Math.cos(a) * len, y + Math.sin(a) * len);
-      tctx.stroke();
-    }
-    tctx.restore();
-  }
+  // 2026-07-02: The old ship-front muzzle jet is retired. It was drawn 46px out along the aim, so it
+  // orbited the ship as you aimed/swept — reading as a glitchy "phantom circle + rotating laser line".
+  // The Pulse Cannon fire signature is now the teal electric ring stamped at each shot point
+  // (spawnPulseFireBurst / pulseFireBursts). This stub keeps the call sites harmless.
+  function drawPulseMuzzle() { /* muzzle FX removed — see pulseFireBursts */ }
 
   // 2026-06-11: spawn + advance the fire trail behind an in-flight tossed asteroid. Stepped
   // from update() (dt-based) so it never double-advances when draw() runs more than once.
@@ -18544,6 +18571,8 @@ function initGalaxyCanvas() {
     _pulseShot = true;
     const hit = resolveShotAt(sx, sy, now, galaxyGesture.isTouch === true, true);
     _pulseShot = false;
+    // 2026-07-02: stamp a teal electric ring at the shot point (over the X-blast) as the fire signature.
+    spawnPulseFireBurst(sx, sy);
     // 2026-07-01: the Pulse Cannon sprays ~12 hits/s — feeding every hit into the 10-hit MARKSMAN
     // counter trivializes it. Only every 3rd pulse hit counts toward marksman (so it still builds,
     // but ~3x slower). Pulse still never records a MISS (resolveShotAt was called with deferMarksman),

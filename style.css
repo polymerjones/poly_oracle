@@ -2599,6 +2599,14 @@ select:focus-visible {
   color: #eaf3ff;
   text-shadow: 0 0 10px rgba(140, 210, 255, 0.55), 0 0 28px rgba(90, 170, 255, 0.4);
 }
+/* 2026-07-02: Training step titles reuse this banner but sit in the upper third (clear of the
+   commander portrait, dialogue box, objective banner and HUD, which all live low on screen) and
+   scale down a touch so they read as a step intro rather than a full level card. */
+.levelTitleBanner.training {
+  bottom: auto;
+  top: max(18%, 90px);
+  font-size: clamp(1rem, 4vw, 1.55rem);
+}
 .levelTitleBanner.show {
   animation: levelTitleIn 600ms cubic-bezier(.2, .9, .3, 1) both;
 }
@@ -2935,4 +2943,13 @@ select:focus-visible {
 @keyframes taskInstrStrobe {
   0%, 100% { opacity: 0.95; }
   50% { opacity: 0.35; }
+}
+/* 2026-07-02: ghost the objective banner + plasma-net demo video when a Stroid drifts beneath
+   them, matching the commander HUD's comm-see-through treatment. !important overrides the banner's
+   inline opacity + strobe animation; removing the class restores the element's own opacity. */
+#commanderTaskInstruction.stroid-ghost,
+#tutorialDemoOverlay.stroid-ghost {
+  opacity: 0.32 !important;
+  animation: none !important;
+  transition: opacity 0.18s ease !important;
 }

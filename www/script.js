@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-02 10:39";
+const BUILD_TS = "2026-07-02 16:19";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -7929,6 +7929,11 @@ function initGalaxyCanvas() {
   // It stays "spawned" until the cadet taps it to arm it, so the "TAP THE BOMB TO ARM IT" step
   // can't strand the player in purgatory waiting for a player_armed that auto-detonation skipped.
   let tutorialPlacedBombNoAutoArm = false;
+  // 2026-07-02: freeze phase → freeze_toss step. While set, the freeze bank does NOT time-drain,
+  // so the freeze the cadet activates in the freeze step survives the VO + field-clear + step
+  // transition and stays active through the frozen toss (no forced re-acquire). Cleared once the
+  // toss lands (freeze_toss explicitly ends the freeze) and in cleanupTutorial.
+  let tutorialHoldFreeze = false;
   let tutorialPaused = false;          // pause menu / app-switch
   let tutorialTimerRunning = false;    // intro: perimeter visibly counts down until timer powerup
   let tutorialTimerStartedAt = 0;
@@ -10902,11 +10907,15 @@ function initGalaxyCanvas() {
 
   // 2026-06-22: standalone bottom-screen level title. Slides in, holds, then a very slow fade.
   // pointer-events:none + outside the dimming intro overlay, so it never blocks/covers gameplay.
-  function showLevelTitleBanner(label) {
+  function showLevelTitleBanner(label, opts = {}) {
     const el = document.getElementById("levelTitleBanner");
     if (!el) return;
     if (levelTitleTimer) { clearTimeout(levelTitleTimer); levelTitleTimer = null; }
     el.classList.remove("show", "fadeOut");
+    // 2026-07-02: Training reuses this same animated banner to introduce each mechanic, but the
+    // default lower-center position collides with the training comm box / objective banner. The
+    // `training` variant repositions to the upper third (see .levelTitleBanner.training in CSS).
+    el.classList.toggle("training", !!opts.training);
     if (!label) { el.textContent = ""; el.setAttribute("aria-hidden", "true"); return; }
     el.textContent = label;
     void el.offsetWidth; // restart the entrance animation
@@ -14948,6 +14957,31 @@ function initGalaxyCanvas() {
   // each step's action, detected via stuntNotify() calls at the existing
   // action-completion sites (shoot / plasma / toss / bomb / freeze).
   // ──────────────────────────────────────────────────────────────────────────
+  // 2026-07-02: warm the assets specific to Training that the generic arcade warmup can't reach.
+  // Runs right after warmArcadeAssets(1) in startStuntMode, keeping the WARMING UP overlay up.
+  async function warmTrainingAssets() {
+    setArcadeWarmupVisible(true, "WARMING UP");
+    try {
+      // 1) SPC portrait frames — .src is set at load but never decoded, so the first talk/praise
+      //    frame swap (which lands right around the first Stroid kill) decode-hitches. Decode now.
+      await warmImageSet(spcImages);
+      // 2) Plasma-net demo clip — built lazily on first show today; pre-build + buffer it so the
+      //    first plasma lesson doesn't stall fetching/decoding the video.
+      try {
+        const v = _ensureDemoOverlayEl();
+        if (v && v.readyState < 2) v.load();
+      } catch {}
+      // 3) Second, uncapped gameplay-sprite prime. The arcade pass races an 1800ms cap that can be
+      //    truncated on a cold device, re-introducing the first-stroid FX upload hitch. Idempotent
+      //    (already-decoded images are no-ops); bounded so it can never hang the warmup screen.
+      if (typeof warmGameplaySprites === "function") {
+        await Promise.race([warmGameplaySprites(), delay(3000)]);
+      }
+    } finally {
+      setArcadeWarmupVisible(false);
+    }
+  }
+
   async function startStuntMode() {
     // 2026-06-24: the audioEngine.teardown() that used to run here is GONE. Backing out of Training
     // and restarting it was laggy because the SPC tutorial (VO-heavy) piled up MediaElementSource
@@ -14959,6 +14993,9 @@ function initGalaxyCanvas() {
     // sprite GPU-prime) so Training/Practice are as smooth as the main game. warmArcadeAssets already
     // unlocks audio and loads the gameplay SFX map, so no separate loadMany is needed here.
     await warmArcadeAssets(1);
+    // 2026-07-02: then warm the Training-only surfaces (SPC frames, demo video, uncapped sprite
+    // prime) so the first Stroid kill / first portrait swap / first plasma demo don't hitch.
+    await warmTrainingAssets();
     hideArcadeOverlay();
     tapBlasts = [];
     // fresh, pressure-free state
@@ -15874,6 +15911,7 @@ function initGalaxyCanvas() {
     { id: "laser", run: async () => {
       tutorialFireBlocked = false;
       tutorialBlockPlasmaToss = true; // only the laser this step
+      showLevelTitleBanner("PRIMARY LASER WEAPON", { training: true });
       spawnTutorialAsteroids(1, 3);
       const baseShots = tutorialEvents.shoot || 0;
       spcVO("08", "These are the **Stroids** — our job is to clear them from the Polyverse.", "talk_friendly");
@@ -15909,6 +15947,7 @@ function initGalaxyCanvas() {
     } },
     { id: "plasma", run: async () => {
       tutorialBlockPlasmaToss = false; // net + toss unlocked from here on
+      showLevelTitleBanner("PLASMA NET WEAPON", { training: true });
       spawnTutorialAsteroids(2, 2);
       spcVO("one_of_our_most_useful_weapons_plasma_net", "One of our most useful weapons is the **Plasma Net**.");
       spcVO("to_fire_a_plasma_net_tap_and_drag", "To fire a **Plasma Net**, tap and drag a net across the screen.");
@@ -15982,6 +16021,7 @@ function initGalaxyCanvas() {
     { id: "ufo", run: async () => {
       spawnTutorialAsteroids(3, 2);
       spawnTutorialUFO();
+      showLevelTitleBanner("UFOS", { training: true });
       spcVO("23", "UFO spotted, Cadet!", "alert");
       spcVO("24", "Shoot it twice to take it out!", "alert");
       showTaskInstructionDeferred("SHOOT THE UFO TWICE");
@@ -16000,6 +16040,7 @@ function initGalaxyCanvas() {
         playGameSfx(Math.random() < 0.5 ? "plasmarecharged" : "plasmarecharged1", 1.0);
         cssFlash("#00ffd1", 0.22, 300);
       });
+      showLevelTitleBanner("NET UFO NET COMBO ATTACK", { training: true });
       spcVO("28-30", "So net the **Stroids** when a UFO shows up.");
       await clearTutorialField();
       spawnTutorialAsteroids(3, 2);
@@ -16029,8 +16070,9 @@ function initGalaxyCanvas() {
       // Net confirmed — now the UFO appears
       spawnTutorialUFO();
       spcVO("32", "Now destroy the UFO quickly!", "alert");
-      hideTaskInstruction();
+      showTaskInstructionDeferred("SHOOT THE UFO TWICE");
       await waitFor(() => !ufo);
+      hideTaskInstruction();
       spawnTutorialAsteroids(4, 2);
       spcVO("33", "Plasma recharged — make another net!", "talk_friendly");
       // 2026-06-22 (Item 2): this follow-up net had no objective text — restore it, and clear the
@@ -16045,6 +16087,7 @@ function initGalaxyCanvas() {
     } },
     { id: "toss", run: async () => {
       spawnTutorialAsteroids(3, 3);
+      showLevelTitleBanner("THE STROID TOSS", { training: true });
       spcVO("35-36", "Next — the **Stroid Toss**. Tap and hold a **Stroid** to grab it.", "talk_calm");
       showTaskInstructionDeferred("TAP AND HOLD A STROID — SWIPE TO TOSS");
       tutorialState.tossFailures = 0;
@@ -16077,11 +16120,17 @@ function initGalaxyCanvas() {
     } },
     { id: "landmine", run: async () => {
       await waitVOIdle(); // 2026-06-22 (Item 4): let the prior praise finish before the bomb appears
+      showLevelTitleBanner("BOMBS", { training: true });
       spawnTutorialLandmine(tutZonePoint("center"));
       spcVO("42-43", "When you see a bomb, tap it to arm it.", "talk_calm");
       spcVO("44-45", "The bomb explodes soon,", "talk_calm");
       spcVO("but_to_detonate_it_yourself_just_tap_it_again", "but to detonate it yourself, just tap it again.", "talk_calm");
       showTaskInstructionDeferred("TAP THE BOMB TO ARM IT");
+      // 2026-07-02: once the cadet arms the bomb (tap → player_armed), swap the objective to the
+      // detonate action so the banner tracks the mechanic instead of stalling on "ARM IT".
+      waitFor(() => landmine && landmine.phase === "player_armed")
+        .then(() => { if (stuntActive) showTaskInstruction("TAP THE BOMB TO DETONATE IT"); })
+        .catch(() => {});
       tutorialState.mineTapBase = tutorialEvents.mine_tap || 0;
       for (;;) {
         await waitFor(() => !landmine);
@@ -16103,7 +16152,9 @@ function initGalaxyCanvas() {
       await waitVOIdle(); // 2026-06-22 (Item 4): let the prior praise finish before the powerup appears
       spawnTutorialPowerup("bomb", tutZonePoint("center"));
       spcVO("50-51", "Sometimes a bomb powerup appears — tap it to add it to your HUD.", "talk_calm");
+      showTaskInstructionDeferred("TAP THE BOMB TO PICK IT UP");
       await waitPowerupCollected("bomb");
+      hideTaskInstruction();
 
       // 2026-06-20 (Item 5): the old all-at-once "52-54" line is replaced by 4 action-gated steps.
       // 2026-06-21: a tutorial-placed bomb must wait for the cadet to tap-arm it (no auto-arm /
@@ -16147,9 +16198,12 @@ function initGalaxyCanvas() {
     } },
     { id: "quadshot", run: async () => {
       await waitVOIdle(); // 2026-06-22 (Item 4): hold the powerup until the prior praise finishes
+      showLevelTitleBanner("QUAD SHOT", { training: true });
       spawnTutorialPowerup("quadshot", tutZonePoint("center"));
       spcVO("thats_the_quad_shot_pick_it_up", "That's the **Quad Shot** power-up. Pick it up!", "talk_calm");
+      showTaskInstructionDeferred("TAP THE QUAD SHOT TO PICK IT UP");
       await waitPowerupCollected("quadshot");
+      hideTaskInstruction();
       // 2026-06-22: NO quad timer during training — keep it active for the whole lesson so an
       // idle cadet can't have it expire under them and get forced to finish with the plain laser.
       quadShotUntil = performance.now() + 600000;
@@ -16175,12 +16229,15 @@ function initGalaxyCanvas() {
     } },
     { id: "freeze", run: async () => {
       await waitVOIdle(); // 2026-06-22 (Item 4): hold the powerup until the prior praise finishes
+      showLevelTitleBanner("THE FREEZE POWERUP", { training: true });
       spawnTutorialPowerup("snowflake", tutZonePoint("center"));
       // 2026-06-20 (Item 9): split the combined 59-60 line so the "tap the freeze button" guidance
       // only plays AFTER the powerup is actually collected (was telling the cadet to activate it
       // before they'd even picked it up).
       spcVO("59", "Pick up the freeze powerup.", "idle_soft");
+      showTaskInstructionDeferred("TAP THE FREEZE POWERUP TO PICK IT UP");
       await waitPowerupCollected("snowflake");
+      hideTaskInstruction();
       spawnTutorialAsteroids(3, 2);
       // 2026-06-22 (Item 8): the recorded "60" clip played the wrong line — use the corrected,
       // dedicated recording (vo/SPC_tap_freeze_on_hud_to_activate_it.mp3).
@@ -16190,6 +16247,11 @@ function initGalaxyCanvas() {
       await waitEvent("freeze");
       hideHudPointer();
       hideTaskInstruction();
+      // 2026-07-02: pin the freeze bank from time-draining now, so it can't expire during this VO
+      // + the field-clear + the transition into the freeze_toss step. The cadet keeps the freeze
+      // they just activated all the way through the frozen toss (flag cleared once they toss, or in
+      // cleanupTutorial). Manual toggle still works; the second powerup becomes optional, not forced.
+      tutorialHoldFreeze = true;
       spcVO("61", "Objects are frozen for a short time.", "idle_soft");
       spcVO("freeze_toggle", "Freeze can be enabled and disabled by tapping the freeze icon on your HUD.", "idle_soft");
       await waitVOIdle();
@@ -16246,6 +16308,11 @@ function initGalaxyCanvas() {
           hideHudPointer();
         }
       }
+      // 2026-07-02: the frozen toss is done — release the freeze hold and thaw the field so the
+      // active freeze doesn't linger into the missile step (previously the 12s bank had long since
+      // drained by this point; now we held it open, so end it explicitly here).
+      tutorialHoldFreeze = false;
+      if (_freezeActive) endFreeze(false);
       // "toss" event fires the instant the stroid is flicked — wait for it to fully resolve
       // (collide + detonate, or self-destruct) so the cadet sees the destruction first.
       await waitFor(() => !sim.asteroids.some((a) => a.tossed));
@@ -16258,9 +16325,12 @@ function initGalaxyCanvas() {
       await waitVOIdle(); // 2026-06-22 (Item 4): hold the powerup until the prior praise finishes
       spawnTutorialPowerup("missile", tutZonePoint("center"));
       spawnTutorialAsteroids(4, 2);
+      showLevelTitleBanner("MISSILES", { training: true });
       // 2026-06-22 (Item 9): singular — one missile pickup (vo/SPC_pick_up_the_missile_cadet.mp3).
       spcVO("pick_up_the_missile_cadet", "Pick up the missile, Cadet.", "talk_calm");
+      showTaskInstructionDeferred("TAP THE MISSILE TO PICK IT UP");
       await waitPowerupCollected("missile");
+      hideTaskInstruction();
       spcVO("66", "Tap the missile weapon in the HUD to arm a missile.", "alert");
       showHudPointer("hudMissileBtn", 6000);
       showTaskInstructionDeferred("TAP THE MISSILE ICON IN YOUR HUD");
@@ -16279,11 +16349,12 @@ function initGalaxyCanvas() {
         "One more thing I want to show you before we're done today, Cadet.", "talk_calm");
       await waitVOIdle();
       if (!stuntActive) return;
+      showLevelTitleBanner("THE PULSE CANNON", { training: true });
       // Spawn the Pulse Cannon pickup (bypasses level/unlock gating via the tutorial helper).
       spawnTutorialPowerup("pulse", tutZonePoint("center"));
       spcVO("the_pulse_cannon_is",
         "The Pulse Cannon is a rapid-fire powerup. Pick it up, Cadet.", "talk_calm");
-      showTaskInstructionDeferred("PICK UP THE PULSE CANNON");
+      showTaskInstructionDeferred("TAP THE PULSE CANNON TO PICK IT UP");
       await waitPowerupCollected("pulse");   // collectPowerup auto-arms the 10s timer here
       hideTaskInstruction();
       // Pulse is now active: 10s timer running, Plasma Net auto-disabled. Guarantee that
@@ -16310,6 +16381,9 @@ function initGalaxyCanvas() {
       await clearTutorialField();
       await waitMs(300);
       // ── falls straight into the existing conclusion below ──
+      // 2026-07-02: bookend the tutorial with the level-title card so finishing Training reads as a
+      // genuine accomplishment before the hand-off into Practice / the full game.
+      showLevelTitleBanner("TRAINING COMPLETE", { training: true });
       spcVO("68", "Excellent work, Cadet.", "laugh");
       // 2026-06-22 (Item 10): SPC dons the "shades" closing pose (with its blink) the moment the
       // sign-off line begins, and holds it through the final "go practice" line below.
@@ -16415,9 +16489,11 @@ function initGalaxyCanvas() {
     tutorialBlockPlasmaToss = false;
     tutorialSmallGrabHintEnabled = false;
     tutorialPlacedBombNoAutoArm = false;
+    tutorialHoldFreeze = false;
     tutorialPaused = false;
     tutorialTimerRunning = false;
     hideSkipHint();
+    hideLevelTitleBanner(); // 2026-07-02: drop any in-flight training step title on teardown
     hideTaskInstruction();
     hidePlasmaDemoOverlay(); // 2026-06-22 (Item 1): never leave the demo clip on screen post-teardown
     hideCommArrows();
@@ -16443,6 +16519,7 @@ function initGalaxyCanvas() {
     tutorialBlockPlasmaToss = false;
     tutorialSmallGrabHintEnabled = false;
     tutorialPlacedBombNoAutoArm = false;
+    tutorialHoldFreeze = false;
     tutorialPaused = false;
     tutorialTimerRunning = false;
     hideSkipHint();
@@ -16873,6 +16950,29 @@ function initGalaxyCanvas() {
       _stroidBehindHud = behind;
       hud.classList.toggle("comm-see-through", behind);
     }
+    // 2026-07-02: extend the same "ghost behind Stroids" treatment to the training objective banner
+    // and the plasma-net demo video, so every HUD-layer overlay ducks consistently. Each is its own
+    // fixed element with its own opacity, so we toggle a .stroid-ghost class (see CSS). Only live
+    // during Training (both elements are null/hidden otherwise → no-op).
+    if (canvasRect) {
+      _updateElBehindStroid(_taskInstrEl, canvasRect);
+      _updateElBehindStroid(_demoOverlayEl, canvasRect);
+    }
+  }
+  // Toggle .stroid-ghost on a fixed overlay element when a non-ambient Stroid overlaps its rect.
+  function _updateElBehindStroid(el, canvasRect) {
+    if (!el || el.style.display === "none" || !el.style.display) {
+      if (el && el.classList.contains("stroid-ghost")) el.classList.remove("stroid-ghost");
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    let behind = false;
+    if (r.width > 20 && r.height > 20 && r.bottom > canvasRect.top && r.top < canvasRect.bottom) {
+      behind = anyStroidInRect(
+        r.left - canvasRect.left, r.top - canvasRect.top,
+        r.right - canvasRect.left, r.bottom - canvasRect.top);
+    }
+    el.classList.toggle("stroid-ghost", behind);
   }
 
   function update(dt, now) {
@@ -16955,7 +17055,7 @@ function initGalaxyCanvas() {
       // freeze runs out. dt is clamped to 33ms upstream, so a huge dt on foreground return can't nuke
       // the bank in one frame. When the bank hits 0, auto-end silently. A PAUSE leaves _freezeActive
       // = false with bank intact — the clock simply resumes ticking at full speed (no special case).
-      if (_freezeActive) {
+      if (_freezeActive && !tutorialHoldFreeze) {
         _freezeBankMs -= dt;
         if (_freezeBankMs <= 0) {
           endFreeze(false); // bank drained — silent unfreeze (drops music filter + HUD glow)

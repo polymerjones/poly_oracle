@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-02 09:28";
+const BUILD_TS = "2026-07-02 10:20";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -8349,7 +8349,9 @@ function initGalaxyCanvas() {
     if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
     if (slotEls.tokensBox) { slotEls.tokensBox.classList.remove("tick"); void slotEls.tokensBox.offsetWidth; slotEls.tokensBox.classList.add("tick"); }
     slotState = SLOT_STATE.SPINNING;
-    triggerGameplayHapticImpact(hapticImpactStyle.Heavy); // 2026-07-01: lever pull bumped Medium->Heavy per playtest
+    // 2026-07-02: lever pull wants a harder, meatier kick than a single Heavy tick — layer a
+    // double-Heavy + Medium tail (same punch as the bomb "huge" haptic) per playtest.
+    if (!DISABLE_GAMEPLAY_HAPTICS) triggerHugeHaptic();
     slotLeverFlash(); // 2026-07-01: localized glow instead of the full-screen cssFlash (see slotLeverFlash)
     cssShake(isIOSNative ? 0.45 : 0.75);
     playGameSfx("slot_clunk", 0.72);
@@ -8805,7 +8807,7 @@ function initGalaxyCanvas() {
         if (s >= 1) {
           r.pos = r.stopFinal; r.bounce = 0; r.bounceVel = SLOT_BOUNCE_IMPULSE; r.state = "settle";
           playGameSfx("slot_clunk", 0.7);
-          triggerGameplayHapticImpact(hapticImpactStyle.Medium); // 2026-07-01: reel-stop bumped Light->Medium per playtest
+          triggerGameplayHapticImpact(hapticImpactStyle.Heavy); // 2026-07-02: reel-stop bumped Medium->Heavy per playtest (harder symbol-stop feel)
         }
       } else if (r.state === "settle") {
         r.bounceVel += (0 - r.bounce) * SLOT_BOUNCE_K * dt; r.bounceVel -= r.bounceVel * SLOT_BOUNCE_DAMP * dt; r.bounce += r.bounceVel * dt;
@@ -9289,6 +9291,7 @@ function initGalaxyCanvas() {
   let pulseBurstIndex = 0; // 0/1 within a pair (1 == mid-pair, use the short delay)
   let pulseSweepPhase = 0; // oscillator driving the left↔right turret sweep
   let pulseFireToggle = 0; // alternates the fire1/fire2 report
+  let lastPulseFireHapticAt = 0; // 2026-07-02: throttles the per-shot pulse-fire haptic (bridge flood guard)
   let pulseMarksmanTick = 0; // 2026-07-01: throttles pulse hits fed into the marksman combo (1 of 3)
   let _pulseShot = false; // set around resolveShotAt so the projectile renders as a pulse bolt
   const pulseMuzzle = { active: false, x: 0, y: 0, angle: 0, recoil: 0, phase: 0 };
@@ -9451,6 +9454,10 @@ function initGalaxyCanvas() {
   let arcadeLives = 0;
   let arcadeScore = 0;
   let arcadeScoreAtLevelStart = 0;
+  // 2026-07-02: gold-bar slot tokens picked up during a run must NOT survive a lost-life retry.
+  // Snapshot the bank at each level start (always 0 in practice — the prior level's tokens are spent
+  // at the slot before advancing) and restore it on Retry so the failed attempt's pickups are erased.
+  let slotTokensAtLevelStart = 0;
   let shotsFired = 0;
   let shotsHit = 0;
   let ufosKilledThisLevel = 0;
@@ -10218,7 +10225,7 @@ function initGalaxyCanvas() {
           continue;
         }
         const frame = Math.min(pulseFireFxSheet.frameCount - 1, Math.floor(t * pulseFireFxSheet.frameCount));
-        const size = (isIOSNative ? 46 : 54) * b.scale; // ~X-blast sized
+        const size = (isIOSNative ? 92 : 108) * b.scale; // 2026-07-02: ~2x bigger — readable under the thumb (playtest)
         const fade = 1 - t; // expands + fades over its short life
         drawCtx.globalAlpha = clamp(0.95 * fade * fastFxFlicker(now, b.flickerSeed, 0.5), 0, 0.95);
         drawFxSheetFrame(drawCtx, pulseFireFxSheet, frame, b.x, b.y, size, b.rot, b.tint);
@@ -11252,7 +11259,8 @@ function initGalaxyCanvas() {
     if (!audioEngine.unlocked) audioEngine.unlock();
     // 2026-06-24: small detune jitter on every shot — rapid identical advfire buffers were summing
     // into a resonant low boom (worst under quadshot); this de-correlates their phase, staying crisp.
-    playGameSfx("advfire", 0.86, { detune: (Math.random() - 0.5) * 100 });
+    // 2026-07-02: base laser tap bumped 0.86 → 1.0 (louder plasma report per playtest).
+    playGameSfx("advfire", 1.0, { detune: (Math.random() - 0.5) * 100 });
   }
 
   function startUfoDrone() {
@@ -14180,8 +14188,10 @@ function initGalaxyCanvas() {
       lastTapAt = tapNow;
       if (!hintVisible && !scoreRevealComplete) {
         // 2026-06-30: stray firing taps were skipping the write-on the instant the scorecard
-        // appeared. Swallow taps in the first second; after that a tap still fast-forwards.
-        if (tapNow - shownAt >= 1000) completeScorecardReveal();
+        // appeared. Swallow single taps in the first second; after that a tap still fast-forwards.
+        // 2026-07-02: a deliberate double-tap is clearly not a stray fire, so it skips the
+        // write-on immediately (even inside the first-second swallow window).
+        if (tapNow - shownAt >= 1000 || isDoubleTap) completeScorecardReveal();
         return;
       }
       // 2026-06-26: stray firing taps were skipping the scorecard. Only skip via either
@@ -14508,6 +14518,7 @@ function initGalaxyCanvas() {
         setMenuOverlayOpen(false);
         arcadeLives = clamp(arcadeLives - 1, 0, MAX_LIVES);
         arcadeScore = arcadeScoreAtLevelStart;
+        slotTokens = slotTokensAtLevelStart; // 2026-07-02: erase gold-bar tokens banked during the failed attempt
         renderLives();
         renderScore();
         if (arcadeLives === 1) {
@@ -14589,6 +14600,7 @@ function initGalaxyCanvas() {
     const cfg = ARCADE_LEVELS[safeIdx];
     const now = performance.now();
     arcadeScoreAtLevelStart = arcadeScore;
+    slotTokensAtLevelStart = slotTokens; // 2026-07-02: baseline for the lost-life token rollback (see Retry)
     setSavedArcadeLevel(cfg.level);
     initMediaSession().then(() => updateMediaSessionLevel(cfg.level, cfg.label));
     galaxyView?.classList.toggle("level-10", cfg.level === 10);
@@ -17482,6 +17494,28 @@ function initGalaxyCanvas() {
     const beef = pulse && hit;        // full beefy blast only on a real pulse hit
     const pulseMiss = pulse && !hit;  // toned-down: skip the ghost-X + flash bloom
     const wMul = beef ? 1.6 : 1;
+    // Layer 0 — "radiation" ring: a soft, low-opacity teal circle that expands well past the
+    // fingertip so the player can always see WHERE they tapped, even with a thumb over the spot.
+    // 2026-07-02 (playtest). Skipped on a pulse miss to keep empty-space sweeps clean.
+    if (!pulseMiss) {
+      const radR = 30 + (1 - life) * 40; // 30 → 70px, larger than a thumb contact patch
+      const rg = tctx.createRadialGradient(x, y, radR * 0.55, x, y, radR);
+      rg.addColorStop(0, "rgba(0,255,204,0)");
+      rg.addColorStop(0.8, `rgba(0,255,204,${(life * 0.10).toFixed(3)})`);
+      rg.addColorStop(1, "rgba(0,255,204,0)");
+      tctx.save();
+      tctx.fillStyle = rg;
+      tctx.beginPath();
+      tctx.arc(x, y, radR, 0, Math.PI * 2);
+      tctx.fill();
+      tctx.globalAlpha = life * 0.18;
+      tctx.strokeStyle = "#00ffcc";
+      tctx.lineWidth = 2;
+      tctx.beginPath();
+      tctx.arc(x, y, radR, 0, Math.PI * 2);
+      tctx.stroke();
+      tctx.restore();
+    }
     // Layer 1 — radial flash (only while bright; suppressed on a pulse miss)
     if (life > 0.6 && !pulseMiss) {
       const flashAlpha = (life - 0.6) / 0.4;
@@ -17499,8 +17533,9 @@ function initGalaxyCanvas() {
     }
 
     // Layer 2 — ghost X (outer, expands, low opacity; suppressed on a pulse miss)
+    // 2026-07-02: ~2x bigger — the old X was smaller than a thumb, so it hid under the touch (playtest).
     if (!pulseMiss) {
-      const ghostSize = (10 + (1 - life) * 14) * (beef ? 1.2 : 1);
+      const ghostSize = (18 + (1 - life) * 26) * (beef ? 1.2 : 1);
       tctx.save();
       tctx.globalAlpha = life * 0.18;
       tctx.strokeStyle = "#00ffcc";
@@ -17515,7 +17550,8 @@ function initGalaxyCanvas() {
     }
 
     // Layer 3 — main X (crisp teal). A pulse miss stays compact (no beef); a pulse hit is enlarged.
-    const size = (8 + (1 - life) * 5) * (beef ? 1.15 : pulseMiss ? 0.7 : 1);
+    // 2026-07-02: ~2x bigger so the crosshair reads even under the firing thumb (playtest).
+    const size = (15 + (1 - life) * 10) * (beef ? 1.15 : pulseMiss ? 0.7 : 1);
     tctx.save();
     tctx.globalAlpha = life * 0.95;
     tctx.strokeStyle = pulse ? "#66ffe6" : "#00ffcc";
@@ -18534,9 +18570,11 @@ function initGalaxyCanvas() {
       if (hitRock && hitRock.tossed) {
         detonateTossedAsteroid(hitRock);
       } else {
-        // 2026-07-01: on a Pulse Cannon kill, pass the bolt's impact point so the split children get a
-        // directional teal "just got hit" highlight on the side that faced the shot (see splitAsteroidByIndex).
-        splitAsteroidByIndex(hitIndex, pulse ? { x: sx, y: sy } : null);
+        // 2026-07-01: pass the shot's impact point so the split children get a directional teal
+        // "just got hit" highlight on the side that faced the shot (see splitAsteroidByIndex).
+        // 2026-07-02: applies to plain plasma/laser taps too, not just Pulse Cannon bolts — the
+        // shard highlight was missing on normal-tap kills (playtest).
+        splitAsteroidByIndex(hitIndex, { x: sx, y: sy });
       }
       // 2026-06-30: under quadshot, defer to handleArcadeTap so the 4-projectile volley counts as
       // one marksman hit (flag the kill instead of incrementing here).
@@ -18582,11 +18620,19 @@ function initGalaxyCanvas() {
       if (pulseMarksmanTick === 0) recordComboEvent("laser_stroid_hit", { x: sx, y: sy });
     }
     // alternating fire1/fire2 with pitch jitter so a sustained stream never combs into one harsh tone
-    playGameSfx(pulseFireToggle ? "pulse_cannon_fire2" : "pulse_cannon_fire1", 0.7, {
+    // 2026-07-02: pulse fire read too quiet in playtest — bumped 0.7 → 0.9 (~+25%).
+    playGameSfx(pulseFireToggle ? "pulse_cannon_fire2" : "pulse_cannon_fire1", 0.9, {
       important: true,
       detune: (Math.random() - 0.5) * 90,
     });
     pulseFireToggle ^= 1;
+    // 2026-07-02: sharp, quick haptic tick on each shot so a held pulse stream "buzzes" in the hand.
+    // Throttled to ~40ms so the ~12 shots/s stream doesn't flood the Capacitor bridge (a pair's two
+    // 35ms-apart shots collapse to one tick). This layers ON TOP of the per-kill destroy haptic.
+    if (now - lastPulseFireHapticAt >= 40) {
+      lastPulseFireHapticAt = now;
+      triggerGameplayHapticImpact(hapticImpactStyle.Light);
+    }
     pulseMuzzle.recoil = 2; // subtle kick; drawn as a 1-2px muzzle offset, never touches gameplay
   }
 

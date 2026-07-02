@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-01 20:11";
+const BUILD_TS = "2026-07-01 20:30";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -7954,6 +7954,9 @@ function initGalaxyCanvas() {
   const SPC_VO_AVAILABLE = new Set([
     "01", "02", "03-04", "05-06a", "06b", "07", "08", "08b", "08c", "12", "13-14", "15-16", "15-16_release", "17", "17b", "18", "19",
     "one_of_our_most_useful_weapons_plasma_net", "to_fire_a_plasma_net_tap_and_drag",
+    // 2026-07-01: Pulse Cannon training step (final weapon taught before the outro).
+    "one_more_thing_i_want_to_show_you", "the_pulse_cannon_is",
+    "tap_and_drag_to_fire_the_pulse_cannon_light_em_up",
     "20", "21", "22", "23", "24", "25", "26", "27", "28-30", "28-30_part2", "31", "32", "33",
     "34", "35", "36", "35-36", "37", "38", "39", "40", "41", "42-43", "44-45", "46", "47", "48", "49",
     // 2026-06-23: standalone "52" OMITTED on purpose — vo/SPC_52.mp3 is a mislabeled recording
@@ -15683,7 +15686,7 @@ function initGalaxyCanvas() {
     // a batch doesn't all pop in at once.
     const spawnOne = () => {
       const p = tutZonePoint(options.positionZone || "random");
-      const a = spawnAsteroid(p.x, p.y, kind, true); // warp:true → playWarpSound + addWarpRing
+      const a = spawnAsteroid(p.x, p.y, kind, true, options.spriteKey || null); // warp:true → playWarpSound + addWarpRing; optional per-step skin (e.g. "roidneon" green for the Pulse Cannon step)
       if (a) {
         if (options.fast) { a.vx *= 1.7; a.vy *= 1.7; }
         refs.push(a);
@@ -16197,6 +16200,45 @@ function initGalaxyCanvas() {
       await waitFor(() => activeMissile);
       hideTaskInstruction();
       await waitFor(() => !activeMissile);
+      // ── Pulse Cannon (final weapon) — 2026-07-01 ──────────────────────────────
+      await clearTutorialField();            // clear leftover silver missile-step Stroids
+      await waitMs(300);
+      // Intro line — must fully finish before the powerup appears.
+      spcVO("one_more_thing_i_want_to_show_you",
+        "One more thing I want to show you before we're done today, Cadet.", "talk_calm");
+      await waitVOIdle();
+      if (!stuntActive) return;
+      // Spawn the Pulse Cannon pickup (bypasses level/unlock gating via the tutorial helper).
+      spawnTutorialPowerup("pulse", tutZonePoint("center"));
+      spcVO("the_pulse_cannon_is",
+        "The Pulse Cannon is a rapid-fire powerup. Pick it up, Cadet.", "talk_calm");
+      showTaskInstructionDeferred("PICK UP THE PULSE CANNON");
+      await waitPowerupCollected("pulse");   // collectPowerup auto-arms the 10s timer here
+      hideTaskInstruction();
+      // Pulse is now active: 10s timer running, Plasma Net auto-disabled. Guarantee that
+      // a press always fires (not a stroid grab) for the "tap and drag" lesson.
+      tutorialBlockPlasmaToss = true;
+      spcVO("tap_and_drag_to_fire_the_pulse_cannon_light_em_up",
+        "Tap and drag to fire the Pulse Cannon. Light 'em up, Cadet!", "alert");
+      showTaskInstructionDeferred("TAP AND DRAG TO FIRE THE PULSE CANNON");
+      // Green target field; keep it stocked for the whole duration. Free-fire, no kill
+      // requirement. Loop ends when the cannon ends — natural expiry OR HUD-tap cancel
+      // (both zero out pulseCannonActive()).
+      spawnTutorialAsteroids(4, 2, { spriteKey: "roidneon" });
+      while (pulseCannonActive() && stuntActive) {
+        await waitMs(1000);
+        if (!stuntActive) return;
+        if (pulseCannonActive() && tutorialAsteroidsAllCleared()) {
+          spawnTutorialAsteroids(4, 2, { spriteKey: "roidneon" });
+        }
+      }
+      // Cannon ended: restore normal weapon behavior. Plasma Net already auto-restored
+      // (pulseCannonActive() is false); just re-enable grab/toss and clear the green field.
+      tutorialBlockPlasmaToss = false;
+      hideTaskInstruction();
+      await clearTutorialField();
+      await waitMs(300);
+      // ── falls straight into the existing conclusion below ──
       spcVO("68", "Excellent work, Cadet.", "laugh");
       // 2026-06-22 (Item 10): SPC dons the "shades" closing pose (with its blink) the moment the
       // sign-off line begins, and holds it through the final "go practice" line below.

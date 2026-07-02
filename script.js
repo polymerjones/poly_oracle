@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-01 16:54";
+const BUILD_TS = "2026-07-01 17:20";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -461,12 +461,16 @@ const GAME_SFX = {
 
 const CORE_PRELOAD_SFX_KEYS = [
   "orb_tap",
+  "orb_rub2",
   "menu_hit",
   "menu_back",
   "bling",
   "explosion_med",
   "explosion_big",
   "advfire",
+  "pulse_cannon_charge",
+  "pulse_cannon_fire1",
+  "pulse_cannon_fire2",
 ];
 
 const IOS_GAMEPLAY_PRELOAD_SFX_KEYS = [
@@ -3470,9 +3474,14 @@ const audioEngine = {
     const missingKeys = Object.keys(soundMap).filter((key) => !this.buffers.has(key));
     if (!missingKeys.length) return Promise.resolve();
     const priorityKeys = [
+      "orb_tap",
+      "orb_rub2",
       "explosion_med",
       "explosion_big",
       "advfire",
+      "pulse_cannon_charge",
+      "pulse_cannon_fire1",
+      "pulse_cannon_fire2",
       "ufo_destroy",
       "landmine_boom",
       "plasmarecharged",
@@ -7991,7 +8000,7 @@ function initGalaxyCanvas() {
   const slotSprites = {};            // symbol id -> Image (loaded from slotart/)
   let _slotSpritesLoaded = false;
   let slotNukeOwned = 0;             // per-game nuke flag (jackpot cap); reset on a new game
-  let slotPendingQuadShot = false;   // quad win is timed → applied at the next level start
+  let slotPendingQuadShot = 0;       // quad wins are timed charges → applied at the next level start
   let slotMusicEl = null;            // legacy dedicated slot stream; kept for teardown safety
   let slotLevelMusicGainBefore = null;
   let slotLevelMusicHtmlVolBefore = null;
@@ -8108,7 +8117,7 @@ function initGalaxyCanvas() {
   const SLOT_SPIN_TIME_MS = isIOSNative ? 1900 : 2600;
   const SLOT_REEL_STAGGER_MS = isIOSNative ? 260 : 380;
   const SLOT_STOP_MIN_TRAVEL = 6, SLOT_STOP_DUR = 1.0;
-  const SLOT_LEVER_THRESHOLD = 0.6, SLOT_LEVER_STIFF = 120, SLOT_LEVER_DAMP = 9;
+  const SLOT_LEVER_COMMIT = 0.18, SLOT_LEVER_STIFF = 120, SLOT_LEVER_DAMP = 9;
   const SLOT_BOUNCE_IMPULSE = 0.16, SLOT_BOUNCE_K = 200, SLOT_BOUNCE_DAMP = 16;
   const SLOT_DPR = isIOSNative ? 1 : Math.min(window.devicePixelRatio || 1, 2);
   // Slot mode now keeps level music running underneath, ducked by slotDuckLevelMusic().
@@ -8207,9 +8216,14 @@ function initGalaxyCanvas() {
   }
   function slotReleaseLever() {
     if (slotLever.mode !== "drag") return;
-    const pulled = slotLever.value >= SLOT_LEVER_THRESHOLD;
-    slotLever.mode = "recoil"; slotLever.springTarget = 0;
-    if (pulled) slotDoPull();
+    const committed = slotLever.value >= SLOT_LEVER_COMMIT;
+    if (committed) {
+      slotLever.mode = "autoPull";
+      slotLever.springTarget = 1;
+    } else {
+      slotLever.mode = "recoil";
+      slotLever.springTarget = 0;
+    }
   }
 
   function slotStartSpin() {
@@ -8557,7 +8571,7 @@ function initGalaxyCanvas() {
     else if (sym === "missile") { playerMissileInventory = Math.min(MAX_MISSILE_INVENTORY, playerMissileInventory + 1); updateHudMissileInventory(); }
     else if (sym === "freeze") { playerFreezeInventory = Math.min(MAX_FREEZE_INVENTORY, playerFreezeInventory + 1); updateHudFreezeInventory(); }
     else if (sym === "quad") {
-      slotPendingQuadShot = true; // timed — applied at the next level start
+      slotPendingQuadShot = Math.min(9, slotPendingQuadShot + 1); // timed charges — applied at the next level start
       playerMissileInventory = 0;
       missileAimMode = false;
       updateHudMissileInventory();
@@ -8677,7 +8691,10 @@ function initGalaxyCanvas() {
   }
   // Apply rewards that must land on the NEXT level (quad is timed). Called after startLevel().
   function slotApplyPendingRewards() {
-    if (slotPendingQuadShot) { quadShotUntil = performance.now() + 12000; slotPendingQuadShot = false; }
+    if (slotPendingQuadShot > 0) {
+      quadShotUntil = performance.now() + 12000 * slotPendingQuadShot;
+      slotPendingQuadShot = 0;
+    }
   }
 
   function slotFrame(now) {
@@ -8685,9 +8702,16 @@ function initGalaxyCanvas() {
     let dt = (now - slotLastFrameAt) / 1000; slotLastFrameAt = now;
     if (dt > 0.05) dt = 0.05; if (dt < 0) dt = 0;
     // lever spring physics
-    if (slotLever.mode === "drag") {
+    if (slotLever.mode === "drag" || slotLever.mode === "autoPull") {
       slotLever.vel += (slotLever.springTarget - slotLever.value) * SLOT_LEVER_STIFF * dt;
       slotLever.vel -= slotLever.vel * SLOT_LEVER_DAMP * dt; slotLever.value += slotLever.vel * dt;
+      if (slotLever.mode === "autoPull" && slotLever.value >= 0.985) {
+        slotLever.value = 1;
+        slotLever.vel = 0;
+        slotLever.mode = "recoil";
+        slotLever.springTarget = 0;
+        slotDoPull();
+      }
     } else if (slotLever.mode === "recoil") {
       slotLever.vel += (0 - slotLever.value) * SLOT_LEVER_STIFF * dt;
       slotLever.vel -= slotLever.vel * SLOT_LEVER_DAMP * dt; slotLever.value += slotLever.vel * dt;
@@ -8939,7 +8963,7 @@ function initGalaxyCanvas() {
     if (slotEls.topLives) slotEls.topLives.textContent = String(arcadeLives);
     if (slotEls.scoreVal) slotEls.scoreVal.textContent = String(arcadeScore);
     const setInv = (id, n) => { const el = slotEls.root?.querySelector(id); if (el) el.textContent = String(n); };
-    setInv("#psInvQuad", 0); // quad is timed (no inventory count)
+    setInv("#psInvQuad", slotPendingQuadShot);
     setInv("#psInvBomb", playerBombInventory);
     setInv("#psInvMissile", playerMissileInventory);
     setInv("#psInvFreeze", playerFreezeInventory);
@@ -9225,6 +9249,7 @@ function initGalaxyCanvas() {
   const MINE_CHAIN_PER_FRAME = 2;
   let missileImpactFlash = null; // { x, y, start } localized impact flash, drawn in drawMissileFx
   let missileForceSpawnedThisLevel = false; // DEBUG: revert before release
+  let pulseForceSpawnedThisLevel = 0; // DEBUG: force two Pulse Cannon drops per level
   // 2026-06-16: per-level emergency timer drop — on the listed levels, when the clock first
   // dips under 20s with no timer powerup on screen, force one out (reset in clearGameplayEntities).
   let emergencyTimerSpawned = false;
@@ -13706,6 +13731,7 @@ function initGalaxyCanvas() {
     audioEngine.removeFreezeFilter();
     hudFreezeBtn?.classList.remove("hudFreezeBtn--active");
     emergencyTimerSpawned = false; // 2026-06-16: re-arm the under-20s emergency timer drop
+    pulseForceSpawnedThisLevel = 0; // DEBUG: re-arm two Pulse Cannon test drops per level
     firedGuaranteedSpawns.clear(); // 2026-06-16: re-arm cfg.guaranteedSpawn entries
     firedWaves.clear(); // 2026-06-23: re-arm cfg.waves second-wave surges
     appliedSpeedEscalation = 1; // 2026-06-16: reset L15 speed ramp
@@ -14670,7 +14696,7 @@ function initGalaxyCanvas() {
     playerBombInventory = 0;
     slotTeardown(SLOT_REASON.NEW_GAME); // dispose any live slot before discarding its tokens
     slotTokens = 0; // 2026-06-26: discard banked POLYSLOTS tokens on a fresh run
-    slotNukeOwned = 0; slotPendingQuadShot = false; // reset per-game slot reward state
+    slotNukeOwned = 0; slotPendingQuadShot = 0; // reset per-game slot reward state
     // 2026-06-10: reset powerup + active effect state
     powerups.length = 0;
     quadShotUntil = 0;
@@ -16253,7 +16279,7 @@ function initGalaxyCanvas() {
     playerBombInventory = 0;
     slotTeardown(SLOT_REASON.NEW_GAME); // dispose any live slot before discarding its tokens
     slotTokens = 0; // 2026-06-26: discard banked POLYSLOTS tokens on a fresh run
-    slotNukeOwned = 0; slotPendingQuadShot = false; // reset per-game slot reward state
+    slotNukeOwned = 0; slotPendingQuadShot = 0; // reset per-game slot reward state
     quadShotUntil = 0;
     pulseCannonUntil = 0; stopPulseFiring();
     _freezeBankMs = 0;
@@ -16952,6 +16978,17 @@ function initGalaxyCanvas() {
                 : now + BOMB_POWERUP_INTERVAL_MIN
                   + Math.random() * (BOMB_POWERUP_INTERVAL_MAX - BOMB_POWERUP_INTERVAL_MIN);
           }
+        }
+
+        // DEBUG: force two Pulse Cannon drops on every level so the pickup/charge/fire loop is
+        // always testable, regardless of the level's normal powerupOverride pool.
+        const pulseDebugAtMs = pulseForceSpawnedThisLevel === 0
+          ? LEVEL_START_SPAWN_DELAY_MS
+          : LEVEL_START_SPAWN_DELAY_MS + 5000;
+        if (pulseForceSpawnedThisLevel < 2 && elapsedMs >= pulseDebugAtMs) {
+          pulseForceSpawnedThisLevel += 1;
+          spawnPowerupAt("pulse", randomPowerupPoint());
+          playGameSfx("bling", 0.8);
         }
 
         // DEBUG: revert before release — force one missile powerup at the start of each level
@@ -18332,7 +18369,7 @@ function initGalaxyCanvas() {
     spawnPowerupPickupBurst(pu);
     // gold bars get their own pickup sound; everything else keeps the generic blip
     if (pu.type === "goldbars") playGameSfx("pickup_gold", 0.9);
-    else playGameSfx("blip", 0.9);
+    else if (pu.type !== "pulse") playGameSfx("blip", 0.9);
     playGameSfx("crunch", 0.58);
     if (pu.type === "bomb") {
       if (playerBombInventory < MAX_BOMB_INVENTORY) {

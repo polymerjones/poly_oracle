@@ -1,0 +1,25 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /scores/{scoreId} {
+      allow read: if true;
+      allow create: if isValidScore();
+      allow update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidScore() {
+      return request.resource.data.keys().hasOnly(['initials', 'score', 'timestamp'])
+        && request.resource.data.initials is string
+        && request.resource.data.initials.matches('^[A-Z0-9-]{3}$')
+        && request.resource.data.score is int
+        && request.resource.data.score >= 0
+        && request.resource.data.score <= 999999999
+        && request.resource.data.timestamp == request.time;
+    }
+  }
+}

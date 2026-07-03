@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-02 21:26";
+const BUILD_TS = "2026-07-02 21:44";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -13925,6 +13925,7 @@ function initGalaxyCanvas() {
   }
 
   function clearGameplayEntities() {
+    fkReset(); // DEBUG_FIRSTKILL: re-arm the first-kill probe for the next run
     resetStroidToss();
     resetComboState();
     sim.tossedAsteroid = null;
@@ -14061,6 +14062,59 @@ function initGalaxyCanvas() {
       _fd.worstAt = now;
       fdRepaint();
     }
+  }
+
+  // 2026-07-02: ON-SCREEN first-stroid-destroy hitch probe (no Web Inspector needed). Arms on the
+  // FIRST asteroid kill of the run (the split call site in resolveShotAt), times that call's
+  // synchronous cost (split = explosion-particle alloc + child creation + SFX trigger), then watches
+  // the next FK_WINDOW_MS of frames for the worst inter-frame gap — a one-frame stall shows up as one
+  // big rawDt. Read it straight off the iPad, just above the freeze/BUILD stamps:
+  //   split=X.Xms  → the synchronous destruction work is the cost (particles/children).
+  //   worstΔ big @+0ms, split small → the SAME frame's DRAW (first sprite/particle GPU upload) is it.
+  //   worstΔ big @+later → a deferred/async cost landed after the kill (image/SFX decode finishing).
+  // Re-arms every clearGameplayEntities (each training/level restart). // DEBUG: revert before release
+  const DEBUG_FIRSTKILL = true;
+  const FK_WINDOW_MS = 2000;
+  const _fk = { armed: false, done: false, phaseTaken: false, t0: 0, splitMs: 0, worstDt: 0, worstAt: 0 };
+  let _fkEl = null;
+  function fkRepaint() {
+    if (!DEBUG_FIRSTKILL) return;
+    if (!_fkEl) {
+      _fkEl = document.createElement("div");
+      _fkEl.style.cssText = "position:fixed;bottom:52px;left:8px;font-family:monospace;"
+        + "font-size:10px;color:rgba(0,255,180,0.92);pointer-events:none;z-index:99999;"
+        + "white-space:pre;text-shadow:0 0 3px #000;";
+      document.body.appendChild(_fkEl);
+    }
+    const at = _fk.worstAt > 0 ? `@+${(_fk.worstAt - _fk.t0).toFixed(0)}ms` : "";
+    _fkEl.textContent = `FIRSTKILL split=${_fk.splitMs.toFixed(1)}ms`
+      + `\nworstΔ=${_fk.worstDt.toFixed(0)}ms ${at}`;
+  }
+  function fkReset() {
+    if (!DEBUG_FIRSTKILL) return;
+    _fk.armed = false; _fk.done = false; _fk.phaseTaken = false;
+    _fk.t0 = 0; _fk.splitMs = 0; _fk.worstDt = 0; _fk.worstAt = 0;
+  }
+  function fkArm() {
+    if (!DEBUG_FIRSTKILL || _fk.armed || _fk.done) return;
+    _fk.armed = true;
+    _fk.t0 = performance.now();
+    fkRepaint();
+  }
+  // Brackets the first-kill split call; a no-op passthrough on every later kill / after the window.
+  function fkPhase(fn) {
+    if (!DEBUG_FIRSTKILL || _fk.done || _fk.phaseTaken) return fn();
+    const a = performance.now();
+    const r = fn();
+    _fk.splitMs = performance.now() - a;
+    _fk.phaseTaken = true;
+    fkRepaint();
+    return r;
+  }
+  function fkSampleFrame(rawDt, now) {
+    if (!DEBUG_FIRSTKILL || !_fk.armed) return;
+    if (rawDt > _fk.worstDt) { _fk.worstDt = rawDt; _fk.worstAt = now; fkRepaint(); }
+    if (now - _fk.t0 >= FK_WINDOW_MS) { _fk.armed = false; _fk.done = true; }
   }
 
   function startLevelTransitionWatch(levelIndex) {
@@ -18561,6 +18615,7 @@ function initGalaxyCanvas() {
     const rawDt = sim.last ? now - sim.last : 16;
     sampleLevelTransitionFrame(rawDt, now);
     fdSampleFrame(rawDt, now);
+    fkSampleFrame(rawDt, now);
     const dt = Math.min(rawDt, 33);
     sim.last = now;
     update(dt, now);
@@ -18746,7 +18801,9 @@ function initGalaxyCanvas() {
         // "just got hit" highlight on the side that faced the shot (see splitAsteroidByIndex).
         // 2026-07-02: applies to plain plasma/laser taps too, not just Pulse Cannon bolts — the
         // shard highlight was missing on normal-tap kills (playtest).
-        splitAsteroidByIndex(hitIndex, { x: sx, y: sy });
+        // DEBUG_FIRSTKILL: arm on this (the first stroid kill) + time the split's synchronous cost.
+        fkArm();
+        fkPhase(() => splitAsteroidByIndex(hitIndex, { x: sx, y: sy }));
       }
       // 2026-06-30: under quadshot, defer to handleArcadeTap so the 4-projectile volley counts as
       // one marksman hit (flag the kill instead of incrementing here).

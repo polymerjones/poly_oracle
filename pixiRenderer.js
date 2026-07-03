@@ -185,7 +185,10 @@ const pixiRenderer = (() => {
           }
         }),
       );
-      textures.ufo = await PIXI.Assets.load('astgfx/ufo.png').catch(() => null);
+      // 2026-07-02: there is no ufo.png asset — the UFO is drawn procedurally (see the null-texture
+      // branch below, ufoFallback graphics). Attempting the load only guaranteed a 404 every session
+      // (and cluttered the Web Inspector console during profiling). Skip it; leave textures.ufo null.
+      textures.ufo = null;
 
       // 2026-06-23/24: code-generated skins (no file asset) baked here as canvas textures so the
       // iPad/PIXI path shows them — without this the renderer falls back to textures.roid01 (silver).

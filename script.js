@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-02 18:39";
+const BUILD_TS = "2026-07-02 21:26";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -4588,6 +4588,12 @@ function addListeners() {
       galaxyCanvasController?.cancelPulse?.();
     });
   }
+  if (hudQuadBadge) {
+    // 2026-07-02: tapping the Quad Shot badge cancels the weapon early (parity with Pulse Cannon).
+    hudQuadBadge.addEventListener("click", () => {
+      galaxyCanvasController?.cancelQuad?.();
+    });
+  }
   if (btnArcadeNew) {
     btnArcadeNew.addEventListener("click", () => galaxyCanvasController?.startArcadeNew?.());
   }
@@ -7956,7 +7962,10 @@ function initGalaxyCanvas() {
   const PRACTICE_THEME_INTERVAL_MS = 18000;
   const PRACTICE_PERIMETER_HUE_PERIOD_MS = 16000;
   const PRACTICE_POWERUP_INTERVAL_MS = 8000;
-  const PRACTICE_POWERUP_POOL = ["bomb", "bomb", "missile", "quadshot", "snowflake"];
+  // 2026-07-02: widened for variety so Practice no longer skews toward quad shots — one entry per
+  // powerup type (quad now ~1/7 instead of 1/5), with an extra bomb/freeze so the staples still
+  // recur. Bomb-full and missile-busy rolls are skipped at spawn time (see the spawn block).
+  const PRACTICE_POWERUP_POOL = ["bomb", "bomb", "missile", "snowflake", "goldbars", "pulse", "quadshot"];
   let practiceEndless = false;
   let practiceStartedAt = 0;
   let nextPracticeMineAt = 0; // Part 8: practice drops a fresh landmine on this 60s cadence
@@ -9878,6 +9887,14 @@ function initGalaxyCanvas() {
       const label = `${Math.ceil(remaining / 1000)}s`;
       if (hudPulseTime.textContent !== label) hudPulseTime.textContent = label;
     }
+  }
+
+  // 2026-07-02: Player tapped the Quad Shot badge — forfeit any remaining cluster-fire time.
+  // Mirrors cancelPulseCannon; guarded against the training lesson by the controller export.
+  function cancelQuadShot() {
+    if (quadShotUntil <= performance.now()) return;
+    quadShotUntil = 0;
+    updateHudQuadBadge();
   }
 
   // Player tapped the Pulse Cannon badge — forfeit any remaining duration and stop firing at once.
@@ -16512,9 +16529,13 @@ function initGalaxyCanvas() {
         try { ok = w.pred(); } catch { ok = false; }
         if (ok) { _tutWaiters.splice(i, 1); w.resolve(); resolvedAction = true; }
       }
-      // The player just completed/triggered something — drop any still-queued instructional VO
-      // so the next line (usually the success/transition beat) plays immediately. No dead air.
-      if (resolvedAction) spcFlush();
+      // The player just completed/triggered something — drop any still-QUEUED instructional VO,
+      // but let the line that's currently PLAYING finish naturally. 2026-07-02: previously this
+      // called spcFlush(), which paused the in-flight clip too — so completing an action mid-line
+      // (e.g. flicking the frozen stroid while "62" was still talking) left the caption pinned on
+      // screen with dead audio. Now the current line plays out to its end, then the next phase
+      // beat (success/transition) comes up right after. Only queued extras are dropped.
+      if (resolvedAction) _spcQueue = [];
     }
     const ph = TUTORIAL_PHASES[tutorialPhase];
     if (ph && ph.onUpdate) { try { ph.onUpdate(now); } catch {} }
@@ -17322,10 +17343,13 @@ function initGalaxyCanvas() {
         // block, so once a missile was collected (and the debug force-spawn drops one every level)
         // quad/freeze/bomb stopped appearing entirely. Other types must keep dropping.
         const missileBusy = playerMissileInventory > 0 || activeMissile;
+        // 2026-07-02: don't drop bomb powerups while the inventory is already full (3) — wait until
+        // the player spends one down to 2 or fewer. Applies in both arcade and practice.
+        const bombFull = playerBombInventory >= MAX_BOMB_INVENTORY;
         if (powerups.length < POWERUP_MAX_ONSCREEN && cfg.level >= 1 && now >= nextBombPowerupAt) {
           const puType = practiceEndless ? pick(PRACTICE_POWERUP_POOL) : pickPowerupForLevel(cfg);
-          if (puType === "missile" && missileBusy) {
-            // skip this missile roll while one is held/in flight; retry shortly with a fresh type.
+          if ((puType === "missile" && missileBusy) || (puType === "bomb" && bombFull)) {
+            // skip: missile held/in flight, or bomb inventory already full — retry soon w/ a fresh type.
             nextBombPowerupAt = now + 1500;
           } else {
             spawnPowerupAt(puType, randomPowerupPoint());
@@ -19813,6 +19837,13 @@ function initGalaxyCanvas() {
     cancelPulse() {
       if (!arcadeActive || engineMode !== "arcade") return;
       cancelPulseCannon();
+    },
+    // 2026-07-02: HUD Quad Shot badge — tap to cancel the weapon early. Allowed in real arcade and
+    // in endless Practice, but never during the training lesson (stuntActive drives the quad phase).
+    cancelQuad() {
+      if (stuntActive) return;
+      if (engineMode !== "arcade" && engineMode !== "practice") return;
+      cancelQuadShot();
     },
     // 2026-06-14: HUD missile button — toggle aim mode; the next canvas tap sets the target.
     toggleMissileAim() {

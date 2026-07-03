@@ -2238,6 +2238,9 @@ select:focus-visible {
   background: rgba(30, 8, 40, 0.85);
   box-shadow: 0 0 10px rgba(204, 102, 255, 0.6);
   align-items: center;
+  /* 2026-07-02: TAPPABLE — tap to cancel the quad shot early (parity with the pulse badge). */
+  pointer-events: auto;
+  cursor: pointer;
 }
 .hudQuadBadge.active {
   display: flex;

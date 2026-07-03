@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-02 18:14";
+const BUILD_TS = "2026-07-02 18:36";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1037,6 +1037,11 @@ const prefersReducedMotion =
 const isIOSWebKit = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const isCapacitorNative = !!(globalThis.Capacitor?.isNativePlatform?.());
 const isIOSNative = isCapacitorNative && isIOSWebKit;
+// 2026-07-02: iPad-class = an iOS device whose SHORT edge is tablet-sized (>=640px). iPhones top
+// out well under this in both orientations, so it cleanly separates iPad from iPhone. Used to
+// nudge device-specific audio/layout (e.g. combo-callout loudness, which reads much quieter on
+// iPad's HTML-audio mix than on iPhone).
+const isIPadClass = isIOSWebKit && Math.min(window.innerWidth || 0, window.innerHeight || 0) >= 640;
 // FIXED 2026-06-08: Safari desktop blocks AudioContext resume on rapid fire events
 const isSafariDesktop = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) && !navigator.userAgent.includes("Mobile");
 const MAX_EXPLOSION_PARTICLES = isIOSNative ? 30 : 80;
@@ -8843,14 +8848,16 @@ function initGalaxyCanvas() {
   function slotDuckLevelMusic() {
     slotLevelMusicGainBefore = audioEngine.musicGain?.gain?.value ?? MUSIC_MAX_GAIN;
     slotLevelMusicHtmlVolBefore = audioEngine.currentMusicHtml?.node?.volume ?? MUSIC_MAX_GAIN;
-    const target = (state.whisper ? 0.28 : 0.42) * MUSIC_MAX_GAIN;
+    // 2026-07-02: gentler slot duck — the level track stays clearly present under the slot SFX
+    // (was 0.42 / 0.32, which read as "music turned way down"). Just a light dip now.
+    const target = (state.whisper ? 0.45 : 0.68) * MUSIC_MAX_GAIN;
     if (audioEngine.musicGain && audioEngine.ctx) {
       const t = audioEngine.ctx.currentTime;
       audioEngine.musicGain.gain.cancelScheduledValues(t);
       audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, t);
       audioEngine.musicGain.gain.linearRampToValueAtTime(target, t + 0.22);
     }
-    if (audioEngine.currentMusicHtml?.node) audioEngine.currentMusicHtml.node.volume = state.whisper ? 0.18 : 0.32;
+    if (audioEngine.currentMusicHtml?.node) audioEngine.currentMusicHtml.node.volume = state.whisper ? 0.35 : 0.55;
   }
   function slotRestoreLevelMusic() {
     if (slotLevelMusicGainBefore == null && slotLevelMusicHtmlVolBefore == null) return;
@@ -8918,6 +8925,14 @@ function initGalaxyCanvas() {
         --reelL:6.9%;--reelT:19.82%;--reelW:69.98%;--reelH:35.27%;
         --leverR:2%;--leverT:20%;--leverW:17%;--leverH:35%;
         --resultT:55.8%;--hintT:61.3%;--hudT:67.5%;--btnT:75.5%;}
+      /* 2026-07-02: iPad-class screens (>=640px wide — clears every iPhone) were pinned to the
+         420px cap, leaving the cabinet marooned in the middle of a huge display. The art is a tall,
+         narrow aspect (826/1806), so the way to reclaim real estate is to grow it to (nearly) fill
+         the viewport height; width follows the aspect ratio. Trim the top margin so the taller
+         cabinet still fits. Everything inside is placed in % of the panel, so it all scales along. */
+      @media (min-width:640px){
+        .ps-panel{width:min(43vh,90vw,620px);margin-top:calc(18px + env(safe-area-inset-top,0px));}
+      }
       @keyframes psSlam{0%{opacity:0;transform:scale(2.35) rotate(-2deg)}58%{opacity:1;transform:scale(.92) rotate(.5deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
       @keyframes psBlink{50%{opacity:.25}}
       @keyframes psTick{0%{transform:scale(1)}40%{transform:scale(1.5);color:#fff}100%{transform:scale(1)}}
@@ -10147,7 +10162,12 @@ function initGalaxyCanvas() {
     const sfxKey = `combo_${key}`;
     if (!GAME_SFX[sfxKey]) return;
     // 2026-07-01: the net-ufo-net callout sat too hot in the mix — trim just this one.
-    const [v1, v2] = key === "net_ufo_net" ? [0.85, 0.18] : [0.98, 0.24];
+    let [v1, v2] = key === "net_ufo_net" ? [0.85, 0.18] : [0.98, 0.24];
+    // 2026-07-02: combo callouts read much quieter on iPad than on iPhone (they ride the HTML-audio
+    // path for the pitch-preserved speed-up, and that element volume lands softer in iPad's mix).
+    // Push the iPad class up toward the ceiling so the callout matches iPhone loudness; iPhone,
+    // already "very loud," is left as-is.
+    if (isIPadClass) { v1 = Math.min(1, v1 * 1.7); v2 = Math.min(1, v2 * 1.7); }
     playGameSfx(sfxKey, v1, { rate: 1.45, preservePitch: true, important: true });
     setTimeout(() => playGameSfx(sfxKey, v2, { rate: 1.55, preservePitch: true, important: true }), 70);
   }
@@ -16326,14 +16346,14 @@ function initGalaxyCanvas() {
           hideHudPointer();
         }
       }
-      // 2026-07-02: the frozen toss is done — release the freeze hold and thaw the field so the
-      // active freeze doesn't linger into the missile step (previously the 12s bank had long since
-      // drained by this point; now we held it open, so end it explicitly here).
+      // 2026-07-02: keep the freeze ACTIVE through the toss so the tossed rock stays frozen while
+      // it flies. "toss" fires the instant the stroid is flicked — wait for it to fully resolve
+      // (collide + detonate, or self-destruct) so the cadet sees the frozen destruction, THEN
+      // release the hold and thaw the field. Previously we ended the freeze the instant the toss
+      // fired, so the rock thawed mid-flight and the freeze never made it to the explosion.
+      await waitFor(() => !sim.asteroids.some((a) => a.tossed));
       tutorialHoldFreeze = false;
       if (_freezeActive) endFreeze(false);
-      // "toss" event fires the instant the stroid is flicked — wait for it to fully resolve
-      // (collide + detonate, or self-destruct) so the cadet sees the destruction first.
-      await waitFor(() => !sim.asteroids.some((a) => a.tossed));
       await waitMs(300); // let the blast read before SPC chimes in
       spcVO("64", "Very cool, Cadet.", "praise");
       await clearTutorialField();
@@ -18838,7 +18858,10 @@ function initGalaxyCanvas() {
     }
     if (pu.type === "goldbars") {
       addArcadeScore(1000);
-      slotTokens += 3; // 2026-06-29: one in-level gold bar pickup = three POLYSLOTS pulls
+      // 2026-07-02: 1 gold bar = 1 POLYSLOTS pull (was 3). Playtest read the token count as
+      // wildly higher than the number of gold bars actually collected — 1:1 keeps the tally
+      // matching the player's mental model. Bump back up if the slot needs more pulls per run.
+      slotTokens += 1;
       cssFlash("#ffd700", 0.22, 250);
       return;
     }

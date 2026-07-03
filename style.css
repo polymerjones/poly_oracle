@@ -2599,12 +2599,14 @@ select:focus-visible {
   color: #eaf3ff;
   text-shadow: 0 0 10px rgba(140, 210, 255, 0.55), 0 0 28px rgba(90, 170, 255, 0.4);
 }
-/* 2026-07-02: Training step titles reuse this banner but sit in the upper third (clear of the
-   commander portrait, dialogue box, objective banner and HUD, which all live low on screen) and
-   scale down a touch so they read as a step intro rather than a full level card. */
+/* 2026-07-02: Training step titles reuse this banner but sit just ABOVE the playfield centre —
+   right over where the step's powerup warps in (tutZonePoint("center") == 50%) — so the title
+   reads as a label for the incoming pickup. Kept a touch above mid so it clears the powerup art,
+   and clear of the commander portrait / dialogue box / objective banner that live low on screen.
+   Scaled down a touch so it reads as a step intro rather than a full level card. */
 .levelTitleBanner.training {
   bottom: auto;
-  top: max(18%, 90px);
+  top: 40%;
   font-size: clamp(1rem, 4vw, 1.55rem);
 }
 .levelTitleBanner.show {

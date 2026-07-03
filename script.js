@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-02 18:36";
+const BUILD_TS = "2026-07-02 18:39";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -13931,10 +13931,17 @@ function initGalaxyCanvas() {
     // 2026-06-21: discard any banked freeze on level transition (bank does NOT persist across
     // levels). Silent — no unfreeze SFX on a level/menu change — but still tear down the lingering
     // FX (icy music filter + HUD glow) so a level that ends mid-freeze doesn't carry them forward.
-    _freezeBankMs = 0;
-    _freezeActive = false;
-    audioEngine.removeFreezeFilter();
-    hudFreezeBtn?.classList.remove("hudFreezeBtn--active");
+    // 2026-07-02: EXCEPT while the freeze tutorial is holding the freeze open (tutorialHoldFreeze).
+    // The between-step field clear (clearTutorialField) runs this, and it used to silently kill the
+    // freeze the cadet just activated — so the freeze expired right after the "can be toggled" VO
+    // and the toss step dropped a redundant second powerup. Keep the held freeze alive across the
+    // clear; it's ended explicitly once the cadet tosses a frozen stroid.
+    if (!tutorialHoldFreeze) {
+      _freezeBankMs = 0;
+      _freezeActive = false;
+      audioEngine.removeFreezeFilter();
+      hudFreezeBtn?.classList.remove("hudFreezeBtn--active");
+    }
     emergencyTimerSpawned = false; // 2026-06-16: re-arm the under-20s emergency timer drop
     pulseForceSpawnedThisLevel = 0; // 2026-07-01: re-arm the per-level guaranteed Pulse Cannon drop(s)
     firedGuaranteedSpawns.clear(); // 2026-06-16: re-arm cfg.guaranteedSpawn entries

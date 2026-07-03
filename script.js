@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-03 11:33";
+const BUILD_TS = "2026-07-03 12:44";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -518,6 +518,10 @@ const PRACTICE_ENABLED = false;
 // The previous 1000ms is the "hard mode" candidate value for a future difficulty setting.
 const PLASMA_CAGE_CHARGE_MS = 800;
 const PLASMA_CAGE_COOLDOWN_MS = 5000;
+// 2026-07-03: a MANUAL placed net blocks re-arming (beginPlasmaCage rejects while one is set), so an
+// un-detonated net soft-locks the weapon. Safety-expire it after 45s (blinks the last 5s as a warning).
+const PLASMA_PLACED_NET_TTL_MS = 45000;
+const PLASMA_PLACED_NET_WARN_MS = 5000;
 const PLASMA_CAGE_DRAG_THRESHOLD = 20;
 const PLASMA_CAGE_VOLUME_BOOST = Math.pow(10, 4 / 20);
 const STROID_TOSS_HOLD_MS = 500;
@@ -8454,29 +8458,37 @@ function initGalaxyCanvas() {
     const _slotPullT0 = DEBUG_SLOT_TIMING ? performance.now() : 0;
     slotTokens -= 1;
     if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
-    if (slotEls.tokensBox) { slotEls.tokensBox.classList.remove("tick"); void slotEls.tokensBox.offsetWidth; slotEls.tokensBox.classList.add("tick"); }
+    // 2026-07-03 (iPad lever-hang fix): START THE REELS FIRST. Build strips, flip to SPINNING and
+    // schedule the stops before anything else so the reels are already moving on THIS committing rAF
+    // frame. The heavy non-visual work — forced reflow (tokens tick), the native Capacitor haptic
+    // bridge, and the slot_pull audio decode/start — is deferred to after the first paint below; on
+    // iPad that work stalled the commit frame so the reels visibly hung one frame before spinning.
     slotState = SLOT_STATE.SPINNING;
-    slotLeverFlash(); // 2026-07-01: localized glow instead of the full-screen cssFlash (see slotLeverFlash)
-    // 2026-07-02 (16:19 revert): the triple-impact triggerHugeHaptic() (immediate + two setTimeout
-    // bridge impacts) stalled every lever pull on iPad ~0.5s and swallowed the flash. Back to a
-    // single Heavy tick — flash fires first so the glow paints before the native bridge call.
-    triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
-    cssShake(isIOSNative ? 0.45 : 0.75);
-    playGameSfx("slot_clunk", 0.72);
-    setSlotHint("");
-    slotEls.skip?.classList.remove("show");
-    slotClearWinFx();
-    slotEls.reels?.classList.remove("win");
-    if (slotEls.result) { slotEls.result.className = "ps-result"; slotEls.result.innerHTML = ""; }
-    // Single pull+spin sound (prototype's official_level_pull_full), stored as a handle so it can be
-    // stopped the instant all reels land. Tracked so teardown/background also stop it.
-    slotRampHandle = slotTrackLoop(audioEngine.play("slot_pull", { volume: 0.9 }));
     // Capped powerups are pulled from the strip for this spin so their win literally can't appear.
     const ex = slotCappedExclusions();
     slotReels.forEach((r) => { r.strip = slotBuildStrip(ex); r.len = r.strip.length; r.target = (Math.random() * r.len) | 0; });
     slotStartSpin();
     slotReels.forEach((r, i) => slotTrackTimeout(() => slotCommandStop(r, r.target), SLOT_SPIN_TIME_MS + i * SLOT_REEL_STAGGER_MS));
+    // Cheap on-frame feedback so the glow + shake land with the spin-start.
+    slotLeverFlash(); // 2026-07-01: localized glow instead of the full-screen cssFlash (see slotLeverFlash)
+    cssShake(isIOSNative ? 0.45 : 0.75);
+    setSlotHint("");
+    slotEls.skip?.classList.remove("show");
+    slotClearWinFx();
+    slotEls.reels?.classList.remove("win");
+    if (slotEls.result) { slotEls.result.className = "ps-result"; slotEls.result.innerHTML = ""; }
     if (DEBUG_SLOT_TIMING) console.log(`slotDoPull sync: ${(performance.now() - _slotPullT0).toFixed(1)}ms`);
+    // Deferred to the next frame: haptic bridge + audio start + forced reflow never block the reels'
+    // first moving frame. A one-frame (~16ms) offset on these is imperceptible.
+    requestAnimationFrame(() => {
+      if (slotState !== SLOT_STATE.SPINNING) return; // stopped / torn down before the defer fired
+      if (slotEls.tokensBox) { slotEls.tokensBox.classList.remove("tick"); void slotEls.tokensBox.offsetWidth; slotEls.tokensBox.classList.add("tick"); }
+      triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
+      playGameSfx("slot_clunk", 0.72);
+      // Single pull+spin sound (prototype's official_level_pull_full), stored as a handle so it can be
+      // stopped the instant all reels land. Tracked so teardown/background also stop it.
+      slotRampHandle = slotTrackLoop(audioEngine.play("slot_pull", { volume: 0.9 }));
+    });
   }
   function slotOnAllStopped() {
     slotStopRamp();
@@ -9436,6 +9448,9 @@ function initGalaxyCanvas() {
   // the freeze fully ends only when the bank drains to 0 (auto-expiry) or the level resets.
   let _freezeBankMs = 0;        // remaining banked freeze time (ms); 0 == nothing to resume
   let _freezeActive = false;    // true == freeze running (clock paused); false == paused or empty
+  // 2026-07-03: strobe the timer perimeter for exactly one training VO line ("First — the perimeter
+  // timer…"). Set true by that line's onStart, cleared when the next VO line begins (see pumpSpc).
+  let _perimeterVoFlash = false;
   let _freezeSessionId = 0;     // bumped only on a fresh activation (NOT on resume) — cold-toss gliders
   let bombAimMode = false;
   // 2026-06-14: homing missile powerup — inventory, targeting + single in-flight missile.
@@ -13246,6 +13261,31 @@ function initGalaxyCanvas() {
     }
   }
 
+  // 2026-07-03: shared "wasted net" cue — a muffled dud, deliberately unsatisfying vs the punchy
+  // basicb_explo of a net that actually catches stroids. Used on an empty net AND the 45s net expiry.
+  function playPlasmaFizzle() {
+    playGameSfx("distantexplode", 0.5);
+  }
+
+  // 2026-07-03: safety-expire a MANUAL placed net. A placed net blocks re-arming (beginPlasmaCage
+  // rejects while one is set), so forgetting to detonate would soft-lock the weapon. After 45s, discard
+  // it with the wasted-net fizzle and run a normal reload so plasma comes back cleanly. (drawPlasmaOverlay
+  // blinks the net during the final PLASMA_PLACED_NET_WARN_MS as a warning.)
+  function updatePlasmaPlacedNet(now) {
+    const placed = plasmaCage.placed;
+    if (!placed) return;
+    if (now - placed.placedAt < PLASMA_PLACED_NET_TTL_MS) return;
+    plasmaCage.placed = null;
+    plasmaCage.lastRectCx = placed.x + placed.w / 2;
+    plasmaCage.lastRectCy = placed.y + placed.h / 2;
+    plasmaCage.releaseFx = { x: placed.x, y: placed.y, w: placed.w, h: placed.h, type: "fizzle", start: now, ttl: 260 };
+    playPlasmaFizzle();
+    plasmaCage.cooldownStart = now;
+    plasmaCage.cooldownUntil = now + PLASMA_CAGE_COOLDOWN_MS;
+    plasmaCage.rechargeSoundPlayed = false;
+    updatePlasmaModeBtn();
+  }
+
   function destroyAsteroidsInPlasmaCage(rect) {
     const toDestroy = [];
     const plasmaKillPositions = [];
@@ -13292,7 +13332,7 @@ function initGalaxyCanvas() {
       y: rect.y + rect.h / 2,
     });
     if (destroyedCount > 0) stuntNotify("plasma");
-    else stuntNotify("plasma_miss"); // tutorial Phase 3 coaching on an empty net
+    else { stuntNotify("plasma_miss"); playPlasmaFizzle(); } // tutorial Phase 3 coaching + a "wasted net" dud on an empty net
     // In the tutorial a MISSED net stays hot so the cadet can retry immediately — but a
     // SUCCESSFUL net runs the real cooldown so the recharge step (10999-11003) has something
     // to teach. (Force-recharging every net made "let the plasma recharge" resolve instantly.)
@@ -13316,8 +13356,12 @@ function initGalaxyCanvas() {
       cssStatic(450);
     }
     triggerHugeHaptic(); // 2026-06-12: plasma-net blast = big hard rumble
+    // 2026-07-03: MANUAL mode recharges 2× slower (10s). A placed whole-screen net that grabs and
+    // detonates everything is powerful, so it costs a longer reload; AUTO fire stays 5s. Clock starts
+    // on detonate, so Manual reads as "one big play, then a 10s reload".
+    const cooldownMs = plasmaCage.mode === "manual" ? PLASMA_CAGE_COOLDOWN_MS * 2 : PLASMA_CAGE_COOLDOWN_MS;
     plasmaCage.cooldownStart = now;
-    plasmaCage.cooldownUntil = now + PLASMA_CAGE_COOLDOWN_MS;
+    plasmaCage.cooldownUntil = now + cooldownMs;
     plasmaCage.rechargeSoundPlayed = false;
     plasmaCage.releaseFx = { x: rect.x, y: rect.y, w: rect.w, h: rect.h, type: "fire", start: now, ttl: 220 };
     return destroyedCount;
@@ -13475,7 +13519,7 @@ function initGalaxyCanvas() {
     }
     // 2026-06-10: freeze strobe — alternate white at ~3Hz while frozen, theme color returns
     // automatically when the freeze pauses/ends.
-    if (_freezeActive && Math.floor(now / 167) % 2 === 0) color = "#ffffff";
+    if ((_freezeActive || _perimeterVoFlash) && Math.floor(now / 167) % 2 === 0) color = "#ffffff";
     timerPerimeterCtx.strokeStyle = color;
     if (!isIOSNative) {
       timerPerimeterCtx.shadowColor = color;
@@ -13602,25 +13646,44 @@ function initGalaxyCanvas() {
 
   function drawPlasmaCooldown(now) {
     if (window.pixiRenderer) return;
-    if (!plasmaCtx || now >= plasmaCage.cooldownUntil) return;
-    const total = Math.max(1, plasmaCage.cooldownUntil - plasmaCage.cooldownStart);
-    const progress = clamp((now - plasmaCage.cooldownStart) / total, 0, 1);
+    if (!plasmaCtx) return;
     const x = sim.width - 28;
     const y = sim.height - 28;
+    if (now < plasmaCage.cooldownUntil) {
+      // RECHARGING — the sweep-arc ring.
+      const total = Math.max(1, plasmaCage.cooldownUntil - plasmaCage.cooldownStart);
+      const progress = clamp((now - plasmaCage.cooldownStart) / total, 0, 1);
+      plasmaCtx.save();
+      plasmaCtx.lineWidth = 3;
+      plasmaCtx.strokeStyle = "rgba(0,255,209,0.22)";
+      plasmaCtx.beginPath();
+      plasmaCtx.arc(x, y, 14, 0, Math.PI * 2);
+      plasmaCtx.stroke();
+      plasmaCtx.strokeStyle = "rgba(0,255,209,0.9)";
+      if (!isIOSNative) {
+        plasmaCtx.shadowColor = "#00FFD1";
+        plasmaCtx.shadowBlur = 8;
+      }
+      plasmaCtx.beginPath();
+      plasmaCtx.arc(x, y, 14, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+      plasmaCtx.stroke();
+      plasmaCtx.restore();
+      return;
+    }
+    // 2026-07-03: CHARGED & READY — a small breathing teal pip so the cadet gets a POSITIVE "loaded"
+    // signal. Before, the recharge ring simply vanished and there was no cue that plasma was ready.
+    // Hidden while drawing a net or while a manual net is already placed (their own overlays cover it).
+    if (plasmaCage.active || plasmaCage.placed) return;
+    const pulse = 0.5 + 0.5 * Math.sin(now / 320);
     plasmaCtx.save();
-    plasmaCtx.lineWidth = 3;
-    plasmaCtx.strokeStyle = "rgba(0,255,209,0.22)";
-    plasmaCtx.beginPath();
-    plasmaCtx.arc(x, y, 14, 0, Math.PI * 2);
-    plasmaCtx.stroke();
-    plasmaCtx.strokeStyle = "rgba(0,255,209,0.9)";
+    plasmaCtx.fillStyle = `rgba(0,255,209,${(0.5 + 0.4 * pulse).toFixed(3)})`;
     if (!isIOSNative) {
       plasmaCtx.shadowColor = "#00FFD1";
       plasmaCtx.shadowBlur = 8;
     }
     plasmaCtx.beginPath();
-    plasmaCtx.arc(x, y, 14, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
-    plasmaCtx.stroke();
+    plasmaCtx.arc(x, y, 5, 0, Math.PI * 2);
+    plasmaCtx.fill();
     plasmaCtx.restore();
   }
 
@@ -13724,7 +13787,14 @@ function initGalaxyCanvas() {
     // 2026-07-03: MANUAL placed net — draw it persistently (charged look, gentle breathing pulse) so
     // it's clearly armed and waiting for a tap/DETONATE.
     if (plasmaCage.placed) {
-      drawPlasmaCageRect(plasmaCage.placed, now, 1, true, 0.82 + 0.18 * Math.sin(now / 120), 1);
+      // 2026-07-03: gentle breathing pulse normally; blink HARD during the final warn window before the
+      // 45s safety-expiry discards it (see updatePlasmaPlacedNet).
+      const age = now - plasmaCage.placed.placedAt;
+      const warn = age > PLASMA_PLACED_NET_TTL_MS - PLASMA_PLACED_NET_WARN_MS;
+      const pulse = warn
+        ? (Math.floor(now / 140) % 2 === 0 ? 0.95 : 0.28)
+        : 0.82 + 0.18 * Math.sin(now / 120);
+      drawPlasmaCageRect(plasmaCage.placed, now, 1, true, pulse, 1);
     }
     if (plasmaCage.releaseFx) {
       const fx = plasmaCage.releaseFx;
@@ -15468,6 +15538,7 @@ function initGalaxyCanvas() {
       if (_spcAudio) { try { _spcAudio.pause(); } catch {} }
       _spcAudio = null;
       _spcPlaying = false;
+      _perimeterVoFlash = false; // 2026-07-03: perimeter strobe lives exactly one VO line
       _spcAdvanceFn = null;
       _spcLineStartedAt = 0;
       _spcLinesCompletedThisPhase += 1; // a full VO line just finished (gates the skip hint)
@@ -16114,6 +16185,13 @@ function initGalaxyCanvas() {
     const mediumBlast = a.kind === 2;
     const ttlScale = bigBlast ? 1.4 : mediumBlast ? 1.18 : 1;
     spawnExplosion(a.x, a.y, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale, a.kind, a.spriteKey);
+    // 2026-07-03: match the real shot-kill weight (splitAsteroidByIndex) so a bomb/landmine/missile
+    // field wipe BLOWS UP each stroid instead of puffing it away (the training bomb steps read as
+    // "stroids just vanish"). Electric burst is size-gated (big/medium only, small count) so wiping a
+    // full field at once doesn't spike; it self-guards on sheet.ready + reduced-motion. Size feedback
+    // adds the impact "weight".
+    if (bigBlast || mediumBlast) spawnExplosiveElectricBurst(a.x, a.y, bigBlast ? 160 : 110, bigBlast ? 4 : 3);
+    triggerAsteroidSizeFeedback(a.kind);
     playAsteroidExplosionBoom(a.kind, (bigBlast ? 0.9 : mediumBlast ? 0.92 : 0.78) * volScale, 0.92 + Math.random() * 0.16);
   }
   function clearTutorialField() {
@@ -16182,7 +16260,8 @@ function initGalaxyCanvas() {
       tutorialFireBlocked = true;
       spcVO("01", "Hi there Cadet, welcome to the Polyverse simulator.", "talk_friendly");
       spcVO("02", "Let me show you the ropes before the real battle.", "talk_friendly");
-      spcVO("03-04", "First — the perimeter timer. That line around the screen edges shows how long you have to clear the field.", "talk_explain");
+      spcVO("03-04", "First — the perimeter timer. That line around the screen edges shows how long you have to clear the field.", "talk_explain",
+        () => { _perimeterVoFlash = true; }); // 2026-07-03: strobe the border while SPC calls it out (cleared at the next line)
       showTimerArrow(); // Part 5: point at the perimeter timer while SPC describes it
       await waitVOIdle();
     } },
@@ -17288,6 +17367,7 @@ function initGalaxyCanvas() {
     sim._frameBudgetExceeded = _frameBudgetExceeded;
     updateStroidBehindHud(now);
     updatePlasmaRechargeSound(now);
+    updatePlasmaPlacedNet(now);
     const driftScale = prefersReducedMotion ? 0 : 1;
     for (let i = 0; i < sim.stars.length; i += 1) {
       const s = sim.stars[i];
@@ -19753,8 +19833,11 @@ function initGalaxyCanvas() {
     if (Number.isFinite(point.x) && Number.isFinite(point.y)) {
       galaxyGesture.current = point;
       if (plasmaCage.active) {
-        plasmaCage.currentX = point.x;
-        plasmaCage.currentY = point.y;
+        // 2026-07-03: clamp the release corner to play bounds (matches onGalaxyPointerMove). Lifting the
+        // finger onto the iPad bezel delivers an out-of-bounds pointerup that used to collapse/skew the
+        // net so it read as "dropped". Clamp so it fires (auto) / sets (manual) at the on-screen edge.
+        plasmaCage.currentX = clamp(point.x, 0, sim.width);
+        plasmaCage.currentY = clamp(point.y, 0, sim.height);
       }
     }
     if (event.cancelable) event.preventDefault();

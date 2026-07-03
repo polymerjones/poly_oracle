@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-02 21:44";
+const BUILD_TS = "2026-07-03 11:33";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1473,8 +1473,9 @@ const hudQuadTime = document.getElementById("hudQuadTime");
 const hudPulseBadge = document.getElementById("hudPulseBadge");
 const hudPulseTime = document.getElementById("hudPulseTime");
 
+const RUN_TIME_CAP_MS = (99 * 60 + 59) * 1000; // clock stops at 99:59
 function formatRunTime(ms) {
-  const s = Math.floor(ms / 1000);
+  const s = Math.floor(Math.min(ms, RUN_TIME_CAP_MS) / 1000);
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 let hudMultiplier = document.getElementById("hudMultiplier");
@@ -7592,6 +7593,75 @@ function initGalaxyCanvas() {
   comboBannerCanvas.style.zIndex = "9500";
   comboBannerCanvas.style.inset = "auto";
   (document.getElementById("commanderHUD")?.parentNode || document.body).appendChild(comboBannerCanvas);
+
+  // 2026-07-03: Plasma net Manual/Auto toggle + Manual-mode DETONATE button. Same top-most layer trick
+  // as the combo banner (sibling of #commanderHUD, z-index 9500) so it stays visible AND tappable even
+  // when a comm box overlaps the bottom-right recharge corner. The primary detonate is still tapping
+  // the placed net itself; this button is the convenience affordance. Starts hidden — updatePlasmaModeBtn
+  // (driven from updateArcadeHud) reveals it only during arcade/practice gameplay (never in Training).
+  const plasmaModeBtn = document.createElement("button");
+  plasmaModeBtn.type = "button";
+  plasmaModeBtn.id = "plasmaModeBtn";
+  plasmaModeBtn.setAttribute("aria-label", "Plasma net firing mode");
+  plasmaModeBtn.style.cssText = [
+    "position:fixed",
+    "right:max(14px,env(safe-area-inset-right,0px))",
+    "bottom:max(18px,calc(env(safe-area-inset-bottom,0px) + 14px))",
+    "z-index:9500",
+    "display:none",
+    "align-items:center",
+    "justify-content:center",
+    "min-width:70px",
+    "min-height:40px",
+    "padding:7px 12px",
+    "border-radius:999px",
+    "border:1px solid rgba(0,255,209,0.7)",
+    "background:rgba(6,20,26,0.82)",
+    "color:#dffff8",
+    "font-family:ui-monospace,Menlo,monospace",
+    "font-size:11px",
+    "font-weight:600",
+    "letter-spacing:0.1em",
+    "text-transform:uppercase",
+    "touch-action:manipulation",
+    "-webkit-user-select:none",
+    "user-select:none",
+    "box-shadow:0 0 12px rgba(0,255,209,0.22)",
+  ].join(";");
+  (document.getElementById("commanderHUD")?.parentNode || document.body).appendChild(plasmaModeBtn);
+  plasmaModeBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (plasmaCage.placed) { detonatePlacedNet(performance.now()); return; }
+    plasmaCage.mode = plasmaCage.mode === "manual" ? "auto" : "manual";
+    playGameSfx("blip1", 0.6, { rate: plasmaCage.mode === "manual" ? 1.2 : 0.9 });
+    updatePlasmaModeBtn();
+  });
+  let _plasmaModeBtnSig = "";
+  function updatePlasmaModeBtn() {
+    if (!plasmaModeBtn) return;
+    const show = engineMode === "arcade" && arcadeActive && !stuntActive;
+    const sig = show ? (plasmaCage.placed ? "det" : plasmaCage.mode) : "hide";
+    if (sig === _plasmaModeBtnSig) return; // only touch the DOM when the state actually changes
+    _plasmaModeBtnSig = sig;
+    if (!show) { plasmaModeBtn.style.display = "none"; return; }
+    plasmaModeBtn.style.display = "inline-flex";
+    if (plasmaCage.placed) {
+      plasmaModeBtn.textContent = "DETONATE";
+      plasmaModeBtn.style.borderColor = "rgba(255,120,80,0.95)";
+      plasmaModeBtn.style.color = "#ffffff";
+      plasmaModeBtn.style.background = "rgba(60,14,8,0.9)";
+      plasmaModeBtn.style.boxShadow = "0 0 16px rgba(255,110,60,0.6)";
+    } else {
+      const manual = plasmaCage.mode === "manual";
+      plasmaModeBtn.textContent = manual ? "NET·MANUAL" : "NET·AUTO";
+      plasmaModeBtn.style.borderColor = manual ? "rgba(255,210,90,0.9)" : "rgba(0,255,209,0.7)";
+      plasmaModeBtn.style.color = manual ? "#fff2cc" : "#dffff8";
+      plasmaModeBtn.style.background = "rgba(6,20,26,0.82)";
+      plasmaModeBtn.style.boxShadow = manual ? "0 0 12px rgba(255,200,80,0.3)" : "0 0 12px rgba(0,255,209,0.22)";
+    }
+  }
+
   [bgVideoA, bgVideoB].forEach((video) => {
     if (video) video.style.zIndex = "0";
   });
@@ -7612,6 +7682,11 @@ function initGalaxyCanvas() {
   const KNOCKBACK_DRIFT_MAX = 90;
   const plasmaCage = {
     active: false,
+    // 2026-07-03: Manual/Auto firing mode. AUTO (default) = release fires immediately. MANUAL = a
+    // charged release LEAVES the net placed on the field until the cadet taps it (or the DETONATE
+    // button). `mode` persists across levels; `placed` is the pending manual net (cleared per level).
+    mode: "auto",
+    placed: null,
     startX: 0,
     startY: 0,
     currentX: 0,
@@ -7961,7 +8036,13 @@ function initGalaxyCanvas() {
   // through colors alongside the changing backgrounds.
   const PRACTICE_THEME_INTERVAL_MS = 18000;
   const PRACTICE_PERIMETER_HUE_PERIOD_MS = 16000;
-  const PRACTICE_POWERUP_INTERVAL_MS = 8000;
+  // 2026-07-03: quicker cadence in Practice so the cadet can actually stock an inventory to play with.
+  const PRACTICE_POWERUP_INTERVAL_MS = 5000;
+  // 2026-07-03: Practice guarantees a Pulse Cannon early (first drop ~12s) and keeps re-offering it on
+  // this cadence for the endless run — the level-based force-spawn only fires once, which isn't enough
+  // for an open-ended practice session.
+  const PRACTICE_PULSE_FIRST_MS = 12000;
+  const PRACTICE_PULSE_INTERVAL_MS = 40000;
   // 2026-07-02: widened for variety so Practice no longer skews toward quad shots — one entry per
   // powerup type (quad now ~1/7 instead of 1/5), with an extra bomb/freeze so the staples still
   // recur. Bomb-full and missile-busy rolls are skipped at spawn time (see the spawn block).
@@ -7969,6 +8050,7 @@ function initGalaxyCanvas() {
   let practiceEndless = false;
   let practiceStartedAt = 0;
   let nextPracticeMineAt = 0; // Part 8: practice drops a fresh landmine on this 60s cadence
+  let nextPracticePulseAt = 0; // 2026-07-03: practice guarantees + re-offers the Pulse Cannon
   // Practice background theme cycling: blend to the next level's color theme every 30s.
   let practiceThemeIndex = 1; // starts on the L1 theme; cycles 1→2→…→15→1
   let nextThemeCycleAt = 0;
@@ -9309,6 +9391,9 @@ function initGalaxyCanvas() {
   // hit and trivialize the 10-hit combo. resolveShotAt(..., deferMarksman) sets this when it kills
   // a rock so handleArcadeTap can record exactly ONE marksman event per quad volley (see below).
   let _quadHitAsteroid = false;
+  // 2026-07-03: set when a quad-volley shot struck the UFO — lets handleArcadeTap suppress the
+  // combined volley marksman event so it doesn't break the net-UFO-net combo mid-sequence.
+  let _quadHitUfo = false;
   const QUADSHOT_SEEK_RADIUS = 120;
   // 2026-07-01: Pulse Cannon — a 10s timed rapid-fire weapon. Modeled on quadShotUntil (a plain
   // expiry timestamp + HUD badge), but adds a new input mode: press-and-HOLD turret rapid fire.
@@ -10689,9 +10774,11 @@ function initGalaxyCanvas() {
 
   function updateGameTimerHud(now) {
     if (!hudGameTimer) return;
-    const elapsed = gameTimer.running
-      ? gameTimer.elapsed + (now - gameTimer.startedAt)
-      : gameTimer.elapsed;
+    // Practice has no arcade gameTimer running — anchor the live clock to practiceStartedAt so
+    // "RUN" counts up from 00:00 the moment practice begins (capped at 99:59 in formatRunTime).
+    const elapsed = practiceEndless
+      ? Math.max(0, now - practiceStartedAt)
+      : (gameTimer.running ? gameTimer.elapsed + (now - gameTimer.startedAt) : gameTimer.elapsed);
     hudGameTimer.textContent = `RUN ${formatRunTime(elapsed)}`;
   }
 
@@ -10701,6 +10788,7 @@ function initGalaxyCanvas() {
     _timerRemainingMs = safeRemaining;
     _timerRatio = levelDurationMs > 0 ? clamp(safeRemaining / levelDurationMs, 0, 1) : 0;
     updateGameTimerHud(now);
+    updatePlasmaModeBtn(); // 2026-07-03: reveal/refresh the Manual/Auto (or DETONATE) button (sig-guarded)
     // Part 8: Practice shows "PRACTICE" where the level number normally goes.
     if (hudLevel) hudLevel.textContent = practiceEndless
       ? "PRACTICE"
@@ -13060,6 +13148,7 @@ function initGalaxyCanvas() {
   function beginPlasmaCage(start, current, now) {
     if (pulseCannonActive()) return false; // Pulse Cannon replaces hold-to-net; auto-restores on expiry
     if (tutorialBlockPlasmaToss) return false; // tutorial laser step only teaches the laser
+    if (plasmaCage.placed) return false; // MANUAL: a placed net must be detonated before drawing a new one
     if (!isPlasmaCageReady(now)) return false;
     plasmaCage.active = true;
     plasmaCage.startX = start.x;
@@ -13192,6 +13281,61 @@ function initGalaxyCanvas() {
     return toDestroy.length;
   }
 
+  // 2026-07-03: the actual "fire the net" payload — destroy caught stroids, combo/FX/haptics, then
+  // start the recharge cooldown. Shared by the AUTO release path and the MANUAL detonate (tap-the-net
+  // / DETONATE button) so both fire identically.
+  function detonatePlasmaRect(rect, now) {
+    const destroyedCount = destroyAsteroidsInPlasmaCage(rect);
+    recordComboEvent("plasma_net", {
+      destroyedCount,
+      x: rect.x + rect.w / 2,
+      y: rect.y + rect.h / 2,
+    });
+    if (destroyedCount > 0) stuntNotify("plasma");
+    else stuntNotify("plasma_miss"); // tutorial Phase 3 coaching on an empty net
+    // In the tutorial a MISSED net stays hot so the cadet can retry immediately — but a
+    // SUCCESSFUL net runs the real cooldown so the recharge step (10999-11003) has something
+    // to teach. (Force-recharging every net made "let the plasma recharge" resolve instantly.)
+    if (stuntActive && destroyedCount === 0) rechargePlasmaNow();
+    window.pixiRenderer?.triggerPlasmaRectFlash?.();
+    const fireKey = destroyedCount > 0 ? resolveGameSfxKey("plasma_fire", "ufo_destroy") : "";
+    // FIXED 2026-06-09: forceHtmlOnIOS covers iOS Safari; `important` bypasses the native
+    // frame-budget so the blast isn't dropped behind the asteroid booms on the native app.
+    // The blast only fires when asteroids were actually caught (otherwise a charged release
+    // over empty space stays silent).
+    if (destroyedCount > 0) {
+      if (fireKey) playGameSfx(fireKey, 0.92, { forceHtmlOnIOS: true, important: true });
+      playGameSfx("basicb_explo", 1.62, { forceHtmlOnIOS: true, important: true });
+    }
+    // 2026-06-09: any plasma kill rumbles; bigger nets shake harder
+    if (destroyedCount >= 1) cssShake(Math.min(1.3, 0.7 + destroyedCount * 0.12));
+    if (destroyedCount >= 3) {
+      cssFlash("#00ffd1", Math.min(0.35, 0.1 + destroyedCount * 0.04), 200);
+    }
+    if (destroyedCount >= 2) {
+      cssStatic(450);
+    }
+    triggerHugeHaptic(); // 2026-06-12: plasma-net blast = big hard rumble
+    plasmaCage.cooldownStart = now;
+    plasmaCage.cooldownUntil = now + PLASMA_CAGE_COOLDOWN_MS;
+    plasmaCage.rechargeSoundPlayed = false;
+    plasmaCage.releaseFx = { x: rect.x, y: rect.y, w: rect.w, h: rect.h, type: "fire", start: now, ttl: 220 };
+    return destroyedCount;
+  }
+
+  // 2026-07-03: fire a MANUAL net that was left placed on the field. Reused by tap-on-net and the
+  // DETONATE button. No-op if nothing is placed.
+  function detonatePlacedNet(now = performance.now()) {
+    if (!plasmaCage.placed) return false;
+    const rect = plasmaCage.placed;
+    plasmaCage.placed = null;
+    plasmaCage.lastRectCx = rect.x + rect.w / 2;
+    plasmaCage.lastRectCy = rect.y + rect.h / 2;
+    detonatePlasmaRect(rect, now);
+    updatePlasmaModeBtn();
+    return true;
+  }
+
   function releasePlasmaCage(now) {
     if (!plasmaCage.active) return false;
     updatePlasmaCageCharge(now);
@@ -13202,43 +13346,19 @@ function initGalaxyCanvas() {
     stopPlasmaChargeSound();
     resetPlasmaCageGesture();
     if (charged) {
-      const destroyedCount = destroyAsteroidsInPlasmaCage(rect);
-      recordComboEvent("plasma_net", {
-        destroyedCount,
-        x: rect.x + rect.w / 2,
-        y: rect.y + rect.h / 2,
-      });
-      if (destroyedCount > 0) stuntNotify("plasma");
-      else stuntNotify("plasma_miss"); // tutorial Phase 3 coaching on an empty net
-      // In the tutorial a MISSED net stays hot so the cadet can retry immediately — but a
-      // SUCCESSFUL net runs the real cooldown so the recharge step (10999-11003) has something
-      // to teach. (Force-recharging every net made "let the plasma recharge" resolve instantly.)
-      if (stuntActive && destroyedCount === 0) rechargePlasmaNow();
-      window.pixiRenderer?.triggerPlasmaRectFlash?.();
-      const fireKey = destroyedCount > 0 ? resolveGameSfxKey("plasma_fire", "ufo_destroy") : "";
-      // FIXED 2026-06-09: forceHtmlOnIOS covers iOS Safari; `important` bypasses the native
-      // frame-budget so the blast isn't dropped behind the asteroid booms on the native app.
-      // The blast only fires when asteroids were actually caught (otherwise a charged release
-      // over empty space stays silent).
-      if (destroyedCount > 0) {
-        if (fireKey) playGameSfx(fireKey, 0.92, { forceHtmlOnIOS: true, important: true });
-        playGameSfx("basicb_explo", 1.62, { forceHtmlOnIOS: true, important: true });
+      // MANUAL mode: leave the charged net placed on the field instead of firing it. It hangs until the
+      // cadet taps it (or the DETONATE button). The tutorial always fires immediately (mode is forced
+      // AUTO there) so its net lesson is unaffected.
+      if (plasmaCage.mode === "manual" && !stuntActive) {
+        plasmaCage.placed = { x: rect.x, y: rect.y, w: rect.w, h: rect.h, placedAt: now };
+        playGameSfx("blip1", 0.72, { rate: 1.12 }); // "net set" confirm
+        triggerGameplayHapticImpact(hapticImpactStyle.Light);
+        updatePlasmaModeBtn();
+        return true;
       }
-      // 2026-06-09: any plasma kill rumbles; bigger nets shake harder
-      if (destroyedCount >= 1) cssShake(Math.min(1.3, 0.7 + destroyedCount * 0.12));
-      if (destroyedCount >= 3) {
-        cssFlash("#00ffd1", Math.min(0.35, 0.1 + destroyedCount * 0.04), 200);
-      }
-      if (destroyedCount >= 2) {
-        cssStatic(450);
-      }
-      triggerHugeHaptic(); // 2026-06-12: plasma-net blast = big hard rumble
-      plasmaCage.cooldownStart = now;
-      plasmaCage.cooldownUntil = now + PLASMA_CAGE_COOLDOWN_MS;
-      plasmaCage.rechargeSoundPlayed = false;
-      plasmaCage.releaseFx = { ...rect, type: "fire", start: now, ttl: 220 };
+      detonatePlasmaRect(rect, now);
     } else {
-      plasmaCage.releaseFx = { ...rect, type: "fizzle", start: now, ttl: 200 };
+      plasmaCage.releaseFx = { x: rect.x, y: rect.y, w: rect.w, h: rect.h, type: "fizzle", start: now, ttl: 200 };
     }
     return true;
   }
@@ -13402,6 +13522,34 @@ function initGalaxyCanvas() {
     plasmaCtx.restore();
   }
 
+  // 2026-07-03: canvas mirror of pixiRenderer.drawWavyRect — traces the net perimeter as a wavy
+  // "plasma field line" path (was a straight dashed strokeRect). Amplitude tapers to 0 at the corners.
+  function traceWavyRectPath(ctx, x, y, w, h, now, amp) {
+    const step = 9;
+    const freq = 0.055;
+    const speed = now / 140;
+    const sides = [
+      { sx: x, sy: y, dx: 1, dy: 0, nx: 0, ny: -1, len: w },
+      { sx: x + w, sy: y, dx: 0, dy: 1, nx: 1, ny: 0, len: h },
+      { sx: x + w, sy: y + h, dx: -1, dy: 0, nx: 0, ny: 1, len: w },
+      { sx: x, sy: y + h, dx: 0, dy: -1, nx: -1, ny: 0, len: h },
+    ];
+    ctx.beginPath();
+    for (let s = 0; s < sides.length; s += 1) {
+      const side = sides[s];
+      for (let d = 0; d <= side.len + step; d += step) {
+        const dd = Math.min(d, side.len);
+        const taper = Math.min(1, Math.min(dd, side.len - dd) / 14);
+        const wob = (Math.sin(dd * freq + speed + s * 1.3) + 0.4 * Math.sin(dd * freq * 2.3 - speed * 1.7)) * amp * taper;
+        const px = side.sx + side.dx * dd + side.nx * wob;
+        const py = side.sy + side.dy * dd + side.ny * wob;
+        if (s === 0 && d === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+        if (dd >= side.len) break;
+      }
+    }
+    ctx.closePath();
+  }
   function drawPlasmaCageRect(rect, now, progress, charged, alpha = 1, scale = 1) {
     if (!plasmaCtx || rect.w < 2 || rect.h < 2) return;
     const cx = rect.x + rect.w / 2;
@@ -13423,10 +13571,10 @@ function initGalaxyCanvas() {
     }
     plasmaCtx.strokeStyle = color;
     plasmaCtx.lineWidth = charged ? 2.4 : 1.4 + progress * 1.2;
-    plasmaCtx.setLineDash([10, 8]);
-    plasmaCtx.lineDashOffset = -(now / 32) % 18;
-    plasmaCtx.strokeRect(x, y, w, h);
-    plasmaCtx.setLineDash([]);
+    const strobe = 0.78 + 0.22 * Math.sin(now / 90);
+    plasmaCtx.globalAlpha = borderAlpha * strobe;
+    traceWavyRectPath(plasmaCtx, x, y, w, h, now, charged ? 3.4 : 1.6 + progress * 1.6);
+    plasmaCtx.stroke();
     if (charged) {
       plasmaCtx.globalAlpha = alpha * (0.7 + 0.3 * Math.sin(now / 70));
       plasmaCtx.lineWidth = 3;
@@ -13572,6 +13720,11 @@ function initGalaxyCanvas() {
     if (plasmaCage.active) {
       const progress = clamp((now - plasmaCage.chargeStart) / PLASMA_CAGE_CHARGE_MS, 0, 1);
       drawPlasmaCageRect(getPlasmaRect(), now, progress, plasmaCage.charged);
+    }
+    // 2026-07-03: MANUAL placed net — draw it persistently (charged look, gentle breathing pulse) so
+    // it's clearly armed and waiting for a tap/DETONATE.
+    if (plasmaCage.placed) {
+      drawPlasmaCageRect(plasmaCage.placed, now, 1, true, 0.82 + 0.18 * Math.sin(now / 120), 1);
     }
     if (plasmaCage.releaseFx) {
       const fx = plasmaCage.releaseFx;
@@ -13989,8 +14142,10 @@ function initGalaxyCanvas() {
     ufo = null;
     arcadeUfoSpawnAt = 0;
     resetPlasmaCageGesture();
+    plasmaCage.placed = null; // 2026-07-03: drop any pending MANUAL net on level/menu transition (mode persists)
     plasmaCage.releaseFx = null;
     plasmaCage.rechargeSoundPlayed = true;
+    updatePlasmaModeBtn();
     laserBeams.length = 0;
     tapBlasts.length = 0;
     _bombShrapnel.length = 0;
@@ -15950,11 +16105,35 @@ function initGalaxyCanvas() {
     addWarpRing(p.x, p.y, "rgba(124,255,91,1)");
     return landmine;
   }
+  // 2026-07-03: full "shot kill" FX for ONE stroid — explosion sprite + coalesced boom, sized per kind,
+  // mirroring splitAsteroidByIndex but without splitting/scoring. Lets a field wipe blow every stroid up
+  // with real weight instead of a silent puff. The boom auto-coalesces (playAsteroidExplosionBoom's
+  // burst window) so wiping a full field doesn't spike audio.
+  function spawnStroidKillFx(a, volScale = 1) {
+    const bigBlast = a.kind === 3;
+    const mediumBlast = a.kind === 2;
+    const ttlScale = bigBlast ? 1.4 : mediumBlast ? 1.18 : 1;
+    spawnExplosion(a.x, a.y, bigBlast ? 32 : 16, false, bigBlast ? 1.8 : 1.15, ttlScale, a.kind, a.spriteKey);
+    playAsteroidExplosionBoom(a.kind, (bigBlast ? 0.9 : mediumBlast ? 0.92 : 0.78) * volScale, 0.92 + Math.random() * 0.16);
+  }
   function clearTutorialField() {
-    for (const a of sim.asteroids) spawnExplosion(a.x, a.y, 14, false, 1.1, 1, a.kind, a.spriteKey);
-    if (ufo && ufo.alive) spawnExplosion(ufo.x, ufo.y, 18, true, 1.4);
-    if (landmine) spawnExplosion(landmine.x, landmine.y, 18, true, 1.4);
-    for (const b of placedBombs) spawnExplosion(b.x, b.y, 14, false, 1.1);
+    // Every stroid the wipe removes gets a real kill FX (was a small silent puff — the bomb steps read
+    // as "stroids just vanish"). One shared crackle + impact flash for the whole burst keeps it punchy
+    // without stacking a dozen particle crackles at once.
+    let killed = 0;
+    let anyBig = false;
+    for (const a of sim.asteroids) {
+      spawnStroidKillFx(a);
+      killed += 1;
+      if (a.kind === 3) anyBig = true;
+    }
+    if (killed > 0) {
+      playParticleCrackle();
+      triggerAsteroidImpactFlash(anyBig ? 0.9 : 0.5);
+    }
+    if (ufo && ufo.alive) spawnExplosion(ufo.x, ufo.y, 20, true, 1.5);
+    if (landmine) spawnExplosion(landmine.x, landmine.y, 20, true, 1.5);
+    for (const b of placedBombs) spawnExplosion(b.x, b.y, 16, false, 1.2);
     playGameSfx("ufo_destroy", 0.6);
     clearGameplayEntities();
     powerups.length = 0;
@@ -16786,8 +16965,9 @@ function initGalaxyCanvas() {
     practiceEndless = true;
     arcadeUfoSpawnAt = nowP + 30000;   // first UFO ~30s in (then respawns 45s after each kill)
     nextPracticeMineAt = nowP + 60000; // first landmine at 60s, every 60s after
-    // Practice powerups: first drop at 8s, then a steady 8s cadence (see the endless update block).
-    nextBombPowerupAt = nowP + 8000;
+    nextPracticePulseAt = nowP + PRACTICE_PULSE_FIRST_MS; // guaranteed Pulse Cannon inside the first minute
+    // Practice powerups: first drop at 5s, then a steady cadence (see the endless update block).
+    nextBombPowerupAt = nowP + 5000;
     // Background theme cycling: hold L1 theme, blend to the next every 30s.
     practiceThemeIndex = 1;
     nextThemeCycleAt = nowP + PRACTICE_THEME_INTERVAL_MS;
@@ -17030,6 +17210,14 @@ function initGalaxyCanvas() {
       if (a.ambient) continue;
       const r = a.r || 0;
       if (a.x + r > hx0 && a.x - r < hx1 && a.y + r > hy0 && a.y - r < hy1) return true;
+    }
+    // 2026-07-03: powerups also duck the HUD — a pickup drifting under the mug/comms box or a
+    // training overlay was hidden before; now it triggers the same see-through fade so it stays
+    // visible and collectable.
+    for (let i = 0; i < powerups.length; i += 1) {
+      const p = powerups[i];
+      const r = p.r || 0;
+      if (p.x + r > hx0 && p.x - r < hx1 && p.y + r > hy0 && p.y - r < hy1) return true;
     }
     return false;
   }
@@ -17399,11 +17587,17 @@ function initGalaxyCanvas() {
         const missileBusy = playerMissileInventory > 0 || activeMissile;
         // 2026-07-02: don't drop bomb powerups while the inventory is already full (3) — wait until
         // the player spends one down to 2 or fewer. Applies in both arcade and practice.
+        // 2026-07-03: same rule generalized to every capped type — freeze/snowflake at max no longer
+        // spawns a powerup the player picks up for zero gain (the pickup was silently wasted).
         const bombFull = playerBombInventory >= MAX_BOMB_INVENTORY;
+        const freezeFull = playerFreezeInventory >= MAX_FREEZE_INVENTORY;
         if (powerups.length < POWERUP_MAX_ONSCREEN && cfg.level >= 1 && now >= nextBombPowerupAt) {
           const puType = practiceEndless ? pick(PRACTICE_POWERUP_POOL) : pickPowerupForLevel(cfg);
-          if ((puType === "missile" && missileBusy) || (puType === "bomb" && bombFull)) {
-            // skip: missile held/in flight, or bomb inventory already full — retry soon w/ a fresh type.
+          const puAtMax = (puType === "missile" && missileBusy)
+            || (puType === "bomb" && bombFull)
+            || ((puType === "snowflake" || puType === "freeze") && freezeFull);
+          if (puAtMax) {
+            // skip: this type's inventory is already full / busy — retry soon with a fresh roll.
             nextBombPowerupAt = now + 1500;
           } else {
             spawnPowerupAt(puType, randomPowerupPoint());
@@ -17422,18 +17616,28 @@ function initGalaxyCanvas() {
         // 2026-07-01: Pulse Cannon availability. One guaranteed drop early on EVERY level; a subset
         // of levels (SECOND_PULSE_LEVELS) get a second drop later in the level (~58% elapsed) for a
         // fresh burst window rather than two back-to-back at the start.
-        const pulseMaxThisLevel = SECOND_PULSE_LEVELS.has(cfg.level) ? 2 : 1;
-        // 2026-07-02: first Pulse Cannon drop is offset to ~28% into the level so it no longer lands
-        // on the same frame as the level-start missile force-spawn (both used to fire at
-        // LEVEL_START_SPAWN_DELAY_MS). Second drop (SECOND_PULSE_LEVELS) stays at ~58%.
-        const pulseNextAtMs = pulseForceSpawnedThisLevel === 0
-          ? Math.max(LEVEL_START_SPAWN_DELAY_MS + 8000, levelDurationMs * 0.28)
-          : levelDurationMs * 0.58;
-        if (pulseForceSpawnedThisLevel < pulseMaxThisLevel && elapsedMs >= pulseNextAtMs
-            && !powerups.some((p) => p.type === "pulse")) {
-          pulseForceSpawnedThisLevel += 1;
-          spawnPowerupAt("pulse", randomPowerupPoint());
-          playGameSfx("bling", 0.8);
+        // 2026-07-03: Practice is endless, so the once-per-level force-spawn isn't enough — it gets a
+        // guaranteed early Pulse (~12s) plus a re-offer cadence so the weapon stays available.
+        if (practiceEndless) {
+          if (now >= nextPracticePulseAt && !powerups.some((p) => p.type === "pulse")) {
+            spawnPowerupAt("pulse", randomPowerupPoint());
+            playGameSfx("bling", 0.8);
+            nextPracticePulseAt = now + PRACTICE_PULSE_INTERVAL_MS;
+          }
+        } else {
+          const pulseMaxThisLevel = SECOND_PULSE_LEVELS.has(cfg.level) ? 2 : 1;
+          // 2026-07-02: first Pulse Cannon drop is offset to ~28% into the level so it no longer lands
+          // on the same frame as the level-start missile force-spawn (both used to fire at
+          // LEVEL_START_SPAWN_DELAY_MS). Second drop (SECOND_PULSE_LEVELS) stays at ~58%.
+          const pulseNextAtMs = pulseForceSpawnedThisLevel === 0
+            ? Math.max(LEVEL_START_SPAWN_DELAY_MS + 8000, levelDurationMs * 0.28)
+            : levelDurationMs * 0.58;
+          if (pulseForceSpawnedThisLevel < pulseMaxThisLevel && elapsedMs >= pulseNextAtMs
+              && !powerups.some((p) => p.type === "pulse")) {
+            pulseForceSpawnedThisLevel += 1;
+            spawnPowerupAt("pulse", randomPowerupPoint());
+            playGameSfx("bling", 0.8);
+          }
         }
 
         // DEBUG: revert before release — force one missile powerup at the start of each level
@@ -18683,7 +18887,7 @@ function initGalaxyCanvas() {
     _sfxBudgetExempt = quadActive;
     // 2026-06-30: under quadshot, defer marksman accounting on every projectile and record one
     // combined hit/miss for the whole volley below — so a quad tap counts as a single marksman hit.
-    if (quadActive) _quadHitAsteroid = false;
+    if (quadActive) { _quadHitAsteroid = false; _quadHitUfo = false; }
     const hitSomething = resolveShotAt(x, y, now, isTouch, quadActive);
     if (quadActive) addShockwave(x, y); // localized heat-shimmer bloom on the primary quad blast
     // Tutorial chatter is skipped by tapping the subtle "TAP TO SKIP" hint above the comm box
@@ -18721,7 +18925,12 @@ function initGalaxyCanvas() {
       }
       // the whole quad volley (primary + cluster) registers as a single marksman event: a hit if
       // any projectile killed a rock, otherwise a miss (which still breaks the combo, as before).
-      recordComboEvent(_quadHitAsteroid ? "laser_stroid_hit" : "laser_miss", { x, y });
+      // 2026-07-03: but if this volley struck the UFO, skip the marksman event entirely — the UFO hit
+      // is already recorded (ufo_shot) and this event's breakNetUfoNetCombo would kill the in-progress
+      // net-UFO-net combo, making it impossible to land with quad shot active.
+      if (!_quadHitUfo) {
+        recordComboEvent(_quadHitAsteroid ? "laser_stroid_hit" : "laser_miss", { x, y });
+      }
     }
     _sfxBudgetExempt = false;
     if (hitSomething || extraHit) draw(now);
@@ -18782,6 +18991,10 @@ function initGalaxyCanvas() {
     if (ufo && isPointOnUfo(sx, sy)) {
       triggerCrosshairFire();
       markShotHit();
+      // 2026-07-03: remember a quad-volley UFO hit so the combined marksman event below is skipped —
+      // ufo_shot already advanced the net-UFO-net combo (plasmaStage 1→2) and the laser_stroid_hit/
+      // laser_miss volley event would immediately break it (breakNetUfoNetCombo) on the same tap.
+      if (deferMarksman) _quadHitUfo = true;
       hitUfo(quadActive);
       recordComboEvent("ufo_shot", { x: sx, y: sy });
       return true;
@@ -19419,6 +19632,16 @@ function initGalaxyCanvas() {
     // A real in-bounds play-area press is a gameplay action → hide the skip hint instantly and
     // suppress it for the next 2s (tap-to-skip rework 2026-06-16).
     if (stuntActive) { _lastTutInteractionAt = now; hideSkipHint(false); }
+    // 2026-07-03: MANUAL plasma net — a placed net is waiting to be detonated. A press INSIDE it fires
+    // it (and consumes the press); a press OUTSIDE falls through to normal weapon fire. beginPlasmaCage
+    // is already blocked while one is placed, so an outside press can't start a second net.
+    if (plasmaCage.placed && engineMode === "arcade" && arcadeActive && !missileAimMode && !bombAimMode) {
+      const r = plasmaCage.placed;
+      if (point.x >= r.x && point.x <= r.x + r.w && point.y >= r.y && point.y <= r.y + r.h) {
+        detonatePlacedNet(now);
+        return;
+      }
+    }
     let mode = "tap";
     // 2026-06-15: while aiming a missile or bomb, a play-area press must place the target — it
     // must NOT grab a stroid/mine for tossing. Tapping on/near a stroid to target it was being

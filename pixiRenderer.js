@@ -708,30 +708,34 @@ const pixiRenderer = (() => {
     };
   }
 
-  function drawDashedRect(g, x, y, w, h, dashLen, gapLen, offset, lineW, color, alpha) {
+  // 2026-07-03: the net perimeter is drawn as a continuous WAVY "plasma field line" (was a straight
+  // marching-ants dashed rect). Each side is sampled and offset perpendicular by a scrolling sine sum;
+  // amplitude tapers to 0 at each corner so the four sides meet cleanly at the rectangle vertices. The
+  // caller strobes alpha off `now` for the electric shimmer.
+  function drawWavyRect(g, x, y, w, h, now, amp, lineW, color, alpha) {
     if (w <= 0 || h <= 0 || alpha <= 0) return;
     g.lineStyle(lineW, color, alpha);
-    const dashCycle = dashLen + gapLen;
-    let dist = ((offset % dashCycle) + dashCycle) % dashCycle;
+    const step = 8;
+    const freq = 0.055;
+    const speed = now / 140;
     const sides = [
-      { dx: 1, dy: 0, len: w, sx: x, sy: y },
-      { dx: 0, dy: 1, len: h, sx: x + w, sy: y },
-      { dx: -1, dy: 0, len: w, sx: x + w, sy: y + h },
-      { dx: 0, dy: -1, len: h, sx: x, sy: y + h },
+      { sx: x, sy: y, dx: 1, dy: 0, nx: 0, ny: -1, len: w },
+      { sx: x + w, sy: y, dx: 0, dy: 1, nx: 1, ny: 0, len: h },
+      { sx: x + w, sy: y + h, dx: -1, dy: 0, nx: 0, ny: 1, len: w },
+      { sx: x, sy: y + h, dx: 0, dy: -1, nx: -1, ny: 0, len: h },
     ];
     for (let s = 0; s < sides.length; s += 1) {
       const side = sides[s];
-      let pos = 0;
-      while (pos < side.len) {
-        const cyclePos = dist % dashCycle;
-        const inDash = cyclePos < dashLen;
-        const segEnd = Math.min(side.len, pos + (dashCycle - cyclePos));
-        if (inDash) {
-          g.moveTo(side.sx + side.dx * pos, side.sy + side.dy * pos);
-          g.lineTo(side.sx + side.dx * segEnd, side.sy + side.dy * segEnd);
-        }
-        dist += segEnd - pos;
-        pos = segEnd;
+      let first = true;
+      for (let d = 0; d <= side.len + step; d += step) {
+        const dd = Math.min(d, side.len);
+        const taper = Math.min(1, Math.min(dd, side.len - dd) / 14);
+        const wob = (Math.sin(dd * freq + speed + s * 1.3) + 0.4 * Math.sin(dd * freq * 2.3 - speed * 1.7)) * amp * taper;
+        const px = side.sx + side.dx * dd + side.nx * wob;
+        const py = side.sy + side.dy * dd + side.ny * wob;
+        if (first) { g.moveTo(px, py); first = false; }
+        else g.lineTo(px, py);
+        if (dd >= side.len) break;
       }
     }
   }
@@ -789,18 +793,19 @@ const pixiRenderer = (() => {
     const borderWidth = charged ? 2.4 : 1.4 + progress * 1.2;
     const gridAlpha = (charged ? 0.18 : 0.08 + progress * 0.25) * alpha;
     drawPlasmaGridPixi(g, x, y, w, h, gridAlpha);
-    drawDashedRect(
+    const strobe = 0.78 + 0.22 * Math.sin(now / 90);
+    const waveAmp = charged ? 3.4 : 1.6 + progress * 1.6;
+    drawWavyRect(
       g,
       x,
       y,
       w,
       h,
-      10,
-      8,
-      -(now / 32) % 18,
+      now,
+      waveAmp,
       borderWidth + flashBoost * 4,
       color,
-      borderAlpha,
+      borderAlpha * strobe,
     );
     drawPlasmaCornerBrackets(g, x, y, w, h, now, progress, charged, alpha);
   }
@@ -831,6 +836,21 @@ const pixiRenderer = (() => {
     }
 
     drawPlasmaRecharge(plasmaCage, now);
+    // 2026-07-03: MANUAL placed net — persistent charged net + capture rings on caught stroids, so it
+    // clearly reads as "armed, tap to detonate". Drawn before the active-net early-return below.
+    if (plasmaCage?.placed) {
+      const pr = plasmaCage.placed;
+      drawPlasmaCageRectPixi(plasmaGraphics, pr, now, 1, true, 1);
+      for (let i = 0; i < asteroids.length; i += 1) {
+        const a = asteroids[i];
+        if (a.x < pr.x || a.x > pr.x + pr.w || a.y < pr.y || a.y > pr.y + pr.h) continue;
+        const r = Math.max(8, a.r + 5 + Math.sin(now * 0.008 + i) * 2);
+        plasmaGraphics.lineStyle(7, 0x00ffd1, 0.24);
+        plasmaGraphics.drawCircle(a.x, a.y, r);
+        plasmaGraphics.lineStyle(1.5, 0xffffff, 0.72);
+        plasmaGraphics.drawCircle(a.x, a.y, Math.max(5, a.r + 1));
+      }
+    }
     if (!plasmaCage?.active) return;
     const rect = getPlasmaRect(plasmaCage);
     if (!rect || rect.w < 2 || rect.h < 2) return;

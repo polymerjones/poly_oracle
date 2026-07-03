@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-02 16:19";
+const BUILD_TS = "2026-07-02 18:14";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -657,6 +657,9 @@ const DEBUG_SHOW_LEVEL_DROPDOWN = false;
 // open and read the `worst=…ms over32=… dropped=…` watcher report.
 const DEBUG_LVLTRANS = false;
 const DEBUG_SPC_VO = false;
+// DEBUG: revert before release — flip true to log slotDoPull() synchronous duration to the console
+// (diagnosing the iPad lever-pull hang). No-op when false.
+const DEBUG_SLOT_TIMING = false;
 let canvasFlash = null;
 const REVEAL_VARIANT_SFX = [
   "newreveal001",
@@ -2959,6 +2962,7 @@ const commBoxController = (() => {
     commVoSrc,
     spcBonusVoSrc,
     isSpcMode: () => _spcMode,
+    getSpcImages: () => spcImages,
     setMuteCmdrVO: (on) => { muteCmdrVO = !!on; },
     pinTicker,
     hideTicker,
@@ -8351,14 +8355,16 @@ function initGalaxyCanvas() {
   }
   function slotDoPull() {
     if (slotState !== SLOT_STATE.READY || slotTokens <= 0 || performance.now() < slotInputLockedUntil) return;
+    const _slotPullT0 = DEBUG_SLOT_TIMING ? performance.now() : 0;
     slotTokens -= 1;
     if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
     if (slotEls.tokensBox) { slotEls.tokensBox.classList.remove("tick"); void slotEls.tokensBox.offsetWidth; slotEls.tokensBox.classList.add("tick"); }
     slotState = SLOT_STATE.SPINNING;
-    // 2026-07-02: lever pull wants a harder, meatier kick than a single Heavy tick — layer a
-    // double-Heavy + Medium tail (same punch as the bomb "huge" haptic) per playtest.
-    if (!DISABLE_GAMEPLAY_HAPTICS) triggerHugeHaptic();
     slotLeverFlash(); // 2026-07-01: localized glow instead of the full-screen cssFlash (see slotLeverFlash)
+    // 2026-07-02 (16:19 revert): the triple-impact triggerHugeHaptic() (immediate + two setTimeout
+    // bridge impacts) stalled every lever pull on iPad ~0.5s and swallowed the flash. Back to a
+    // single Heavy tick — flash fires first so the glow paints before the native bridge call.
+    triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
     cssShake(isIOSNative ? 0.45 : 0.75);
     playGameSfx("slot_clunk", 0.72);
     setSlotHint("");
@@ -8374,6 +8380,7 @@ function initGalaxyCanvas() {
     slotReels.forEach((r) => { r.strip = slotBuildStrip(ex); r.len = r.strip.length; r.target = (Math.random() * r.len) | 0; });
     slotStartSpin();
     slotReels.forEach((r, i) => slotTrackTimeout(() => slotCommandStop(r, r.target), SLOT_SPIN_TIME_MS + i * SLOT_REEL_STAGGER_MS));
+    if (DEBUG_SLOT_TIMING) console.log(`slotDoPull sync: ${(performance.now() - _slotPullT0).toFixed(1)}ms`);
   }
   function slotOnAllStopped() {
     slotStopRamp();
@@ -9287,6 +9294,10 @@ function initGalaxyCanvas() {
   const PULSE_BURST_DELAY_MS = 130; // pause after a pair → ~12 shots/s (2 / (35+130)ms)
   const PULSE_CANNON_SWEEP_DEG = 7; // max turret sweep off the aim line (tunable)
   const PULSE_HIT_GLOW_MS = 550; // 2026-07-01: lifetime of the teal shard-hit highlight on split children
+  // 2026-07-02: every pulse shot lights up stroids within this radius of the impact with the same
+  // pulsing teal glow a UFO explosion gives (reuses the _ufoBlasted glow family; see applyPulseBlastGlow).
+  // Tighter than UFO's 220 since the pulse is a precision weapon — tune after playtest.
+  const PULSE_BLAST_RADIUS = 160;
   // 2026-07-01: every level gets one guaranteed Pulse Cannon early; these levels also get a SECOND
   // drop later in the level (~58% elapsed) for an extra mid/late-level burst window.
   const SECOND_PULSE_LEVELS = new Set([9, 11, 13, 14, 15]);
@@ -14964,7 +14975,10 @@ function initGalaxyCanvas() {
     try {
       // 1) SPC portrait frames — .src is set at load but never decoded, so the first talk/praise
       //    frame swap (which lands right around the first Stroid kill) decode-hitches. Decode now.
-      await warmImageSet(spcImages);
+      //    NOTE: spcImages lives inside the commBoxController IIFE and is out of scope here — reach
+      //    it via the accessor. (Referencing the bare identifier threw ReferenceError → bounced the
+      //    user back to the menu on every Training launch.)
+      await warmImageSet(commBoxController.getSpcImages());
       // 2) Plasma-net demo clip — built lazily on first show today; pre-build + buffer it so the
       //    first plasma lesson doesn't stall fetching/decoding the video.
       try {
@@ -14977,6 +14991,10 @@ function initGalaxyCanvas() {
       if (typeof warmGameplaySprites === "function") {
         await Promise.race([warmGameplaySprites(), delay(3000)]);
       }
+    } catch (err) {
+      // Warmup is best-effort — a failure here must NEVER abort startStuntMode and bounce the
+      // user to the menu. Swallow and let Training start (assets decode lazily as a fallback).
+      console.warn("warmTrainingAssets failed (continuing):", err);
     } finally {
       setArcadeWarmupVisible(false);
     }
@@ -18690,6 +18708,25 @@ function initGalaxyCanvas() {
     return false;
   }
 
+  // 2026-07-02: light up every stroid within PULSE_BLAST_RADIUS of the shot point with the exact same
+  // pulsing teal glow a UFO explosion applies. Writes the _ufoBlasted glow family that pixiRenderer's
+  // syncAsteroids already renders/cleans up — highlight only, no knockback (pulse gameplay unchanged).
+  function applyPulseBlastGlow(cx, cy) {
+    const blastTime = performance.now();
+    for (let i = 0; i < sim.asteroids.length; i += 1) {
+      const a = sim.asteroids[i];
+      const dx = a.x - cx;
+      const dy = a.y - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > PULSE_BLAST_RADIUS) continue;
+      a._ufoBlasted = blastTime;
+      a._ufoBlastedDuration = UFO_GLOW_DURATION;
+      a._ufoBlastOriginX = cx;
+      a._ufoBlastOriginY = cy;
+      a._ufoBlastIntensity = 1 - (dist / PULSE_BLAST_RADIUS);
+    }
+  }
+
   // 2026-07-01: Pulse Cannon single shot. Aims at the held pointer, applies a small oscillating
   // turret sweep (so the stream reads as a rotating cannon, deliberately less precise than a laser),
   // fires through resolveShotAt, and plays an alternating fire report. Marksman is deferred: a pulse
@@ -18714,6 +18751,8 @@ function initGalaxyCanvas() {
     _pulseShot = false;
     // 2026-07-02: stamp a teal electric ring at the shot point (over the X-blast) as the fire signature.
     spawnPulseFireBurst(sx, sy);
+    // 2026-07-02: highlight nearby stroids with the UFO-explosion glow, centered on the shot point.
+    applyPulseBlastGlow(sx, sy);
     // 2026-07-01: the Pulse Cannon sprays ~12 hits/s — feeding every hit into the 10-hit MARKSMAN
     // counter trivializes it. Only every 3rd pulse hit counts toward marksman (so it still builds,
     // but ~3x slower). Pulse still never records a MISS (resolveShotAt was called with deferMarksman),

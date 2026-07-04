@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-03 12:44";
+const BUILD_TS = "2026-07-03 18:31";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -471,6 +471,9 @@ const CORE_PRELOAD_SFX_KEYS = [
   "pulse_cannon_charge",
   "pulse_cannon_fire1",
   "pulse_cannon_fire2",
+  // 2026-07-03: the Oracle reveal intro (SFX.MAIN). Without a decoded WebAudio buffer on iOS native,
+  // the first reveal fell back to an unprimed HTML-audio element and played silent. Preload it.
+  "newreveal005",
 ];
 
 const IOS_GAMEPLAY_PRELOAD_SFX_KEYS = [
@@ -2662,6 +2665,7 @@ const commBoxController = (() => {
     typingToken += 1;
     _voQueue.length = 0;
     _voPlaying = false;
+    _voProtected = false;
     _voPlayToken += 1;
     _voTriggerToken += 1;
     if (_voQueueTimer) {
@@ -2780,8 +2784,11 @@ const commBoxController = (() => {
     // gameplay line (_spc false) shows the CMDR mug for its duration; SPC's own lines (_spc true) keep
     // her mug. Restored to the SPC host when the line ends (endTalking).
     if (_spcLevelHost) {
+      // 2026-07-03: make the mug authoritative on THIS line's channel, not on prior _spcMode state.
+      // A carried-over line left the SPC mug up while a CMDR clip played on L13; forcing showCmdrForLine
+      // on every CMDR line (idempotent) guarantees a CMDR clip always shows the CMDR mug.
       if (_spc) { if (!_spcMode) restoreSpcHost(); }
-      else if (_spcMode) { showCmdrForLine(); }
+      else { showCmdrForLine(); }
     }
 
     stopMouthFlap();
@@ -2902,6 +2909,7 @@ const commBoxController = (() => {
     }
     const playToken = ++_voPlayToken;
     _voPlaying = true;
+    _voProtected = !!options.protected; // 2026-07-03: guard this line from high-priority preemption
     const onEnd = options._onEnd;
     triggerVO({
       ...options,
@@ -2909,6 +2917,7 @@ const commBoxController = (() => {
         if (playToken !== _voPlayToken) return;
         if (onEnd) onEnd();
         _voPlaying = false;
+        _voProtected = false;
         if (_voQueue.length > 0) {
           const next = _voQueue.shift();
           _voQueueTimer = setTimeout(() => {
@@ -2933,6 +2942,9 @@ const commBoxController = (() => {
   // every incidental line (plasma recharged, UFO spotted, ambient praise, queue stragglers, and
   // any scheduled-timer VO that fires during the scorecard) is dropped at this chokepoint.
   let _levelEndLock = false;
+  // 2026-07-03: while a `protected` line is playing (e.g. the L14 official opener), a high-priority
+  // reaction must NOT cut it off — it queues behind instead. Set per-line in playVONow.
+  let _voProtected = false;
   function setLevelEndLock(on) {
     _levelEndLock = !!on;
     if (on) { _voQueue.length = 0; } // flush incidental stragglers queued before the level ended
@@ -2944,7 +2956,8 @@ const commBoxController = (() => {
     // Level-end window: let only the one levelcomplete praise speak (see setLevelEndLock).
     if (_levelEndLock && options.event !== "levelcomplete") return;
     const highPriority = options.priority === "high";
-    if (highPriority) {
+    // A `protected` line in flight can't be preempted — a high-priority line queues behind it.
+    if (highPriority && !_voProtected) {
       _voQueue.length = 0;
       playVONow(options);
       return;
@@ -10903,6 +10916,12 @@ function initGalaxyCanvas() {
   // 2026-06-15: Stunt Mode sub-menu — Training (always available) + Practice (unlocked after
   // training completes, tracked via localStorage poly_stunt_training_complete).
   function showStuntModeMenu() {
+    // 2026-07-03: the Stunt menu must NEVER sit in exclusive-SPC mode. A training/practice replay
+    // exit path could leave _exclusiveSpeaker true (queueVO drops every non-SPC line while it's on),
+    // muting the CMDR/menu VO until the player backed all the way out to the Oracle root. Clear it
+    // (and the SPC portrait override) unconditionally on entry so menu comms always speak.
+    commBoxController.setExclusiveSpeaker(false);
+    commBoxController.clearPortraitOverride();
     setArcadeSubmenu("stunt");
     if (btnStuntPractice) {
       const unlocked = isStuntTrainingComplete();
@@ -13140,6 +13159,7 @@ function initGalaxyCanvas() {
     plasmaCage.chargeLoopRate = 0;
     plasmaCage.readySoundPlayed = false;
     plasmaCage.highlightBlipPlayed = false;
+    hidePlasmaReadyBadge(); // 2026-07-03: drop the "PLASMA READY" cue when the net releases/cancels
     // 2026-06-24: do NOT touch rechargeSoundPlayed here. This resets the gesture geometry only,
     // and runs on fizzles, pointer-cancel, and app-resume too. Clearing the recharge flag while
     // cooldownUntil still points at an already-elapsed cooldown re-fired a FALSE "plasma recharged"
@@ -13147,9 +13167,14 @@ function initGalaxyCanvas() {
     // charged branch) and cleared (true) by the recharge VO / UFO-kill reward / level cleanup.
   }
 
+  // 2026-07-03: net charge/highlight delay. In Training + Practice the highlight/lock lands almost
+  // instantly so the cadet isn't waiting to fire; the real game keeps the full 800ms feel.
+  function plasmaCageChargeMs() {
+    return (stuntActive || practiceEndless) ? 120 : PLASMA_CAGE_CHARGE_MS;
+  }
   function isPlasmaCageReady(now = performance.now()) {
     if (plasmaCage.active) {
-      const ready = plasmaCage.charged || now - plasmaCage.chargeStart >= PLASMA_CAGE_CHARGE_MS;
+      const ready = plasmaCage.charged || now - plasmaCage.chargeStart >= plasmaCageChargeMs();
       if (!plasmaCage.highlightBlipPlayed && ready) {
         plasmaCage.highlightBlipPlayed = true;
         playPlasmaLockSound();
@@ -13163,7 +13188,16 @@ function initGalaxyCanvas() {
   function beginPlasmaCage(start, current, now) {
     if (pulseCannonActive()) return false; // Pulse Cannon replaces hold-to-net; auto-restores on expiry
     if (tutorialBlockPlasmaToss) return false; // tutorial laser step only teaches the laser
-    if (plasmaCage.placed) return false; // MANUAL: a placed net must be detonated before drawing a new one
+    if (plasmaCage.placed) {
+      // 2026-07-03: a placed-but-unfired net is un-spent ammo — starting a new draw picks it up and
+      // replaces it for FREE (no cooldown). Only DETONATION starts the reload, so re-aiming a
+      // misplaced trap costs nothing. (A tap INSIDE the net still detonates — that's handled at the
+      // pointer-down site before any drag begins, so this only runs on a genuine re-draw.)
+      plasmaCage.placed = null;
+      playGameSfx("blip1", 0.55, { rate: 0.9 }); // subtle "pick-up" cue
+      triggerGameplayHapticImpact(hapticImpactStyle.Light);
+      updatePlasmaModeBtn();
+    }
     if (!isPlasmaCageReady(now)) return false;
     plasmaCage.active = true;
     plasmaCage.startX = start.x;
@@ -13179,15 +13213,52 @@ function initGalaxyCanvas() {
     return true;
   }
 
+  // 2026-07-03: the plasma net is a gesture weapon with no HUD meter, so "charged / ready to release"
+  // had no persistent VISUAL cue (sound + haptic only). Flash a "PLASMA READY" badge near the top of
+  // the HUD the moment the net locks on. Lazy DOM element, auto-fades; theme-neutral teal.
+  let _plasmaReadyBadgeEl = null;
+  let _plasmaReadyBadgeTimer = null;
+  function flashPlasmaReadyBadge() {
+    if (!_plasmaReadyBadgeEl) {
+      const el = document.createElement("div");
+      el.id = "plasmaReadyBadge";
+      el.textContent = "PLASMA READY";
+      el.setAttribute("aria-hidden", "true");
+      el.style.cssText =
+        "position:fixed;left:50%;top:11%;transform:translateX(-50%);z-index:9400;pointer-events:none;"
+        + "font:800 clamp(13px,3.2vw,20px)/1 system-ui,-apple-system,sans-serif;letter-spacing:.14em;"
+        + "color:#04140f;background:rgba(0,255,209,.94);padding:7px 15px;border-radius:999px;"
+        + "box-shadow:0 0 22px rgba(0,255,209,.6);opacity:0;transition:opacity 140ms ease;"
+        + "white-space:nowrap;display:none;";
+      document.body.appendChild(el);
+      _plasmaReadyBadgeEl = el;
+    }
+    const el = _plasmaReadyBadgeEl;
+    if (_plasmaReadyBadgeTimer) { clearTimeout(_plasmaReadyBadgeTimer); _plasmaReadyBadgeTimer = null; }
+    el.style.display = "block";
+    requestAnimationFrame(() => { el.style.opacity = "1"; });
+    _plasmaReadyBadgeTimer = setTimeout(() => {
+      el.style.opacity = "0";
+      _plasmaReadyBadgeTimer = setTimeout(() => {
+        _plasmaReadyBadgeTimer = null;
+        if (_plasmaReadyBadgeEl) _plasmaReadyBadgeEl.style.display = "none";
+      }, 200);
+    }, 650);
+  }
+  function hidePlasmaReadyBadge() {
+    if (_plasmaReadyBadgeTimer) { clearTimeout(_plasmaReadyBadgeTimer); _plasmaReadyBadgeTimer = null; }
+    if (_plasmaReadyBadgeEl) { _plasmaReadyBadgeEl.style.opacity = "0"; _plasmaReadyBadgeEl.style.display = "none"; }
+  }
   function updatePlasmaCageCharge(now) {
     if (!plasmaCage.active || plasmaCage.charged) return;
-    if (now - plasmaCage.chargeStart >= PLASMA_CAGE_CHARGE_MS) {
+    if (now - plasmaCage.chargeStart >= plasmaCageChargeMs()) {
       plasmaCage.charged = true;
       if (!plasmaCage.readySoundPlayed) {
         plasmaCage.readySoundPlayed = true;
         const readyKey = resolveGameSfxKey("plasma_ready", "reveal4");
         if (readyKey) playGameSfx(readyKey, 1.0);
         commBoxController.reactTo("plasmacharged");
+        flashPlasmaReadyBadge(); // 2026-07-03: visible "PLASMA READY" HUD cue
       }
       return;
     }
@@ -13380,7 +13451,12 @@ function initGalaxyCanvas() {
     return true;
   }
 
-  function releasePlasmaCage(now) {
+  // 2026-07-03: a trap net needs a usable footprint — a degenerate sliver (dragged out then back)
+  // isn't placeable.
+  function isPlasmaRectPlaceable(rect) {
+    return !!rect && Math.hypot(rect.w, rect.h) >= 50;
+  }
+  function releasePlasmaCage(now, { edgeExit = false } = {}) {
     if (!plasmaCage.active) return false;
     updatePlasmaCageCharge(now);
     const rect = getPlasmaRect();
@@ -13389,17 +13465,26 @@ function initGalaxyCanvas() {
     plasmaCage.lastRectCy = rect.y + rect.h / 2;
     stopPlasmaChargeSound();
     resetPlasmaCageGesture();
-    if (charged) {
-      // MANUAL mode: leave the charged net placed on the field instead of firing it. It hangs until the
-      // cadet taps it (or the DETONATE button). The tutorial always fires immediately (mode is forced
-      // AUTO there) so its net lesson is unaffected.
-      if (plasmaCage.mode === "manual" && !stuntActive) {
+    // 2026-07-03: leave the net PLACED as a trap (hangs until tapped / the DETONATE button) instead
+    // of firing or fizzling when:
+    //   • MANUAL mode — a released net is ALWAYS a placed trap, with or without a stroid highlighted
+    //     inside (#14), OR
+    //   • an EDGE-EXIT (finger left the iPad screen) that hadn't charged — never "throw the net away"
+    //     on an edge slip (#2). A CHARGED edge-exit still fires below, since that net pays off.
+    // Training forces AUTO and never edge-places, so its net lessons are unaffected.
+    const placeAsTrap = !stuntActive && (plasmaCage.mode === "manual" || (edgeExit && !charged));
+    if (placeAsTrap) {
+      if (isPlasmaRectPlaceable(rect)) {
         plasmaCage.placed = { x: rect.x, y: rect.y, w: rect.w, h: rect.h, placedAt: now };
         playGameSfx("blip1", 0.72, { rate: 1.12 }); // "net set" confirm
         triggerGameplayHapticImpact(hapticImpactStyle.Light);
         updatePlasmaModeBtn();
         return true;
       }
+      plasmaCage.releaseFx = { x: rect.x, y: rect.y, w: rect.w, h: rect.h, type: "fizzle", start: now, ttl: 200 };
+      return true;
+    }
+    if (charged) {
       detonatePlasmaRect(rect, now);
     } else {
       plasmaCage.releaseFx = { x: rect.x, y: rect.y, w: rect.w, h: rect.h, type: "fizzle", start: now, ttl: 200 };
@@ -13996,7 +14081,7 @@ function initGalaxyCanvas() {
   // large (kind-3) stroids, drop a goldbars powerup. Counts the big rocks present in the blast radius
   // at detonation (shrapnel kills them over the next ~2s). Throttled to one goldbars on screen so the
   // dense mine-chain levels can't flood the field; bypasses powerupOverride since it's a skill reward.
-  const BIG_BOMB_GOLDBARS_THRESHOLD = 5;
+  const BIG_BOMB_GOLDBARS_THRESHOLD = 7; // 2026-07-03: raised 5→7 — Big Bomb Combo was too easy (co-fired with Pyro); goldbars drop uses the same bar
   function rewardBigBombCombo(x, y, radius) {
     if (engineMode !== "arcade" || !arcadeActive) return;
     if (powerups.some((p) => p.type === "goldbars")) return;
@@ -14147,17 +14232,23 @@ function initGalaxyCanvas() {
     return { x: clientX - rect.left, y: clientY - rect.top };
   }
 
-  function clearGameplayEntities() {
+  function clearGameplayEntities({ keepFx = false } = {}) {
     fkReset(); // DEBUG_FIRSTKILL: re-arm the first-kill probe for the next run
     resetStroidToss();
     resetComboState();
     sim.tossedAsteroid = null;
     while (sim.asteroids.length) releaseAsteroid(sim.asteroids.pop());
-    while (sim.particles.length) releaseParticle(sim.particles.pop());
-    while (sim.warpRings.length) releaseRing(sim.warpRings.pop());
-    while (sim.shockwaves.length) releaseRing(sim.shockwaves.pop());
-    resetBoomBurst(); // drop any pending cluster-boom timer so it can't fire across a transition
-    sim.lightningRings.length = 0;
+    // 2026-07-03: keepFx preserves the in-flight visual FX (explosion debris, rings) so a tutorial
+    // field-wipe that JUST spawned per-stroid kill FX doesn't drain them the same frame — that was
+    // the "stroids just vanish / no debris" bug. They self-expire via their own TTLs; only the
+    // gameplay entities are removed here.
+    if (!keepFx) {
+      while (sim.particles.length) releaseParticle(sim.particles.pop());
+      while (sim.warpRings.length) releaseRing(sim.warpRings.pop());
+      while (sim.shockwaves.length) releaseRing(sim.shockwaves.pop());
+      resetBoomBurst(); // drop any pending cluster-boom timer so it can't fire across a transition
+      sim.lightningRings.length = 0;
+    }
     sim.shooting = null;
     landmine = null;
     placedBombs.length = 0; // 2026-06-10: placed bombs don't carry across levels/menu
@@ -14216,11 +14307,13 @@ function initGalaxyCanvas() {
     plasmaCage.releaseFx = null;
     plasmaCage.rechargeSoundPlayed = true;
     updatePlasmaModeBtn();
-    laserBeams.length = 0;
-    tapBlasts.length = 0;
-    _bombShrapnel.length = 0;
-    flameTrail.length = 0;
-    fireBlobs.length = 0;
+    if (!keepFx) {
+      laserBeams.length = 0;
+      tapBlasts.length = 0;
+      _bombShrapnel.length = 0; // in-flight bomb shrapnel keeps flying/killing under keepFx
+      flameTrail.length = 0;
+      fireBlobs.length = 0;
+    }
     stopPlasmaChargeSound();
     stopWarningState();
   }
@@ -15122,14 +15215,18 @@ function initGalaxyCanvas() {
       // cadet with one of her own intro lines instead of the muted CMDR line.
       // 2026-06-24: pick from POOL_SPC_LEVEL_START for variety; red themes (L13) get the
       // "gettin' hot in here" line.
-      const spcIntroFile = (levelNum === 13 || levelNum === 14)
-        ? (isRedTheme(LEVEL_THEMES[levelNum]?.primary)
-            ? "SPC_aye_its_gettin_hot_in_here.mp3"
-            : commBoxController.pickFromPool("spcLevelStart", commBoxController.POOL_SPC_LEVEL_START))
-        : null;
+      // 2026-07-03: L14's OFFICIAL opener is hard-set to the "peeing their pants" line (was a random
+      // pool pick that duplicated) and flagged `protected` so no gameplay reaction can cut it off.
+      const spcIntroFile = levelNum === 14
+        ? "SPC_peeing_pants.mp3"
+        : (levelNum === 13
+            ? (isRedTheme(LEVEL_THEMES[levelNum]?.primary)
+                ? "SPC_aye_its_gettin_hot_in_here.mp3"
+                : commBoxController.pickFromPool("spcLevelStart", commBoxController.POOL_SPC_LEVEL_START))
+            : null);
       const spcIntro = spcIntroFile ? commBoxController.spcBonusVoSrc(spcIntroFile) : null;
       if (spcIntro) {
-        commBoxController.queueVO({ audioSrc: spcIntro, _spc: true });
+        commBoxController.queueVO({ audioSrc: spcIntro, _spc: true, protected: levelNum === 14 });
       } else if (levelStartVO) {
         // 2026-06-24: pass the intended filename (voFile) so triggerVO resolves audio when recorded
         // and always types the caption.
@@ -16213,7 +16310,10 @@ function initGalaxyCanvas() {
     if (landmine) spawnExplosion(landmine.x, landmine.y, 20, true, 1.5);
     for (const b of placedBombs) spawnExplosion(b.x, b.y, 16, false, 1.2);
     playGameSfx("ufo_destroy", 0.6);
-    clearGameplayEntities();
+    // 2026-07-03: keepFx — remove the entities but LEAVE the debris/rings we just spawned so the wipe
+    // actually blows up (they were being drained the same frame → "stroids just vanish"). The 450ms
+    // hold below lets the debris play out before the next step spawns.
+    clearGameplayEntities({ keepFx: true });
     powerups.length = 0;
     return waitMs(450);
   }
@@ -16291,16 +16391,24 @@ function initGalaxyCanvas() {
       spcVO("08", "These are the **Stroids** — our job is to clear them from the Polyverse.", "talk_friendly");
       spcVO("08b", "Tap to fire your laser and blast the **Stroid** and all its pieces.", "talk_calm");
       showTaskInstructionDeferred("TAP TO FIRE — DESTROY THE STROID");
-      await waitVOIdle();
-      await waitMs(800);
-      if (!stuntActive) return;
-      commBoxController.hide();
+      // 2026-07-03: arm the clear waiter IMMEDIATELY so a cadet who blasts the field DURING the intro
+      // VO advances the instant it's empty. Previously the step blocked on waitVOIdle+800ms before it
+      // even started listening, so an early clear meant waiting out the whole VO. On the first shot,
+      // clear the comm box + the deferred intro instruction and switch the banner to "DESTROY ALL".
       waitFor(() => (tutorialEvents.shoot || 0) > baseShots)
-        .then(() => { if (stuntActive) showTaskInstruction("DESTROY ALL THE STROIDS"); })
+        .then(() => {
+          if (!stuntActive) return;
+          commBoxController.hide();
+          _pendingTaskInstruction = null; // drop the deferred "TAP TO FIRE" so it can't re-surface
+          showTaskInstruction("DESTROY ALL THE STROIDS");
+        })
         .catch(() => {});
       await waitFor(tutorialAsteroidsAllCleared);
+      if (!stuntActive) return;
       hideTaskInstruction();
-      // Praise fires only once the objective is met (all stroids cleared), not before.
+      // Praise fires only once the objective is met (all stroids cleared), not before. Clearing the
+      // field resolves a waiter, which drops any still-queued intro lines (see updateStunt) so the
+      // praise comes up right after the current line — snappy, no waiting out the narration.
       spcVO("08c", "Fantastic, Cadet — you'll show these **Stroids** who's boss.", "praise");
       await waitVOIdle();
       await waitMs(700);
@@ -16323,6 +16431,12 @@ function initGalaxyCanvas() {
       tutorialBlockPlasmaToss = false; // net + toss unlocked from here on
       showLevelTitleBanner("PLASMA NET WEAPON", { training: true });
       spawnTutorialAsteroids(2, 2);
+      // 2026-07-03: show the "here's the net" demo overlay TOGETHER with the title card (concurrent
+      // with the intro VO) — the cadet was asking "where's the net?" because it previously only
+      // appeared after the three intro lines drained. The onUpdate hook still retires it the instant
+      // a real net drag begins.
+      tutorialState.plasmaDemoShown = true;
+      showPlasmaDemoOverlay();
       spcVO("one_of_our_most_useful_weapons_plasma_net", "One of our most useful weapons is the **Plasma Net**.");
       spcVO("to_fire_a_plasma_net_tap_and_drag", "To fire a **Plasma Net**, tap and drag a net across the screen.");
       spcVO("15-16", "When **Stroids** glow they're targeted. Release to fire.");
@@ -16340,10 +16454,8 @@ function initGalaxyCanvas() {
       tutorialState.plasmaObjectiveMode = "setfire";
       tutorialState.plasmaObjectiveShown = "";
       tutorialState.plasmaMisses = 0;
-      // 2026-06-22 (Item 1): demo clip above the objective; the onUpdate hook hides it the instant
-      // a net drag begins (plasmaCage.active). Only for the first lesson round.
-      tutorialState.plasmaDemoShown = true;
-      showPlasmaDemoOverlay();
+      // 2026-07-03: demo overlay already shown up top (with the title card); the onUpdate hook hides
+      // it the instant a net drag begins (plasmaCage.active). Only for the first lesson round.
       await tutorialPlasmaSuccess(() => spawnTutorialAsteroids(2, 2));
       tutorialState.plasmaObjectiveMode = null;
       tutorialState.plasmaDemoShown = false;
@@ -16463,7 +16575,18 @@ function initGalaxyCanvas() {
       spawnTutorialAsteroids(3, 3);
       showLevelTitleBanner("THE STROID TOSS", { training: true });
       spcVO("35-36", "Next — the **Stroid Toss**. Tap and hold a **Stroid** to grab it.", "talk_calm");
-      showTaskInstructionDeferred("TAP AND HOLD A STROID — SWIPE TO TOSS");
+      showTaskInstructionDeferred("TAP AND HOLD A STROID");
+      // 2026-07-03: the instant the cadet GRABS a stroid, swap the banner to the swipe action and
+      // fire a dedicated "now swipe to toss" VO — the grab step had no follow-up cue (mirrors the
+      // bomb arm→detonate swap). Caption shows until vo/SPC_now_swipe_to_toss_the_stroid.mp3 is
+      // recorded + its key added to SPC_VO_AVAILABLE (see PRE-RELEASE checklist).
+      waitFor(() => stroidToss.active)
+        .then(() => {
+          if (!stuntActive) return;
+          showTaskInstruction("NOW SWIPE TO TOSS THE STROID");
+          spcVO("now_swipe_to_toss_the_stroid", "Now swipe to toss the **Stroid**!", "alert");
+        })
+        .catch(() => {});
       tutorialState.tossFailures = 0;
       const baseToss = tutorialEvents.toss || 0;
       tutorialSmallGrabHintEnabled = true;
@@ -16629,6 +16752,17 @@ function initGalaxyCanvas() {
       spcVO("61", "Objects are frozen for a short time.", "idle_soft");
       spcVO("freeze_toggle", "Freeze can be enabled and disabled by tapping the freeze icon on your HUD.", "idle_soft");
       await waitVOIdle();
+      // 2026-07-03: right after the "enable/disable" line, DEMONSTRATE the toggle with a LOUD freeze
+      // enable→disable sound + freeze-blue flash (was the field-clear's plasma-ish electric burst,
+      // which read as the wrong cue). Sound/flash ONLY — the actual freeze stays HELD
+      // (tutorialHoldFreeze) for the upcoming frozen toss.
+      if (stuntActive) {
+        playGameSfx("freeze", 1.0);
+        cssFlash("#88ddff", 0.28, 320);
+        await waitMs(700);
+        if (stuntActive) { playGameSfx("unfreeze", 1.0); cssFlash("#88ddff", 0.22, 300); }
+        await waitMs(300);
+      }
       await clearTutorialField();
       await waitMs(350);
     } },
@@ -16715,6 +16849,12 @@ function initGalaxyCanvas() {
       await waitFor(() => activeMissile);
       hideTaskInstruction();
       await waitFor(() => !activeMissile);
+      // 2026-07-03: let the missile's staggered vaporize debris fully play before the field wipe.
+      // The step used to clear the instant the missile exploded, which dropped the queued splits
+      // (missileSplitQueue drained by clearGameplayEntities) so the caught stroids just vanished
+      // instead of blasting into fiery debris. Wait for the queue to drain, then a short beat.
+      await waitFor(() => missileSplitQueue.length === 0);
+      await waitMs(400);
       // ── Pulse Cannon (final weapon) — 2026-07-01 ──────────────────────────────
       await clearTutorialField();            // clear leftover silver missile-step Stroids
       await waitMs(300);
@@ -17109,6 +17249,10 @@ function initGalaxyCanvas() {
     retryPending = false;
     stopWarningState();
     commBoxController.setLevelEndLock(false); // 2026-06-21 (Item 1b): never carry the level-end VO lock into menus (e.g. the final-level win path bypasses startLevel)
+    // 2026-07-03: _exclusiveSpeaker is only ever set by training/practice, both of which are being
+    // left here — clear it unconditionally so no menu path can stay stuck muting CMDR/menu VO.
+    // (portrait override is left to the mode-specific blocks below — L13/L14 pause-resume relies on it.)
+    commBoxController.setExclusiveSpeaker(false);
     // 2026-06-13: leaving Stunt Mode by any path is always a clean exit — never preserve it as a
     // resumable arcade session, and clear the flag so a later real game runs its level logic.
     if (stuntActive) {
@@ -17344,7 +17488,30 @@ function initGalaxyCanvas() {
     if (canvasRect) {
       _updateElBehindStroid(_taskInstrEl, canvasRect);
       _updateElBehindStroid(_demoOverlayEl, canvasRect);
+      // 2026-07-03: extend the see-through to the TOP arcade-HUD content — the score/level/timer
+      // block and the weapon-button group — so a Stroid drifting behind them fades them too. The
+      // pulse-step green Stroids passed under the top HUD, which had NO ghost effect. Targets the
+      // content sub-regions (not the full-width bar) so empty gaps don't trigger it; rect-based so a
+      // hidden HUD (rect ~0) just clears the class.
+      if (!_hudCenterEl) _hudCenterEl = document.querySelector("#arcadeHud .hudCenter");
+      if (!_hudInvEl) _hudInvEl = document.querySelector("#arcadeHud .hudInventoryGroup");
+      _ghostHudRegion(_hudCenterEl, canvasRect);
+      _ghostHudRegion(_hudInvEl, canvasRect);
     }
+  }
+  let _hudCenterEl = null;
+  let _hudInvEl = null;
+  // Rect-based ghost toggle (doesn't assume an inline display style, unlike _updateElBehindStroid).
+  function _ghostHudRegion(el, canvasRect) {
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    let behind = false;
+    if (r.width > 12 && r.height > 12 && r.bottom > canvasRect.top && r.top < canvasRect.bottom) {
+      behind = anyStroidInRect(
+        r.left - canvasRect.left, r.top - canvasRect.top,
+        r.right - canvasRect.left, r.bottom - canvasRect.top);
+    }
+    el.classList.toggle("stroid-ghost", behind);
   }
   // Toggle .stroid-ghost on a fixed overlay element when a non-ambient Stroid overlaps its rect.
   function _updateElBehindStroid(el, canvasRect) {
@@ -19239,10 +19406,9 @@ function initGalaxyCanvas() {
     }
     if (pu.type === "goldbars") {
       addArcadeScore(1000);
-      // 2026-07-02: 1 gold bar = 1 POLYSLOTS pull (was 3). Playtest read the token count as
-      // wildly higher than the number of gold bars actually collected — 1:1 keeps the tally
-      // matching the player's mental model. Bump back up if the slot needs more pulls per run.
-      slotTokens += 1;
+      // 2026-07-03: 1 gold bar = 3 POLYSLOTS tokens. (The 2026-07-02 drop to 1 was not intended —
+      // reverted here so a gold bar is worth three pulls again.)
+      slotTokens += 3;
       cssFlash("#ffd700", 0.22, 250);
       return;
     }
@@ -19817,10 +19983,11 @@ function initGalaxyCanvas() {
   function onGalaxyPointerCancel() {
     if (pulseFiring) stopPulseFiring();
     if (stroidToss.active) cancelStroidToss();
-    // 2026-06-26: an iOS edge-gesture pointercancel used to silently DISCARD an in-progress
-    // plasma net — players "lost" the net by dragging to the screen edge. Fire it instead so the
-    // drag still pays off; releasePlasmaCage fizzles harmlessly if it was too small to be a net.
-    if (plasmaCage.active) releasePlasmaCage(performance.now());
+    // 2026-06-26: an iOS edge-gesture pointercancel used to silently DISCARD an in-progress plasma
+    // net — players "lost" the net by dragging to the screen edge. 2026-07-03: an edge-exit now
+    // LEAVES THE NET PLACED (a trap to detonate) rather than firing/fizzling it, so a slip off the
+    // bezel never throws the net away.
+    if (plasmaCage.active) releasePlasmaCage(performance.now(), { edgeExit: true });
     galaxyGesture = null;
   }
 
@@ -19830,15 +19997,20 @@ function initGalaxyCanvas() {
     // 2026-06-09: capture before the gesture is cleared so taps know the input type
     const gestureIsTouch = galaxyGesture.isTouch === true;
     const point = getPointerWorld(event);
+    // 2026-07-03: a pointerup whose coords land off the play area (finger lifted onto the iPad bezel)
+    // is treated as an EDGE-EXIT so an in-progress net is left placed rather than fizzled (#2).
+    let plasmaEdgeExit = false;
     if (Number.isFinite(point.x) && Number.isFinite(point.y)) {
       galaxyGesture.current = point;
       if (plasmaCage.active) {
-        // 2026-07-03: clamp the release corner to play bounds (matches onGalaxyPointerMove). Lifting the
-        // finger onto the iPad bezel delivers an out-of-bounds pointerup that used to collapse/skew the
-        // net so it read as "dropped". Clamp so it fires (auto) / sets (manual) at the on-screen edge.
+        plasmaEdgeExit = point.x < 0 || point.x > sim.width || point.y < 0 || point.y > sim.height;
+        // Clamp the release corner to play bounds (matches onGalaxyPointerMove) so the net's geometry
+        // stays on-screen whether it fires (auto/charged) or is placed (manual/edge-exit).
         plasmaCage.currentX = clamp(point.x, 0, sim.width);
         plasmaCage.currentY = clamp(point.y, 0, sim.height);
       }
+    } else if (plasmaCage.active) {
+      plasmaEdgeExit = true; // no usable coords → treat as an edge/interruption exit
     }
     if (event.cancelable) event.preventDefault();
     if (typeof galaxyPlayCanvas.releasePointerCapture === "function" && galaxyGesture.pointerId != null) {
@@ -19857,7 +20029,7 @@ function initGalaxyCanvas() {
       return;
     }
     if (plasmaCage.active) {
-      releasePlasmaCage(now);
+      releasePlasmaCage(now, { edgeExit: plasmaEdgeExit });
       galaxyGesture = null;
       draw(now);
       return;

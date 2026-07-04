@@ -61,6 +61,9 @@ Every item below must be resolved before App Store submission:
 - [x] SPC audio recorded and keyed: ✅ `SPC_VO_AVAILABLE` is fully populated (86 keys, exact
       1:1 match with the `vo/SPC_*.mp3` files — verified 2026-06-17). Merged tutorial captions
       (e.g. `35-36`, `50-51`, `52-54`, `59-60`) intentionally fall back to text-only.
+- [ ] Record `vo/SPC_now_swipe_to_toss_the_stroid.mp3` (2026-07-03 toss-step "now swipe to toss"
+      cue — caption fallback in place) and add key `now_swipe_to_toss_the_stroid` to
+      `SPC_VO_AVAILABLE` so the audio plays
 - [ ] Verify all 10 tutorial phases advance correctly on device (laser, plasma, UFO, toss,
       landmine, bomb inventory, quad, freeze, missile → Practice handoff)
 - [ ] Confirm Stunt Mode → Practice unlocks only after training completes

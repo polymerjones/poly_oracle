@@ -2958,3 +2958,11 @@ select:focus-visible {
   animation: none !important;
   transition: opacity 0.18s ease !important;
 }
+/* 2026-07-03: ghost the TOP arcade-HUD content (score/level/timer block + weapon-button group) when
+   a Stroid drifts behind it, matching the commander HUD. Toggled from updateStroidBehindHud. Opacity
+   only — the buttons stay tappable. */
+#arcadeHud .hudCenter.stroid-ghost,
+#arcadeHud .hudInventoryGroup.stroid-ghost {
+  opacity: 0.32;
+  transition: opacity 0.18s ease;
+}

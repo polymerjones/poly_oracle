@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-04 13:13";
+const BUILD_TS = "2026-07-04 13:45";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -7654,32 +7654,17 @@ function initGalaxyCanvas() {
   const plasmaModeBtn = document.createElement("button");
   plasmaModeBtn.type = "button";
   plasmaModeBtn.id = "plasmaModeBtn";
+  plasmaModeBtn.className = "plasmaModeBtn";
   plasmaModeBtn.setAttribute("aria-label", "Plasma net firing mode");
-  plasmaModeBtn.style.cssText = [
-    "position:fixed",
-    "right:max(14px,env(safe-area-inset-right,0px))",
-    "bottom:max(18px,calc(env(safe-area-inset-bottom,0px) + 14px))",
-    "z-index:9500",
-    "display:none",
-    "align-items:center",
-    "justify-content:center",
-    "min-width:70px",
-    "min-height:40px",
-    "padding:7px 12px",
-    "border-radius:999px",
-    "border:1px solid rgba(0,255,209,0.7)",
-    "background:rgba(6,20,26,0.82)",
-    "color:#dffff8",
-    "font-family:ui-monospace,Menlo,monospace",
-    "font-size:11px",
-    "font-weight:600",
-    "letter-spacing:0.1em",
-    "text-transform:uppercase",
-    "touch-action:manipulation",
-    "-webkit-user-select:none",
-    "user-select:none",
-    "box-shadow:0 0 12px rgba(0,255,209,0.22)",
-  ].join(";");
+  plasmaModeBtn.innerHTML = [
+    '<span class="plasmaModeBtn__plasma" aria-hidden="true">',
+    '  <span class="plasmaModeBtn__fill"></span>',
+    '  <span class="plasmaModeBtn__sheen"></span>',
+    '  <span class="plasmaModeBtn__core"></span>',
+    '  <span class="plasmaModeBtn__particles"></span>',
+    "</span>",
+    '<span class="plasmaModeBtn__label"></span>',
+  ].join("");
   (document.getElementById("commanderHUD")?.parentNode || document.body).appendChild(plasmaModeBtn);
   plasmaModeBtn.addEventListener("click", (e) => {
     e.preventDefault();
@@ -7690,28 +7675,83 @@ function initGalaxyCanvas() {
     updatePlasmaModeBtn();
   });
   let _plasmaModeBtnSig = "";
-  function updatePlasmaModeBtn() {
+  function updatePlasmaModeBtn(now = performance.now()) {
     if (!plasmaModeBtn) return;
-    const show = engineMode === "arcade" && arcadeActive && !stuntActive;
-    const sig = show ? (plasmaCage.placed ? "det" : plasmaCage.mode) : "hide";
-    if (sig === _plasmaModeBtnSig) return; // only touch the DOM when the state actually changes
-    _plasmaModeBtnSig = sig;
-    if (!show) { plasmaModeBtn.style.display = "none"; return; }
-    plasmaModeBtn.style.display = "inline-flex";
-    if (plasmaCage.placed) {
-      plasmaModeBtn.textContent = "DETONATE";
-      plasmaModeBtn.style.borderColor = "rgba(255,120,80,0.95)";
-      plasmaModeBtn.style.color = "#ffffff";
-      plasmaModeBtn.style.background = "rgba(60,14,8,0.9)";
-      plasmaModeBtn.style.boxShadow = "0 0 16px rgba(255,110,60,0.6)";
-    } else {
-      const manual = plasmaCage.mode === "manual";
-      plasmaModeBtn.textContent = manual ? "NET·MANUAL" : "NET·AUTO";
-      plasmaModeBtn.style.borderColor = manual ? "rgba(255,210,90,0.9)" : "rgba(0,255,209,0.7)";
-      plasmaModeBtn.style.color = manual ? "#fff2cc" : "#dffff8";
-      plasmaModeBtn.style.background = "rgba(6,20,26,0.82)";
-      plasmaModeBtn.style.boxShadow = manual ? "0 0 12px rgba(255,200,80,0.3)" : "0 0 12px rgba(0,255,209,0.22)";
+    const show = arcadeActive || practiceEndless || stuntActive;
+    if (!show) {
+      if (_plasmaModeBtnSig !== "hide") {
+        _plasmaModeBtnSig = "hide";
+        plasmaModeBtn.style.display = "none";
+      }
+      return;
     }
+    plasmaModeBtn.style.display = "inline-flex";
+    const manual = plasmaCage.mode === "manual";
+    const placed = !!plasmaCage.placed;
+    const charging = !placed && !plasmaCage.active && plasmaCage.cooldownUntil > now;
+    const state = placed ? "detonate" : charging ? "charging" : (plasmaCage.active ? "arming" : "ready");
+    const cooldownTotal = Math.max(1, (plasmaCage.cooldownUntil || now) - (plasmaCage.cooldownStart || now));
+    const fill = placed
+      ? 1
+      : charging
+        ? clamp((now - plasmaCage.cooldownStart) / cooldownTotal, 0, 1)
+        : (plasmaCage.active ? 0.22 : 0.92);
+    const fillAlpha = placed
+      ? 0.14
+      : charging
+        ? 0.24 + fill * 0.46
+        : (plasmaCage.active ? 0.16 : 0.72);
+    const coreScale = placed
+      ? 1.02
+      : charging
+        ? Math.max(0.52, 0.22 + fill * 0.86)
+        : (plasmaCage.active ? 0.14 : 1);
+    const coreOpacity = placed
+      ? 1
+      : charging
+        ? Math.max(0.45, 0.28 + fill * 0.64)
+        : (plasmaCage.active ? 0.18 : 0.98);
+    const particleOpacity = placed
+      ? 0.72
+      : charging
+        ? 0.22 + fill * 0.54
+        : (plasmaCage.active ? 0.08 : 0.42);
+    const sheenOpacity = placed
+      ? 0.52
+      : charging
+        ? 0.28 + fill * 0.32
+        : (plasmaCage.active ? 0.2 : 0.38);
+
+    const sig = [
+      state,
+      manual ? "manual" : "auto",
+      Math.round(fill * 100),
+    ].join("|");
+    if (sig !== _plasmaModeBtnSig) {
+      _plasmaModeBtnSig = sig;
+      const label = plasmaModeBtn.querySelector(".plasmaModeBtn__label");
+      if (label) {
+        label.textContent = placed ? "DETONATE" : manual ? "NET • MANUAL" : "NET • AUTO";
+      } else {
+        plasmaModeBtn.textContent = placed ? "DETONATE" : manual ? "NET • MANUAL" : "NET • AUTO";
+      }
+      plasmaModeBtn.dataset.state = state;
+      plasmaModeBtn.dataset.mode = manual ? "manual" : "auto";
+      plasmaModeBtn.setAttribute(
+        "aria-label",
+        placed
+          ? "Detonate placed plasma net"
+          : manual
+            ? "Plasma net mode: manual"
+            : "Plasma net mode: auto",
+      );
+    }
+    plasmaModeBtn.style.setProperty("--plasma-fill", `${(fill * 100).toFixed(1)}%`);
+    plasmaModeBtn.style.setProperty("--plasma-fill-alpha", fillAlpha.toFixed(3));
+    plasmaModeBtn.style.setProperty("--plasma-core-scale", coreScale.toFixed(3));
+    plasmaModeBtn.style.setProperty("--plasma-core-opacity", coreOpacity.toFixed(3));
+    plasmaModeBtn.style.setProperty("--plasma-particle-opacity", particleOpacity.toFixed(3));
+    plasmaModeBtn.style.setProperty("--plasma-sheen-opacity", sheenOpacity.toFixed(3));
   }
 
   [bgVideoA, bgVideoB].forEach((video) => {
@@ -10942,7 +10982,7 @@ function initGalaxyCanvas() {
     _timerRemainingMs = safeRemaining;
     _timerRatio = levelDurationMs > 0 ? clamp(safeRemaining / levelDurationMs, 0, 1) : 0;
     updateGameTimerHud(now);
-    updatePlasmaModeBtn(); // 2026-07-03: reveal/refresh the Manual/Auto (or DETONATE) button (sig-guarded)
+    updatePlasmaModeBtn(now); // 2026-07-04: refresh the conformed recharge pill every frame
     // Part 8: Practice shows "PRACTICE" where the level number normally goes.
     if (hudLevel) hudLevel.textContent = practiceEndless
       ? "PRACTICE"

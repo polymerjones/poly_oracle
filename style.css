@@ -2213,6 +2213,178 @@ select:focus-visible {
   box-shadow: 0 0 6px rgba(255, 215, 0, 0.9);
   pointer-events: none;
 }
+
+/* 2026-07-04: plasma net mode button now owns the recharge animation itself, so the pill shape
+   is the indicator instead of a separate floating icon. */
+#plasmaModeBtn {
+  position: fixed;
+  right: max(14px, env(safe-area-inset-right, 0px));
+  bottom: max(18px, calc(env(safe-area-inset-bottom, 0px) + 14px));
+  z-index: 9500;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 128px;
+  min-height: 42px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 255, 209, 0.72);
+  background: rgba(6, 20, 26, 0.84);
+  color: #dffff8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  line-height: 1;
+  text-transform: uppercase;
+  overflow: hidden;
+  isolation: isolate;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  transform: translateZ(0);
+  box-shadow: 0 0 12px rgba(0, 255, 209, 0.22);
+  transition:
+    transform 120ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    background-color 160ms ease,
+    opacity 160ms ease;
+}
+#plasmaModeBtn:active {
+  transform: translateY(1px) scale(0.98);
+}
+#plasmaModeBtn[data-mode="manual"] {
+  border-color: rgba(255, 210, 90, 0.9);
+  background: rgba(16, 18, 7, 0.86);
+  color: #fff2cc;
+  box-shadow: 0 0 12px rgba(255, 200, 80, 0.28);
+}
+#plasmaModeBtn[data-state="charging"] {
+  border-color: rgba(0, 255, 230, 0.92);
+  background: rgba(5, 23, 28, 0.9);
+  color: #f4fffd;
+}
+#plasmaModeBtn[data-state="ready"] {
+  border-color: rgba(0, 255, 230, 0.86);
+}
+#plasmaModeBtn[data-state="arming"] {
+  border-color: rgba(0, 255, 230, 0.84);
+  box-shadow: 0 0 10px rgba(0, 255, 209, 0.18);
+}
+#plasmaModeBtn[data-state="detonate"] {
+  border-color: rgba(255, 120, 80, 0.96);
+  background: rgba(60, 14, 8, 0.92);
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(255, 110, 60, 0.6);
+}
+#plasmaModeBtn .plasmaModeBtn__plasma {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+#plasmaModeBtn .plasmaModeBtn__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--plasma-fill, 0%);
+  opacity: var(--plasma-fill-alpha, 0.18);
+  background:
+    linear-gradient(90deg, rgba(0, 255, 230, 0.08), rgba(0, 255, 230, 0.42) 32%, rgba(0, 255, 230, 0.78) 76%, rgba(220, 255, 240, 0.92)),
+    radial-gradient(circle at 92% 50%, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0) 36%);
+  box-shadow: inset 0 0 18px rgba(255, 255, 255, 0.08);
+  transform: translateZ(0);
+}
+#plasmaModeBtn .plasmaModeBtn__fill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0 6px, rgba(255, 255, 255, 0) 6px 14px);
+  mix-blend-mode: screen;
+  opacity: 0.58;
+}
+#plasmaModeBtn .plasmaModeBtn__sheen {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 26%, rgba(255, 255, 255, 0) 68%, rgba(0, 0, 0, 0.16)),
+    radial-gradient(circle at 76% 50%, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 40%);
+  opacity: var(--plasma-sheen-opacity, 0.42);
+  mix-blend-mode: screen;
+  z-index: 1;
+}
+#plasmaModeBtn .plasmaModeBtn__core {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--plasma-fill, 0%) - 16px);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  transform: translateY(-50%) scale(var(--plasma-core-scale, 0));
+  opacity: var(--plasma-core-opacity, 0);
+  background: radial-gradient(circle,
+    rgba(255, 255, 255, 0.98) 0 13%,
+    rgba(0, 255, 230, 0.96) 24%,
+    rgba(0, 255, 230, 0.7) 42%,
+    rgba(0, 255, 230, 0.2) 62%,
+    rgba(0, 255, 230, 0) 74%);
+  box-shadow:
+    0 0 12px rgba(0, 255, 230, 0.9),
+    0 0 24px rgba(0, 255, 230, 0.55);
+  filter: saturate(1.08);
+  z-index: 2;
+}
+#plasmaModeBtn[data-state="ready"] .plasmaModeBtn__core {
+  animation: plasmaModeCorePulse 1.75s ease-in-out infinite;
+}
+#plasmaModeBtn .plasmaModeBtn__particles {
+  position: absolute;
+  inset: -18% -10%;
+  background-image:
+    radial-gradient(circle at 16% 48%, rgba(255, 255, 255, 0.42) 0 1px, transparent 2px),
+    radial-gradient(circle at 30% 36%, rgba(0, 255, 230, 0.66) 0 1.5px, transparent 3px),
+    radial-gradient(circle at 46% 62%, rgba(255, 255, 255, 0.32) 0 1px, transparent 2px),
+    radial-gradient(circle at 58% 46%, rgba(0, 255, 230, 0.58) 0 1.5px, transparent 3px),
+    radial-gradient(circle at 72% 58%, rgba(255, 255, 255, 0.3) 0 1px, transparent 2px),
+    radial-gradient(circle at 86% 40%, rgba(0, 255, 230, 0.58) 0 1.5px, transparent 3px);
+  background-size: 100% 100%;
+  opacity: var(--plasma-particle-opacity, 0);
+  mix-blend-mode: screen;
+  filter: blur(0.1px);
+  animation: plasmaModeParticles 2.6s linear infinite;
+  z-index: 1;
+}
+#plasmaModeBtn .plasmaModeBtn__label {
+  position: relative;
+  z-index: 3;
+  text-shadow: 0 0 8px rgba(0, 255, 230, 0.24);
+}
+#plasmaModeBtn[data-mode="manual"] .plasmaModeBtn__label {
+  text-shadow: 0 0 10px rgba(255, 205, 100, 0.22);
+}
+#plasmaModeBtn[data-state="detonate"] .plasmaModeBtn__label {
+  text-shadow: 0 0 10px rgba(255, 140, 90, 0.28);
+}
+#plasmaModeBtn[data-state="charging"] .plasmaModeBtn__fill {
+  animation: plasmaModeFillPulse 1.4s ease-in-out infinite;
+}
+@keyframes plasmaModeParticles {
+  0% { transform: translateX(-4%) translateY(0); }
+  50% { transform: translateX(4%) translateY(-1%); }
+  100% { transform: translateX(-4%) translateY(0); }
+}
+@keyframes plasmaModeCorePulse {
+  0%, 100% { filter: saturate(1.08) brightness(1); }
+  50% { filter: saturate(1.18) brightness(1.16); }
+}
+@keyframes plasmaModeFillPulse {
+  0%, 100% { opacity: var(--plasma-fill-alpha, 0.18); }
+  50% { opacity: calc(var(--plasma-fill-alpha, 0.18) + 0.1); }
+}
 @keyframes missileReady {
   0%, 100% { box-shadow: 0 0 6px rgba(255, 215, 0, 0.5); }
   50% { box-shadow: 0 0 16px rgba(255, 215, 0, 0.95), 0 0 28px rgba(255, 180, 0, 0.6); }

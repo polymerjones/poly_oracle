@@ -2302,17 +2302,6 @@ select:focus-visible {
     0 0 14px rgba(0, 255, 230, 0.10);
   transform: translateZ(0);
 }
-#plasmaModeBtn .plasmaModeBtn__fill::after {
-  content: "";
-  position: absolute;
-  right: -2px;
-  top: 2px;
-  bottom: 2px;
-  width: 2px;
-  border-radius: 999px;
-  background: rgba(220, 255, 245, 0.85);
-  box-shadow: 0 0 10px rgba(0, 255, 230, 0.75);
-}
 #plasmaModeBtn .plasmaModeBtn__core {
   position: absolute;
   top: 58%;

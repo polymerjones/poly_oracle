@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-04 14:47";
+const BUILD_TS = "2026-07-04 15:05";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -4220,7 +4220,21 @@ function setArcadeWarmupVisible(visible, text = "LOADING") {
     if (!document.getElementById("arcadeWarmupStyles")) {
       const style = document.createElement("style");
       style.id = "arcadeWarmupStyles";
-      style.textContent = "@keyframes arcadeWarmupSpin{to{transform:rotate(1turn)}}";
+      style.textContent = `
+        @keyframes arcadeWarmupSpin{to{transform:rotate(1turn)}}
+        @keyframes arcadeWarmupPulseScale{
+          0%,100%{transform:scale(1)}
+          50%{transform:scale(1.08)}
+        }
+        .arcadeWarmupInner b{
+          display:inline-block;
+          transform-origin:center;
+          animation:arcadeWarmupPulseScale 1.15s ease-in-out infinite;
+        }
+        @media (prefers-reduced-motion: reduce){
+          .arcadeWarmupInner b{animation:none}
+        }
+      `;
       document.head.appendChild(style);
     }
     arcadeWarmupOverlay = document.createElement("div");

@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-03 18:31";
+const BUILD_TS = "2026-07-04 11:31";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -3574,6 +3574,7 @@ const audioEngine = {
     const src = GAME_SFX?.[name];
     if (!src) return { stop() {}, ended: Promise.resolve() };
     const pool = this.htmlAudioPool.get(src) || [];
+    const poolLimit = loop ? 2 : (preservePitch ? 2 : 4);
     let node = null;
     for (let i = 0; i < pool.length; i += 1) {
       if (pool[i].paused || pool[i].ended) {
@@ -3586,8 +3587,25 @@ const audioEngine = {
       node.preload = "auto";
       node.playsInline = true;
       pool.push(node);
-      this.htmlAudioPool.set(src, pool);
     }
+    if (node) {
+      const nodeIndex = pool.indexOf(node);
+      if (nodeIndex >= 0 && nodeIndex !== pool.length - 1) {
+        pool.splice(nodeIndex, 1);
+        pool.push(node);
+      }
+    }
+    while (pool.length > poolLimit) {
+      const old = pool.shift();
+      if (!old || old === node) continue;
+      try {
+        old.pause();
+        old.currentTime = 0;
+      } catch {
+        // ignore
+      }
+    }
+    this.htmlAudioPool.set(src, pool);
     node.loop = !!loop;
     node.playbackRate = clamp(rate, 0.5, 2);
     if (preservePitch) {
@@ -10091,9 +10109,9 @@ function initGalaxyCanvas() {
 
   function spawnComboParticles(x, y, colors) {
     if (prefersReducedMotion) return;
-    const maxParts = isIOSNative ? 30 : 54;
+    const maxParts = isIOSNative ? 18 : 54;
     const room = Math.max(0, maxParts - comboFxParticles.length);
-    const count = Math.min(room, isIOSNative ? 16 : 28);
+    const count = Math.min(room, isIOSNative ? 8 : 28);
     for (let i = 0; i < count; i += 1) {
       const a = Math.random() * Math.PI * 2;
       const sp = 90 + Math.random() * (isIOSNative ? 180 : 260);
@@ -10508,6 +10526,7 @@ function initGalaxyCanvas() {
   function drawComboBanners(drawCtx, now) {
     if (!drawCtx || !comboBanners.length) return;
     const underFramePressure = isIOSNative && !!sim._frameBudgetExceeded;
+    const compactComboFx = isIOSNative || underFramePressure;
     for (let i = comboBanners.length - 1; i >= 0; i -= 1) {
       const b = comboBanners[i];
       const t = clamp((now - b.start) / COMBO_BANNER_TTL_MS, 0, 1);
@@ -10528,7 +10547,7 @@ function initGalaxyCanvas() {
       drawCtx.save();
       drawCtx.globalCompositeOperation = "lighter";
       drawCtx.globalAlpha = alpha;
-      if (comboFxSheet.ready && !prefersReducedMotion && !underFramePressure) {
+      if (comboFxSheet.ready && !prefersReducedMotion && !compactComboFx) {
         const frame = Math.min(comboFxSheet.frameCount - 1, Math.floor(t * comboFxSheet.frameCount * 1.85));
         const sx = (frame % comboFxSheet.columns) * (comboFxSheet.frameWidth + comboFxSheet.padding);
         const sy = Math.floor(frame / comboFxSheet.columns) * (comboFxSheet.frameHeight + comboFxSheet.padding);
@@ -10559,11 +10578,13 @@ function initGalaxyCanvas() {
       const fillPulse = 0.74 + 0.26 * Math.abs(Math.sin(now * 0.026 + b.start * 0.005 + 1.2));
       drawCtx.strokeStyle = "rgba(0,0,0,0.78)";
       drawCtx.shadowColor = `rgba(${b.colors[0]},${(b.key === "marksman" ? 0.42 : 0.78) * glowPulse})`;
-      drawCtx.shadowBlur = (b.key === "marksman" ? (isIOSNative ? 4 : 8) : (isIOSNative ? 8 : 18)) * glowPulse;
+      drawCtx.shadowBlur = compactComboFx
+        ? 0
+        : (b.key === "marksman" ? (isIOSNative ? 4 : 8) : (isIOSNative ? 8 : 18)) * glowPulse;
       drawCtx.fillStyle = `rgba(255,255,255,${0.76 + 0.22 * fillPulse})`;
       drawCtx.strokeText(headline, safeX, safeY, maxW);
       drawCtx.fillText(headline, safeX, safeY, maxW);
-      if (!prefersReducedMotion && !underFramePressure && smallStroidFxSheet.ready && t >= COMBO_BANNER_BLAST_START) {
+      if (!prefersReducedMotion && !compactComboFx && smallStroidFxSheet.ready && t >= COMBO_BANNER_BLAST_START) {
         const headlineWidth = Math.min(maxW, drawCtx.measureText(headline).width * 1.08);
         const blastCount = Math.max(5, Math.min(9, Math.ceil(headlineWidth / Math.max(42, base * 1.55))));
         const blastDuration = 0.36;

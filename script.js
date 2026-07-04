@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-04 13:45";
+const BUILD_TS = "2026-07-04 14:37";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -7650,20 +7650,19 @@ function initGalaxyCanvas() {
   // as the combo banner (sibling of #commanderHUD, z-index 9500) so it stays visible AND tappable even
   // when a comm box overlaps the bottom-right recharge corner. The primary detonate is still tapping
   // the placed net itself; this button is the convenience affordance. Starts hidden — updatePlasmaModeBtn
-  // (driven from updateArcadeHud) reveals it only during arcade/practice gameplay (never in Training).
+  // (driven from updateArcadeHud) reveals it during arcade, practice, and stunt training gameplay.
   const plasmaModeBtn = document.createElement("button");
   plasmaModeBtn.type = "button";
   plasmaModeBtn.id = "plasmaModeBtn";
   plasmaModeBtn.className = "plasmaModeBtn";
   plasmaModeBtn.setAttribute("aria-label", "Plasma net firing mode");
   plasmaModeBtn.innerHTML = [
-    '<span class="plasmaModeBtn__plasma" aria-hidden="true">',
+    '<span class="plasmaModeBtn__fx" aria-hidden="true">',
     '  <span class="plasmaModeBtn__fill"></span>',
-    '  <span class="plasmaModeBtn__sheen"></span>',
-    '  <span class="plasmaModeBtn__core"></span>',
     '  <span class="plasmaModeBtn__particles"></span>',
+    '  <span class="plasmaModeBtn__core"></span>',
     "</span>",
-    '<span class="plasmaModeBtn__label"></span>',
+    '<span class="plasmaModeBtn__label">NET • AUTO</span>',
   ].join("");
   (document.getElementById("commanderHUD")?.parentNode || document.body).appendChild(plasmaModeBtn);
   plasmaModeBtn.addEventListener("click", (e) => {
@@ -7712,29 +7711,19 @@ function initGalaxyCanvas() {
         ? Math.max(0.45, 0.28 + fill * 0.64)
         : (plasmaCage.active ? 0.18 : 0.98);
     const particleOpacity = placed
-      ? 0.72
+      ? 0.34
       : charging
-        ? 0.22 + fill * 0.54
-        : (plasmaCage.active ? 0.08 : 0.42);
-    const sheenOpacity = placed
-      ? 0.52
-      : charging
-        ? 0.28 + fill * 0.32
-        : (plasmaCage.active ? 0.2 : 0.38);
-
-    const sig = [
-      state,
-      manual ? "manual" : "auto",
-      Math.round(fill * 100),
-    ].join("|");
+        ? 0.08 + fill * 0.26
+        : (plasmaCage.active ? 0.04 : 0.24);
+    const coreLeft = placed || !charging
+      ? 86
+      : Math.max(16, Math.min(86, 16 + fill * 70));
+    const sig = [state, manual ? "manual" : "auto", Math.round(fill * 100)].join("|");
     if (sig !== _plasmaModeBtnSig) {
       _plasmaModeBtnSig = sig;
       const label = plasmaModeBtn.querySelector(".plasmaModeBtn__label");
-      if (label) {
-        label.textContent = placed ? "DETONATE" : manual ? "NET • MANUAL" : "NET • AUTO";
-      } else {
-        plasmaModeBtn.textContent = placed ? "DETONATE" : manual ? "NET • MANUAL" : "NET • AUTO";
-      }
+      if (label) label.textContent = placed ? "DETONATE" : manual ? "NET • MANUAL" : "NET • AUTO";
+      else plasmaModeBtn.textContent = placed ? "DETONATE" : manual ? "NET • MANUAL" : "NET • AUTO";
       plasmaModeBtn.dataset.state = state;
       plasmaModeBtn.dataset.mode = manual ? "manual" : "auto";
       plasmaModeBtn.setAttribute(
@@ -7748,10 +7737,11 @@ function initGalaxyCanvas() {
     }
     plasmaModeBtn.style.setProperty("--plasma-fill", `${(fill * 100).toFixed(1)}%`);
     plasmaModeBtn.style.setProperty("--plasma-fill-alpha", fillAlpha.toFixed(3));
+    plasmaModeBtn.style.setProperty("--plasma-core-left", `${coreLeft.toFixed(1)}%`);
+    plasmaModeBtn.style.setProperty("--plasma-arc-rotate", `${Math.round(fill * 360)}deg`);
     plasmaModeBtn.style.setProperty("--plasma-core-scale", coreScale.toFixed(3));
     plasmaModeBtn.style.setProperty("--plasma-core-opacity", coreOpacity.toFixed(3));
     plasmaModeBtn.style.setProperty("--plasma-particle-opacity", particleOpacity.toFixed(3));
-    plasmaModeBtn.style.setProperty("--plasma-sheen-opacity", sheenOpacity.toFixed(3));
   }
 
   [bgVideoA, bgVideoB].forEach((video) => {
@@ -8413,6 +8403,18 @@ function initGalaxyCanvas() {
       im.src = "slotart/" + id + ".png";
       slotSprites[id] = im;
     }
+  }
+  let _slotCabinetArt = null;
+  let _slotCabinetArtPromise = null;
+  function ensureSlotCabinetArt() {
+    if (_slotCabinetArtPromise) return _slotCabinetArtPromise;
+    _slotCabinetArt = _slotCabinetArt || new Image();
+    _slotCabinetArt.decoding = "async";
+    _slotCabinetArt.src = "slotart/cabinet.png";
+    _slotCabinetArtPromise = warmImageSet({ cabinet: _slotCabinetArt })
+      .then(() => _slotCabinetArt)
+      .catch(() => _slotCabinetArt);
+    return _slotCabinetArtPromise;
   }
   const slotSymbolTileAtlas = { size: 0, tiles: null };
   let _slotSpriteRefreshQueued = false;
@@ -9102,7 +9104,6 @@ function initGalaxyCanvas() {
         if (s >= 1) {
           r.pos = r.stopFinal; r.bounce = 0; r.bounceVel = SLOT_BOUNCE_IMPULSE; r.state = "settle";
           playGameSfx("slot_clunk", 0.7);
-          playGameSfx("slot_reel_click_short", 0.56);
           triggerGameplayHapticImpact(hapticImpactStyle.Heavy); // 2026-07-02: reel-stop bumped Medium->Heavy per playtest (harder symbol-stop feel)
         }
       } else if (r.state === "settle") {
@@ -9189,6 +9190,7 @@ function initGalaxyCanvas() {
       @keyframes psOverlayFlash{0%{filter:brightness(2.1)}100%{filter:brightness(1)}}
       /* Cabinet skin: the whole machine is one art PNG; live bits are absolutely placed (ported 1:1
          from prototypes/slot-machine.html — TUNE fractions are of the cabinet box). */
+      .cabinet-loading .ps-reels,.cabinet-loading .ps-lever,.cabinet-loading .ps-result,.cabinet-loading .ps-hint,.cabinet-loading .ps-hud,.cabinet-loading .ps-skip,.cabinet-loading .ps-continue,.cabinet-loading .ps-lifeaward{opacity:0;}
       .ps-gamehud{position:absolute;left:max(10px,env(safe-area-inset-left,0px));right:max(10px,env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px));z-index:3;display:flex;align-items:center;justify-content:space-between;gap:10px;color:#dff;}
       .ps-modebtn{min-height:40px;border:1px solid rgba(255,255,255,.2);border-radius:999px;background:rgba(7,14,30,.76);color:#dff;padding:8px 12px;font:800 13px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em;}
       .ps-score{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;font-size:clamp(12px,3.1vw,15px);font-weight:800;text-shadow:0 0 10px rgba(0,255,209,.45);}
@@ -9198,11 +9200,12 @@ function initGalaxyCanvas() {
       .ps-reward-flash{animation:psRewardFlash 620ms ease-out both;}
       @keyframes psRewardFlash{0%{filter:brightness(1);text-shadow:0 0 9px rgba(57,255,154,.6)}24%{filter:brightness(1.9) drop-shadow(0 0 12px rgba(57,255,154,.95));text-shadow:0 0 18px rgba(57,255,154,1),0 0 32px rgba(57,255,154,.75)}58%{filter:brightness(1.35) drop-shadow(0 0 20px rgba(57,255,154,.7));text-shadow:0 0 14px rgba(57,255,154,.85)}100%{filter:brightness(1);text-shadow:0 0 9px rgba(57,255,154,.6)}}
       .ps-panel{position:relative;z-index:1;aspect-ratio:826/1806;width:min(420px,94vw,40vh);margin-top:calc(60px + env(safe-area-inset-top,0px));color:#dff;
-        background:url("slotart/cabinet.png") center/100% 100% no-repeat;
+        background:linear-gradient(180deg,rgba(3,6,14,.92),rgba(5,12,24,.98));
         animation:psSlam 240ms cubic-bezier(.2,1.4,.4,1) both;
         --reelL:6.9%;--reelT:19.82%;--reelW:69.98%;--reelH:35.27%;
         --leverR:2%;--leverT:20%;--leverW:17%;--leverH:35%;
         --resultT:55.8%;--hintT:61.3%;--hudT:67.5%;--btnT:75.5%;}
+      .ps-cabinet{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;z-index:1;pointer-events:none;}
       /* 2026-07-02: iPad-class screens (>=640px wide — clears every iPhone) were pinned to the
          420px cap, leaving the cabinet marooned in the middle of a huge display. The art is a tall,
          narrow aspect (826/1806), so the way to reclaim real estate is to grow it to (nearly) fill
@@ -9274,6 +9277,7 @@ function initGalaxyCanvas() {
         <div class="ps-score"><span id="psScoreBox">Score: <b id="psScoreVal">0</b></span><span id="psTopLivesBox">Lives: <b id="psTopLives">0</b></span></div>
       </div>
       <div class="ps-panel">
+        <img class="ps-cabinet" src="slotart/cabinet.png" alt="" aria-hidden="true">
         <span class="ps-lives" id="psLives"><b id="psLifeCount">0</b></span>
         <span class="ps-tokens" id="psTokens"><b id="psTokenCount">0</b></span>
         <div class="ps-lifeaward" id="psLifeAward"><img src="slotart/alien.png" alt=""><span>+1 LIFE</span></div>
@@ -9379,8 +9383,10 @@ function initGalaxyCanvas() {
     slotInputLockedUntil = performance.now() + SLOT_LOCKOUT_MS;
     ensureSlotStyles();
     ensureSlotSprites();
+    void ensureSlotCabinetArt();
     commBoxController.hide();
     slotOverlay = buildSlotOverlay();
+    slotOverlay.classList.add("cabinet-loading");
     slotOverlay.classList.add("ps-flash");
     if (isIOSNative) {
       slotOverlay.classList.add("ios-lite");
@@ -9441,6 +9447,9 @@ function initGalaxyCanvas() {
     }
     slotStartFrameLoop();
     slotStartMusic();
+    requestAnimationFrame(() => {
+      if (slotState === SLOT_STATE.ENTERING) slotOverlay?.classList.remove("cabinet-loading");
+    });
     // After the lockout: become READY and invite the pull.
     slotTrackTimeout(() => {
       if (slotState !== SLOT_STATE.ENTERING) return;
@@ -9896,6 +9905,7 @@ function initGalaxyCanvas() {
     // referenced closure-local symbols from top-level scope, always false), so the slot art
     // decoded on first slot-machine reveal — that's the between-level slot lag. Warm it here.
     try { ensureSlotSprites(); } catch {}
+    try { await ensureSlotCabinetArt(); } catch {}
     try { slotPrimeReelCaches(); } catch {}
     const sprites = Object.assign({}, asteroidSprites, powerupSprites, slotSprites);
     [comboFxSheet, bigStroidFxSheet, smallStroidFxSheet, powerupPickupFxSheet, powerupPickupFlashSheet, pulseFireFxSheet]
@@ -19499,13 +19509,27 @@ function initGalaxyCanvas() {
     // Tutorial chatter is skipped by tapping the subtle "TAP TO SKIP" hint above the comm box
     // (the hint text is its own tap target) — the old double-tap-empty-space detection is gone.
     // 2026-06-10: quadshot — 3 extra shots clustered around the tap point while active.
-    // Each extra shot seeks the nearest live asteroid within QUADSHOT_SEEK_RADIUS and fires
-    // at its center through the same hit pipeline. Pure random 30-80px offsets almost never
-    // landed inside an asteroid's collision radius (r 10-38 + 10 slop), so the cluster
-    // visuals overlapped asteroids without ever destroying them.
+    // Stagger them across frames so the first quad tap stays responsive; each extra shot seeks
+    // the nearest live asteroid within QUADSHOT_SEEK_RADIUS and fires at its center through
+    // the same hit pipeline. Pure random 30-80px offsets almost never landed inside an
+    // asteroid's collision radius (r 10-38 + 10 slop), so the cluster visuals overlapped
+    // asteroids without ever destroying them.
     let extraHit = false;
     if (quadActive) {
-      for (let i = 0; i < 3; i += 1) {
+      let extraIndex = 0;
+      const fireNextQuadShot = () => {
+        if (extraIndex >= 3) {
+          // the whole quad volley (primary + cluster) registers as a single marksman event: a hit if
+          // any projectile killed a rock, otherwise a miss (which still breaks the combo, as before).
+          // 2026-07-03: but if this volley struck the UFO, skip the marksman event entirely — the UFO hit
+          // is already recorded (ufo_shot) and this event's breakNetUfoNetCombo would kill the in-progress
+          // net-UFO-net combo, making it impossible to land with quad shot active.
+          if (!_quadHitUfo) {
+            recordComboEvent(_quadHitAsteroid ? "laser_stroid_hit" : "laser_miss", { x, y });
+          }
+          if (hitSomething || extraHit) draw(performance.now());
+          return;
+        }
         let ex;
         let ey;
         // re-seek every shot: earlier extra shots splice destroyed asteroids, and split
@@ -19520,31 +19544,31 @@ function initGalaxyCanvas() {
           ex = clamp(x + Math.cos(ang) * dist, 0, sim.width);
           ey = clamp(y + Math.sin(ang) * dist, 0, sim.height);
         }
-        // 2026-06-14: each cluster shot fires its own report so quadshot sounds like a burst
-        // (was silent past the first tap). Budget-exempt above so they layer instead of dropping.
-        // 2026-06-22: trimmed 0.6 → 0.42 — layered bursts were a touch too loud.
-        // 2026-06-24: per-shot detune jitter so the 4 identical advfire buffers per quad tap don't
-        // phase-lock into a low resonant comb-filter boom under sustained fire (de-correlates them).
-        playGameSfx("advfire", 0.42, { important: true, detune: (Math.random() - 0.5) * 160 });
-        addShockwave(ex, ey); // each cluster blast gets its own localized shimmer ring
-        if (resolveShotAt(ex, ey, now, isTouch, true)) extraHit = true;
-      }
-      // the whole quad volley (primary + cluster) registers as a single marksman event: a hit if
-      // any projectile killed a rock, otherwise a miss (which still breaks the combo, as before).
-      // 2026-07-03: but if this volley struck the UFO, skip the marksman event entirely — the UFO hit
-      // is already recorded (ufo_shot) and this event's breakNetUfoNetCombo would kill the in-progress
-      // net-UFO-net combo, making it impossible to land with quad shot active.
-      if (!_quadHitUfo) {
-        recordComboEvent(_quadHitAsteroid ? "laser_stroid_hit" : "laser_miss", { x, y });
-      }
+        _sfxBudgetExempt = true;
+        try {
+          // 2026-06-14: each cluster shot fires its own report so quadshot sounds like a burst
+          // (was silent past the first tap). Budget-exempt above so they layer instead of dropping.
+          // 2026-06-22: trimmed 0.6 → 0.42 — layered bursts were a touch too loud.
+          // 2026-06-24: per-shot detune jitter so the 4 identical advfire buffers per quad tap don't
+          // phase-lock into a low resonant comb-filter boom under sustained fire (de-correlates them).
+          playGameSfx("advfire", 0.42, { important: true, detune: (Math.random() - 0.5) * 160 });
+          addShockwave(ex, ey); // each cluster blast gets its own localized shimmer ring
+          if (resolveShotAt(ex, ey, performance.now(), isTouch, true)) extraHit = true;
+        } finally {
+          _sfxBudgetExempt = false;
+        }
+        extraIndex += 1;
+        requestAnimationFrame(fireNextQuadShot);
+      };
+      requestAnimationFrame(fireNextQuadShot);
     }
     _sfxBudgetExempt = false;
     if (hitSomething || extraHit) draw(now);
   }
 
-  // 2026-06-10: resolves one shot at (sx, sy) — visual (X-blast on iOS touch, laser on
-  // desktop) plus the standard hit checks. Extracted from handleArcadeTap so quadshot can
-  // fire extra cluster shots through the identical path. Returns true if it hit anything.
+  // 2026-06-10: resolves one shot at (sx, sy) — visual X-blast on both touch and desktop,
+  // plus the standard hit checks. Extracted from handleArcadeTap so quadshot can fire extra
+  // cluster shots through the identical path. Returns true if it hit anything.
   function resolveShotAt(sx, sy, now, isTouch, deferMarksman = false) {
     // 2026-07-01: _pulseShot tags this projectile as a Pulse Cannon bolt so it renders thicker +
     // brighter than a normal laser (set by firePulseShot around the call, cleared after).
@@ -19557,16 +19581,10 @@ function initGalaxyCanvas() {
       _shotBlastRef = { x: sx, y: sy, life: 1.0, pulse, hit: false };
       tapBlasts.push(_shotBlastRef);
     } else {
-      _shotBlastRef = {
-        x1: sim.width / 2,
-        y1: sim.height / 2,
-        x2: sx,
-        y2: sy,
-        startedAt: now,
-        pulse,
-        hit: false,
-      };
-      laserBeams.push(_shotBlastRef);
+      // Desktop now reuses the iOS-style fire graphic so taps read as the same compact blast
+      // instead of the thin laser line path.
+      _shotBlastRef = { x: sx, y: sy, life: 1.0, pulse, hit: false };
+      tapBlasts.push(_shotBlastRef);
     }
     const markShotHit = () => { if (_shotBlastRef) _shotBlastRef.hit = true; };
     shotsFired += 1;

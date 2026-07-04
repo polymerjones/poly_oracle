@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-04 12:52";
+const BUILD_TS = "2026-07-04 13:13";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -391,6 +391,8 @@ const GAME_SFX = {
   slot_bigwin: "gamesfx/slot_bigwin.mp3", // big-payout flourish layered on jackpot
   slot_life: "gamesfx/slot_life.mp3", // alien-scatter extra life
   slot_outoftokens: "gamesfx/slot_outoftokens.mp3", // played as TAP TO CONTINUE appears
+  slot_reel_click_short: "gamesfx/slot_reel_click_short.mp3", // crisp per-reel stop tick
+  "slot_machine-ramp-and-spin": "gamesfx/slot_machine-ramp-and-spin.mp3", // optional spin bed
   combo_marksman: "combo_fx/marksman_combo.mp3",
   combo_net_ufo_net: "combo_fx/net-ufo-net-combo.mp3",
   combo_pyro: "combo_fx/pyro_combo.mp3",
@@ -521,6 +523,15 @@ const PRACTICE_ENABLED = false;
 // The previous 1000ms is the "hard mode" candidate value for a future difficulty setting.
 const PLASMA_CAGE_CHARGE_MS = 800;
 const PLASMA_CAGE_COOLDOWN_MS = 5000;
+const PLASMA_HUD_COLOR = "#00FFE6";
+const PLASMA_HUD_RADIUS = 14;
+const PLASMA_HUD_PULSE_MS = 2000;
+const PLASMA_HUD_PARTICLE_COUNT = 10;
+const PLASMA_HUD_TRANSITION_MS = 300;
+const PLASMA_HUD_GLOW_ALPHA = 0.52;
+const PLASMA_HUD_EDGE_OFFSET = 28;
+const PLASMA_HUD_ARC_MIN_MS = 3000;
+const PLASMA_HUD_ARC_MAX_MS = 6000;
 // 2026-07-03: a MANUAL placed net blocks re-arming (beginPlasmaCage rejects while one is set), so an
 // un-detonated net soft-locks the weapon. Safety-expire it after 45s (blinks the last 5s as a warning).
 const PLASMA_PLACED_NET_TTL_MS = 45000;
@@ -7576,6 +7587,12 @@ function initGalaxyCanvas() {
     desynchronized: true,
     willReadFrequently: false,
   });
+  const plasmaHudParticles = [];
+  let plasmaHudState = "readyIdle";
+  let plasmaHudTransitionAt = 0;
+  let plasmaHudNextArcAt = 0;
+  let plasmaHudArcUntil = 0;
+  let plasmaHudPulseSeed = Math.random() * Math.PI * 2;
   const timerPerimeterCanvas = document.createElement("canvas");
   const timerPerimeterCtx = timerPerimeterCanvas.getContext("2d", {
     alpha: true,
@@ -8110,6 +8127,7 @@ function initGalaxyCanvas() {
     "bomb_now_tap_the_screen_where_you_want_to_place_it",
     // 2026-06-22: corrected single-purpose recordings (drop the matching vo/SPC_*.mp3 in to enable).
     "blast_those_stroids_with_the_quad_shot", "tap_freeze_on_hud_to_activate_it", "pick_up_the_missile_cadet",
+    "now_swipe_to_toss_the_stroid",
     // 2026-06-24: dedicated bomb arm/detonate recordings (placed-bomb steps).
     "Tap_the_bomb_to_arm_it", "tap_the_bomb_again_to_detonate_it",
     "62_part1", "63", "63b", "63b_part1", "63b_part2", "64", "65", "66", "67", "68", "69", "70",
@@ -8342,9 +8360,34 @@ function initGalaxyCanvas() {
   function ensureSlotSprites() {
     if (_slotSpritesLoaded) return;
     _slotSpritesLoaded = true;
-    for (const id of SLOT_SYMBOLS) { const im = new Image(); im.src = "slotart/" + id + ".png"; slotSprites[id] = im; }
+    for (const id of SLOT_SYMBOLS) {
+      const im = new Image();
+      im.decoding = "async";
+      im.onload = () => {
+        slotInvalidateSymbolAtlas();
+        if (slotReels.length) slotQueueSpriteRefresh();
+      };
+      im.onerror = () => {
+        slotInvalidateSymbolAtlas();
+      };
+      im.src = "slotart/" + id + ".png";
+      slotSprites[id] = im;
+    }
   }
   const slotSymbolTileAtlas = { size: 0, tiles: null };
+  let _slotSpriteRefreshQueued = false;
+  function slotInvalidateSymbolAtlas() {
+    slotSymbolTileAtlas.size = 0;
+    slotSymbolTileAtlas.tiles = null;
+  }
+  function slotQueueSpriteRefresh() {
+    if (_slotSpriteRefreshQueued) return;
+    _slotSpriteRefreshQueued = true;
+    requestAnimationFrame(() => {
+      _slotSpriteRefreshQueued = false;
+      if (slotReels.length) slotSizeReels();
+    });
+  }
   function slotRenderSymbolTile(id, sz) {
     const tile = typeof OffscreenCanvas === "function" ? new OffscreenCanvas(sz, sz) : document.createElement("canvas");
     tile.width = sz;
@@ -8577,7 +8620,8 @@ function initGalaxyCanvas() {
       playGameSfx("slot_clunk", 0.72);
       // Single pull+spin sound (prototype's official_level_pull_full), stored as a handle so it can be
       // stopped the instant all reels land. Tracked so teardown/background also stop it.
-      slotRampHandle = slotTrackLoop(audioEngine.play("slot_pull", { volume: 0.9 }));
+      slotRampHandle = slotTrackLoop(audioEngine.playLoop("slot_machine-ramp-and-spin", { volume: 0.28 }));
+      playGameSfx("slot_pull", 0.9);
     });
   }
   function slotOnAllStopped() {
@@ -9018,6 +9062,7 @@ function initGalaxyCanvas() {
         if (s >= 1) {
           r.pos = r.stopFinal; r.bounce = 0; r.bounceVel = SLOT_BOUNCE_IMPULSE; r.state = "settle";
           playGameSfx("slot_clunk", 0.7);
+          playGameSfx("slot_reel_click_short", 0.56);
           triggerGameplayHapticImpact(hapticImpactStyle.Heavy); // 2026-07-02: reel-stop bumped Medium->Heavy per playtest (harder symbol-stop feel)
         }
       } else if (r.state === "settle") {
@@ -10380,8 +10425,9 @@ function initGalaxyCanvas() {
     setTimeout(() => playGameSfx(sfxKey, v2, { rate: 1.55, preservePitch: true, important: true }), 70);
   }
 
-  function awardCombo({ key, label, points, x, y, colors = ["255,255,255", "0,255,209"] }) {
+  function awardCombo({ key, label, points, x, y, colors = ["0,255,209", "186,110,255"] }) {
     if (engineMode !== "arcade" || !arcadeActive) return;
+    if (stuntActive) return;
     const now = performance.now();
     const marginX = Math.max(18, sim.width * 0.06);
     const marginY = Math.max(54, sim.height * 0.12);
@@ -10635,13 +10681,12 @@ function initGalaxyCanvas() {
       drawCtx.font = `900 ${Math.floor(base * slam)}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       drawCtx.lineWidth = Math.max(4, base * 0.18);
       const glowPulse = 0.54 + 0.46 * Math.abs(Math.sin(now * 0.016 + b.start * 0.003));
-      const fillPulse = 0.74 + 0.26 * Math.abs(Math.sin(now * 0.026 + b.start * 0.005 + 1.2));
-      drawCtx.strokeStyle = "rgba(0,0,0,0.78)";
-      drawCtx.shadowColor = `rgba(${b.colors[0]},${(b.key === "marksman" ? 0.42 : 0.78) * glowPulse})`;
+      drawCtx.strokeStyle = "rgba(2,8,18,0.88)";
+      drawCtx.shadowColor = `rgba(${b.colors[0]},${(b.key === "marksman" ? 0.34 : 0.78) * glowPulse})`;
       drawCtx.shadowBlur = compactComboFx
         ? 0
         : (b.key === "marksman" ? (isIOSNative ? 4 : 8) : (isIOSNative ? 8 : 18)) * glowPulse;
-      drawCtx.fillStyle = `rgba(255,255,255,${0.76 + 0.22 * fillPulse})`;
+      drawCtx.fillStyle = brandHeadline;
       drawCtx.strokeText(headline, safeX, safeY, maxW);
       drawCtx.fillText(headline, safeX, safeY, maxW);
       if (!prefersReducedMotion && !compactComboFx && smallStroidFxSheet.ready && t >= COMBO_BANNER_BLAST_START) {
@@ -10664,9 +10709,9 @@ function initGalaxyCanvas() {
         drawCtx.restore();
       }
       drawCtx.font = `800 ${Math.floor(base * 0.54 * slam)}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
-      drawCtx.shadowColor = `rgba(${b.colors[1] || b.colors[0]},${0.46 * glowPulse})`;
+      drawCtx.shadowColor = `rgba(${b.colors[1] || b.colors[0]},${0.42 * glowPulse})`;
       drawCtx.shadowBlur = (isIOSNative ? 5 : 10) * glowPulse;
-      drawCtx.fillStyle = `rgba(${b.colors[1] || b.colors[0]},${0.78 + 0.2 * fillPulse})`;
+      drawCtx.fillStyle = brandSub;
       drawCtx.strokeText(sub, safeX, clamp(safeY + base * 0.82, 66, Math.max(66, sim.height - 24)), maxW);
       drawCtx.fillText(sub, safeX, clamp(safeY + base * 0.82, 66, Math.max(66, sim.height - 24)), maxW);
       drawCtx.restore();
@@ -13179,7 +13224,7 @@ function initGalaxyCanvas() {
     }
   }
 
-  function vaporizeAsteroidByIndex(targetIndex, suppressBoom = false) {
+  function vaporizeAsteroidByIndex(targetIndex, suppressBoom = false, suppressFreezeCombo = false) {
     const a = removeAsteroidAt(targetIndex);
     if (!a) return;
     const levelNum = ARCADE_LEVELS[currentLevelIndex]?.level || 1;
@@ -13188,7 +13233,7 @@ function initGalaxyCanvas() {
     const mediumBlast = a.kind === 2;
     addArcadeScore(arcadeMultiplierPoints(a.kind >= 2 ? 25 : 10));
     trackKillStreak();
-    if (_freezeActive) recordComboEvent("frozen_stroid_destroyed", { x: a.x, y: a.y });
+    if (_freezeActive && !suppressFreezeCombo) recordComboEvent("frozen_stroid_destroyed", { x: a.x, y: a.y });
     spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1, 1, a.kind, a.spriteKey);
     addFrozenShatterFx(a.x, a.y);
     triggerAsteroidSizeFeedback(a.kind);
@@ -13449,7 +13494,7 @@ function initGalaxyCanvas() {
       }
     }
     for (let i = toDestroy.length - 1; i >= 0; i -= 1) {
-      vaporizeAsteroidByIndex(toDestroy[i], true); // suppressBoom: plasma uses one basicb_explo blast
+      vaporizeAsteroidByIndex(toDestroy[i], true, true); // suppressBoom + no freeze combo credit for plasma kills
     }
     plasmaKillPositions.forEach((pos) => {
       for (let p = 0; p < 12; p += 1) {
@@ -13810,46 +13855,230 @@ function initGalaxyCanvas() {
     plasmaCtx.restore();
   }
 
+  function ensurePlasmaHudParticles() {
+    if (plasmaHudParticles.length) return plasmaHudParticles;
+    for (let i = 0; i < PLASMA_HUD_PARTICLE_COUNT; i += 1) {
+      plasmaHudParticles.push({
+        angle: (i / PLASMA_HUD_PARTICLE_COUNT) * Math.PI * 2 + Math.random() * 0.5,
+        speed: 0.00028 + Math.random() * 0.0003,
+        radius: PLASMA_HUD_RADIUS + 1.5 + Math.random() * 5,
+        wobble: 0.0012 + Math.random() * 0.0018,
+        wobbleAmp: 0.6 + Math.random() * 1.2,
+        size: 0.7 + Math.random() * 1.3,
+        alpha: 0.22 + Math.random() * 0.34,
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+    return plasmaHudParticles;
+  }
+
+  function updatePlasmaHudState(plasmaCage, now) {
+    if (!plasmaCage || plasmaCage.active || plasmaCage.placed) return null;
+    const charging = plasmaCage.cooldownUntil > now;
+    if (charging) {
+      if (plasmaHudState !== "charging") {
+        plasmaHudState = "charging";
+        plasmaHudTransitionAt = 0;
+        plasmaHudArcUntil = 0;
+        plasmaHudNextArcAt = 0;
+      }
+      return "charging";
+    }
+
+    if (plasmaHudState === "charging") {
+      plasmaHudState = "chargedTransition";
+      plasmaHudTransitionAt = now;
+      plasmaHudArcUntil = now + 140;
+      plasmaHudNextArcAt = now + PLASMA_HUD_ARC_MIN_MS + Math.random() * (PLASMA_HUD_ARC_MAX_MS - PLASMA_HUD_ARC_MIN_MS);
+      return "chargedTransition";
+    }
+
+    if (plasmaHudState === "chargedTransition") {
+      if (plasmaHudTransitionAt > 0 && (now - plasmaHudTransitionAt) < PLASMA_HUD_TRANSITION_MS) {
+        return "chargedTransition";
+      }
+      plasmaHudState = "readyIdle";
+    }
+
+    if (plasmaHudState !== "readyIdle") {
+      plasmaHudState = "readyIdle";
+    }
+    if (!plasmaHudNextArcAt) {
+      plasmaHudNextArcAt = now + PLASMA_HUD_ARC_MIN_MS + Math.random() * (PLASMA_HUD_ARC_MAX_MS - PLASMA_HUD_ARC_MIN_MS);
+    }
+    return "readyIdle";
+  }
+
+  function drawPlasmaHudParticles(g, cx, cy, now, alpha, pulse) {
+    const particles = ensurePlasmaHudParticles();
+    const pulseScale = 1 + pulse * 0.04;
+    const drawAlpha = alpha * (0.55 + pulse * 0.45);
+    g.save();
+    g.globalCompositeOperation = "lighter";
+    for (let i = 0; i < particles.length; i += 1) {
+      const p = particles[i];
+      const angle = p.angle + now * p.speed;
+      const orbit = p.radius + Math.sin(now * p.wobble + p.phase) * p.wobbleAmp;
+      const px = cx + Math.cos(angle) * orbit;
+      const py = cy + Math.sin(angle) * orbit;
+      const size = p.size * pulseScale;
+      g.fillStyle = `rgba(0,255,230,${(p.alpha * drawAlpha).toFixed(3)})`;
+      g.beginPath();
+      g.arc(px, py, size, 0, Math.PI * 2);
+      g.fill();
+      if (i % 4 === 0) {
+        g.fillStyle = `rgba(220,255,250,${(p.alpha * drawAlpha * 0.55).toFixed(3)})`;
+        g.beginPath();
+        g.arc(px + Math.cos(angle + 0.8) * 0.8, py + Math.sin(angle + 0.8) * 0.8, Math.max(0.5, size * 0.45), 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+    g.restore();
+  }
+
   function drawPlasmaCooldown(now) {
     if (window.pixiRenderer) return;
-    if (!plasmaCtx) return;
-    const x = sim.width - 28;
-    const y = sim.height - 28;
-    if (now < plasmaCage.cooldownUntil) {
-      // RECHARGING — the sweep-arc ring.
-      const total = Math.max(1, plasmaCage.cooldownUntil - plasmaCage.cooldownStart);
-      const progress = clamp((now - plasmaCage.cooldownStart) / total, 0, 1);
-      plasmaCtx.save();
-      plasmaCtx.lineWidth = 3;
-      plasmaCtx.strokeStyle = "rgba(0,255,209,0.22)";
+    if (!plasmaCtx || !plasmaCage || plasmaCage.active || plasmaCage.placed) return;
+    const state = updatePlasmaHudState(plasmaCage, now);
+    const x = sim.width - PLASMA_HUD_EDGE_OFFSET;
+    const y = sim.height - PLASMA_HUD_EDGE_OFFSET;
+    const pulse = 0.5 + 0.5 * Math.sin(((now + plasmaHudPulseSeed) / PLASMA_HUD_PULSE_MS) * Math.PI * 2);
+    const charging = state === "charging";
+    const progress = charging
+      ? Math.max(
+        0,
+        Math.min(
+          1,
+          1 - (plasmaCage.cooldownUntil - now) / Math.max(1, plasmaCage.cooldownUntil - (plasmaCage.cooldownStart || now)),
+        ),
+      )
+      : 1;
+
+    plasmaCtx.save();
+    plasmaCtx.globalCompositeOperation = "lighter";
+
+    if (charging) {
+      const ringRadius = PLASMA_HUD_RADIUS + 8;
+      plasmaCtx.lineWidth = 7;
+      plasmaCtx.strokeStyle = `rgba(0,255,230,${(PLASMA_HUD_GLOW_ALPHA * 0.15).toFixed(3)})`;
       plasmaCtx.beginPath();
-      plasmaCtx.arc(x, y, 14, 0, Math.PI * 2);
+      plasmaCtx.arc(x, y, ringRadius + 2.2, -Math.PI / 2, Math.PI * 1.5);
       plasmaCtx.stroke();
-      plasmaCtx.strokeStyle = "rgba(0,255,209,0.9)";
+      plasmaCtx.lineWidth = 3;
+      plasmaCtx.strokeStyle = "rgba(0,68,61,0.42)";
+      plasmaCtx.beginPath();
+      plasmaCtx.arc(x, y, ringRadius, -Math.PI / 2, Math.PI * 1.5);
+      plasmaCtx.stroke();
+      plasmaCtx.lineWidth = 3.2;
+      plasmaCtx.strokeStyle = "rgba(0,255,230,0.8)";
       if (!isIOSNative) {
-        plasmaCtx.shadowColor = "#00FFD1";
+        plasmaCtx.shadowColor = PLASMA_HUD_COLOR;
         plasmaCtx.shadowBlur = 8;
       }
       plasmaCtx.beginPath();
-      plasmaCtx.arc(x, y, 14, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+      plasmaCtx.arc(x, y, ringRadius, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+      plasmaCtx.stroke();
+      plasmaCtx.lineWidth = 1.6;
+      plasmaCtx.strokeStyle = "rgba(220,255,240,0.22)";
+      plasmaCtx.beginPath();
+      plasmaCtx.arc(x, y, ringRadius - 1.1, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
       plasmaCtx.stroke();
       plasmaCtx.restore();
       return;
     }
-    // 2026-07-03: CHARGED & READY — a small breathing teal pip so the cadet gets a POSITIVE "loaded"
-    // signal. Before, the recharge ring simply vanished and there was no cue that plasma was ready.
-    // Hidden while drawing a net or while a manual net is already placed (their own overlays cover it).
-    if (plasmaCage.active || plasmaCage.placed) return;
-    const pulse = 0.5 + 0.5 * Math.sin(now / 320);
-    plasmaCtx.save();
-    plasmaCtx.fillStyle = `rgba(0,255,209,${(0.5 + 0.4 * pulse).toFixed(3)})`;
+
+    const transitionT = state === "chargedTransition"
+      ? Math.max(0, Math.min(1, (now - plasmaHudTransitionAt) / PLASMA_HUD_TRANSITION_MS))
+      : 1;
+    const transitionEase = 1 - Math.pow(1 - transitionT, 3);
+    const ringRadius = PLASMA_HUD_RADIUS + 8 + (state === "chargedTransition" ? 2.6 * (1 - transitionEase) : 0.7 * pulse);
+    const ringAlpha = state === "chargedTransition"
+      ? 0.4 + transitionEase * 0.5
+      : 0.46 + pulse * 0.22;
+    const orbAlpha = state === "chargedTransition"
+      ? Math.max(0, Math.min(1, (transitionT - 0.08) / 0.4))
+      : 0.88 + pulse * 0.12;
+    const orbRadius = state === "chargedTransition"
+      ? 2 + transitionEase * 5.2
+      : 4.8 + pulse * 1.1;
+
+    plasmaCtx.lineWidth = 7;
+    plasmaCtx.strokeStyle = `rgba(0,255,230,${(PLASMA_HUD_GLOW_ALPHA * 0.27).toFixed(3)})`;
     if (!isIOSNative) {
-      plasmaCtx.shadowColor = "#00FFD1";
-      plasmaCtx.shadowBlur = 8;
+      plasmaCtx.shadowColor = PLASMA_HUD_COLOR;
+      plasmaCtx.shadowBlur = 9;
     }
     plasmaCtx.beginPath();
-    plasmaCtx.arc(x, y, 5, 0, Math.PI * 2);
+    plasmaCtx.arc(x, y, ringRadius + 1.8, -Math.PI / 2, Math.PI * 1.5);
+    plasmaCtx.stroke();
+
+    plasmaCtx.lineWidth = 3;
+    plasmaCtx.strokeStyle = `rgba(0,68,61,${(ringAlpha * 0.55).toFixed(3)})`;
+    plasmaCtx.beginPath();
+    plasmaCtx.arc(x, y, ringRadius, -Math.PI / 2, Math.PI * 1.5);
+    plasmaCtx.stroke();
+
+    plasmaCtx.lineWidth = 2.8;
+    plasmaCtx.strokeStyle = `rgba(0,255,230,${ringAlpha.toFixed(3)})`;
+    plasmaCtx.beginPath();
+    plasmaCtx.arc(x, y, ringRadius, -Math.PI / 2, Math.PI * 1.5);
+    plasmaCtx.stroke();
+
+    plasmaCtx.lineWidth = 1.5;
+    plasmaCtx.strokeStyle = `rgba(220,255,240,${(ringAlpha * 0.28).toFixed(3)})`;
+    plasmaCtx.beginPath();
+    plasmaCtx.arc(x, y, ringRadius - 1.3, -Math.PI / 2, Math.PI * 1.5);
+    plasmaCtx.stroke();
+
+    if (state === "chargedTransition") {
+      const rippleRadius = ringRadius + 2 + transitionEase * 16;
+      const rippleAlpha = (1 - transitionEase) * 0.42;
+      plasmaCtx.lineWidth = 1.5;
+      plasmaCtx.strokeStyle = `rgba(0,255,230,${rippleAlpha.toFixed(3)})`;
+      plasmaCtx.beginPath();
+      plasmaCtx.arc(x, y, rippleRadius, 0, Math.PI * 2);
+      plasmaCtx.stroke();
+    }
+
+    plasmaCtx.fillStyle = `rgba(0,255,230,${(orbAlpha * 0.24).toFixed(3)})`;
+    plasmaCtx.beginPath();
+    plasmaCtx.arc(x, y, orbRadius + 3, 0, Math.PI * 2);
     plasmaCtx.fill();
+    plasmaCtx.fillStyle = `rgba(0,255,230,${(orbAlpha * 0.62).toFixed(3)})`;
+    plasmaCtx.beginPath();
+    plasmaCtx.arc(x, y, orbRadius, 0, Math.PI * 2);
+    plasmaCtx.fill();
+    plasmaCtx.fillStyle = `rgba(220,255,240,${(orbAlpha * 0.92).toFixed(3)})`;
+    plasmaCtx.beginPath();
+    plasmaCtx.arc(x, y, Math.max(1.2, orbRadius * 0.42), 0, Math.PI * 2);
+    plasmaCtx.fill();
+
+    drawPlasmaHudParticles(plasmaCtx, x, y, now, orbAlpha, pulse);
+
+    if (!plasmaHudNextArcAt) {
+      plasmaHudNextArcAt = now + PLASMA_HUD_ARC_MIN_MS + Math.random() * (PLASMA_HUD_ARC_MAX_MS - PLASMA_HUD_ARC_MIN_MS);
+    }
+    if (now >= plasmaHudNextArcAt && now >= plasmaHudTransitionAt + PLASMA_HUD_TRANSITION_MS) {
+      plasmaHudArcUntil = now + 160;
+      plasmaHudNextArcAt = now + PLASMA_HUD_ARC_MIN_MS + Math.random() * (PLASMA_HUD_ARC_MAX_MS - PLASMA_HUD_ARC_MIN_MS);
+    }
+    if (plasmaHudArcUntil > now) {
+      const arcT = 1 - ((plasmaHudArcUntil - now) / 160);
+      const arcStart = -Math.PI / 2 + arcT * Math.PI * 1.1;
+      const arcEnd = arcStart + 0.65 + arcT * 0.9;
+      const arcRadius = ringRadius + 3.5;
+      plasmaCtx.lineWidth = 2.2;
+      plasmaCtx.strokeStyle = `rgba(0,255,230,${((1 - arcT) * 0.78).toFixed(3)})`;
+      plasmaCtx.beginPath();
+      plasmaCtx.arc(x, y, arcRadius, arcStart, arcEnd);
+      plasmaCtx.stroke();
+      plasmaCtx.lineWidth = 1;
+      plasmaCtx.strokeStyle = `rgba(220,255,240,${((1 - arcT) * 0.42).toFixed(3)})`;
+      plasmaCtx.beginPath();
+      plasmaCtx.arc(x, y, arcRadius + 0.8, arcStart, arcEnd);
+      plasmaCtx.stroke();
+    }
+
     plasmaCtx.restore();
   }
 
@@ -14472,7 +14701,7 @@ function initGalaxyCanvas() {
   //   worstΔ big @+0ms, split small → the SAME frame's DRAW (first sprite/particle GPU upload) is it.
   //   worstΔ big @+later → a deferred/async cost landed after the kill (image/SFX decode finishing).
   // Re-arms every clearGameplayEntities (each training/level restart). // DEBUG: revert before release
-  const DEBUG_FIRSTKILL = true;
+  const DEBUG_FIRSTKILL = false;
   const FK_WINDOW_MS = 2000;
   const _fk = { armed: false, done: false, phaseTaken: false, t0: 0, splitMs: 0, worstDt: 0, worstAt: 0 };
   let _fkEl = null;
@@ -16499,7 +16728,7 @@ function initGalaxyCanvas() {
     // 1.5x speed nudge so it clears the comm-box footprint quickly. Per-asteroid flag (cleared on
     // pool release) means it scales each piece exactly once, never frame-over-frame. Laser phase
     // only — no effect on arcade/practice or any other tutorial step.
-    onUpdate: () => {
+    onUpdate: (now) => {
       if (sim.asteroids.length > 2) return;
       for (const a of sim.asteroids) {
         if (a._tutLaserBoosted) continue;
@@ -16518,6 +16747,7 @@ function initGalaxyCanvas() {
       // a real net drag begins.
       tutorialState.plasmaDemoShown = true;
       showPlasmaDemoOverlay();
+      tutorialState.plasmaRestockAt = 0;
       spcVO("one_of_our_most_useful_weapons_plasma_net", "One of our most useful weapons is the **Plasma Net**.");
       spcVO("to_fire_a_plasma_net_tap_and_drag", "To fire a **Plasma Net**, tap and drag a net across the screen.");
       spcVO("15-16", "When **Stroids** glow they're targeted. Release to fire.");
@@ -16575,6 +16805,14 @@ function initGalaxyCanvas() {
       if (tutorialState.plasmaDemoShown && plasmaCage.active) {
         tutorialState.plasmaDemoShown = false;
         hidePlasmaDemoOverlay();
+      }
+      if ((tutorialState.plasmaDemoShown || tutorialState.plasmaObjectiveMode === "setfire") && sim.asteroids.length < 2) {
+        const lastRestock = tutorialState.plasmaRestockAt || 0;
+        if (now - lastRestock >= 900) {
+          const need = Math.max(1, 2 - sim.asteroids.length);
+          spawnTutorialAsteroids(need, 2);
+          tutorialState.plasmaRestockAt = now;
+        }
       }
       if (tutorialState.plasmaObjectiveMode !== "setfire") return;
       const want = plasmaCage.active

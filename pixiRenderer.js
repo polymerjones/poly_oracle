@@ -80,6 +80,21 @@ const pixiRenderer = (() => {
   let flashFilter = null;
   let flashAlpha = 0;
   let _plasmaBorderFlash = 0;
+  const PLASMA_HUD_COLOR = 0x00ffe6;
+  const PLASMA_HUD_RADIUS = 14;
+  const PLASMA_HUD_PULSE_MS = 2000;
+  const PLASMA_HUD_PARTICLE_COUNT = 10;
+  const PLASMA_HUD_TRANSITION_MS = 300;
+  const PLASMA_HUD_GLOW_ALPHA = 0.52;
+  const PLASMA_HUD_EDGE_OFFSET = 28;
+  const PLASMA_HUD_ARC_MIN_MS = 3000;
+  const PLASMA_HUD_ARC_MAX_MS = 6000;
+  const plasmaHudParticles = [];
+  let plasmaHudState = "readyIdle";
+  let plasmaHudTransitionAt = 0;
+  let plasmaHudNextArcAt = 0;
+  let plasmaHudArcUntil = 0;
+  let plasmaHudPulseSeed = Math.random() * Math.PI * 2;
 
   let starGraphics = null;
   let starsSeeded = false;
@@ -810,6 +825,82 @@ const pixiRenderer = (() => {
     drawPlasmaCornerBrackets(g, x, y, w, h, now, progress, charged, alpha);
   }
 
+  function ensurePlasmaHudParticles() {
+    if (plasmaHudParticles.length) return plasmaHudParticles;
+    for (let i = 0; i < PLASMA_HUD_PARTICLE_COUNT; i += 1) {
+      plasmaHudParticles.push({
+        angle: (i / PLASMA_HUD_PARTICLE_COUNT) * Math.PI * 2 + Math.random() * 0.5,
+        speed: 0.00028 + Math.random() * 0.0003,
+        radius: PLASMA_HUD_RADIUS + 1.5 + Math.random() * 5,
+        wobble: 0.0012 + Math.random() * 0.0018,
+        wobbleAmp: 0.6 + Math.random() * 1.2,
+        size: 0.7 + Math.random() * 1.3,
+        alpha: 0.22 + Math.random() * 0.34,
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+    return plasmaHudParticles;
+  }
+
+  function updatePlasmaHudState(plasmaCage, now) {
+    if (!plasmaCage || plasmaCage.active || plasmaCage.placed) return null;
+    const charging = plasmaCage.cooldownUntil > now;
+    if (charging) {
+      if (plasmaHudState !== "charging") {
+        plasmaHudState = "charging";
+        plasmaHudTransitionAt = 0;
+        plasmaHudArcUntil = 0;
+        plasmaHudNextArcAt = 0;
+      }
+      return "charging";
+    }
+
+    if (plasmaHudState === "charging") {
+      plasmaHudState = "chargedTransition";
+      plasmaHudTransitionAt = now;
+      plasmaHudArcUntil = now + 140;
+      plasmaHudNextArcAt = now + PLASMA_HUD_ARC_MIN_MS + Math.random() * (PLASMA_HUD_ARC_MAX_MS - PLASMA_HUD_ARC_MIN_MS);
+      return "chargedTransition";
+    }
+
+    if (plasmaHudState === "chargedTransition") {
+      if (plasmaHudTransitionAt > 0 && (now - plasmaHudTransitionAt) < PLASMA_HUD_TRANSITION_MS) {
+        return "chargedTransition";
+      }
+      plasmaHudState = "readyIdle";
+    }
+
+    if (plasmaHudState !== "readyIdle") {
+      plasmaHudState = "readyIdle";
+    }
+    if (!plasmaHudNextArcAt) {
+      plasmaHudNextArcAt = now + PLASMA_HUD_ARC_MIN_MS + Math.random() * (PLASMA_HUD_ARC_MAX_MS - PLASMA_HUD_ARC_MIN_MS);
+    }
+    return "readyIdle";
+  }
+
+  function drawPlasmaHudParticles(g, cx, cy, now, alpha, pulse) {
+    const particles = ensurePlasmaHudParticles();
+    const pulseScale = 1 + pulse * 0.04;
+    const drawAlpha = alpha * (0.55 + pulse * 0.45);
+    for (let i = 0; i < particles.length; i += 1) {
+      const p = particles[i];
+      const angle = p.angle + now * p.speed;
+      const orbit = p.radius + Math.sin(now * p.wobble + p.phase) * p.wobbleAmp;
+      const px = cx + Math.cos(angle) * orbit;
+      const py = cy + Math.sin(angle) * orbit;
+      const size = p.size * pulseScale;
+      g.beginFill(PLASMA_HUD_COLOR, p.alpha * drawAlpha);
+      g.drawCircle(px, py, size);
+      g.endFill();
+      if (i % 4 === 0) {
+        g.beginFill(0xdcfff0, p.alpha * drawAlpha * 0.55);
+        g.drawCircle(px + Math.cos(angle + 0.8) * 0.8, py + Math.sin(angle + 0.8) * 0.8, Math.max(0.5, size * 0.45));
+        g.endFill();
+      }
+    }
+  }
+
   function drawPlasmaLayer(plasmaCage, asteroids, now) {
     if (!plasmaGraphics) return;
     plasmaGraphics.clear();
@@ -872,19 +963,95 @@ const pixiRenderer = (() => {
   }
 
   function drawPlasmaRecharge(plasmaCage, now) {
-    if (!plasmaCage || plasmaCage.active) return;
-    if (!plasmaCage.cooldownUntil || plasmaCage.cooldownUntil <= now) return;
+    if (!plasmaGraphics || !plasmaCage || plasmaCage.active || plasmaCage.placed) return;
+    const state = updatePlasmaHudState(plasmaCage, now);
+    const cx = _width - PLASMA_HUD_EDGE_OFFSET;
+    const cy = _height - PLASMA_HUD_EDGE_OFFSET;
+    const pulse = 0.5 + 0.5 * Math.sin(((now + plasmaHudPulseSeed) / PLASMA_HUD_PULSE_MS) * Math.PI * 2);
+    const charging = state === "charging";
+    const progress = charging
+      ? Math.max(
+        0,
+        Math.min(
+          1,
+          1 - (plasmaCage.cooldownUntil - now) / Math.max(1, plasmaCage.cooldownUntil - (plasmaCage.cooldownStart || now)),
+        ),
+      )
+      : 1;
 
-    const total = plasmaCage.cooldownUntil - (plasmaCage.cooldownStart || 0);
-    const remaining = plasmaCage.cooldownUntil - now;
-    const progress = Math.max(0, Math.min(1, 1 - remaining / Math.max(1, total)));
-    const cx = _width - 28;
-    const cy = _height - 28;
+    if (charging) {
+      const ringRadius = PLASMA_HUD_RADIUS + 8;
+      plasmaGraphics.lineStyle(7, PLASMA_HUD_COLOR, PLASMA_HUD_GLOW_ALPHA * 0.15);
+      plasmaGraphics.arc(cx, cy, ringRadius + 2.2, -Math.PI / 2, Math.PI * 1.5, false);
+      plasmaGraphics.lineStyle(3, 0x00443d, 0.42);
+      plasmaGraphics.arc(cx, cy, ringRadius, -Math.PI / 2, Math.PI * 1.5, false);
+      plasmaGraphics.lineStyle(3.2, PLASMA_HUD_COLOR, 0.8);
+      plasmaGraphics.arc(cx, cy, ringRadius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress, false);
+      plasmaGraphics.lineStyle(1.6, 0xdcfff0, 0.22 + progress * 0.2);
+      plasmaGraphics.arc(cx, cy, ringRadius - 1.1, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress, false);
+      return;
+    }
 
-    plasmaGraphics.lineStyle(3, 0x004433, 0.4);
-    plasmaGraphics.arc(cx, cy, 22, -Math.PI / 2, Math.PI * 1.5, false);
-    plasmaGraphics.lineStyle(3, 0x00ffd1, 0.7);
-    plasmaGraphics.arc(cx, cy, 22, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress, false);
+    const transitionT = state === "chargedTransition"
+      ? Math.max(0, Math.min(1, (now - plasmaHudTransitionAt) / PLASMA_HUD_TRANSITION_MS))
+      : 1;
+    const transitionEase = 1 - Math.pow(1 - transitionT, 3);
+    const ringRadius = PLASMA_HUD_RADIUS + 8 + (state === "chargedTransition" ? 2.6 * (1 - transitionEase) : 0.7 * pulse);
+    const ringAlpha = state === "chargedTransition"
+      ? 0.4 + transitionEase * 0.5
+      : 0.46 + pulse * 0.22;
+    const orbAlpha = state === "chargedTransition"
+      ? Math.max(0, Math.min(1, (transitionT - 0.08) / 0.4))
+      : 0.88 + pulse * 0.12;
+    const orbRadius = state === "chargedTransition"
+      ? 2 + transitionEase * 5.2
+      : 4.8 + pulse * 1.1;
+
+    plasmaGraphics.lineStyle(7, PLASMA_HUD_COLOR, PLASMA_HUD_GLOW_ALPHA * 0.27);
+    plasmaGraphics.arc(cx, cy, ringRadius + 1.8, -Math.PI / 2, Math.PI * 1.5, false);
+    plasmaGraphics.lineStyle(3, 0x00443d, ringAlpha * 0.55);
+    plasmaGraphics.arc(cx, cy, ringRadius, -Math.PI / 2, Math.PI * 1.5, false);
+    plasmaGraphics.lineStyle(2.8, PLASMA_HUD_COLOR, ringAlpha);
+    plasmaGraphics.arc(cx, cy, ringRadius, -Math.PI / 2, Math.PI * 1.5, false);
+    plasmaGraphics.lineStyle(1.5, 0xdcfff0, ringAlpha * 0.28);
+    plasmaGraphics.arc(cx, cy, ringRadius - 1.3, -Math.PI / 2, Math.PI * 1.5, false);
+
+    if (state === "chargedTransition") {
+      const rippleRadius = ringRadius + 2 + transitionEase * 16;
+      const rippleAlpha = (1 - transitionEase) * 0.42;
+      plasmaGraphics.lineStyle(1.5, PLASMA_HUD_COLOR, rippleAlpha);
+      plasmaGraphics.arc(cx, cy, rippleRadius, 0, Math.PI * 2, false);
+    }
+
+    plasmaGraphics.beginFill(PLASMA_HUD_COLOR, orbAlpha * 0.24);
+    plasmaGraphics.drawCircle(cx, cy, orbRadius + 3);
+    plasmaGraphics.endFill();
+    plasmaGraphics.beginFill(PLASMA_HUD_COLOR, orbAlpha * 0.62);
+    plasmaGraphics.drawCircle(cx, cy, orbRadius);
+    plasmaGraphics.endFill();
+    plasmaGraphics.beginFill(0xdcfff0, orbAlpha * 0.92);
+    plasmaGraphics.drawCircle(cx, cy, Math.max(1.2, orbRadius * 0.42));
+    plasmaGraphics.endFill();
+
+    drawPlasmaHudParticles(plasmaGraphics, cx, cy, now, orbAlpha, pulse);
+
+    if (!plasmaHudNextArcAt) {
+      plasmaHudNextArcAt = now + PLASMA_HUD_ARC_MIN_MS + Math.random() * (PLASMA_HUD_ARC_MAX_MS - PLASMA_HUD_ARC_MIN_MS);
+    }
+    if (now >= plasmaHudNextArcAt && now >= plasmaHudTransitionAt + PLASMA_HUD_TRANSITION_MS) {
+      plasmaHudArcUntil = now + 160;
+      plasmaHudNextArcAt = now + PLASMA_HUD_ARC_MIN_MS + Math.random() * (PLASMA_HUD_ARC_MAX_MS - PLASMA_HUD_ARC_MIN_MS);
+    }
+    if (plasmaHudArcUntil > now) {
+      const arcT = 1 - ((plasmaHudArcUntil - now) / 160);
+      const arcStart = -Math.PI / 2 + arcT * Math.PI * 1.1;
+      const arcEnd = arcStart + 0.65 + arcT * 0.9;
+      const arcRadius = ringRadius + 3.5;
+      plasmaGraphics.lineStyle(2.2, PLASMA_HUD_COLOR, (1 - arcT) * 0.78);
+      plasmaGraphics.arc(cx, cy, arcRadius, arcStart, arcEnd, false);
+      plasmaGraphics.lineStyle(1, 0xdcfff0, (1 - arcT) * 0.42);
+      plasmaGraphics.arc(cx, cy, arcRadius + 0.8, arcStart, arcEnd, false);
+    }
   }
 
   function drawLandmine(landmine, now) {
@@ -1254,6 +1421,12 @@ const pixiRenderer = (() => {
     warpRingPool.length = 0;
     lightningRingPool.length = 0;
     debrisPool.length = 0;
+    plasmaHudParticles.length = 0;
+    plasmaHudState = "readyIdle";
+    plasmaHudTransitionAt = 0;
+    plasmaHudNextArcAt = 0;
+    plasmaHudArcUntil = 0;
+    plasmaHudPulseSeed = Math.random() * Math.PI * 2;
     starsSeeded = false;
     flashFilter = null;
     flashAlpha = 0;

@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-04 14:37";
+const BUILD_TS = "2026-07-04 14:47";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -10731,6 +10731,8 @@ function initGalaxyCanvas() {
       drawCtx.font = `900 ${Math.floor(base * slam)}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       drawCtx.lineWidth = Math.max(4, base * 0.18);
       const glowPulse = 0.54 + 0.46 * Math.abs(Math.sin(now * 0.016 + b.start * 0.003));
+      const brandHeadline = `rgb(${b.colors[0]})`;
+      const brandSub = `rgb(${b.colors[1] || b.colors[0]})`;
       drawCtx.strokeStyle = "rgba(2,8,18,0.88)";
       drawCtx.shadowColor = `rgba(${b.colors[0]},${(b.key === "marksman" ? 0.34 : 0.78) * glowPulse})`;
       drawCtx.shadowBlur = compactComboFx

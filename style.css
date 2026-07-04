@@ -2219,7 +2219,7 @@ select:focus-visible {
 #plasmaModeBtn {
   position: fixed;
   right: max(14px, env(safe-area-inset-right, 0px));
-  bottom: max(18px, calc(env(safe-area-inset-bottom, 0px) + 14px));
+  bottom: max(2px, calc(env(safe-area-inset-bottom, 0px) - 12px));
   z-index: 9500;
   display: none;
   align-items: center;
@@ -2315,7 +2315,7 @@ select:focus-visible {
 }
 #plasmaModeBtn .plasmaModeBtn__core {
   position: absolute;
-  top: 50%;
+  top: 58%;
   left: var(--plasma-core-left, 86%);
   width: 30px;
   height: 30px;
@@ -2351,7 +2351,7 @@ select:focus-visible {
 }
 #plasmaModeBtn .plasmaModeBtn__particles {
   position: absolute;
-  top: 50%;
+  top: 58%;
   left: calc(var(--plasma-core-left, 86%) - 18px);
   width: 44px;
   height: 34px;

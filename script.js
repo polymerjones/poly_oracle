@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-04 11:31";
+const BUILD_TS = "2026-07-04 12:06";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -8344,6 +8344,55 @@ function initGalaxyCanvas() {
     _slotSpritesLoaded = true;
     for (const id of SLOT_SYMBOLS) { const im = new Image(); im.src = "slotart/" + id + ".png"; slotSprites[id] = im; }
   }
+  const slotSymbolTileAtlas = { size: 0, tiles: null };
+  function slotRenderSymbolTile(id, sz) {
+    const tile = typeof OffscreenCanvas === "function" ? new OffscreenCanvas(sz, sz) : document.createElement("canvas");
+    tile.width = sz;
+    tile.height = sz;
+    const cacheCtx = tile.getContext("2d");
+    if (!cacheCtx) return tile;
+    const glow = SLOT_SYM_COLOR[id];
+    if (glow) {
+      cacheCtx.save();
+      cacheCtx.globalAlpha = 0.22;
+      cacheCtx.fillStyle = glow;
+      cacheCtx.beginPath();
+      cacheCtx.arc(sz / 2, sz / 2, sz * 0.5, 0, Math.PI * 2);
+      cacheCtx.fill();
+      cacheCtx.restore();
+    }
+    const img = slotSprites[id];
+    if (img && img.complete && img.naturalWidth) {
+      cacheCtx.drawImage(img, 0, 0, sz, sz);
+    } else {
+      cacheCtx.fillStyle = SLOT_SYM_COLOR[id] || "#9fb";
+      cacheCtx.font = `700 ${Math.round(sz * 0.24)}px ui-monospace,monospace`;
+      cacheCtx.textAlign = "center";
+      cacheCtx.textBaseline = "middle";
+      cacheCtx.fillText(SLOT_SYM_LABEL[id] || id, sz / 2, sz / 2);
+    }
+    return tile;
+  }
+  function slotBuildSymbolTileAtlas(sz) {
+    const size = Math.max(1, Math.round(sz));
+    if (slotSymbolTileAtlas.size === size && slotSymbolTileAtlas.tiles) return slotSymbolTileAtlas;
+    const tiles = {};
+    for (const id of SLOT_SYMBOLS) tiles[id] = slotRenderSymbolTile(id, size);
+    slotSymbolTileAtlas.size = size;
+    slotSymbolTileAtlas.tiles = tiles;
+    return slotSymbolTileAtlas;
+  }
+  function slotEstimateReelTileSize() {
+    const vw = window.innerWidth || 0;
+    const vh = window.innerHeight || 0;
+    const panelW = vw >= 640 ? Math.min(vh * 0.43, vw * 0.9, 620) : Math.min(vw * 0.94, vh * 0.4, 420);
+    const panelH = panelW * (1806 / 826);
+    const reelsW = panelW * 0.6998;
+    const reelsH = panelH * 0.3527;
+    const reelW = (reelsW - 16) / 3; // padding + two gaps
+    const reelH = reelsH - 8;
+    return Math.max(1, Math.round(Math.min(reelH * 0.92, reelW * 0.92)));
+  }
   function slotShuffle(a) {
     for (let i = a.length - 1; i > 0; i -= 1) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; }
     return a;
@@ -8364,6 +8413,7 @@ function initGalaxyCanvas() {
         strip, len: strip.length, pos: i + strip.length, vel: 0,
         bounce: 0, bounceVel: 0, state: "idle", target: 0,
         stopFrom: 0, stopFinal: 0, stopV0: 0, stopT0: 0,
+        symCache: null, symSize: 0,
       };
     });
     slotSizeReels();
@@ -8375,6 +8425,11 @@ function initGalaxyCanvas() {
       r.canvas.width = Math.round(w * SLOT_DPR);
       r.canvas.height = Math.round(h * SLOT_DPR);
       r.ctx.setTransform(SLOT_DPR, 0, 0, SLOT_DPR, 0, 0);
+      const rowH = r.ch / 3;
+      const sz = Math.max(1, Math.round(Math.min(rowH * 0.92, r.cw * 0.92)));
+      const atlas = slotSymbolTileAtlas.tiles ? slotSymbolTileAtlas : slotBuildSymbolTileAtlas(sz);
+      r.symSize = sz;
+      r.symCache = atlas.tiles;
       slotDrawReel(r);
     }
     slotSizeWinFx();
@@ -8402,30 +8457,29 @@ function initGalaxyCanvas() {
     if (!len || !r.cw) return;
     ctx.clearRect(0, 0, r.cw, r.ch);
     const rp = r.pos + r.bounce, base = Math.round(rp);
-    const sz = Math.min(rowH * 0.92, r.cw * 0.92);
+    const sz = r.symSize || Math.min(rowH * 0.92, r.cw * 0.92);
     for (let k = -2; k <= 2; k += 1) {
       const a = base + k, id = r.strip[((a % len) + len) % len], y = mid + (rp - a) * rowH;
       if (y < -rowH || y > r.ch + rowH) continue;
-      // per-symbol backlight glow behind the icon (lit-screen look)
-      const glow = SLOT_SYM_COLOR[id];
-      if (glow) {
-        ctx.save();
-        ctx.globalAlpha = 0.22;
-        ctx.fillStyle = glow;
-        ctx.beginPath(); ctx.arc(cx, y, sz * 0.5, 0, Math.PI * 2); ctx.fill();
-        ctx.restore();
-      }
-      const img = slotSprites[id];
-      if (img && img.complete && img.naturalWidth) {
-        ctx.drawImage(img, cx - sz / 2, y - sz / 2, sz, sz);
+      const cached = r.symCache?.[id];
+      if (cached) {
+        ctx.drawImage(cached, cx - sz / 2, y - sz / 2, sz, sz);
       } else {
-        // fallback until the sprite decodes: coloured label
-        ctx.fillStyle = SLOT_SYM_COLOR[id] || "#9fb";
-        ctx.font = `700 ${Math.round(sz * 0.24)}px ui-monospace,monospace`;
-        ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText(SLOT_SYM_LABEL[id] || id, cx, y);
+        const img = slotSprites[id];
+        if (img && img.complete && img.naturalWidth) {
+          ctx.drawImage(img, cx - sz / 2, y - sz / 2, sz, sz);
+        } else {
+          // fallback until the sprite decodes: coloured label
+          ctx.fillStyle = SLOT_SYM_COLOR[id] || "#9fb";
+          ctx.font = `700 ${Math.round(sz * 0.24)}px ui-monospace,monospace`;
+          ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillText(SLOT_SYM_LABEL[id] || id, cx, y);
+        }
       }
     }
+  }
+  function slotPrimeReelCaches() {
+    try { slotBuildSymbolTileAtlas(slotEstimateReelTileSize()); } catch { /* ignore */ }
   }
 
   function slotLeverEnabled() {
@@ -8437,6 +8491,9 @@ function initGalaxyCanvas() {
     if (committed) {
       slotLever.mode = "autoPull";
       slotLever.springTarget = 1;
+      // Start the spin on release instead of waiting for the lever spring to cross the threshold
+      // on a later frame. That keeps the cabinet responsive even if the frame loop is briefly late.
+      slotDoPull();
     } else {
       slotLever.mode = "recoil";
       slotLever.springTarget = 0;
@@ -8499,6 +8556,8 @@ function initGalaxyCanvas() {
     const ex = slotCappedExclusions();
     slotReels.forEach((r) => { r.strip = slotBuildStrip(ex); r.len = r.strip.length; r.target = (Math.random() * r.len) | 0; });
     slotStartSpin();
+    // Paint the first moving frame immediately so the reels visibly move even if the next rAF is late.
+    slotReels.forEach((r) => slotDrawReel(r));
     slotReels.forEach((r, i) => slotTrackTimeout(() => slotCommandStop(r, r.target), SLOT_SPIN_TIME_MS + i * SLOT_REEL_STAGGER_MS));
     // Cheap on-frame feedback so the glow + shake land with the spin-start.
     slotLeverFlash(); // 2026-07-01: localized glow instead of the full-screen cssFlash (see slotLeverFlash)
@@ -9752,6 +9811,7 @@ function initGalaxyCanvas() {
     // referenced closure-local symbols from top-level scope, always false), so the slot art
     // decoded on first slot-machine reveal — that's the between-level slot lag. Warm it here.
     try { ensureSlotSprites(); } catch {}
+    try { slotPrimeReelCaches(); } catch {}
     const sprites = Object.assign({}, asteroidSprites, powerupSprites, slotSprites);
     [comboFxSheet, bigStroidFxSheet, smallStroidFxSheet, powerupPickupFxSheet, powerupPickupFlashSheet, pulseFireFxSheet]
       .forEach((s, i) => { if (s && s.img) sprites["_fx" + i] = s.img; });
@@ -10571,7 +10631,7 @@ function initGalaxyCanvas() {
       const maxW = Math.max(220, sim.width - 28);
       const safeX = clamp(b.x, 14 + maxW / 2, Math.max(14 + maxW / 2, sim.width - 14 - maxW / 2));
       const safeY = clamp(y, 46, Math.max(46, sim.height - 46));
-      const base = clamp(maxW / Math.max(1, headline.length * 0.68), 20, 38);
+      const base = clamp(maxW / Math.max(1, headline.length * 0.74), 18, 34);
       drawCtx.font = `900 ${Math.floor(base * slam)}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       drawCtx.lineWidth = Math.max(4, base * 0.18);
       const glowPulse = 0.54 + 0.46 * Math.abs(Math.sin(now * 0.016 + b.start * 0.003));
@@ -10603,7 +10663,7 @@ function initGalaxyCanvas() {
         }
         drawCtx.restore();
       }
-      drawCtx.font = `800 ${Math.floor(base * 0.58 * slam)}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
+      drawCtx.font = `800 ${Math.floor(base * 0.54 * slam)}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       drawCtx.shadowColor = `rgba(${b.colors[1] || b.colors[0]},${0.46 * glowPulse})`;
       drawCtx.shadowBlur = (isIOSNative ? 5 : 10) * glowPulse;
       drawCtx.fillStyle = `rgba(${b.colors[1] || b.colors[0]},${0.78 + 0.2 * fillPulse})`;

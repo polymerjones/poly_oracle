@@ -901,7 +901,7 @@ const pixiRenderer = (() => {
     }
   }
 
-  function drawPlasmaLayer(plasmaCage, asteroids, now) {
+  function drawPlasmaLayer(plasmaCage, asteroids, now, plasmaChargeMs = 1000) {
     if (!plasmaGraphics) return;
     plasmaGraphics.clear();
     if (_plasmaBorderFlash > 0) {
@@ -946,8 +946,11 @@ const pixiRenderer = (() => {
     const rect = getPlasmaRect(plasmaCage);
     if (!rect || rect.w < 2 || rect.h < 2) return;
 
-    const isReady = plasmaCage.charged === true || (now - (plasmaCage.chargeStart || 0)) >= 1000;
-    const progress = isReady ? 1 : Math.max(0, Math.min(1, (now - (plasmaCage.chargeStart || now)) / 1000));
+    const chargeMs = Math.max(1, plasmaChargeMs || 1000);
+    // Match gameplay readiness. Training/Practice uses a short charge window so stroids inside a
+    // dragged net target-highlight almost immediately; arcade keeps the longer charge/readability beat.
+    const isReady = plasmaCage.charged === true || (now - (plasmaCage.chargeStart || 0)) >= chargeMs;
+    const progress = isReady ? 1 : Math.max(0, Math.min(1, (now - (plasmaCage.chargeStart || now)) / chargeMs));
     drawPlasmaCageRectPixi(plasmaGraphics, rect, now, progress, isReady, 1);
 
     if (!isReady) return;
@@ -1350,7 +1353,7 @@ const pixiRenderer = (() => {
     }
   }
 
-  function draw(sim, laserBeams, canvasFlash, ufoState, plasmaCage, landmine, bombShrapnel, now) {
+  function draw(sim, laserBeams, canvasFlash, ufoState, plasmaCage, landmine, bombShrapnel, now, plasmaChargeMs) {
     if (!app) return false;
     const frameBudgetExceeded = !!sim._frameBudgetExceeded;
     const prefersReducedMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -1362,7 +1365,7 @@ const pixiRenderer = (() => {
     syncLasers(laserBeams, now);
     syncWarpRings(sim.warpRings, frameBudgetExceeded);
     syncLightningRings(sim.lightningRings || [], frameBudgetExceeded);
-    drawPlasmaLayer(plasmaCage, sim.asteroids, now);
+    drawPlasmaLayer(plasmaCage, sim.asteroids, now, plasmaChargeMs);
     drawLandmine(landmine, now);
     updateBombEffects(now);
     syncShrapnel(bombShrapnel || [], now);

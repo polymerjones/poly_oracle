@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-05 12:09";
+const BUILD_TS = "2026-07-05 12:18";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -9199,7 +9199,7 @@ function initGalaxyCanvas() {
   // Apply rewards that must land on the NEXT level (quad is timed). Called after startLevel().
   function slotApplyPendingRewards() {
     if (slotPendingQuadShot > 0) {
-      quadShotUntil = performance.now() + 12000 * slotPendingQuadShot;
+      grantTimedWeapon("quadshot", QUADSHOT_DURATION_MS * slotPendingQuadShot);
       slotPendingQuadShot = 0;
     }
   }
@@ -9720,6 +9720,7 @@ function initGalaxyCanvas() {
     missile: "#ffd700", // gold ring glow
     pulse: "#00ffc8", // teal ring glow
   };
+  const QUADSHOT_DURATION_MS = 12000;
   let quadShotUntil = 0;
   // 2026-06-30: a quad-shot tap fires 4 projectiles; without this they'd each register a marksman
   // hit and trivialize the 10-hit combo. resolveShotAt(..., deferMarksman) sets this when it kills
@@ -9745,6 +9746,8 @@ function initGalaxyCanvas() {
   // drop later in the level (~58% elapsed) for an extra mid/late-level burst window.
   const SECOND_PULSE_LEVELS = new Set([9, 11, 13, 14, 15]);
   let pulseCannonUntil = 0;
+  let pendingTimedWeaponType = null; // "quadshot" | "pulse" waiting for the other timed weapon to expire
+  let pendingTimedWeaponMs = 0;
   let pulseWasActive = false; // 2026-07-01: active→inactive edge latch for onPulseStart/onPulseEnd
   let pulseFiring = false; // input currently held → streaming shots
   let nextPulseShotAt = 0;
@@ -10320,21 +10323,98 @@ function initGalaxyCanvas() {
     }
   }
 
+  function activeTimedWeapon(now = performance.now()) {
+    if (now < pulseCannonUntil) return "pulse";
+    if (now < quadShotUntil) return "quadshot";
+    return null;
+  }
+
+  function clearPendingTimedWeapon() {
+    pendingTimedWeaponType = null;
+    pendingTimedWeaponMs = 0;
+  }
+
+  function startTimedWeapon(type, durationMs, now = performance.now(), queued = false) {
+    if (type === "quadshot") {
+      quadShotUntil = now + durationMs;
+      updateHudQuadBadge();
+      if (queued) playGameSfx("pickup_weapon", 0.9);
+      return;
+    }
+    if (type === "pulse") {
+      pulseCannonUntil = now + durationMs;
+      updateHudPulseBadge();
+      playGameSfx("pulse_cannon_charge", queued ? 1.05 : 1.2, { important: true });
+      onPulseStart();
+    }
+  }
+
+  function promotePendingTimedWeapon(now = performance.now()) {
+    if (!pendingTimedWeaponType || pendingTimedWeaponMs <= 0) return false;
+    if (activeTimedWeapon(now)) return false;
+    const type = pendingTimedWeaponType;
+    const durationMs = pendingTimedWeaponMs;
+    clearPendingTimedWeapon();
+    startTimedWeapon(type, durationMs, now, true);
+    return true;
+  }
+
+  function queueTimedWeapon(type, durationMs) {
+    if (pendingTimedWeaponType && pendingTimedWeaponType !== type) {
+      // Only one opposite timed weapon can be waiting under normal play; if a reset/edge path ever
+      // leaves a stale different entry, the newer pickup is the one the player just earned.
+      pendingTimedWeaponMs = 0;
+    }
+    pendingTimedWeaponType = type;
+    pendingTimedWeaponMs += durationMs;
+  }
+
+  function grantTimedWeapon(type, durationMs) {
+    const now = performance.now();
+    const active = activeTimedWeapon(now);
+    if (active === type) {
+      if (type === "quadshot") {
+        quadShotUntil = Math.max(quadShotUntil, now) + durationMs;
+        updateHudQuadBadge();
+        playGameSfx("pickup_weapon", 0.9);
+      } else if (type === "pulse") {
+        pulseCannonUntil = Math.max(pulseCannonUntil, now) + durationMs;
+        updateHudPulseBadge();
+        playGameSfx("pulse_cannon_charge", 0.95, { important: true });
+      }
+      return "extended";
+    }
+    if (active && active !== type) {
+      queueTimedWeapon(type, durationMs);
+      playGameSfx("pickup_weapon", 0.85);
+      return "queued";
+    }
+    startTimedWeapon(type, durationMs, now, false);
+    return "started";
+  }
+
+  function updateTimedWeaponQueue(now = performance.now()) {
+    if (now >= pulseCannonUntil && pulseWasActive) onPulseEnd();
+    promotePendingTimedWeapon(now);
+  }
+
   // 2026-07-02: Player tapped the Quad Shot badge — forfeit any remaining cluster-fire time.
   // Mirrors cancelPulseCannon; guarded against the training lesson by the controller export.
-  function cancelQuadShot() {
+  function cancelQuadShot(options = {}) {
     if (quadShotUntil <= performance.now()) return;
     quadShotUntil = 0;
     updateHudQuadBadge();
+    if (options.promoteQueued !== false) promotePendingTimedWeapon();
   }
 
   // Player tapped the Pulse Cannon badge — forfeit any remaining duration and stop firing at once.
-  function cancelPulseCannon() {
+  function cancelPulseCannon(options = {}) {
     if (!pulseCannonActive()) return;
     pulseCannonUntil = 0;
     stopPulseFiring();
-    onPulseEnd(); // disarm cue + music swell-back (idempotent; edge already flipped)
+    onPulseEnd(!!options.silent); // disarm cue + music swell-back (idempotent; edge already flipped)
     updateHudPulseBadge();
+    if (options.promoteQueued !== false) promotePendingTimedWeapon();
   }
 
   function getArcadeScoreMultiplier(now = performance.now()) {
@@ -14771,6 +14851,7 @@ function initGalaxyCanvas() {
     landmineSpawnedThisLevel = false;
     // 2026-06-10: clear powerups, active effects, and aim state on level transitions / menu exit
     powerups.length = 0;
+    clearPendingTimedWeapon();
     quadShotUntil = 0;
     pulseCannonUntil = 0; stopPulseFiring(); onPulseEnd(true);
     // 2026-06-21: discard any banked freeze on level transition (bank does NOT persist across
@@ -15829,6 +15910,7 @@ function initGalaxyCanvas() {
     slotNukeOwned = 0; slotPendingQuadShot = 0; // reset per-game slot reward state
     // 2026-06-10: reset powerup + active effect state
     powerups.length = 0;
+    clearPendingTimedWeapon();
     quadShotUntil = 0;
     pulseCannonUntil = 0; stopPulseFiring(); onPulseEnd(true);
     _freezeBankMs = 0;
@@ -15960,6 +16042,7 @@ function initGalaxyCanvas() {
     arcadeLives = 0;
     playerBombInventory = 0;
     playerFreezeInventory = 0;
+    clearPendingTimedWeapon();
     quadShotUntil = 0;
     pulseCannonUntil = 0; stopPulseFiring(); onPulseEnd(true);
     _freezeBankMs = 0;
@@ -17624,6 +17707,7 @@ function initGalaxyCanvas() {
     slotTeardown(SLOT_REASON.NEW_GAME); // dispose any live slot before discarding its tokens
     slotTokens = 0; // 2026-06-26: discard banked POLYSLOTS tokens on a fresh run
     slotNukeOwned = 0; slotPendingQuadShot = 0; // reset per-game slot reward state
+    clearPendingTimedWeapon();
     quadShotUntil = 0;
     pulseCannonUntil = 0; stopPulseFiring(); onPulseEnd(true);
     _freezeBankMs = 0;
@@ -17819,7 +17903,8 @@ function initGalaxyCanvas() {
       // drop the 600Hz music filter, hide the badge) so a stuck pulse state can never follow the
       // player into the menu or survive a resume (L12 freeze playtest: filter + badge stayed live
       // through pause/resume). cancelPulseCannon is a no-op when the weapon isn't active.
-      cancelPulseCannon();
+      clearPendingTimedWeapon();
+      cancelPulseCannon({ promoteQueued: false });
     } else {
       commBoxController.hide();
       commBoxController.clearPortraitOverride(); // 2026-06-16: clean exit restores CMDR (SPC owns L13/14)
@@ -18092,6 +18177,7 @@ function initGalaxyCanvas() {
     if (stuntActive) updateStunt(now);
 
     // Arcade, endless Practice, and Training all use quadShotUntil as the active-effect source.
+    updateTimedWeaponQueue(now);
     if (engineMode === "arcade" && arcadeActive) updateHudQuadBadge();
     if (engineMode === "arcade" && arcadeActive) updateHudPulseBadge();
     // Pulse Cannon rapid-fire pump: fire a swept shot whenever the cadence timer is due while the
@@ -19129,7 +19215,7 @@ function initGalaxyCanvas() {
 
   function draw(now) {
     drawTimerPerimeterOverlay(now);
-    if ((engineMode === "arcade" || engineMode === "practice") && window.pixiRenderer?.draw(sim, laserBeams, canvasFlash, ufo, plasmaCage, landmine, _bombShrapnel, now)) {
+    if ((engineMode === "arcade" || engineMode === "practice") && window.pixiRenderer?.draw(sim, laserBeams, canvasFlash, ufo, plasmaCage, landmine, _bombShrapnel, now, plasmaCageChargeMs())) {
       setPlasmaOverlayVisible(stroidToss.active);
       if (stroidToss.active) drawPlasmaOverlay(now);
       drawUfoFxOverlay(ctx);
@@ -19999,8 +20085,7 @@ function initGalaxyCanvas() {
       return;
     }
     if (pu.type === "quadshot") {
-      quadShotUntil = performance.now() + 12000;
-      playGameSfx("pickup_weapon", 0.9); // layered quadshot-pickup sound
+      grantTimedWeapon("quadshot", QUADSHOT_DURATION_MS);
       cssFlash("#cc66ff", 0.22, 250);
       // 2026-06-14: quad shot supersedes the missile weapon — clear missile inventory + aim.
       playerMissileInventory = 0;
@@ -20009,16 +20094,9 @@ function initGalaxyCanvas() {
       return;
     }
     if (pu.type === "pulse") {
-      // 2026-07-01: Pulse Cannon — a 10s timed rapid-fire weapon (hold to sweep-fire). Plays a
-      // charge-up on activation; supersedes the missile weapon like quad shot does.
-      pulseCannonUntil = performance.now() + PULSE_CANNON_DURATION_MS;
-      updateHudPulseBadge();
-      // 2026-07-01: `important` so the pickup-frame iOS 2-SFX budget (blip + crunch already
-      // fired this frame) can't drop the arm-up cue — the Pulse Cannon self-arms on pickup, so
-      // this charge sound IS the "weapon armed" confirmation and must land with the pickup.
-      // Louder than the pickup blip so the "cannon charge" reads clearly (user request).
-      playGameSfx("pulse_cannon_charge", 1.2, { important: true });
-      onPulseStart(); // dim the music (>600Hz) + light duck for the weapon's duration
+      // 2026-07-06: timed weapons now stack by type and queue across types. A pulse pickup extends
+      // a live Pulse Cannon; if Quad Shot is live, the pulse waits and auto-arms when quad expires.
+      grantTimedWeapon("pulse", PULSE_CANNON_DURATION_MS);
       cssFlash("#00ffc8", 0.22, 250);
       playerMissileInventory = 0;
       missileAimMode = false;

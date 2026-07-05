@@ -31,7 +31,9 @@ Every turn re-bills the whole accumulated context, so long mixed sessions get ex
 
 Every item below must be resolved before App Store submission:
 
-- [ ] `DEBUG_FORCE_LEVEL_SELECT` → set back to `false` (script.js, near line 470)
+- [x] `DEBUG_FORCE_LEVEL_SELECT` → ✅ set to `false` 2026-07-05. Level Select now gates on
+      `isLevelSelectUnlocked()` (beat the game, or the Oracle-orb cheat: 3 reality shifts in one
+      session — ~60 orb taps — permanently unlocks via `poly_oracle_cheat_levelselect`)
 - [ ] Powerup level gate → restore to `cfg.level >= 4` (currently `>= 1` for freeze testing)
 - [ ] Powerup weights → restore snowflake 10 / goldbars → 25 (`POWERUP_WEIGHTS`; goldbars dropped 5 for the missile's 15)
 - [ ] Remove forced goldbars spawn in the level's final 15s (`goldbarsForceSpawnedThisLevel`)

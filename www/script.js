@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-04 23:16";
+const BUILD_TS = "2026-07-05 12:09";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -392,7 +392,7 @@ const GAME_SFX = {
   slot_life: "gamesfx/slot_life.mp3", // alien-scatter extra life
   slot_outoftokens: "gamesfx/slot_outoftokens.mp3", // played as TAP TO CONTINUE appears
   slot_reel_click_short: "gamesfx/slot_reel_click_short.mp3", // crisp per-reel stop tick
-  "slot_machine-ramp-and-spin": "gamesfx/slot_machine-ramp-and-spin.mp3", // optional spin bed
+  "slot_machine-ramp-and-spin": "gamesfx/slot-machine-ramp-and-spin.mp3", // optional spin bed (2026-07-05: fixed path — the file is hyphenated, was silently 404ing)
   combo_marksman: "combo_fx/marksman_combo.mp3",
   combo_net_ufo_net: "combo_fx/net-ufo-net-combo.mp3",
   combo_pyro: "combo_fx/pyro_combo.mp3",
@@ -667,7 +667,7 @@ function getMusicForLevel(level) {
   return MUSIC.L1_3;
 }
 
-const DEBUG_FORCE_LEVEL_SELECT = true; // 2026-06-09: re-enabled for debugging
+const DEBUG_FORCE_LEVEL_SELECT = false; // 2026-07-05: gate is live for release — dev access via the orb cheat (3 reality shifts) or beating the game
 const DEBUG_SHOW_LEVEL_DROPDOWN = false;
 // 2026-06-22: gate the verbose level-transition / SPC-VO diagnostics. Default OFF so shipped
 // builds pay nothing (the per-slow-frame [lvltrans] log otherwise fires DURING janky frames).
@@ -941,6 +941,24 @@ function hasBeatenGame() {
   // FIXED 2026-06-08
   try { return localStorage.getItem(STORAGE_GAME_BEATEN) === "true"; }
   catch { return false; }
+}
+
+// 2026-07-05: Oracle-orb easter egg — 3 "changed realities" shifts in one session permanently
+// unlocks Level Select (see showChaosToast). Same persistence pattern as hasBeatenGame.
+const STORAGE_CHEAT_LEVELSELECT = "poly_oracle_cheat_levelselect";
+function hasCheatLevelSelect() {
+  try { return localStorage.getItem(STORAGE_CHEAT_LEVELSELECT) === "1"; }
+  catch { return false; }
+}
+function setCheatLevelSelect() {
+  try { localStorage.setItem(STORAGE_CHEAT_LEVELSELECT, "1"); }
+  catch { /* ignore */ }
+}
+
+// Single source of truth for the Level Select gate: forever unlocked once the player beats the
+// game (either historical flag) or earns the orb cheat. DEBUG_FORCE_LEVEL_SELECT still overrides.
+function isLevelSelectUnlocked() {
+  return DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon() || hasBeatenGame() || hasCheatLevelSelect();
 }
 
 const revealModes = [
@@ -2085,7 +2103,11 @@ const commBoxController = (() => {
     smile_open:  ["smile_open", "talk_happy"],
     idle_smirk:  ["idle_smirk", "talk_neutral"],
     idle_gentle: ["idle_gentle", "talk_neutral"],
-    idle_soft:   ["idle_soft", "talk_neutral"],
+    // 2026-07-05: idle_soft was a 2-frame ["idle_soft","talk_neutral"] alternation — technically
+    // flapping (verified: 8 frame swaps/sec through every line) but the two calm faces are so close
+    // it read as "SPC isn't talking" through the whole Freeze lesson (playtest). Give it the same
+    // multi-frame phoneme variety the talk_* hints get, still resting on the soft idle mood.
+    idle_soft:   ["idle_soft", "talk_mid", "talk_neutral", "idle_soft", "talk_ah"],
     idle_warm:   ["idle_warm", "talk_happy"],
     alert:       ["alert", "talk_neutral"],
     laugh:       ["laugh", "talk_happy"],
@@ -2961,11 +2983,31 @@ const commBoxController = (() => {
     if (on) { _voQueue.length = 0; } // flush incidental stragglers queued before the level ended
   }
 
+  // 2026-07-05: level-START intro lock (mirror of the level-end lock, for the other edge). On
+  // levels that open with a scheduled intro comm after a hush (L10/L15 "let's blast these
+  // 'stroids"), ambient praise lines earned during the hush — kill-streak NICE_SHOT ("smirk"),
+  // cocky ("angry"), toss hype — used to play first and push the intro behind them in the queue.
+  // While this lock is set, praise-class lines are dropped at the queueVO chokepoint; everything
+  // else (landmine armed, life lost, SPC, levelcomplete) passes. Cleared by the intro line's own
+  // _onEnd, plus a safety timeout so a failed audio load can't mute praise for the whole level.
+  let _introVoLock = false;
+  let _introVoLockTimer = null;
+  const INTRO_LOCK_PRAISE_EVENTS = new Set(["smirk", "angry"]);
+  function setIntroVoLock(on, safetyMs = 30000) {
+    _introVoLock = !!on;
+    if (_introVoLockTimer) { clearTimeout(_introVoLockTimer); _introVoLockTimer = null; }
+    if (_introVoLock) {
+      _introVoLockTimer = setTimeout(() => { _introVoLock = false; _introVoLockTimer = null; }, safetyMs);
+    }
+  }
+
   function queueVO(options = {}) {
     if (arcadeLevelSelectOpen) return; // no comms over the level-select menu
     if (_exclusiveSpeaker && !options._spc) return;
     // Level-end window: let only the one levelcomplete praise speak (see setLevelEndLock).
     if (_levelEndLock && options.event !== "levelcomplete") return;
+    // Level-start window: drop praise until the scheduled intro comm has finished (see setIntroVoLock).
+    if (_introVoLock && INTRO_LOCK_PRAISE_EVENTS.has(options.event)) return;
     const highPriority = options.priority === "high";
     // A `protected` line in flight can't be preempted — a high-priority line queues behind it.
     if (highPriority && !_voProtected) {
@@ -3010,6 +3052,7 @@ const commBoxController = (() => {
     spcSpeakEnd,
     setExclusiveSpeaker,
     setLevelEndLock,
+    setIntroVoLock,
     setCommCenter,
     setHudDimmed,
     isVOActive,
@@ -6045,10 +6088,20 @@ function applyTheme() {
 
 function showChaosToast() {
   if (!chaosToast) return;
-  chaosToast.textContent = "✨ Oracle changed realities.";
+  // 2026-07-05: easter egg — the 3rd reality shift in a session, on a save that hasn't unlocked
+  // Level Select yet, awards it permanently. Jackpot sting instead of the usual shift sound; the
+  // arcade menu reads the flag via isLevelSelectUnlocked() on its next sync.
+  const cheatUnlock = state.chaosShiftCount >= 3 && !isLevelSelectUnlocked();
+  if (cheatUnlock) {
+    setCheatLevelSelect();
+    chaosToast.textContent = "✨ Level Select unlocked!";
+  } else {
+    chaosToast.textContent = "✨ Oracle changed realities.";
+  }
   const intensity = clamp(1 + state.chaosShiftCount * 0.12, 1, 2.2);
   chaosToast.style.setProperty("--chaos-intensity", intensity.toFixed(2));
-  playChaosShiftSound();
+  if (cheatUnlock && typeof window.playGameSfx === "function") window.playGameSfx("slot_jackpot", 0.95);
+  else playChaosShiftSound();
   chaosToast.hidden = false;
   chaosToast.classList.remove("show");
   void chaosToast.offsetWidth;
@@ -9279,7 +9332,9 @@ function initGalaxyCanvas() {
       .ps-reward-flash{animation:psRewardFlash 620ms ease-out both;}
       @keyframes psRewardFlash{0%{filter:brightness(1);text-shadow:0 0 9px rgba(57,255,154,.6)}24%{filter:brightness(1.9) drop-shadow(0 0 12px rgba(57,255,154,.95));text-shadow:0 0 18px rgba(57,255,154,1),0 0 32px rgba(57,255,154,.75)}58%{filter:brightness(1.35) drop-shadow(0 0 20px rgba(57,255,154,.7));text-shadow:0 0 14px rgba(57,255,154,.85)}100%{filter:brightness(1);text-shadow:0 0 9px rgba(57,255,154,.6)}}
       .ps-panel{position:relative;z-index:1;aspect-ratio:826/1806;width:min(420px,94vw,40vh);margin-top:calc(60px + env(safe-area-inset-top,0px));color:#dff;
-        background:linear-gradient(180deg,rgba(3,6,14,.92),rgba(5,12,24,.98));
+        /* 2026-07-05: no panel background — cabinet.png has transparent margins (top strip etc)
+           and the old near-black gradient showed through them as black bands on the cabinet.
+           The galaxy backdrop now shows through instead; every opaque region is the art itself. */
         animation:psSlam 240ms cubic-bezier(.2,1.4,.4,1) both;
         --reelL:6.9%;--reelT:19.82%;--reelW:69.98%;--reelH:35.27%;
         --leverR:2%;--leverT:20%;--leverW:17%;--leverH:35%;
@@ -9334,7 +9389,11 @@ function initGalaxyCanvas() {
       .ps-hud{position:absolute;left:0;right:0;top:var(--hudT);transform:translateY(-50%);display:flex;gap:clamp(8px,3.2vw,18px);justify-content:center;font-size:clamp(13px,3.4vw,17px);z-index:8;}
       .ps-hud .ps-slot{display:flex;align-items:center;gap:3px;color:#cfe;}
       .ps-hud .ps-slot b{color:#fff;font-weight:700;}
-      .ps-hud .ps-slot.nuke{color:#ff8a96;}
+      /* 2026-07-05: nuke is still a placeholder (no gameplay wiring) and the 5-icon row overflowed
+         the cabinet art's black inset — hide it so quad/bomb/missile/freeze re-center and fit.
+         DOM + JS refs stay (jackpot flash targets it harmlessly); restore color #ff8a96 when the
+         Nuke ships. */
+      .ps-hud .ps-slot.nuke{display:none;}
       .ps-hud .ps-hudicon{width:clamp(22px,6vw,30px);height:clamp(22px,6vw,30px);object-fit:contain;}
       .ps-skip{position:absolute;left:8%;top:var(--btnT);z-index:8;font-family:inherit;font-size:clamp(9px,2.3vw,12px);letter-spacing:.14em;color:rgba(183,201,255,.65);background:rgba(8,18,32,.92);border:1px solid rgba(0,255,209,.25);border-radius:8px;padding:6px 12px;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .4s;}
       .ps-skip.show{opacity:.85;pointer-events:auto;}
@@ -11218,8 +11277,10 @@ function initGalaxyCanvas() {
   function syncArcadeMenuButtons() {
     if (btnArcadeResume) btnArcadeResume.disabled = !(arcadeResumeAvailable || hasArcadeSave());
     if (btnArcadeLevelSelect) {
-      const levelSelectUnlocked = DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon() || hasBeatenGame();
-      btnArcadeLevelSelect.disabled = !(DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon());
+      // 2026-07-05: one gate for both attrs via isLevelSelectUnlocked (beat the game OR the orb
+      // cheat). .disabled and .locked used to check different flag subsets and could disagree.
+      const levelSelectUnlocked = isLevelSelectUnlocked();
+      btnArcadeLevelSelect.disabled = !levelSelectUnlocked;
       // 2026-06-09: .locked sets pointer-events:none, which blocked the button even when
       // debug-unlocked. Keep it locked only when there's genuinely no access.
       btnArcadeLevelSelect.classList.toggle("locked", !levelSelectUnlocked);
@@ -13543,7 +13604,9 @@ function initGalaxyCanvas() {
 
   function updatePlasmaChargeSound(now) {
     if (!plasmaCage.active) return;
-    const progress = clamp((now - plasmaCage.chargeStart) / PLASMA_CAGE_CHARGE_MS, 0, 1);
+    // 2026-07-05: plasmaCageChargeMs() (not the raw constant) so Training/Practice charge audio
+    // ramps on the same fast 120ms clock as the lock itself.
+    const progress = clamp((now - plasmaCage.chargeStart) / plasmaCageChargeMs(), 0, 1);
     const steppedRate = Math.round((0.8 + progress * 0.6) * 10) / 10;
     if (plasmaCage.chargeLoopHandle && plasmaCage.chargeLoopRate === steppedRate) return;
     stopPlasmaChargeSound();
@@ -14314,7 +14377,9 @@ function initGalaxyCanvas() {
       laserBeams.splice(0, laserBeams.length - 8);
     }
     if (plasmaCage.active) {
-      const progress = clamp((now - plasmaCage.chargeStart) / PLASMA_CAGE_CHARGE_MS, 0, 1);
+      // 2026-07-05: plasmaCageChargeMs() so the Training/Practice cage rect reaches its charged
+      // look on the fast 120ms clock (the lock was instant but the visual still ramped over 800ms).
+      const progress = clamp((now - plasmaCage.chargeStart) / plasmaCageChargeMs(), 0, 1);
       drawPlasmaCageRect(getPlasmaRect(), now, progress, plasmaCage.charged);
     }
     // 2026-07-03: MANUAL placed net — draw it persistently (charged look, gentle breathing pulse) so
@@ -15477,6 +15542,7 @@ function initGalaxyCanvas() {
     stuntActive = false; // a real arcade level is never a stunt session
     practiceEndless = false; // ...nor an endless practice session (Stunt Practice re-sets this after)
     commBoxController.setLevelEndLock(false); // 2026-06-21 (Item 1b): next level live — end the level-end VO lock
+    commBoxController.setIntroVoLock(false); // 2026-07-05: a fresh level never inherits a stale intro hold
     setLevelBackgroundDefocus(false); // 2026-06-26: lift the scorecard bg blur as the next level's bg comes in
     const safeIdx = clamp(idx, 0, ARCADE_LEVELS.length - 1);
     audioEngine.unlock?.();
@@ -15649,6 +15715,10 @@ function initGalaxyCanvas() {
     // 2026-06-24: L10 stays silent for the first 8s — no intro chatter before the action gets going.
     // 2026-07-02: L15 hushes for 10s, then opens with the CMDR blast line (like L10's 8s hush).
     const firstVoDelayMs = levelNum === 10 ? 8000 : (levelNum === 15 ? 10000 : 800);
+    // 2026-07-05: hold ambient praise from the moment the hush starts until the intro comm has
+    // finished — kills during the hush were queueing praise ahead of the "blast these 'stroids"
+    // line (L10 playtest). The intro's _onEnd releases the hold; a 30s safety timeout backstops it.
+    if (levelNum === 10 || levelNum === 15) commBoxController.setIntroVoLock(true);
     setTimeout(() => {
       // 2026-06-24: L10 — after the 8s hush the commander opens with the blast line (its only intro).
       // 2026-07-02: L15 does the same after its 10s hush.
@@ -15656,6 +15726,7 @@ function initGalaxyCanvas() {
         commBoxController.queueVO({
           voFile: commBoxController.pickFromPool("cmdrBlast", commBoxController.POOL_CMDR_BLAST),
           event: "commander",
+          _onEnd: () => commBoxController.setIntroVoLock(false),
         });
         return;
       }
@@ -15799,7 +15870,7 @@ function initGalaxyCanvas() {
   }
 
   function openArcadeLevelSelect() {
-    if (!(DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon())) return;
+    if (!isLevelSelectUnlocked()) return;
     buildArcadeLevelSelect();
     setArcadeSubmenu("levels");
     playArcadeMenuMusic();
@@ -17246,20 +17317,25 @@ function initGalaxyCanvas() {
         // drains together used to strand the step (player had to tap freeze to make rocks reappear).
         // Restock here every iteration; new spawns are auto-frozen while _freezeActive (freeze is a
         // global movement-skip), so they're immediately tossable.
-        if (tutorialAsteroidsAllCleared()) spawnTutorialAsteroids(3, 2);
+        // 2026-07-05: top up whenever the field drops BELOW 3 (was: only on a full clear) so stroids
+        // keep warping in through the whole freeze sequence instead of thinning out to dead air.
+        if (sim.asteroids.length < 3) spawnTutorialAsteroids(3 - sim.asteroids.length, 2);
         await waitFor(() =>
           (tutorialEvents.toss || 0) > tutorialState.frozenTossBase
-          || tutorialAsteroidsAllCleared()
+          || sim.asteroids.length < 3
           || _freezeBankMs <= 0); // bank fully drained (a pause keeps time banked — lesson continues)
         if ((tutorialEvents.toss || 0) > tutorialState.frozenTossBase) break;
-        if (tutorialAsteroidsAllCleared()) {
-          // cleared the field with the laser — restock + re-freeze so the toss can be practiced
-          spawnTutorialAsteroids(3, 2);
-          _freezeBankMs = FREEZE_DURATION_MS; // fresh full bank, running
-          _freezeActive = true;
-          _freezeSessionId++; // new session so prior gliders re-freeze
-          onFreezeStart(); // re-freeze with the full FX set (icy music filter + HUD glow)
-          spcVO("63", "Good shooting — but try grabbing and tossing a frozen **Stroid**.", "idle_soft");
+        if (_freezeBankMs > 0) {
+          if (tutorialAsteroidsAllCleared()) {
+            // cleared the whole field with the laser — restock + re-freeze so the toss can be practiced
+            spawnTutorialAsteroids(3, 2);
+            _freezeBankMs = FREEZE_DURATION_MS; // fresh full bank, running
+            _freezeActive = true;
+            _freezeSessionId++; // new session so prior gliders re-freeze
+            onFreezeStart(); // re-freeze with the full FX set (icy music filter + HUD glow)
+            spcVO("63", "Good shooting — but try grabbing and tossing a frozen **Stroid**.", "idle_soft");
+          }
+          // partial dip (1-2 rocks left): the top-of-loop watchdog restocks silently next pass
         } else {
           // freeze expired before the cadet tossed one — wait a beat, drop a fresh powerup
           await waitMs(1000);
@@ -17706,6 +17782,7 @@ function initGalaxyCanvas() {
     retryPending = false;
     stopWarningState();
     commBoxController.setLevelEndLock(false); // 2026-06-21 (Item 1b): never carry the level-end VO lock into menus (e.g. the final-level win path bypasses startLevel)
+    commBoxController.setIntroVoLock(false); // 2026-07-05: nor the level-start intro hold
     // 2026-07-03: _exclusiveSpeaker is only ever set by training/practice, both of which are being
     // left here — clear it unconditionally so no menu path can stay stuck muting CMDR/menu VO.
     // (portrait override is left to the mode-specific blocks below — L13/L14 pause-resume relies on it.)
@@ -17738,6 +17815,11 @@ function initGalaxyCanvas() {
       // via startArcadeFromSave -> commBoxController.show().
       commBoxController.stopVO();
       commBoxController.hide();
+      // 2026-07-05: pausing mid-Pulse-Cannon forfeits the weapon — disarm it fully (stop firing,
+      // drop the 600Hz music filter, hide the badge) so a stuck pulse state can never follow the
+      // player into the menu or survive a resume (L12 freeze playtest: filter + badge stayed live
+      // through pause/resume). cancelPulseCannon is a no-op when the weapon isn't active.
+      cancelPulseCannon();
     } else {
       commBoxController.hide();
       commBoxController.clearPortraitOverride(); // 2026-06-16: clean exit restores CMDR (SPC owns L13/14)
@@ -19120,7 +19202,10 @@ function initGalaxyCanvas() {
 
     const _plasmaActive = plasmaCage.active;
     const _plasmaRect = _plasmaActive ? getPlasmaRect() : null;
-    const _plasmaCharge = _plasmaActive ? clamp((now - plasmaCage.chargeStart) / PLASMA_CAGE_CHARGE_MS, 0, 1) : 0;
+    // 2026-07-05: plasmaCageChargeMs() (not the raw 800ms constant) — in Training the net locks at
+    // 120ms but the per-stroid teal highlight was still fading in over 800ms, so caged stroids
+    // looked un-highlighted for most of a lesson beat. Arcade keeps the 800ms ramp.
+    const _plasmaCharge = _plasmaActive ? clamp((now - plasmaCage.chargeStart) / plasmaCageChargeMs(), 0, 1) : 0;
     const _plasmaCharged = _plasmaActive && isPlasmaCageReady(now);
     const _levelNum = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
     const _plasmaGlowAsteroids = [];
@@ -19514,6 +19599,36 @@ function initGalaxyCanvas() {
     drawPlasmaOverlay(now);
   }
 
+  // 2026-07-05: loop crash-guard. The RAF used to be re-armed only AFTER update() returned, with
+  // no try/catch anywhere in the frame path — so a single exception on any frame killed the loop
+  // permanently (L12 playtest: pulse badge frozen at "10s", music filter stuck, entities dead,
+  // while the wall-clock RUN HUD still repainted from menu code and made it look half-alive).
+  // Now the loop always survives: the error is logged (throttled so a persistently-throwing frame
+  // can't flood the console) and the next frame is scheduled regardless.
+  const DEBUG_LOOP_ERR_OVERLAY = false; // on-screen stack for device debugging; keep false for release
+  let _loopErrLastLogAt = 0;
+  let _loopErrCount = 0;
+  function reportLoopError(err) {
+    _loopErrCount += 1;
+    const now = performance.now();
+    if (now - _loopErrLastLogAt < 5000) return;
+    _loopErrLastLogAt = now;
+    console.error(`[loop-crash-guard] frame update threw (x${_loopErrCount}):`, err);
+    // Stash the latest stack where it can be read without devtools (Safari/device diagnosis).
+    window.__loopErr = { count: _loopErrCount, at: Date.now(), stack: String(err?.stack || err) };
+    if (!DEBUG_LOOP_ERR_OVERLAY) return;
+    let el = document.getElementById("loopErrOverlay");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "loopErrOverlay";
+      el.style.cssText = "position:fixed;left:8px;right:8px;bottom:40px;z-index:99999;"
+        + "background:rgba(60,0,0,.92);color:#ffb3b3;font:11px/1.4 monospace;padding:8px;"
+        + "border:1px solid #ff5555;border-radius:6px;white-space:pre-wrap;pointer-events:none;";
+      document.body.appendChild(el);
+    }
+    el.textContent = `frame update threw (x${_loopErrCount})\n${err?.stack || err}`;
+  }
+
   function frame(now) {
     if (!galaxyRunning) return;
     trackFpsOverlay();
@@ -19527,8 +19642,13 @@ function initGalaxyCanvas() {
     fkSampleFrame(rawDt, now);
     const dt = Math.min(rawDt, 33);
     sim.last = now;
-    update(dt, now);
-    galaxyRaf = requestAnimationFrame(frame);
+    try {
+      update(dt, now);
+    } catch (err) {
+      reportLoopError(err);
+    } finally {
+      galaxyRaf = requestAnimationFrame(frame);
+    }
   }
 
   function pointerToCanvas(event) {

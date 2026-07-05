@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-04 22:32";
+const BUILD_TS = "2026-07-04 23:16";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -4331,6 +4331,16 @@ async function playSfxAndWait(name, { volume = 1, rate = 1, detune = 0, maxWaitM
   await Promise.race([handle?.ended || Promise.resolve(), delay(waitMs)]);
 }
 
+// Leaderboard high-score thresholds — declared here (above the init() call) because renderScore()
+// reads leaderboardThresholds during initGalaxyCanvas(). init() runs mid-module, so any top-level
+// const/let it touches must be declared before this line or it throws a TDZ ReferenceError.
+let leaderboardThresholdsPromise = null;
+const leaderboardThresholds = {
+  loaded: false,
+  firstScore: null,
+  thirdScore: null,
+};
+
 init();
 
 function init() {
@@ -4345,7 +4355,9 @@ function init() {
   resetUiOverlayState();
   loadState();
   runStartupStep("preloadSfx", preloadSfx);
-  addListeners();
+  // Bind listeners before the noncritical startup work so a later failure can't leave the UI inert.
+  // Guarded too: a throw mid-binding must not abort the remaining startup steps (e.g. initGalaxyCanvas).
+  runStartupStep("addListeners", addListeners);
   // 2026-06-16: procedural Oracle starfield removed — the Oracle page background is now the
   // looping MP4 (#oracleBgVideo → assets/video/oracle_bg.mp4). initGalaxyBackground() (and its
   // #galaxyCanvas element) are gone; the gameplay level-video stack is unaffected.
@@ -6990,12 +7002,6 @@ function escapeHtml(value) {
 let leaderboardDb = null;
 let leaderboardOverlay = null;
 let leaderboardHighlightId = "";
-let leaderboardThresholdsPromise = null;
-const leaderboardThresholds = {
-  loaded: false,
-  firstScore: null,
-  thirdScore: null,
-};
 
 const firebaseConfig = globalThis.POLY_FIREBASE_CONFIG && typeof globalThis.POLY_FIREBASE_CONFIG === "object"
   ? { ...globalThis.POLY_FIREBASE_CONFIG }

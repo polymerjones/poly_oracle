@@ -287,7 +287,10 @@
           <button id="btnGalaxyBack" class="modeBackBtn" type="button">← Oracle</button>
         </div>
       </div>
-      <header class="galaxy-topbar">
+      <!-- Hidden by default: this is the (disabled) Practice sandbox chrome. setGalaxyViewMode()
+           reveals it only in practice mode; defaulting hidden means a failed init can never fall
+           back to showing this dead layout when the galaxy view opens. -->
+      <header class="galaxy-topbar hidden pe-none">
         <button id="closeGalaxy" class="ghost small galaxy-back" type="button" aria-label="Back to Modes">← Modes</button>
         <div class="galaxy-title">Practice</div>
         <div class="galaxy-tools" role="tablist" aria-label="Galaxy tools">
@@ -324,7 +327,7 @@
       </div>
       <canvas id="galaxyPlayCanvas" aria-hidden="true"></canvas>
       <div id="canvasCrosshair" class="canvasCrosshair" aria-hidden="true"></div>
-      <div class="galaxy-hint">Draw: tap to spawn asteroid • Boom: tap asteroid to split</div>
+      <div class="galaxy-hint hidden pe-none">Draw: tap to spawn asteroid • Boom: tap asteroid to split</div>
       <div id="arcadeOverlay" class="arcadeOverlay" aria-hidden="true">
         <div id="arcadeOverlayText" class="arcadeOverlayText">LEVEL 1</div>
         <div id="arcadeOverlaySub" class="arcadeOverlaySub"></div>

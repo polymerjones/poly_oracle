@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-04 22:30";
+const BUILD_TS = "2026-07-04 22:32";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1098,6 +1098,7 @@ const state = {
   practiceTool: "pencil",
   voiceReadsAnswer: true,
 };
+let listenersBound = false;
 
 const stage = document.getElementById("stage");
 const orb = document.getElementById("orb");
@@ -4333,30 +4334,39 @@ async function playSfxAndWait(name, { volume = 1, rate = 1, detune = 0, maxWaitM
 init();
 
 function init() {
+  const runStartupStep = (label, fn) => {
+    try {
+      fn?.();
+    } catch (error) {
+      console.warn(`[startup] ${label} failed`, error);
+    }
+  };
   setVh();
   resetUiOverlayState();
   loadState();
-  preloadSfx();
+  runStartupStep("preloadSfx", preloadSfx);
+  addListeners();
   // 2026-06-16: procedural Oracle starfield removed — the Oracle page background is now the
   // looping MP4 (#oracleBgVideo → assets/video/oracle_bg.mp4). initGalaxyBackground() (and its
   // #galaxyCanvas element) are gone; the gameplay level-video stack is unaffected.
-  initGalaxyCanvas();
-  initBackgroundVideos();
-  applyTheme();
-  buildPackSelect();
-  warmVoices();
-  populateVoices();
-  applySettingsToUi();
-  renderVault();
-  setIntentState();
-  setupFirstRunHint();
-  initTitleSparkles();
-  initOrbTapPool();
-  addListeners();
-  setGalaxyTool(state.galaxyTool);
+  runStartupStep("initGalaxyCanvas", initGalaxyCanvas);
+  runStartupStep("initBackgroundVideos", initBackgroundVideos);
+  runStartupStep("applyTheme", applyTheme);
+  runStartupStep("buildPackSelect", buildPackSelect);
+  runStartupStep("warmVoices", warmVoices);
+  runStartupStep("populateVoices", populateVoices);
+  runStartupStep("applySettingsToUi", applySettingsToUi);
+  runStartupStep("renderVault", renderVault);
+  runStartupStep("setIntentState", setIntentState);
+  runStartupStep("setupFirstRunHint", setupFirstRunHint);
+  runStartupStep("initTitleSparkles", initTitleSparkles);
+  runStartupStep("initOrbTapPool", initOrbTapPool);
+  runStartupStep("setGalaxyTool", () => setGalaxyTool(state.galaxyTool));
 }
 
 function addListeners() {
+  if (listenersBound) return;
+  listenersBound = true;
   window.addEventListener("resize", setVh);
   window.addEventListener("orientationchange", setVh);
   questionInput.addEventListener("focus", setVh);

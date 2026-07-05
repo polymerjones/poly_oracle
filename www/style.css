@@ -2611,6 +2611,22 @@ select:focus-visible {
   color: rgba(220, 234, 255, 0.9);
 }
 
+#hudScore.score-glow-teal {
+  color: #dffff8;
+  text-shadow:
+    0 0 8px rgba(0, 255, 209, 0.95),
+    0 0 20px rgba(0, 255, 209, 0.65),
+    0 0 34px rgba(0, 255, 209, 0.32);
+}
+
+#hudScore.score-glow-amber {
+  color: #fff4cc;
+  text-shadow:
+    0 0 8px rgba(255, 191, 64, 1),
+    0 0 22px rgba(255, 191, 64, 0.74),
+    0 0 38px rgba(255, 128, 0, 0.38);
+}
+
 .practiceDebug {
   font-size: 12px;
   opacity: 0.85;

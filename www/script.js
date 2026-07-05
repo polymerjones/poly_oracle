@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-04 15:05";
+const BUILD_TS = "2026-07-04 22:23";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -675,8 +675,7 @@ const DEBUG_SHOW_LEVEL_DROPDOWN = false;
 // open and read the `worst=…ms over32=… dropped=…` watcher report.
 const DEBUG_LVLTRANS = false;
 const DEBUG_SPC_VO = false;
-// DEBUG: revert before release — flip true to log slotDoPull() synchronous duration to the console
-// (diagnosing the iPad lever-pull hang). No-op when false.
+// DEBUG: flip true to log slotDoPull() synchronous duration to the console. Keep false in builds.
 const DEBUG_SLOT_TIMING = false;
 let canvasFlash = null;
 const REVEAL_VARIANT_SFX = [
@@ -865,7 +864,7 @@ const ARCADE_LEVELS = [
     ],
     // 2026-06-16: missile-heavy mix with every type available, dropping every 12s.
     // 2026-07-01: + pulse so the Pulse Cannon is available in the finale (also force-spawned per level).
-    powerupOverride: ["missile", "missile", "timer", "freeze", "quadshot", "bomb", "goldbars", "pulse"],
+    powerupOverride: ["missile", "missile", "timer", "freeze", "quadshot", "bomb", "pulse"],
     powerupIntervalMs: 12000,
     // 2026-07-01: two guaranteed +30s timer drops — the level's make-or-break lifeline (mirrors the
     // L13/L14 timer-chain design). Without these the clock can't cover clearing the splitting field.
@@ -4306,6 +4305,7 @@ async function warmArcadeAssets(levelNum = 1) {
         audioEngine.loadMusicBuffer?.(getMusicForLevel(levelNum)) || Promise.resolve(),
         delay(1800),
       ]);
+      primeLeaderboardThresholds({ timeoutMs: 1600 }).catch(() => {});
       // 2026-06-30: pre-decode + GPU-prime ALL gameplay sprites (asteroids incl. generated tint
       // skins, powerups, combo-FX sheets, AND the slot symbols) so first combo / first pickup /
       // first tinted-rock level / first slot reveal no longer hitch. This supersedes the old
@@ -6980,6 +6980,12 @@ function escapeHtml(value) {
 let leaderboardDb = null;
 let leaderboardOverlay = null;
 let leaderboardHighlightId = "";
+let leaderboardThresholdsPromise = null;
+const leaderboardThresholds = {
+  loaded: false,
+  firstScore: null,
+  thirdScore: null,
+};
 
 const firebaseConfig = globalThis.POLY_FIREBASE_CONFIG && typeof globalThis.POLY_FIREBASE_CONFIG === "object"
   ? { ...globalThis.POLY_FIREBASE_CONFIG }
@@ -7124,6 +7130,42 @@ async function fetchLeaderboardRows() {
   return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 }
 
+async function primeLeaderboardThresholds({ timeoutMs = 1600 } = {}) {
+  if (leaderboardThresholds.loaded) return leaderboardThresholds;
+  if (!leaderboardThresholdsPromise) {
+    leaderboardThresholdsPromise = (async () => {
+      try {
+        const db = await initLeaderboardFirestore();
+        if (!db) throw new Error("Firebase unavailable");
+        const snap = await db.collection("scores").orderBy("score", "desc").limit(3).get();
+        const scores = snap.docs
+          .map((doc) => Math.floor(Number(doc.data()?.score) || 0))
+          .filter((score) => score > 0);
+        leaderboardThresholds.firstScore = scores.length >= 1 ? scores[0] : null;
+        leaderboardThresholds.thirdScore = scores.length >= 3 ? scores[2] : null;
+        leaderboardThresholds.loaded = true;
+      } catch {
+        leaderboardThresholds.firstScore = null;
+        leaderboardThresholds.thirdScore = null;
+        leaderboardThresholds.loaded = true;
+      }
+      if (typeof CustomEvent === "function") {
+        window.dispatchEvent(new CustomEvent("polyLeaderboardThresholdsReady"));
+      }
+      return leaderboardThresholds;
+    })();
+  }
+  await Promise.race([leaderboardThresholdsPromise, delay(timeoutMs)]);
+  return leaderboardThresholds;
+}
+
+function playPolyverseScoreboardVo() {
+  const _voFn = window.playGameSfx;
+  if (typeof _voFn !== "function") return;
+  _voFn("menuvo_polyversescoreboard", 0.5, { rate: 1.0, preservePitch: true, important: true });
+  setTimeout(() => _voFn("menuvo_polyversescoreboard", 0.12, { rate: 1.0, preservePitch: true, important: true }), 70);
+}
+
 function renderLeaderboardRows(rows, highlightId = "") {
   if (!rows.length) return `<p class="leaderboardSub">No scores yet. Claim the first slot.</p>`;
   return `
@@ -7145,11 +7187,7 @@ async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubm
   // SPC callout when the board is opened for browsing (not on the post-submit "Done" re-render).
   // Uses the same dual-layer echo chain as playMenuVo so it matches the other menu voiceovers.
   if (!afterSubmit) {
-    const _voFn = window.playGameSfx;
-    if (typeof _voFn === "function") {
-      _voFn("menuvo_polyversescoreboard", 0.5, { rate: 1.0, preservePitch: true, important: true });
-      setTimeout(() => _voFn("menuvo_polyversescoreboard", 0.12, { rate: 1.0, preservePitch: true, important: true }), 70);
-    }
+    playPolyverseScoreboardVo();
   }
   renderLeaderboardShell("POLYVERSE SCOREBOARD", `<p class="leaderboardSub">Loading global scores...</p>`);
   try {
@@ -7190,6 +7228,7 @@ async function submitLeaderboardScore(initials, score) {
 function showInitialsEntry(score, runMsg = "") {
   const safeScore = Math.max(0, Math.floor(Number(score) || 0));
   galaxyCanvasController?.playArcadeMenuMusic?.({ fullVolume: true });
+  playPolyverseScoreboardVo();
   const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
     <form id="initialsForm" class="initialsForm">
       <p class="leaderboardSub">Score ${safeScore}. Enter initials.${runMsg ? ` ${runMsg}` : ""}</p>
@@ -8667,17 +8706,27 @@ function initGalaxyCanvas() {
     slotEls.reels?.classList.remove("win");
     if (slotEls.result) { slotEls.result.className = "ps-result"; slotEls.result.innerHTML = ""; }
     if (DEBUG_SLOT_TIMING) console.log(`slotDoPull sync: ${(performance.now() - _slotPullT0).toFixed(1)}ms`);
-    // Deferred to the next frame: haptic bridge + audio start + forced reflow never block the reels'
-    // first moving frame. A one-frame (~16ms) offset on these is imperceptible.
+    // Deferred until after the first moving paint: haptic bridge + audio start + forced reflow never
+    // block the reels' first frame. Native iOS gets one extra frame because the bridge/audio startup
+    // can still contend with the compositor on the pull commit.
     requestAnimationFrame(() => {
       if (slotState !== SLOT_STATE.SPINNING) return; // stopped / torn down before the defer fired
-      if (slotEls.tokensBox) { slotEls.tokensBox.classList.remove("tick"); void slotEls.tokensBox.offsetWidth; slotEls.tokensBox.classList.add("tick"); }
-      triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
-      playGameSfx("slot_clunk", 0.72);
-      // Single pull+spin sound (prototype's official_level_pull_full), stored as a handle so it can be
-      // stopped the instant all reels land. Tracked so teardown/background also stop it.
-      slotRampHandle = slotTrackLoop(audioEngine.playLoop("slot_machine-ramp-and-spin", { volume: 0.28 }));
-      playGameSfx("slot_pull", 0.9);
+      const runFeedback = () => {
+        if (slotState !== SLOT_STATE.SPINNING) return;
+        if (slotEls.tokensBox) {
+          slotEls.tokensBox.classList.remove("tick");
+          if (!isIOSNative) void slotEls.tokensBox.offsetWidth;
+          slotEls.tokensBox.classList.add("tick");
+        }
+        triggerGameplayHapticImpact(hapticImpactStyle.Heavy);
+        playGameSfx("slot_clunk", 0.72);
+        // Single pull+spin sound (prototype's official_level_pull_full), stored as a handle so it can be
+        // stopped the instant all reels land. Tracked so teardown/background also stop it.
+        slotRampHandle = slotTrackLoop(audioEngine.playLoop("slot_machine-ramp-and-spin", { volume: 0.28 }));
+        playGameSfx("slot_pull", 0.9);
+      };
+      if (isIOSNative) requestAnimationFrame(runFeedback);
+      else runFeedback();
     });
   }
   function slotOnAllStopped() {
@@ -10083,7 +10132,14 @@ function initGalaxyCanvas() {
     if (slotEls.scoreVal) slotEls.scoreVal.textContent = String(arcadeScore);
     if (!hudScore) return;
     hudScore.textContent = `Score: ${arcadeScore}`;
+    const beatsFirst = Number.isFinite(leaderboardThresholds.firstScore)
+      && arcadeScore > leaderboardThresholds.firstScore;
+    const beatsThird = Number.isFinite(leaderboardThresholds.thirdScore)
+      && arcadeScore > leaderboardThresholds.thirdScore;
+    hudScore.classList.toggle("score-glow-amber", beatsFirst);
+    hudScore.classList.toggle("score-glow-teal", !beatsFirst && beatsThird);
   }
+  window.addEventListener("polyLeaderboardThresholdsReady", renderScore);
 
   function updateHudBombInventory() {
     if (!hudBombBtn) return;
@@ -17920,6 +17976,7 @@ function initGalaxyCanvas() {
     updateStroidBehindHud(now);
     updatePlasmaRechargeSound(now);
     updatePlasmaPlacedNet(now);
+    if (stuntActive || practiceEndless) updatePlasmaModeBtn(now);
     const driftScale = prefersReducedMotion ? 0 : 1;
     for (let i = 0; i < sim.stars.length; i += 1) {
       const s = sim.stars[i];

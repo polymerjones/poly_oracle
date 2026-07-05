@@ -153,8 +153,8 @@ body.reveal-screen-shake #oracleView {
 
 .oracle-bg-video {
   /* Oracle page background is now the looping MP4 (procedural starfield removed).
-     Full opacity, sits behind the orb/stage (z-index 0). The element starts at
-     inline opacity:0 and JS clears it on canplay/loadeddata to fade in over 400ms. */
+     Full opacity, sits behind the orb/stage (z-index 0). Keep it visible by default:
+     iOS can miss early media events, and a hidden fullscreen video reads as a dead page. */
   z-index: 0;
   --video-visible-opacity: 1;
   transition: opacity 400ms ease;

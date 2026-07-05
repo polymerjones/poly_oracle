@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-04 22:23";
+const BUILD_TS = "2026-07-04 22:30";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -4305,7 +4305,6 @@ async function warmArcadeAssets(levelNum = 1) {
         audioEngine.loadMusicBuffer?.(getMusicForLevel(levelNum)) || Promise.resolve(),
         delay(1800),
       ]);
-      primeLeaderboardThresholds({ timeoutMs: 1600 }).catch(() => {});
       // 2026-06-30: pre-decode + GPU-prime ALL gameplay sprites (asteroids incl. generated tint
       // skins, powerups, combo-FX sheets, AND the slot symbols) so first combo / first pickup /
       // first tinted-rock level / first slot reveal no longer hitch. This supersedes the old
@@ -4318,6 +4317,7 @@ async function warmArcadeAssets(levelNum = 1) {
     } finally {
       setArcadeWarmupVisible(false);
       arcadeWarmupPromise = null;
+      setTimeout(() => primeLeaderboardThresholds({ timeoutMs: 1600 }).catch(() => {}), 250);
     }
   })();
   return arcadeWarmupPromise;

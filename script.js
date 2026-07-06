@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-05 17:11";
+const BUILD_TS = "2026-07-05 17:50";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2409,8 +2409,12 @@ const commBoxController = (() => {
       hud.style.transform = "none";
       if (ticker) {
         ticker.style.left = "128px";
-        ticker.style.top = "auto";
-        ticker.style.bottom = "0";
+        // 2026-07-05: top-aligned to the portrait (was bottom:0) so the box top sits flush with
+        // the mug and normal 1-2 line captions end above the fixed bottom-right plasma NET/AUTO
+        // pill instead of underneath it. Text grows downward; only unusually long captions can
+        // still reach the pill zone.
+        ticker.style.top = "0";
+        ticker.style.bottom = "auto";
       }
     }
   }

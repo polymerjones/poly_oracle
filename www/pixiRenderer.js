@@ -965,6 +965,17 @@ const pixiRenderer = (() => {
     }
   }
 
+  // 2026-07-05: PIXI Graphics.arc() auto-connects any open subpath to the arc's start point with
+  // a straight lineTo. That drew two playtest artifacts: (a) the intermittent "phantom laser" —
+  // the fizzle releaseFx leaves the pen at the released net's corner, and the next recharge-ring
+  // arc connected it to the corner HUD with a 7px teal line; (b) the white "line" across the
+  // recharge circle — the inner white accent arc connected from the teal progress arc's end back
+  // to 12 o'clock as a chord. Parking the pen on the arc's start point first kills both.
+  function strokeArcFresh(g, cx, cy, r, a0, a1) {
+    g.moveTo(cx + Math.cos(a0) * r, cy + Math.sin(a0) * r);
+    g.arc(cx, cy, r, a0, a1, false);
+  }
+
   function drawPlasmaRecharge(plasmaCage, now) {
     if (!plasmaGraphics || !plasmaCage || plasmaCage.active || plasmaCage.placed) return;
     const state = updatePlasmaHudState(plasmaCage, now);
@@ -985,13 +996,13 @@ const pixiRenderer = (() => {
     if (charging) {
       const ringRadius = PLASMA_HUD_RADIUS + 8;
       plasmaGraphics.lineStyle(7, PLASMA_HUD_COLOR, PLASMA_HUD_GLOW_ALPHA * 0.15);
-      plasmaGraphics.arc(cx, cy, ringRadius + 2.2, -Math.PI / 2, Math.PI * 1.5, false);
+      strokeArcFresh(plasmaGraphics, cx, cy, ringRadius + 2.2, -Math.PI / 2, Math.PI * 1.5);
       plasmaGraphics.lineStyle(3, 0x00443d, 0.42);
-      plasmaGraphics.arc(cx, cy, ringRadius, -Math.PI / 2, Math.PI * 1.5, false);
+      strokeArcFresh(plasmaGraphics, cx, cy, ringRadius, -Math.PI / 2, Math.PI * 1.5);
       plasmaGraphics.lineStyle(3.2, PLASMA_HUD_COLOR, 0.8);
-      plasmaGraphics.arc(cx, cy, ringRadius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress, false);
+      strokeArcFresh(plasmaGraphics, cx, cy, ringRadius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
       plasmaGraphics.lineStyle(1.6, 0xdcfff0, 0.22 + progress * 0.2);
-      plasmaGraphics.arc(cx, cy, ringRadius - 1.1, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress, false);
+      strokeArcFresh(plasmaGraphics, cx, cy, ringRadius - 1.1, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
       return;
     }
 
@@ -1011,19 +1022,19 @@ const pixiRenderer = (() => {
       : 4.8 + pulse * 1.1;
 
     plasmaGraphics.lineStyle(7, PLASMA_HUD_COLOR, PLASMA_HUD_GLOW_ALPHA * 0.27);
-    plasmaGraphics.arc(cx, cy, ringRadius + 1.8, -Math.PI / 2, Math.PI * 1.5, false);
+    strokeArcFresh(plasmaGraphics, cx, cy, ringRadius + 1.8, -Math.PI / 2, Math.PI * 1.5);
     plasmaGraphics.lineStyle(3, 0x00443d, ringAlpha * 0.55);
-    plasmaGraphics.arc(cx, cy, ringRadius, -Math.PI / 2, Math.PI * 1.5, false);
+    strokeArcFresh(plasmaGraphics, cx, cy, ringRadius, -Math.PI / 2, Math.PI * 1.5);
     plasmaGraphics.lineStyle(2.8, PLASMA_HUD_COLOR, ringAlpha);
-    plasmaGraphics.arc(cx, cy, ringRadius, -Math.PI / 2, Math.PI * 1.5, false);
+    strokeArcFresh(plasmaGraphics, cx, cy, ringRadius, -Math.PI / 2, Math.PI * 1.5);
     plasmaGraphics.lineStyle(1.5, 0xdcfff0, ringAlpha * 0.28);
-    plasmaGraphics.arc(cx, cy, ringRadius - 1.3, -Math.PI / 2, Math.PI * 1.5, false);
+    strokeArcFresh(plasmaGraphics, cx, cy, ringRadius - 1.3, -Math.PI / 2, Math.PI * 1.5);
 
     if (state === "chargedTransition") {
       const rippleRadius = ringRadius + 2 + transitionEase * 16;
       const rippleAlpha = (1 - transitionEase) * 0.42;
       plasmaGraphics.lineStyle(1.5, PLASMA_HUD_COLOR, rippleAlpha);
-      plasmaGraphics.arc(cx, cy, rippleRadius, 0, Math.PI * 2, false);
+      strokeArcFresh(plasmaGraphics, cx, cy, rippleRadius, 0, Math.PI * 2);
     }
 
     plasmaGraphics.beginFill(PLASMA_HUD_COLOR, orbAlpha * 0.24);
@@ -1051,9 +1062,9 @@ const pixiRenderer = (() => {
       const arcEnd = arcStart + 0.65 + arcT * 0.9;
       const arcRadius = ringRadius + 3.5;
       plasmaGraphics.lineStyle(2.2, PLASMA_HUD_COLOR, (1 - arcT) * 0.78);
-      plasmaGraphics.arc(cx, cy, arcRadius, arcStart, arcEnd, false);
+      strokeArcFresh(plasmaGraphics, cx, cy, arcRadius, arcStart, arcEnd);
       plasmaGraphics.lineStyle(1, 0xdcfff0, (1 - arcT) * 0.42);
-      plasmaGraphics.arc(cx, cy, arcRadius + 0.8, arcStart, arcEnd, false);
+      strokeArcFresh(plasmaGraphics, cx, cy, arcRadius + 0.8, arcStart, arcEnd);
     }
   }
 

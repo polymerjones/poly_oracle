@@ -184,7 +184,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-05 12:18";
+const BUILD_TS = "2026-07-05 17:11";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -943,8 +943,8 @@ function hasBeatenGame() {
   catch { return false; }
 }
 
-// 2026-07-05: Oracle-orb easter egg — 3 "changed realities" shifts in one session permanently
-// unlocks Level Select (see showChaosToast). Same persistence pattern as hasBeatenGame.
+// 2026-07-05: Oracle-orb easter egg — 3 "changed realities" shifts permanently unlocks Level
+// Select (see triggerChaosTheme). Same persistence pattern as hasBeatenGame.
 const STORAGE_CHEAT_LEVELSELECT = "poly_oracle_cheat_levelselect";
 function hasCheatLevelSelect() {
   try { return localStorage.getItem(STORAGE_CHEAT_LEVELSELECT) === "1"; }
@@ -952,6 +952,18 @@ function hasCheatLevelSelect() {
 }
 function setCheatLevelSelect() {
   try { localStorage.setItem(STORAGE_CHEAT_LEVELSELECT, "1"); }
+  catch { /* ignore */ }
+}
+// 2026-07-05: the shift count is persisted for life (playtest: the old session-only counter
+// reset on every launch, so 3 shifts spread across launches never unlocked the cheat). The
+// theme-reset button clears the visuals, NOT this progress.
+const STORAGE_CHAOS_SHIFTS = "poly_oracle_chaos_shifts";
+function storedChaosShiftCount() {
+  try { return parseInt(localStorage.getItem(STORAGE_CHAOS_SHIFTS) || "0", 10) || 0; }
+  catch { return 0; }
+}
+function recordChaosShift() {
+  try { localStorage.setItem(STORAGE_CHAOS_SHIFTS, String(storedChaosShiftCount() + 1)); }
   catch { /* ignore */ }
 }
 
@@ -3599,7 +3611,22 @@ const audioEngine = {
   },
   enforcePolyphony(name, maxVoices = this.maxVoicesPerSound, mode = "drop_newest") {
     const voices = this.voices.get(name);
-    if (!voices || voices.length < maxVoices) return true;
+    if (!voices || !voices.length) return true;
+    // 2026-07-05: self-heal stuck voices. If a source's onended never fires (seen once on iOS —
+    // an audio-session hiccup while leaving Training left SFX names pinned at the voice cap, so
+    // every later play was silently dropped until app relaunch), the entry would starve this
+    // sound forever. A voice well past its buffer's runtime is finished whether or not the
+    // callback ran, so purge those before counting against the cap.
+    const nowT = this.ctx ? this.ctx.currentTime : 0;
+    for (let i = voices.length - 1; i >= 0; i -= 1) {
+      const v = voices[i];
+      const buf = v?.source?.buffer;
+      if (!buf) { voices.splice(i, 1); continue; }
+      const rate = Math.max(0.25, Math.abs(v.source.playbackRate?.value || 1));
+      if (nowT - v.startedAt > buf.duration / rate + 1) voices.splice(i, 1);
+    }
+    if (!voices.length) { this.voices.delete(name); return true; }
+    if (voices.length < maxVoices) return true;
     if (mode === "steal_oldest") {
       const dropCount = voices.length - maxVoices + 1;
       for (let i = 0; i < dropCount; i += 1) {
@@ -6021,10 +6048,16 @@ function registerOrbTap() {
 function triggerChaosTheme() {
   state.chaosThemeEnabled = true;
   state.chaosShiftCount += 1;
+  recordChaosShift();
   state.themePalette = createRandomPalette(state.chaosShiftCount);
   applyTheme();
   saveThemeSettings();
-  showChaosToast();
+  // 2026-07-05: cheat check lives here (not in showChaosToast, which the contact form reuses as
+  // a plain toast). Lifetime shift count, so the 3 shifts may span app launches; the arcade menu
+  // reads the flag via isLevelSelectUnlocked() on its next sync.
+  const cheatUnlock = storedChaosShiftCount() >= 3 && !isLevelSelectUnlocked();
+  if (cheatUnlock) setCheatLevelSelect();
+  showChaosToast(cheatUnlock ? "✨ Level Select unlocked!" : null, { jackpot: cheatUnlock });
 }
 
 function resetChaosTheme() {
@@ -6086,21 +6119,15 @@ function applyTheme() {
   root.style.setProperty("--orbGlow", palette.orbGlow);
 }
 
-function showChaosToast() {
+// 2026-07-05: plain presenter — pass custom text (e.g. the contact form's "Message sent.", whose
+// argument used to be silently ignored) or nothing for the default reality-shift line. The
+// Level-Select cheat unlock is decided in triggerChaosTheme; jackpot swaps in its sting.
+function showChaosToast(message = null, { jackpot = false } = {}) {
   if (!chaosToast) return;
-  // 2026-07-05: easter egg — the 3rd reality shift in a session, on a save that hasn't unlocked
-  // Level Select yet, awards it permanently. Jackpot sting instead of the usual shift sound; the
-  // arcade menu reads the flag via isLevelSelectUnlocked() on its next sync.
-  const cheatUnlock = state.chaosShiftCount >= 3 && !isLevelSelectUnlocked();
-  if (cheatUnlock) {
-    setCheatLevelSelect();
-    chaosToast.textContent = "✨ Level Select unlocked!";
-  } else {
-    chaosToast.textContent = "✨ Oracle changed realities.";
-  }
+  chaosToast.textContent = message || "✨ Oracle changed realities.";
   const intensity = clamp(1 + state.chaosShiftCount * 0.12, 1, 2.2);
   chaosToast.style.setProperty("--chaos-intensity", intensity.toFixed(2));
-  if (cheatUnlock && typeof window.playGameSfx === "function") window.playGameSfx("slot_jackpot", 0.95);
+  if (jackpot && typeof window.playGameSfx === "function") window.playGameSfx("slot_jackpot", 0.95);
   else playChaosShiftSound();
   chaosToast.hidden = false;
   chaosToast.classList.remove("show");
@@ -7798,7 +7825,10 @@ function initGalaxyCanvas() {
   let _plasmaModeBtnSig = "";
   function updatePlasmaModeBtn(now = performance.now()) {
     if (!plasmaModeBtn) return;
-    const show = arcadeActive || practiceEndless || stuntActive;
+    // 2026-07-05: hidden during Stunt training — the pill overlapped the SPC caption text on
+    // iPhone (playtest screenshots) and no tutorial step uses it (net is taught by gesture).
+    // Note stunt sets arcadeActive=true, so training must be excluded explicitly.
+    const show = (arcadeActive || practiceEndless) && !stuntActive;
     if (!show) {
       if (_plasmaModeBtnSig !== "hide") {
         _plasmaModeBtnSig = "hide";
@@ -13577,6 +13607,11 @@ function initGalaxyCanvas() {
   function plasmaCageChargeMs() {
     return (stuntActive || practiceEndless) ? 120 : PLASMA_CAGE_CHARGE_MS;
   }
+  // 2026-07-05: Training recharges the net 2× faster so the plasma steps keep moving; the real
+  // game (and Practice) keep the full 5s reload. Composes with the Manual-mode ×2 at the call site.
+  function plasmaCageCooldownMs() {
+    return stuntActive ? PLASMA_CAGE_COOLDOWN_MS / 2 : PLASMA_CAGE_COOLDOWN_MS;
+  }
   function isPlasmaCageReady(now = performance.now()) {
     if (plasmaCage.active) {
       const ready = plasmaCage.charged || now - plasmaCage.chargeStart >= plasmaCageChargeMs();
@@ -13759,7 +13794,7 @@ function initGalaxyCanvas() {
     plasmaCage.releaseFx = { x: placed.x, y: placed.y, w: placed.w, h: placed.h, type: "fizzle", start: now, ttl: 260 };
     playPlasmaFizzle();
     plasmaCage.cooldownStart = now;
-    plasmaCage.cooldownUntil = now + PLASMA_CAGE_COOLDOWN_MS;
+    plasmaCage.cooldownUntil = now + plasmaCageCooldownMs();
     plasmaCage.rechargeSoundPlayed = false;
     updatePlasmaModeBtn();
   }
@@ -13837,7 +13872,7 @@ function initGalaxyCanvas() {
     // 2026-07-03: MANUAL mode recharges 2× slower (10s). A placed whole-screen net that grabs and
     // detonates everything is powerful, so it costs a longer reload; AUTO fire stays 5s. Clock starts
     // on detonate, so Manual reads as "one big play, then a 10s reload".
-    const cooldownMs = plasmaCage.mode === "manual" ? PLASMA_CAGE_COOLDOWN_MS * 2 : PLASMA_CAGE_COOLDOWN_MS;
+    const cooldownMs = plasmaCage.mode === "manual" ? plasmaCageCooldownMs() * 2 : plasmaCageCooldownMs();
     plasmaCage.cooldownStart = now;
     plasmaCage.cooldownUntil = now + cooldownMs;
     plasmaCage.rechargeSoundPlayed = false;
@@ -16981,6 +17016,9 @@ function initGalaxyCanvas() {
       // Collected: perimeter snapped back to full (collectPowerup) — now hold it there, paused.
       tutorialTimerRunning = false;
       _timerRemainingMs = levelDurationMs;
+      // 2026-07-05: cut any still-playing intro line ("Tap it now.") so the praise lands the
+      // instant the powerup is tapped — the queue otherwise lets the current line finish first.
+      spcFlush();
       spcVO("07", "Great! From here, the timer is paused while you train.", "talk_calm");
       await waitVOIdle();
     } },
@@ -17092,7 +17130,9 @@ function initGalaxyCanvas() {
     },
     // Drive the objective text off plasmaCage.active each frame while a "setfire" round is live,
     // so it re-arms to "TAP AND DRAG" whenever the gesture resets (Part 3 fix, 2026-06-17).
-    onUpdate: () => {
+    // 2026-07-05: (now) was missing — the restock branch below read an undefined `now`, threw, and
+    // the caller's try/catch swallowed it, so the plasma step never restocked a thinned-out field.
+    onUpdate: (now) => {
       // 2026-06-22 (Item 1): the moment the cadet starts drawing a net, retire the demo overlay.
       if (tutorialState.plasmaDemoShown && plasmaCage.active) {
         tutorialState.plasmaDemoShown = false;
@@ -17122,8 +17162,12 @@ function initGalaxyCanvas() {
       spcVO("23", "UFO spotted, Cadet!", "alert");
       spcVO("24", "Shoot it twice to take it out!", "alert");
       showTaskInstructionDeferred("SHOOT THE UFO TWICE");
+      // 2026-07-05: "Direct hit! Do it again!" is a slow-learner nudge, not a reaction line —
+      // wait a beat after the UFO turns red and only speak if it's STILL red (not yet destroyed).
+      // A quick double-tap kill therefore never hears it (it used to stack against the kill lines).
       waitFor(() => ufo && ufo.hitCount >= 1)
-        .then(() => { if (stuntActive) spcVO("25", "Direct hit! Do it again!", "praise"); })
+        .then(() => waitMs(1500))
+        .then(() => { if (stuntActive && ufo && ufo.hitCount >= 1) spcVO("25", "Direct hit! Do it again!", "praise"); })
         .catch(() => {});
       await waitFor(() => !ufo);
       hideTaskInstruction();
@@ -17664,6 +17708,9 @@ function initGalaxyCanvas() {
 
   function exitStuntMode() {
     cleanupTutorial();
+    // 2026-07-05: drop SFX voice-cap tracking across the mode switch — if an interruption kept
+    // any onended from firing, stale entries would starve those sounds (see enforcePolyphony).
+    audioEngine.voices.clear();
     stuntActive = false;
     stuntAdvancing = false;
     hideArcadeOverlay();

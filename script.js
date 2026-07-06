@@ -214,7 +214,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-06 11:47";
+const BUILD_TS = "2026-07-06 12:01";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -5487,11 +5487,14 @@ async function startCrystalOverlay() {
   } catch {
     // ignore autoplay errors
   }
-  // 2026-07-06: Android WebView can stall a first play at t=0 (buffered, "playing", but no
-  // frame ever decodes) — the cause of the missing reveal bg on the first reveal only.
-  // Nudge with a tiny seek if no frames advanced shortly after play().
+  // 2026-07-06: Android WebView first-play failure modes (cause of the missing reveal bg on
+  // the first reveal only): (a) stalled decode — "playing" at t=0 with data buffered, fix =
+  // tiny seek; (b) fetch raced app startup — MediaError 4 / NETWORK_NO_SOURCE, fix = load().
   setTimeout(() => {
-    if (!video.paused && video.currentTime === 0 && video.readyState < 3) {
+    if (video.error || video.networkState === 3) {
+      try { video.load(); } catch { /* ignore */ }
+      video.play().catch(() => {});
+    } else if (!video.paused && video.currentTime === 0 && video.readyState < 3) {
       try { video.currentTime = 0.05; } catch { /* ignore */ }
       video.play().catch(() => {});
     }
@@ -7593,7 +7596,13 @@ function createLoopVideoController(video) {
       if (watchdog) clearInterval(watchdog);
       let lastTime = -1;
       watchdog = setInterval(() => {
-        if (video.paused) {
+        if (video.error || video.networkState === 3) {
+          // 2026-07-06 Android: a media fetch that races app startup can fail permanently
+          // (MediaError 4 + NETWORK_NO_SOURCE) — play() alone never retries a failed
+          // source; only a fresh load() restarts resource selection.
+          try { video.load(); } catch { /* ignore */ }
+          video.play().catch(() => {});
+        } else if (video.paused) {
           video.play().catch(() => {});
         } else if (video.currentTime === lastTime && video.readyState < 3) {
           // 2026-07-06 Android WebView stall: reports playing but never decodes a frame
@@ -16830,9 +16839,13 @@ function initGalaxyCanvas() {
     v.style.display = "block";
     _positionDemoOverlay();
     try { v.currentTime = 0; const p = v.play(); if (p && p.catch) p.catch(() => {}); } catch {}
-    // 2026-07-06: same Android WebView first-play stall nudge as the oracle/crystal videos.
+    // 2026-07-06: same Android WebView first-play recovery as the oracle/crystal videos
+    // (stalled decode → seek nudge; failed startup fetch → load()).
     setTimeout(() => {
-      if (!v.paused && v.currentTime === 0 && v.readyState < 3) {
+      if (v.error || v.networkState === 3) {
+        try { v.load(); } catch { /* ignore */ }
+        v.play().catch(() => {});
+      } else if (!v.paused && v.currentTime === 0 && v.readyState < 3) {
         try { v.currentTime = 0.05; } catch { /* ignore */ }
         v.play().catch(() => {});
       }

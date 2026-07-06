@@ -169,6 +169,15 @@ document.addEventListener("DOMContentLoaded", () => {
   _bel.textContent = "BUILD " + BUILD_TS;
   _bel.style.cssText = "position:fixed;bottom:6px;left:8px;font-family:monospace;font-size:10px;color:rgba(0,255,180,0.55);pointer-events:none;z-index:99999;";
   document.body.appendChild(_bel);
+  // Live oracle-bg video diagnostics (2026-07-06 Android frozen-video hunt): readyState,
+  // networkState, error code, currentTime, frames presented, nudge/reload counts. One
+  // screenshot of a wedged device tells us which recovery branch (if any) is firing.
+  setInterval(() => {
+    try {
+      const d = oracleBgController?.diag?.();
+      _bel.textContent = "BUILD " + BUILD_TS + (d ? "  " + d : "");
+    } catch { /* diag is best-effort */ }
+  }, 1000);
 });
 
 function getCapacitorHaptics() {
@@ -214,7 +223,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-06 12:01";
+const BUILD_TS = "2026-07-06 14:47";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -5488,13 +5497,14 @@ async function startCrystalOverlay() {
     // ignore autoplay errors
   }
   // 2026-07-06: Android WebView first-play failure modes (cause of the missing reveal bg on
-  // the first reveal only): (a) stalled decode — "playing" at t=0 with data buffered, fix =
-  // tiny seek; (b) fetch raced app startup — MediaError 4 / NETWORK_NO_SOURCE, fix = load().
+  // the first reveal only): (a) stalled decode — "playing" at t=0, any readyState (stalls
+  // seen at readyState >= 3 too), fix = tiny seek; (b) fetch raced app startup —
+  // MediaError 4 / NETWORK_NO_SOURCE, fix = load().
   setTimeout(() => {
     if (video.error || video.networkState === 3) {
       try { video.load(); } catch { /* ignore */ }
       video.play().catch(() => {});
-    } else if (!video.paused && video.currentTime === 0 && video.readyState < 3) {
+    } else if (!video.paused && video.currentTime === 0) {
       try { video.currentTime = 0.05; } catch { /* ignore */ }
       video.play().catch(() => {});
     }
@@ -6717,7 +6727,16 @@ function warmNativeTtsVoices() {
         nativeTtsVoices = result?.voices || [];
         return nativeTtsVoices;
       })
-      .catch(() => []);
+      .catch(() => [])
+      .then((voices) => {
+        // 2026-07-06 Android cold start: the TTS engine binds asynchronously, and a
+        // getSupportedVoices() call that races it returns/rejects empty. Caching that
+        // forever left the catalog empty for the whole session — speakNativeText then
+        // passes voice:undefined and the engine default (female) speaks. Never cache
+        // an empty result; the next caller retries.
+        if (!voices.length) nativeTtsVoicesLoading = null;
+        return voices;
+      });
   }
   return nativeTtsVoicesLoading;
 }
@@ -6730,21 +6749,21 @@ function getVoiceCatalog() {
 function pickRandomVoiceName() {
   const voices = getVoiceCatalog();
   if (!voices.length) return "";
-  return pick(voices).name;
+  return getVoiceId(pick(voices));
 }
 
 function pickDifferentRandomVoiceName(excludeVoice = "") {
   const voices = getVoiceCatalog();
   if (!voices.length) return "";
-  const filtered = excludeVoice ? voices.filter((voice) => voice.name !== excludeVoice) : voices;
+  const filtered = excludeVoice ? voices.filter((voice) => getVoiceId(voice) !== excludeVoice) : voices;
   const pool = filtered.length ? filtered : voices;
-  return pick(pool).name;
+  return getVoiceId(pick(pool));
 }
 
 function resolvePrimaryVoiceName() {
   if (state.selectedVoice) return state.selectedVoice;
   const voices = getVoiceCatalog();
-  return voices[0]?.name || "";
+  return voices[0] ? getVoiceId(voices[0]) : "";
 }
 
 function populateVoices() {
@@ -6762,8 +6781,9 @@ function populateVoices() {
 
     voices.forEach((voice) => {
       const option = document.createElement("option");
-      option.value = voice.name;
-      option.textContent = `${voice.name} (${voice.lang})`;
+      option.value = getVoiceId(voice);
+      // Native (Android) display names are duplicated across variants — show the coded id.
+      option.textContent = `${getVoiceId(voice)} (${voice.lang})`;
       voiceSelect.appendChild(option);
     });
 
@@ -6783,9 +6803,9 @@ function populateVoices() {
       voices.find((voice) => /en/i.test(voice.lang)) ||
       voices[0];
 
-    const currentExists = voices.some((voice) => voice.name === state.selectedVoice);
+    const currentExists = voices.some((voice) => getVoiceId(voice) === state.selectedVoice);
     if (!state.userVoiceOverride || !currentExists) {
-      state.selectedVoice = preferred.name;
+      state.selectedVoice = getVoiceId(preferred);
       state.userVoiceOverride = false;
     }
 
@@ -6795,18 +6815,36 @@ function populateVoices() {
   };
 
   if ("speechSynthesis" in window) window.speechSynthesis.onvoiceschanged = load;
-  if (nativeTts) warmNativeTtsVoices().then(load);
+  if (nativeTts) {
+    // Android cold start: the TTS engine can take seconds to bind (minutes on the
+    // SwiftShader emulator's first-ever launch) — keep re-warming until the catalog
+    // arrives so the picker doesn't stay on "Loading voices...".
+    let warmAttempts = 0;
+    const warmLoad = () => warmNativeTtsVoices().then((voices) => {
+      load();
+      if (!voices.length && warmAttempts++ < 60) setTimeout(warmLoad, 1000);
+    });
+    warmLoad();
+  }
   load();
 }
 
-// Android default voice: Google TTS voice names are coded (no "Daniel"), and the first en
+// The Android TTS plugin puts the real coded voice id (e.g. "en-gb-x-gbb-local") in
+// voiceURI; its `name` is just the locale display string ("English United Kingdom"),
+// which is NOT unique across variants — so on the native path voices must be keyed by
+// voiceURI. Web/iOS speechSynthesis keeps name keying (matches saved preferences).
+function getVoiceId(voice) {
+  return getNativeTtsPlugin() ? (voice.voiceURI || voice.name || "") : (voice.name || "");
+}
+
+// Android default voice: Google TTS voice ids are coded (no "Daniel"), and the first en
 // voice is female — prefer these known male en variants so the Oracle defaults older/male.
 function pickAndroidMaleVoice(voices) {
   if (globalThis.Capacitor?.getPlatform?.() !== "android") return null;
   const MALE_VOICE_KEYS = ["en-gb-x-gbb", "en-gb-x-gbd", "en-gb-x-rjs", "en-us-x-tpd", "en-us-x-iod"];
   for (const key of MALE_VOICE_KEYS) {
-    const hits = voices.filter((voice) => (voice.name || "").toLowerCase().includes(key));
-    if (hits.length) return hits.find((voice) => /local/i.test(voice.name)) || hits[0];
+    const hits = voices.filter((voice) => getVoiceId(voice).toLowerCase().includes(key));
+    if (hits.length) return hits.find((voice) => /local/i.test(getVoiceId(voice))) || hits[0];
   }
   return null;
 }
@@ -6893,7 +6931,7 @@ async function speakNativeText(text, { rate = 1, pitch = 1.2, voiceName = "" } =
     // Plugin API takes the voice as an index into getSupportedVoices(), not a name.
     const voices = await warmNativeTtsVoices();
     const selectedVoiceName = voiceName || resolvePrimaryVoiceName();
-    const voiceIndex = voices.findIndex((voice) => voice.name === selectedVoiceName);
+    const voiceIndex = voices.findIndex((voice) => getVoiceId(voice) === selectedVoiceName);
     const selectedVoice = voiceIndex >= 0 ? voices[voiceIndex] : null;
 
     await plugin.speak({
@@ -7589,30 +7627,70 @@ function createLoopVideoController(video) {
     video.play().catch(() => {});
   });
 
+  // Count actually-presented frames where the API exists (Chromium WebView, iOS 15.4+).
+  // 2026-07-06 Android third failure mode: readyState >= 3 and "playing" while the
+  // decoder/compositor presents nothing — currentTime/readyState can't see it.
+  // Registered once here (not in start()) so restarts don't stack callback chains.
+  let framesPresented = 0;
+  const hasFrameCallback = typeof video.requestVideoFrameCallback === "function";
+  if (hasFrameCallback) {
+    const onFrame = () => {
+      framesPresented += 1;
+      video.requestVideoFrameCallback(onFrame);
+    };
+    video.requestVideoFrameCallback(onFrame);
+  }
+  let nudgeCount = 0;
+  let reloadCount = 0;
+
   return {
     start() {
       video.loop = true;
       video.play().catch(() => {});
       if (watchdog) clearInterval(watchdog);
       let lastTime = -1;
+      let lastFrames = -1;
+      let stalledTicks = 0;
       watchdog = setInterval(() => {
+        const advanced = hasFrameCallback
+          ? framesPresented !== lastFrames
+          : video.currentTime !== lastTime;
         if (video.error || video.networkState === 3) {
           // 2026-07-06 Android: a media fetch that races app startup can fail permanently
           // (MediaError 4 + NETWORK_NO_SOURCE) — play() alone never retries a failed
           // source; only a fresh load() restarts resource selection.
           try { video.load(); } catch { /* ignore */ }
           video.play().catch(() => {});
+          reloadCount += 1;
+          stalledTicks = 0;
         } else if (video.paused) {
           video.play().catch(() => {});
-        } else if (video.currentTime === lastTime && video.readyState < 3) {
-          // 2026-07-06 Android WebView stall: reports playing but never decodes a frame
-          // (stuck at t=0 with data buffered, readyState 1, no MediaError). A tiny seek
-          // kicks the decode pipeline alive. Never fires on a healthily-advancing video.
-          try { video.currentTime = video.currentTime + 0.05; } catch { /* ignore */ }
+        } else if (!advanced) {
+          // Android WebView stall: reports playing but presents no frames. First a tiny
+          // seek to kick the decode pipeline; if still stuck next tick, a full load()
+          // resets the whole media pipeline (wedged decoder/compositor surface).
+          stalledTicks += 1;
+          if (stalledTicks >= 2) {
+            try { video.load(); } catch { /* ignore */ }
+            reloadCount += 1;
+            stalledTicks = 0;
+          } else {
+            try { video.currentTime = video.currentTime + 0.05; } catch { /* ignore */ }
+            nudgeCount += 1;
+          }
           video.play().catch(() => {});
+        } else {
+          stalledTicks = 0;
         }
         lastTime = video.currentTime;
+        lastFrames = framesPresented;
       }, 1800);
+    },
+    diag() {
+      const err = video.error ? video.error.code : "-";
+      return `rs:${video.readyState} ns:${video.networkState} err:${err}` +
+        ` t:${video.currentTime.toFixed(2)} f:${framesPresented} n:${nudgeCount} l:${reloadCount}` +
+        (video.paused ? " paused" : "");
     },
     stop() {
       video.pause();
@@ -16840,12 +16918,12 @@ function initGalaxyCanvas() {
     _positionDemoOverlay();
     try { v.currentTime = 0; const p = v.play(); if (p && p.catch) p.catch(() => {}); } catch {}
     // 2026-07-06: same Android WebView first-play recovery as the oracle/crystal videos
-    // (stalled decode → seek nudge; failed startup fetch → load()).
+    // (stalled decode at any readyState → seek nudge; failed startup fetch → load()).
     setTimeout(() => {
       if (v.error || v.networkState === 3) {
         try { v.load(); } catch { /* ignore */ }
         v.play().catch(() => {});
-      } else if (!v.paused && v.currentTime === 0 && v.readyState < 3) {
+      } else if (!v.paused && v.currentTime === 0) {
         try { v.currentTime = 0.05; } catch { /* ignore */ }
         v.play().catch(() => {});
       }

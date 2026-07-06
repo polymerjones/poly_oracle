@@ -223,7 +223,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-06 14:47";
+const BUILD_TS = "2026-07-06 15:58";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -7526,6 +7526,23 @@ function initBackgroundVideos() {
     } else {
       oracleBgVideo.addEventListener("canplay", onVideoReady, { once: true });
       oracleBgVideo.addEventListener("loadeddata", onVideoReady, { once: true });
+    }
+
+    // 2026-07-06 (Retroid playtest): "warming up" pip over the oracle bg while the Android
+    // WebView decoder spins up. The poster attribute already hides Chromium's grey
+    // play-button placeholder; this caption clears on the first actually-presented frame
+    // (requestVideoFrameCallback — canplay/readyState lie on the stalled-pipeline path).
+    const warmupEl = document.getElementById("oracleBgWarmup");
+    if (warmupEl) {
+      const hideWarmup = () => warmupEl.classList.add("warmup-done");
+      if (typeof oracleBgVideo.requestVideoFrameCallback === "function") {
+        oracleBgVideo.requestVideoFrameCallback(hideWarmup);
+      } else {
+        oracleBgVideo.addEventListener("timeupdate", hideWarmup, { once: true });
+      }
+      // Failsafe: if the video never presents (watchdog keeps retrying), don't pulse
+      // "warming up" forever — the poster still is the backdrop.
+      setTimeout(hideWarmup, 20000);
     }
   }
 

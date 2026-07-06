@@ -154,10 +154,47 @@ body.reveal-screen-shake #oracleView {
 .oracle-bg-video {
   /* Oracle page background is now the looping MP4 (procedural starfield removed).
      Full opacity, sits behind the orb/stage (z-index 0). Keep it visible by default:
-     iOS can miss early media events, and a hidden fullscreen video reads as a dead page. */
+     iOS can miss early media events, and a hidden fullscreen video reads as a dead page.
+     The poster attribute (first frame of the loop) paints instantly on Android WebView,
+     which otherwise shows Chromium's grey play-button placeholder until first decode. */
   z-index: 0;
   --video-visible-opacity: 1;
   transition: opacity 400ms ease;
+}
+
+#oracleBgWarmup {
+  /* Oracle bg warm-up indicator (2026-07-06 Retroid): sits directly over the bg video
+     (same fixed/z-index layer, later in DOM) while the decoder spins up. The poster
+     already provides the visual backdrop; this is just the pulsing caption. Hidden by
+     script.js on the first actually-presented video frame. */
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 22px);
+  opacity: 1;
+  transition: opacity 600ms ease;
+}
+
+#oracleBgWarmup.warmup-done {
+  opacity: 0;
+}
+
+#oracleBgWarmup .warmup-pip {
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(190, 205, 255, 0.75);
+  text-shadow: 0 0 12px rgba(90, 120, 255, 0.55);
+  animation: warmupPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes warmupPulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
 }
 
 .stage {

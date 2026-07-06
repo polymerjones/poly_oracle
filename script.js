@@ -223,7 +223,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-06 15:58";
+const BUILD_TS = "2026-07-06 16:42";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -4476,6 +4476,7 @@ function init() {
   // #galaxyCanvas element) are gone; the gameplay level-video stack is unaffected.
   runStartupStep("initGalaxyCanvas", initGalaxyCanvas);
   runStartupStep("initBackgroundVideos", initBackgroundVideos);
+  runStartupStep("warmRevealFxVideo", warmRevealFxVideo);
   runStartupStep("applyTheme", applyTheme);
   runStartupStep("buildPackSelect", buildPackSelect);
   runStartupStep("warmVoices", warmVoices);
@@ -5471,6 +5472,81 @@ function lerp(a, b, t) {
 
 function getCrystalOverlay() {
   return revealFxVideo || document.getElementById("crystalOverlayVideo");
+}
+
+// 2026-07-06 (Retroid playtest): shared hardening for on-demand <video> elements (crystal-ball
+// reveal FX, training plasma-demo overlay — the oracle bg has its own watchdog controller).
+// Android WebView's first fetch/decode of a media file can fail outright (startup-race
+// MediaError 4 / NETWORK_NO_SOURCE), and Chromium then paints a grey broken-media glyph where
+// the video sits. Two defenses: (a) a transparent 1px poster suppresses the glyph, so worst
+// case is "no effect" instead of "missing asset"; (b) a persistent error listener re-runs
+// load() with backoff — play() alone never retries a failed source. This complements (not
+// replaces) the one-shot 900ms first-play nudges, which handle the stalled-decode mode.
+// NOTE: function-scoped constants only — this is called from init(), which runs mid-module,
+// so a top-level const declared after init() would still be in its TDZ here.
+function attachVideoSelfHeal(video) {
+  if (!video || video._selfHealAttached) return;
+  video._selfHealAttached = true;
+  if (!video.getAttribute("poster")) {
+    // 1x1 transparent PNG
+    video.setAttribute(
+      "poster",
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=",
+    );
+  }
+  let retries = 0;
+  let wantsPlay = false; // tracks caller intent: 'play' fires on any play() call, 'pause' only on explicit pause()
+  video.addEventListener("play", () => { wantsPlay = true; });
+  video.addEventListener("pause", () => { wantsPlay = false; });
+  video.addEventListener("loadeddata", () => { retries = 0; });
+  video.addEventListener("error", () => {
+    // No src attribute = intentionally detached (in-game teardown), not a failure.
+    if (!video.getAttribute("src")) return;
+    if (retries >= 5) return;
+    retries += 1;
+    setTimeout(() => {
+      if (!video.getAttribute("src")) return;
+      try { video.load(); } catch { /* ignore */ }
+      if (wantsPlay) video.play().catch(() => {});
+    }, 600 * retries);
+  });
+}
+
+// 2026-07-06 (Retroid playtest): the first Reveal showed the broken-media glyph — with the old
+// setup the very first play() did the cold fetch+decode, which is exactly the Android WebView
+// failure window (same startup-fetch race as the oracle bg). This step warms the fetch shortly
+// after startup and arms the self-heal so the video is ready before the user presses Reveal.
+// SEQUENCING MATTERS (CDP-verified on the emulator): any parser-driven preload on this element
+// (even preload="metadata" — Chromium spins up the media pipeline for it before init() runs)
+// won the WebView's scarce media-decoder slot and permanently starved the visible oracle bg
+// (every watchdog reload re-failed with MediaError 4 while the idle crystal held the decoder).
+// index.html must stay preload="none"; this warm — gated on the bg's first actually-presented
+// frame — is the only thing allowed to start the crystal fetch. Both pipelines coexist fine
+// once the bg owns its decoder.
+function warmRevealFxVideo() {
+  const video = getCrystalOverlay();
+  if (!video) return;
+  attachVideoSelfHeal(video);
+  let warmed = false;
+  const warm = () => {
+    if (warmed) return;
+    warmed = true;
+    video.preload = "metadata";
+    // Don't abort a fetch that's already in flight (networkState 2 = LOADING).
+    if (video.readyState === 0 && video.networkState !== 2) {
+      try { video.load(); } catch { /* ignore */ }
+    }
+  };
+  if (
+    oracleBgVideo &&
+    !prefersReducedMotion &&
+    typeof oracleBgVideo.requestVideoFrameCallback === "function"
+  ) {
+    oracleBgVideo.requestVideoFrameCallback(warm);
+    setTimeout(warm, 6000); // failsafe: bg never presents (its own watchdog keeps retrying)
+  } else {
+    setTimeout(warm, 1500);
+  }
 }
 
 async function startCrystalOverlay() {
@@ -6762,8 +6838,29 @@ function pickDifferentRandomVoiceName(excludeVoice = "") {
 
 function resolvePrimaryVoiceName() {
   if (state.selectedVoice) return state.selectedVoice;
+  // 2026-07-06 (Retroid playtest): don't fall back to voices[0] — on Android that's the
+  // female engine default, and the first Reveal can beat populateVoices()' load() (which
+  // is what sets state.selectedVoice to the male preferred) when the TTS engine binds
+  // late. Resolve through the same preferred-voice policy so the very first utterance
+  // already speaks with the default male voice.
   const voices = getVoiceCatalog();
-  return voices[0] ? getVoiceId(voices[0]) : "";
+  const preferred = voices.length ? pickPreferredVoice(voices) : null;
+  return preferred ? getVoiceId(preferred) : "";
+}
+
+// Default-voice policy, shared by the settings picker (populateVoices) and the
+// first-utterance fallback (resolvePrimaryVoiceName): iOS/web Daniel first, then the
+// known male Android variants, then any English voice.
+function pickPreferredVoice(voices) {
+  return (
+    voices.find((voice) => voice.name === "Daniel" && voice.lang === "en-GB") ||
+    voices.find((voice) => voice.name === "Daniel") ||
+    pickAndroidMaleVoice(voices) ||
+    voices.find((voice) => /en-GB/i.test(voice.lang)) ||
+    voices.find((voice) => /en/i.test(voice.lang)) ||
+    voices[0] ||
+    null
+  );
 }
 
 function populateVoices() {
@@ -6795,13 +6892,7 @@ function populateVoices() {
       return;
     }
 
-    const preferred =
-      voices.find((voice) => voice.name === "Daniel" && voice.lang === "en-GB") ||
-      voices.find((voice) => voice.name === "Daniel") ||
-      pickAndroidMaleVoice(voices) ||
-      voices.find((voice) => /en-GB/i.test(voice.lang)) ||
-      voices.find((voice) => /en/i.test(voice.lang)) ||
-      voices[0];
+    const preferred = pickPreferredVoice(voices);
 
     const currentExists = voices.some((voice) => getVoiceId(voice) === state.selectedVoice);
     if (!state.userVoiceOverride || !currentExists) {
@@ -7510,6 +7601,11 @@ function makeId() {
 }
 
 function initBackgroundVideos() {
+  // 2026-07-06 (Retroid playtest): error self-heal on the oracle bg too. Its watchdog already
+  // retries failed loads, but only while the controller is started — this also catches a failed
+  // (re)load in the windows in between, e.g. re-arming when returning from the game menu. The
+  // jpg poster (index.html) keeps the broken-media glyph suppressed throughout.
+  attachVideoSelfHeal(oracleBgVideo);
   oracleBgController = createLoopVideoController(oracleBgVideo);
 
   // FIXED 2026-06-08: fade in oracle bg video after first frame to prevent black flash
@@ -16901,6 +16997,10 @@ function initGalaxyCanvas() {
     v.id = "tutorialDemoOverlay";
     // 2026-07-06: H.264 mp4 (was HEVC .mov) — Android WebView can't decode the QuickTime original.
     v.src = "assets/video/plasma_net_demonstration_overlay.mp4";
+    // 2026-07-06 (Retroid playtest): the first show painted the broken-media glyph when the cold
+    // fetch failed — transparent poster + persistent load() retry, same as the crystal-ball video.
+    attachVideoSelfHeal(v);
+    v.preload = "auto";
     v.muted = true;
     v.loop = true;
     v.playsInline = true;

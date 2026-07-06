@@ -135,6 +135,12 @@ function lockPortraitOrientation() {
 }
 document.addEventListener("DOMContentLoaded", lockPortraitOrientation);
 document.addEventListener("DOMContentLoaded", () => {
+  // Deploy-verification stamp: hidden for release builds. Set localStorage
+  // poly_oracle_show_build = "1" (once per dev device, via Safari Web Inspector)
+  // to show it. Not tied to poly_oracle_debug_taps — that key also outlines every element.
+  try {
+    if (localStorage.getItem("poly_oracle_show_build") !== "1") return;
+  } catch { return; }
   const _bel = document.createElement("div");
   _bel.textContent = "BUILD " + BUILD_TS;
   _bel.style.cssText = "position:fixed;bottom:6px;left:8px;font-family:monospace;font-size:10px;color:rgba(0,255,180,0.55);pointer-events:none;z-index:99999;";
@@ -184,7 +190,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-05 17:50";
+const BUILD_TS = "2026-07-06 09:46";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -9833,7 +9839,7 @@ function initGalaxyCanvas() {
   const pendingExplosions = []; // entries: { mine, source: "landmine" | "placed" }
   const MINE_CHAIN_PER_FRAME = 2;
   let missileImpactFlash = null; // { x, y, start } localized impact flash, drawn in drawMissileFx
-  let missileForceSpawnedThisLevel = false; // DEBUG: revert before release
+  let missileForceSpawnedThisLevel = false; // DECIDED 2026-07-06: one missile drops at every level start (ships as-is)
   let pulseForceSpawnedThisLevel = 0; // 2026-07-01: Pulse Cannon drops placed this level (see SECOND_PULSE_LEVELS)
   // 2026-06-16: per-level emergency timer drop — on the listed levels, when the clock first
   // dips under 20s with no timer powerup on screen, force one out (reset in clearGameplayEntities).
@@ -9850,7 +9856,7 @@ function initGalaxyCanvas() {
   let appliedSpeedEscalation = 1;
   // missile blast = 50% of the bomb's full blast radius (explodeMineEntity uses 700)
   const MISSILE_BLAST_RADIUS = 350;
-  // DEBUG: revert before release — missile unlocks at level >= 5 (currently >= 1)
+  // DECIDED 2026-07-06: missile available from level 1 (ships as-is; was planned as level >= 5)
   const missileUnlocked = (level) => level >= 1;
   // 2026-07-01: Pulse Cannon unlocks at level >= 5 (drop to >= 1 temporarily to test on low levels).
   const pulseUnlocked = (level) => level >= 5;
@@ -11187,8 +11193,8 @@ function initGalaxyCanvas() {
     const volume = (ARCADE_LEVELS.find((l) => l.level === levelNum)?.musicVolume || 1) * 1.08;
     audioEngine.playMusic(url, url, { crossfadeMs: 250, volume });
     const nextUrl = getMusicForLevel(levelNum + 1);
-    // 2026-06-26 EXPERIMENT: also skip the boss-music decode prefetch at L9 so the boss-tier
-    // lookahead is fully off for this test (decoded at L10 entry instead). // DEBUG: revert before release
+    // 2026-06-26 (permanent): also skip the boss-music decode prefetch at L9 so the boss-tier
+    // lookahead is fully off (decoded at L10 entry instead) — see SKIP_BOSS_LOOKAHEAD.
     if (nextUrl && nextUrl !== url && !(SKIP_BOSS_LOOKAHEAD && levelNum + 1 >= 10)) {
       audioEngine.loadMusicBuffer(nextUrl).catch(() => {});
     }
@@ -11655,10 +11661,10 @@ function initGalaxyCanvas() {
     const key = bgKeyForLevel(levelNum);
     setGalaxyBackgroundKey(key, { fadeMs: 450, fadeInSeconds: 20 });
     const nextKey = bgKeyForLevel(levelNum + 1);
-    // 2026-06-26 EXPERIMENT (SKIP_BOSS_LOOKAHEAD): the L9→L10 boss-video preload spins up an extra
+    // 2026-06-26 (permanent, SKIP_BOSS_LOOKAHEAD): the L9→L10 boss-video preload spins up an extra
     // hardware video decoder (27s 720p, preload=auto) on top of the live bg + oracle videos — the
-    // suspected cause of the render-server crash / ~12s WebContent stall at L9 entry. Skip the
-    // boss-tier lookahead; the boss bg loads at L10 entry instead. // DEBUG: revert before release
+    // cause of the render-server crash / ~12s WebContent stall at L9 entry. Skip the boss-tier
+    // lookahead; the boss bg loads at L10 entry instead.
     if (nextKey && nextKey !== key && !(SKIP_BOSS_LOOKAHEAD && nextKey === "L10")) {
       preloadGalaxyBackgroundKey(nextKey);
     }
@@ -14962,11 +14968,11 @@ function initGalaxyCanvas() {
   // entry it records (a) the synchronous cost of each suspect phase inside startLevel and
   // (b) the worst single frame delta in the WINDOW_MS after entry — a ~10s WKWebView freeze
   // shows up as one giant rawDt on the first frame after the app un-stalls. The summary is
-  // painted just above the BUILD stamp so it's readable straight off the iPad. Flip
-  // FREEZE_DIAG=false to remove once the L9 freeze is pinned. // DEBUG: revert before release
+  // painted just above the BUILD stamp so it's readable straight off the iPad.
   const FREEZE_DIAG = false; // 2026-06-26: freezes resolved, on-screen worst-Δ probe hidden (flip true to re-arm)
-  // 2026-06-26 EXPERIMENT: skip the L9→L10 boss-tier lookahead preload (boss video + boss music)
-  // to test whether that resource spike is the L9-entry render-server crash. // DEBUG: revert before release
+  // 2026-06-26 (permanent as of 2026-07-06): skip the L9→L10 boss-tier lookahead preload (boss
+  // video + boss music). The extra hardware video decoder that preload spun up was the resource
+  // spike behind the L9-entry render-server crash; the boss bg/music load at L10 entry instead.
   const SKIP_BOSS_LOOKAHEAD = true;
   // Worst frame is tracked for the WHOLE level (until the next entry), repainted live on every
   // new worst, so a freeze that starts seconds in and lasts ~10s can never slip past a fixed
@@ -15023,7 +15029,7 @@ function initGalaxyCanvas() {
   //   split=X.Xms  → the synchronous destruction work is the cost (particles/children).
   //   worstΔ big @+0ms, split small → the SAME frame's DRAW (first sprite/particle GPU upload) is it.
   //   worstΔ big @+later → a deferred/async cost landed after the kill (image/SFX decode finishing).
-  // Re-arms every clearGameplayEntities (each training/level restart). // DEBUG: revert before release
+  // Re-arms every clearGameplayEntities (each training/level restart). Flip true to re-arm.
   const DEBUG_FIRSTKILL = false;
   const FK_WINDOW_MS = 2000;
   const _fk = { armed: false, done: false, phaseTaken: false, t0: 0, splitMs: 0, worstDt: 0, worstAt: 0 };
@@ -18501,9 +18507,9 @@ function initGalaxyCanvas() {
         }
 
         // 2026-06-10: periodically spawn a collectible powerup (weighted random type).
-        // Progressive introduction — no powerups before level 4. Spawn zone keeps clear of
-        // the top HUD (140px) and the commander portrait/comm box (160px).
-        // DEBUG: revert before release — gate is normally cfg.level >= 4
+        // DECIDED 2026-07-06: powerups drop from level 1 (ships as-is; the planned >= 4
+        // progressive introduction was dropped). Spawn zone keeps clear of the top HUD
+        // (140px) and the commander portrait/comm box (160px).
         // 2026-06-16: while the player holds a missile or one is in flight, suppress ONLY a new
         // missile spawn — not the whole powerup system. Previously missileBusy gated this entire
         // block, so once a missile was collected (and the debug force-spawn drops one every level)
@@ -18564,8 +18570,8 @@ function initGalaxyCanvas() {
           }
         }
 
-        // DEBUG: revert before release — force one missile powerup at the start of each level
-        // so the homing missile is easy to test (mirrors the goldbars force-spawn below).
+        // DECIDED 2026-07-06: one guaranteed missile powerup at the start of each level (ships
+        // as-is — began as a test hook, kept as design).
         if (!missileForceSpawnedThisLevel && elapsedMs >= LEVEL_START_SPAWN_DELAY_MS
             && missileUnlocked(cfg.level) && !missileBusy
             && (!cfg.powerupOverride || cfg.powerupOverride.includes("missile"))

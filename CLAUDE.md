@@ -10,7 +10,9 @@ node --check script.js && npm run prepare:web
 ```
 
 Bump `BUILD_TS` in `script.js` whenever shipping a build — the in-game bottom-left
-stamp is how deploys are verified.
+stamp is how deploys are verified. Since 2026-07-06 the stamp is hidden by default
+(release builds show nothing): set `localStorage poly_oracle_show_build = "1"` once
+per dev device (Safari Web Inspector console) to show it.
 
 ## Session hygiene (cost control)
 
@@ -34,16 +36,26 @@ Every item below must be resolved before App Store submission:
 - [x] `DEBUG_FORCE_LEVEL_SELECT` → ✅ set to `false` 2026-07-05. Level Select now gates on
       `isLevelSelectUnlocked()` (beat the game, or the Oracle-orb cheat: 3 reality shifts in one
       session — ~60 orb taps — permanently unlocks via `poly_oracle_cheat_levelselect`)
-- [ ] Powerup level gate → restore to `cfg.level >= 4` (currently `>= 1` for freeze testing)
-- [ ] Powerup weights → restore snowflake 10 / goldbars → 25 (`POWERUP_WEIGHTS`; goldbars dropped 5 for the missile's 15)
-- [ ] Remove forced goldbars spawn in the level's final 15s (`goldbarsForceSpawnedThisLevel`)
-- [ ] Missile level gate → restore `missileUnlocked` to `level >= 5` (currently `>= 1`)
-- [ ] Remove forced missile spawn at level start (`missileForceSpawnedThisLevel`)
+- [x] Powerup level gate → ✅ DECIDED 2026-07-06: **powerups ship as they are** — gate stays
+      `cfg.level >= 1` (the planned `>= 4` progressive introduction was dropped)
+- [x] Powerup weights → ✅ DECIDED 2026-07-06: current `POWERUP_WEIGHTS` ship as-is
+      (goldbars 25, snowflake 22)
+- [x] Forced goldbars spawn → ✅ obsolete 2026-07-06: `goldbarsForceSpawnedThisLevel` no longer
+      exists in the code (goldbars spawns are per-level `cfg.guaranteedSpawn` + combo reward)
+- [x] Missile level gate → ✅ DECIDED 2026-07-06: `missileUnlocked` stays `level >= 1` (ship as-is)
+- [x] Forced missile spawn at level start → ✅ DECIDED 2026-07-06: keep — one guaranteed missile
+      per level is design now (`missileForceSpawnedThisLevel`)
 - [x] Pulse Cannon gate → ✅ DECIDED 2026-07-05: **keep it on every level** (ship as-is).
       `pulseUnlocked` stays `level >= 1`, every level force-spawns one Pulse Cannon, plus a
       second later drop on `SECOND_PULSE_LEVELS`. No code change needed.
-- [ ] Search script.js for `DEBUG: revert before release` and resolve **all** hits
-- [ ] Verify `hasBeatenGame()` has no overrides
+- [x] `DEBUG: revert before release` hits → ✅ 2026-07-06: all resolved, zero hits remain
+      (comments reworded to their shipped decisions; `SKIP_BOSS_LOOKAHEAD=true` is permanent —
+      it's the L9 render-server-crash fix)
+- [x] Verify `hasBeatenGame()` has no overrides → ✅ verified 2026-07-06: reads
+      `poly-oracle-game-beaten` from localStorage honestly, no force-true. Fresh-install Level
+      Select lock verified via `isLevelSelectUnlocked()` (all three unlock paths localStorage-backed)
+- [x] Hide the BUILD stamp → ✅ 2026-07-06: gated behind `poly_oracle_show_build = "1"`
+      (App Store users never see it; see note at top of this file)
 
 ### Levels 12-15 (second act)
 

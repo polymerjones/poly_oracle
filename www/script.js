@@ -145,6 +145,15 @@ function installAndroidBackButtonHandler() {
   } catch { /* back-button handling is Android-native only */ }
 }
 document.addEventListener("DOMContentLoaded", installAndroidBackButtonHandler);
+// 2026-07-06 (Android): hide the status bar for iOS-parity immersive fullscreen.
+function hideAndroidStatusBar() {
+  try {
+    if (globalThis.Capacitor?.getPlatform?.() !== "android") return;
+    const SB = globalThis.Capacitor?.Plugins?.StatusBar;
+    SB?.hide?.()?.catch?.(() => {});
+  } catch { /* status bar plugin is Android-native only here */ }
+}
+document.addEventListener("DOMContentLoaded", hideAndroidStatusBar);
 // Android native-TTS voice cache (see warmNativeTtsVoices). Declared up here because
 // init() runs mid-module and the voice-catalog path reads these during startup.
 let nativeTtsVoices = [];
@@ -205,7 +214,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-06 11:02";
+const BUILD_TS = "2026-07-06 11:47";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -5478,6 +5487,15 @@ async function startCrystalOverlay() {
   } catch {
     // ignore autoplay errors
   }
+  // 2026-07-06: Android WebView can stall a first play at t=0 (buffered, "playing", but no
+  // frame ever decodes) — the cause of the missing reveal bg on the first reveal only.
+  // Nudge with a tiny seek if no frames advanced shortly after play().
+  setTimeout(() => {
+    if (!video.paused && video.currentTime === 0 && video.readyState < 3) {
+      try { video.currentTime = 0.05; } catch { /* ignore */ }
+      video.play().catch(() => {});
+    }
+  }, 900);
 }
 
 function stopCrystalOverlay(fadeMs = 620) {
@@ -6757,6 +6775,7 @@ function populateVoices() {
     const preferred =
       voices.find((voice) => voice.name === "Daniel" && voice.lang === "en-GB") ||
       voices.find((voice) => voice.name === "Daniel") ||
+      pickAndroidMaleVoice(voices) ||
       voices.find((voice) => /en-GB/i.test(voice.lang)) ||
       voices.find((voice) => /en/i.test(voice.lang)) ||
       voices[0];
@@ -6775,6 +6794,18 @@ function populateVoices() {
   if ("speechSynthesis" in window) window.speechSynthesis.onvoiceschanged = load;
   if (nativeTts) warmNativeTtsVoices().then(load);
   load();
+}
+
+// Android default voice: Google TTS voice names are coded (no "Daniel"), and the first en
+// voice is female — prefer these known male en variants so the Oracle defaults older/male.
+function pickAndroidMaleVoice(voices) {
+  if (globalThis.Capacitor?.getPlatform?.() !== "android") return null;
+  const MALE_VOICE_KEYS = ["en-gb-x-gbb", "en-gb-x-gbd", "en-gb-x-rjs", "en-us-x-tpd", "en-us-x-iod"];
+  for (const key of MALE_VOICE_KEYS) {
+    const hits = voices.filter((voice) => (voice.name || "").toLowerCase().includes(key));
+    if (hits.length) return hits.find((voice) => /local/i.test(voice.name)) || hits[0];
+  }
+  return null;
 }
 
 function updatePersonaChip() {
@@ -6867,7 +6898,9 @@ async function speakNativeText(text, { rate = 1, pitch = 1.2, voiceName = "" } =
       lang: selectedVoice?.lang || "en-US",
       voice: voiceIndex >= 0 ? voiceIndex : undefined,
       rate: Math.max(0.2, Math.min(2, rate)),
-      pitch: Math.max(0.5, Math.min(2, pitch)),
+      // Caller pitches (1.1–1.2) were tuned for iOS Daniel; Google TTS reads them squeaky —
+      // trim toward 1.0 for the older/deeper Oracle read (2026-07-06 playtest note).
+      pitch: Math.max(0.5, Math.min(2, pitch * 0.85)),
       volume: state.whisper ? 0.5 : 1,
       category: "ambient",
     });
@@ -7558,10 +7591,18 @@ function createLoopVideoController(video) {
       video.loop = true;
       video.play().catch(() => {});
       if (watchdog) clearInterval(watchdog);
+      let lastTime = -1;
       watchdog = setInterval(() => {
         if (video.paused) {
           video.play().catch(() => {});
+        } else if (video.currentTime === lastTime && video.readyState < 3) {
+          // 2026-07-06 Android WebView stall: reports playing but never decodes a frame
+          // (stuck at t=0 with data buffered, readyState 1, no MediaError). A tiny seek
+          // kicks the decode pipeline alive. Never fires on a healthily-advancing video.
+          try { video.currentTime = video.currentTime + 0.05; } catch { /* ignore */ }
+          video.play().catch(() => {});
         }
+        lastTime = video.currentTime;
       }, 1800);
     },
     stop() {
@@ -16789,6 +16830,13 @@ function initGalaxyCanvas() {
     v.style.display = "block";
     _positionDemoOverlay();
     try { v.currentTime = 0; const p = v.play(); if (p && p.catch) p.catch(() => {}); } catch {}
+    // 2026-07-06: same Android WebView first-play stall nudge as the oracle/crystal videos.
+    setTimeout(() => {
+      if (!v.paused && v.currentTime === 0 && v.readyState < 3) {
+        try { v.currentTime = 0.05; } catch { /* ignore */ }
+        v.play().catch(() => {});
+      }
+    }, 900);
     requestAnimationFrame(() => requestAnimationFrame(() => { v.style.opacity = "1"; }));
   }
   function hidePlasmaDemoOverlay() {

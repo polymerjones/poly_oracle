@@ -134,6 +134,21 @@ function lockPortraitOrientation() {
   } catch { /* orientation lock is optional outside native */ }
 }
 document.addEventListener("DOMContentLoaded", lockPortraitOrientation);
+// 2026-07-06 (Android): hardware back would otherwise finish the activity and destroy a run
+// mid-game — minimize to background instead (same as Home), so state survives.
+function installAndroidBackButtonHandler() {
+  try {
+    if (globalThis.Capacitor?.getPlatform?.() !== "android") return;
+    const App = globalThis.Capacitor?.Plugins?.App;
+    if (!App?.addListener) return;
+    App.addListener("backButton", () => { App.minimizeApp?.(); });
+  } catch { /* back-button handling is Android-native only */ }
+}
+document.addEventListener("DOMContentLoaded", installAndroidBackButtonHandler);
+// Android native-TTS voice cache (see warmNativeTtsVoices). Declared up here because
+// init() runs mid-module and the voice-catalog path reads these during startup.
+let nativeTtsVoices = [];
+let nativeTtsVoicesLoading = null;
 document.addEventListener("DOMContentLoaded", () => {
   // Deploy-verification stamp: hidden for release builds. Set localStorage
   // poly_oracle_show_build = "1" (once per dev device, via Safari Web Inspector)
@@ -190,7 +205,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-06 09:46";
+const BUILD_TS = "2026-07-06 11:02";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6657,6 +6672,7 @@ function playPixySound(intensity) {
 }
 
 function warmVoices() {
+  warmNativeTtsVoices();
   if (!("speechSynthesis" in window)) return;
   window.speechSynthesis.getVoices();
 }
@@ -6666,14 +6682,38 @@ function getWebVoices() {
   return window.speechSynthesis.getVoices() || [];
 }
 
+// Android: the native TTS plugin exposes voices asynchronously; cache them once so the
+// synchronous voice-catalog callers (picker, random-voice reveals) can use them.
+// (nativeTtsVoices/-Loading are declared top-of-file: this runs from init(), which
+// executes mid-module — a let declared here would still be in its TDZ at that point.)
+function warmNativeTtsVoices() {
+  const plugin = getNativeTtsPlugin();
+  if (!plugin || typeof plugin.getSupportedVoices !== "function") return Promise.resolve([]);
+  if (nativeTtsVoices.length) return Promise.resolve(nativeTtsVoices);
+  if (!nativeTtsVoicesLoading) {
+    nativeTtsVoicesLoading = plugin.getSupportedVoices()
+      .then((result) => {
+        nativeTtsVoices = result?.voices || [];
+        return nativeTtsVoices;
+      })
+      .catch(() => []);
+  }
+  return nativeTtsVoicesLoading;
+}
+
+function getVoiceCatalog() {
+  const webVoices = getWebVoices();
+  return webVoices.length ? webVoices : nativeTtsVoices;
+}
+
 function pickRandomVoiceName() {
-  const voices = getWebVoices();
+  const voices = getVoiceCatalog();
   if (!voices.length) return "";
   return pick(voices).name;
 }
 
 function pickDifferentRandomVoiceName(excludeVoice = "") {
-  const voices = getWebVoices();
+  const voices = getVoiceCatalog();
   if (!voices.length) return "";
   const filtered = excludeVoice ? voices.filter((voice) => voice.name !== excludeVoice) : voices;
   const pool = filtered.length ? filtered : voices;
@@ -6682,21 +6722,21 @@ function pickDifferentRandomVoiceName(excludeVoice = "") {
 
 function resolvePrimaryVoiceName() {
   if (state.selectedVoice) return state.selectedVoice;
-  const voices = getWebVoices();
+  const voices = getVoiceCatalog();
   return voices[0]?.name || "";
 }
 
 function populateVoices() {
-  if (!("speechSynthesis" in window)) {
+  const nativeTts = getNativeTtsPlugin();
+  if (!("speechSynthesis" in window) && !nativeTts) {
     voiceSelect.innerHTML = "<option value=''>Voice unavailable</option>";
     voiceSelect.disabled = true;
     previewVoice.disabled = true;
     return;
   }
 
-  const synth = window.speechSynthesis;
   const load = () => {
-    const voices = getWebVoices();
+    const voices = getVoiceCatalog();
     voiceSelect.innerHTML = "";
 
     voices.forEach((voice) => {
@@ -6732,7 +6772,8 @@ function populateVoices() {
     saveState();
   };
 
-  synth.onvoiceschanged = load;
+  if ("speechSynthesis" in window) window.speechSynthesis.onvoiceschanged = load;
+  if (nativeTts) warmNativeTtsVoices().then(load);
   load();
 }
 
@@ -6815,13 +6856,16 @@ async function speakNativeText(text, { rate = 1, pitch = 1.2, voiceName = "" } =
 
   try {
     if (typeof plugin.stop === "function") await plugin.stop();
+    // Plugin API takes the voice as an index into getSupportedVoices(), not a name.
+    const voices = await warmNativeTtsVoices();
     const selectedVoiceName = voiceName || resolvePrimaryVoiceName();
-    const selectedVoice = getWebVoices().find((voice) => voice.name === selectedVoiceName);
+    const voiceIndex = voices.findIndex((voice) => voice.name === selectedVoiceName);
+    const selectedVoice = voiceIndex >= 0 ? voices[voiceIndex] : null;
 
     await plugin.speak({
       text,
       lang: selectedVoice?.lang || "en-US",
-      voice: selectedVoiceName || undefined,
+      voice: voiceIndex >= 0 ? voiceIndex : undefined,
       rate: Math.max(0.2, Math.min(2, rate)),
       pitch: Math.max(0.5, Math.min(2, pitch)),
       volume: state.whisper ? 0.5 : 1,
@@ -6879,6 +6923,9 @@ function getNativeTtsPlugin() {
   const cap = window.Capacitor;
   if (!cap || typeof cap.isNativePlatform !== "function") return null;
   if (!cap.isNativePlatform()) return null;
+  // Android WebView has no window.speechSynthesis, so native TTS is the only voice there.
+  // iOS stays on the shipped web-speech path even with the plugin pod installed.
+  if (cap.getPlatform?.() !== "android") return null;
 
   const plugin = cap?.Plugins?.TextToSpeech;
   return plugin && typeof plugin.speak === "function" ? plugin : null;
@@ -16707,7 +16754,8 @@ function initGalaxyCanvas() {
     if (_demoOverlayEl) return _demoOverlayEl;
     const v = document.createElement("video");
     v.id = "tutorialDemoOverlay";
-    v.src = "assets/video/plasma_net_demonstration_overlay.mov";
+    // 2026-07-06: H.264 mp4 (was HEVC .mov) — Android WebView can't decode the QuickTime original.
+    v.src = "assets/video/plasma_net_demonstration_overlay.mp4";
     v.muted = true;
     v.loop = true;
     v.playsInline = true;

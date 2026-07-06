@@ -10,6 +10,10 @@
     "contentInset": "never",
     "preferredContentMode": "mobile"
   },
+  "android": {
+    "backgroundColor": "#000000",
+    "allowMixedContent": false
+  },
   "plugins": {
     "SplashScreen": {
       "launchAutoHide": true,

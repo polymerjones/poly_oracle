@@ -1,0 +1,24 @@
+[
+  {
+    "name": "breathing-enabled",
+    "writes": {
+      "width": 65,
+      "height": 65
+    },
+    "width": 745,
+    "height": 598,
+    "cssWidth": "369.797px",
+    "visualWidth": 372.60260009765625
+  },
+  {
+    "name": "breathing-disabled",
+    "writes": {
+      "width": 0,
+      "height": 0
+    },
+    "width": 740,
+    "height": 594,
+    "cssWidth": "369.797px",
+    "visualWidth": 369.796875
+  }
+]

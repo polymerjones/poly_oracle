@@ -1,0 +1,77 @@
+{
+  "windowS": 5,
+  "sizeWrites": [
+    [
+      "(detached) <- drawFxSheetFrame (script.js?v=3.3:11008:28) < drawComboFxOverlay (script.js?v=3.3:11187:9)",
+      1
+    ],
+    [
+      "(detached) <- drawFxSheetFrame (script.js?v=3.3:11009:29) < drawComboFxOverlay (script.js?v=3.3:11187:9)",
+      1
+    ]
+  ],
+  "created": 0,
+  "createdStacks": [],
+  "gradients": [
+    [
+      "galaxyBgCanvas createRadialGradient <- galaxyBackground.js:409:21 < Array.forEach (<anonymous>)",
+      3672
+    ],
+    [
+      "galaxyBgCanvas createRadialGradient <- galaxyBackground.js:565:20 < Array.forEach (<anonymous>)",
+      1530
+    ],
+    [
+      "galaxyBgCanvas createRadialGradient <- drawPlanet (galaxyBackground.js:259:19) < galaxyBackground.js:583:9",
+      918
+    ],
+    [
+      "galaxyBgCanvas createRadialGradient <- drawPlanet (galaxyBackground.js:286:19) < galaxyBackground.js:583:9",
+      918
+    ],
+    [
+      "galaxyBgCanvas createRadialGradient <- drawPlanet (galaxyBackground.js:313:19) < galaxyBackground.js:583:9",
+      918
+    ],
+    [
+      "galaxyBgCanvas createRadialGradient <- drawGasCloud (galaxyBackground.js:369:19) < galaxyBackground.js:596:9",
+      612
+    ],
+    [
+      "galaxyBgCanvas createRadialGradient <- drawGasCloud (galaxyBackground.js:378:19) < galaxyBackground.js:596:9",
+      612
+    ],
+    [
+      "galaxyBgCanvas createRadialGradient <- drawGasCloud (galaxyBackground.js:388:19) < galaxyBackground.js:596:9",
+      612
+    ],
+    [
+      "(attached) createRadialGradient <- drawTapBlast (script.js?v=3.3:19190:23) < drawAndStepTapBlasts (script.js?v=3.3:19281:7)",
+      469
+    ],
+    [
+      "galaxyBgCanvas createRadialGradient <- frame (galaxyBackground.js:534:19)",
+      306
+    ],
+    [
+      "galaxyBgCanvas createRadialGradient <- drawGasCloud (galaxyBackground.js:357:21) < galaxyBackground.js:543:7",
+      306
+    ],
+    [
+      "galaxyBgCanvas createRadialGradient <- drawPlanet (galaxyBackground.js:259:19) < galaxyBackground.js:587:11",
+      306
+    ],
+    [
+      "galaxyBgCanvas createRadialGradient <- drawPlanet (galaxyBackground.js:277:21) < galaxyBackground.js:587:11",
+      306
+    ],
+    [
+      "galaxyBgCanvas createRadialGradient <- drawPlanet (galaxyBackground.js:286:19) < galaxyBackground.js:587:11",
+      306
+    ],
+    [
+      "galaxyBgCanvas createRadialGradient <- drawPlanet (galaxyBackground.js:313:19) < galaxyBackground.js:587:11",
+      306
+    ]
+  ]
+}

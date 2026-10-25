@@ -1,0 +1,13 @@
+{
+  "gameplay3s": {
+    "draws": 90,
+    "bgOps": 1440
+  },
+  "slotIdle3s": {
+    "draws": 90,
+    "bgOps": 1440
+  },
+  "slotActive": true,
+  "loopRunning": true,
+  "errors": []
+}

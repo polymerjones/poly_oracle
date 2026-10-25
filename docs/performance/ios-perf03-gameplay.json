@@ -1,0 +1,68 @@
+[
+  {
+    "process": "com.apple.WebKit.GPU (12369)",
+    "responsible": "launchd (1)",
+    "samples": 59,
+    "cpuMean": 36.54,
+    "cpuLast": 31.992319174,
+    "cpuMax": 69.814680356,
+    "memoryMiBStart": 61.6,
+    "memoryMiBEnd": 60.2,
+    "memoryMiBMax": 164.1
+  },
+  {
+    "process": "backboardd (73)",
+    "responsible": "launchd (1)",
+    "samples": 59,
+    "cpuMean": 46.02,
+    "cpuLast": 44.895872869,
+    "cpuMax": 62.038718812,
+    "memoryMiBStart": 214.6,
+    "memoryMiBEnd": 243.9,
+    "memoryMiBMax": 277.7
+  },
+  {
+    "process": "com.apple.WebKit.Networking (12367)",
+    "responsible": "launchd (1)",
+    "samples": 51,
+    "cpuMean": 0.05,
+    "cpuLast": 0.0,
+    "cpuMax": 0.141812481,
+    "memoryMiBStart": 7.9,
+    "memoryMiBEnd": 8.5,
+    "memoryMiBMax": 8.7
+  },
+  {
+    "process": "SpringBoard (37)",
+    "responsible": "launchd (1)",
+    "samples": 59,
+    "cpuMean": 2.96,
+    "cpuLast": 2.992582686,
+    "cpuMax": 7.988121719,
+    "memoryMiBStart": 171.3,
+    "memoryMiBEnd": 171.3,
+    "memoryMiBMax": 171.4
+  },
+  {
+    "process": "App (12366)",
+    "responsible": "launchd (1)",
+    "samples": 59,
+    "cpuMean": 7.12,
+    "cpuLast": 7.587363684,
+    "cpuMax": 10.334993908,
+    "memoryMiBStart": 13.8,
+    "memoryMiBEnd": 13.9,
+    "memoryMiBMax": 14.1
+  },
+  {
+    "process": "com.apple.WebKit.WebContent (12368)",
+    "responsible": "launchd (1)",
+    "samples": 59,
+    "cpuMean": 20.82,
+    "cpuLast": 19.678177339,
+    "cpuMax": 34.246093414,
+    "memoryMiBStart": 504.9,
+    "memoryMiBEnd": 556.4,
+    "memoryMiBMax": 617.1
+  }
+]

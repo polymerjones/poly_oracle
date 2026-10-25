@@ -1,0 +1,90 @@
+[
+  {
+    "process": "SpringBoard (37)",
+    "responsible": "launchd (1)",
+    "samples": 44,
+    "cpuMean": 0.19,
+    "cpuLast": 0.100053366,
+    "cpuMax": 0.759213363,
+    "memoryMiBStart": 171.7,
+    "memoryMiBEnd": 170.8,
+    "memoryMiBMax": 171.7
+  },
+  {
+    "process": "com.apple.WebKit.Networking (11703)",
+    "responsible": "launchd (1)",
+    "samples": 6,
+    "cpuMean": 0.0,
+    "cpuLast": 0.0,
+    "cpuMax": 0.000860151,
+    "memoryMiBStart": 10.3,
+    "memoryMiBEnd": 10.3,
+    "memoryMiBMax": 10.3
+  },
+  {
+    "process": "com.apple.WebKit.GPU (11805)",
+    "responsible": "launchd (1)",
+    "samples": 44,
+    "cpuMean": 18.03,
+    "cpuLast": 17.150927454,
+    "cpuMax": 19.268426314,
+    "memoryMiBStart": 29.4,
+    "memoryMiBEnd": 29.0,
+    "memoryMiBMax": 31.5
+  },
+  {
+    "process": "backboardd (73)",
+    "responsible": "launchd (1)",
+    "samples": 44,
+    "cpuMean": 48.51,
+    "cpuLast": 48.303880005,
+    "cpuMax": 52.583223382,
+    "memoryMiBStart": 237.8,
+    "memoryMiBEnd": 237.0,
+    "memoryMiBMax": 237.8
+  },
+  {
+    "process": "com.apple.WebKit.GPU (11811)",
+    "responsible": "launchd (1)",
+    "samples": 7,
+    "cpuMean": 0.0,
+    "cpuLast": 0.0,
+    "cpuMax": 0.002219421,
+    "memoryMiBStart": 4.2,
+    "memoryMiBEnd": 4.2,
+    "memoryMiBMax": 4.2
+  },
+  {
+    "process": "com.apple.WebKit.WebContent (11804)",
+    "responsible": "launchd (1)",
+    "samples": 44,
+    "cpuMean": 13.3,
+    "cpuLast": 12.95418589,
+    "cpuMax": 14.384713601,
+    "memoryMiBStart": 192.8,
+    "memoryMiBEnd": 190.9,
+    "memoryMiBMax": 194.4
+  },
+  {
+    "process": "App (11801)",
+    "responsible": "launchd (1)",
+    "samples": 44,
+    "cpuMean": 11.28,
+    "cpuLast": 11.057280153,
+    "cpuMax": 12.460370903,
+    "memoryMiBStart": 12.9,
+    "memoryMiBEnd": 12.8,
+    "memoryMiBMax": 12.9
+  },
+  {
+    "process": "com.apple.WebKit.Networking (11803)",
+    "responsible": "launchd (1)",
+    "samples": 22,
+    "cpuMean": 0.06,
+    "cpuLast": 0.064831746,
+    "cpuMax": 0.251490188,
+    "memoryMiBStart": 7.9,
+    "memoryMiBEnd": 7.8,
+    "memoryMiBMax": 7.9
+  }
+]

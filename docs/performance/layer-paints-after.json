@@ -1,0 +1,152 @@
+{
+  "runningAnimations": [
+    {
+      "name": "crosshairPulse",
+      "target": "#canvasCrosshair",
+      "props": [
+        "transform",
+        "opacity"
+      ],
+      "area": 847,
+      "visible": true,
+      "opacity": "0.999394"
+    },
+    {
+      "name": "levelTitleOut",
+      "target": "#levelTitleBanner",
+      "props": [
+        "opacity"
+      ],
+      "area": 9890,
+      "visible": true,
+      "opacity": "0.286922"
+    },
+    {
+      "name": "cmdStaticFlash",
+      "target": "#commanderStatic",
+      "props": [
+        "opacity"
+      ],
+      "area": 15625,
+      "visible": true,
+      "opacity": "0"
+    },
+    {
+      "name": "sigbarWave",
+      "target": "sigbar sigbar-active",
+      "props": [
+        "height"
+      ],
+      "area": 11,
+      "visible": true,
+      "opacity": "1"
+    },
+    {
+      "name": "sigbarWave",
+      "target": "sigbar sigbar-active",
+      "props": [
+        "height"
+      ],
+      "area": 32,
+      "visible": true,
+      "opacity": "1"
+    },
+    {
+      "name": "sigbarWave",
+      "target": "sigbar sigbar-active",
+      "props": [
+        "height"
+      ],
+      "area": 33,
+      "visible": true,
+      "opacity": "1"
+    },
+    {
+      "name": "sigbarWave",
+      "target": "sigbar sigbar-active",
+      "props": [
+        "height"
+      ],
+      "area": 23,
+      "visible": true,
+      "opacity": "1"
+    },
+    {
+      "name": "sigbarWave",
+      "target": "sigbar sigbar-active",
+      "props": [
+        "height"
+      ],
+      "area": 28,
+      "visible": true,
+      "opacity": "1"
+    },
+    {
+      "name": "plasmaModeParticles",
+      "target": "plasmaModeBtn__particles",
+      "props": [
+        "transform"
+      ],
+      "area": 1496,
+      "visible": true,
+      "opacity": "0.24"
+    },
+    {
+      "name": "plasmaModeCorePulse",
+      "target": "plasmaModeBtn__core",
+      "props": [
+        "filter"
+      ],
+      "area": 900,
+      "visible": true,
+      "opacity": "0.98"
+    }
+  ],
+  "paintedLayers": [],
+  "mutations5s": [
+    [
+      "#commanderTickerText childList",
+      29
+    ],
+    [
+      "#commanderImg attributes:src",
+      17
+    ],
+    [
+      "#bgTint attributes:style",
+      11
+    ],
+    [
+      "#hudGameTimer childList",
+      5
+    ],
+    [
+      "sigbar attributes:class",
+      5
+    ],
+    [
+      "sigbar sigbar-active attributes:class",
+      5
+    ],
+    [
+      "#commanderHUD attributes:class",
+      3
+    ],
+    [
+      "#commanderTicker attributes:class",
+      2
+    ],
+    [
+      "#hudMultiplier childList",
+      2
+    ],
+    [
+      "#levelTitleBanner attributes:class",
+      1
+    ],
+    [
+      "#levelTitleBanner attributes:aria-hidden",
+      1
+    ]
+  ]
+}

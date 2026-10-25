@@ -180,6 +180,10 @@ const pixiRenderer = (() => {
       app.renderer.background.alpha = 0;
 
       app.ticker.stop();
+      // draw() advances effect callbacks, then renders explicitly. PIXI registers
+      // Application.render on this ticker by default, which otherwise renders
+      // the whole stage a second time on every manual ticker.update().
+      app.ticker.remove(app.render, app);
       glowTexture = createGlowTexture(app, 32);
 
       const spriteKeys = {

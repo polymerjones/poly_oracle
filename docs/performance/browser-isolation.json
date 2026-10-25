@@ -1,0 +1,588 @@
+{
+  "environment": "Desktop headless Chromium, 430x932 DPR3; web path; 10s samples; RAF probe overhead included",
+  "errors": [],
+  "samples": [
+    {
+      "name": "oracle-idle",
+      "seconds": 10.001876000000266,
+      "taskMs": 415.937,
+      "scriptMs": 5.394,
+      "layoutMs": 1.4549999999999998,
+      "heap": 2779924,
+      "frames": {},
+      "animations": [
+        {
+          "name": "warmupPulse",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "titleSweep",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "titleSparklePop",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "titleSparklePop",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "arcadeFlameFlicker",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "arcadeOrbPulse",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "orbFloat",
+          "state": "running",
+          "id": "orb",
+          "tag": "DIV"
+        },
+        {
+          "name": "orbSpecSweep",
+          "state": "running",
+          "id": "orb",
+          "tag": "DIV"
+        }
+      ],
+      "videos": [
+        {
+          "id": "oracleBgVideo",
+          "paused": false,
+          "ready": 4
+        },
+        {
+          "id": "revealFxVideo",
+          "paused": true,
+          "ready": 4
+        },
+        {
+          "id": "bgA",
+          "paused": true,
+          "ready": 0
+        },
+        {
+          "id": "bgB",
+          "paused": true,
+          "ready": 0
+        }
+      ],
+      "visibleButtons": [
+        {
+          "id": "openGalaxy",
+          "text": ""
+        },
+        {
+          "id": "openSettings",
+          "text": ""
+        },
+        {
+          "id": "ask",
+          "text": "Reveal"
+        }
+      ]
+    },
+    {
+      "name": "oracle-no-warmup-pulse",
+      "seconds": 10.0024599999997,
+      "taskMs": 387.892,
+      "scriptMs": 4.16,
+      "layoutMs": 1.8450000000000002,
+      "heap": 3245384,
+      "frames": {},
+      "animations": [
+        {
+          "name": "titleSweep",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "titleSparklePop",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "titleSparklePop",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "arcadeFlameFlicker",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "arcadeOrbPulse",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "orbFloat",
+          "state": "running",
+          "id": "orb",
+          "tag": "DIV"
+        },
+        {
+          "name": "orbSpecSweep",
+          "state": "running",
+          "id": "orb",
+          "tag": "DIV"
+        }
+      ],
+      "videos": [
+        {
+          "id": "oracleBgVideo",
+          "paused": false,
+          "ready": 4
+        },
+        {
+          "id": "revealFxVideo",
+          "paused": true,
+          "ready": 4
+        },
+        {
+          "id": "bgA",
+          "paused": true,
+          "ready": 0
+        },
+        {
+          "id": "bgB",
+          "paused": true,
+          "ready": 0
+        }
+      ],
+      "visibleButtons": [
+        {
+          "id": "openGalaxy",
+          "text": ""
+        },
+        {
+          "id": "openSettings",
+          "text": ""
+        },
+        {
+          "id": "ask",
+          "text": "Reveal"
+        }
+      ]
+    },
+    {
+      "name": "oracle-no-video",
+      "seconds": 10.001702999999907,
+      "taskMs": 506.0760000000001,
+      "scriptMs": 4.724999999999998,
+      "layoutMs": 2.614,
+      "heap": 3254756,
+      "frames": {},
+      "animations": [
+        {
+          "name": "titleSweep",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "titleSparklePop",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "arcadeFlameFlicker",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "arcadeOrbPulse",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "orbFloat",
+          "state": "running",
+          "id": "orb",
+          "tag": "DIV"
+        },
+        {
+          "name": "orbSpecSweep",
+          "state": "running",
+          "id": "orb",
+          "tag": "DIV"
+        }
+      ],
+      "videos": [
+        {
+          "id": "oracleBgVideo",
+          "paused": false,
+          "ready": 4
+        },
+        {
+          "id": "revealFxVideo",
+          "paused": true,
+          "ready": 4
+        },
+        {
+          "id": "bgA",
+          "paused": true,
+          "ready": 0
+        },
+        {
+          "id": "bgB",
+          "paused": true,
+          "ready": 0
+        }
+      ],
+      "visibleButtons": [
+        {
+          "id": "openGalaxy",
+          "text": ""
+        },
+        {
+          "id": "openSettings",
+          "text": ""
+        },
+        {
+          "id": "ask",
+          "text": "Reveal"
+        }
+      ]
+    },
+    {
+      "name": "stroids-menu",
+      "seconds": 10.002532999999858,
+      "taskMs": 569.2609999999997,
+      "scriptMs": 256.10499999999996,
+      "layoutMs": 11.043000000000001,
+      "heap": 4900336,
+      "frames": {
+        "idleFrame": 600,
+        "frame": 600
+      },
+      "animations": [
+        {
+          "name": "menuLogoBreathe",
+          "state": "running",
+          "id": "menuLogoCanvas",
+          "tag": "CANVAS"
+        }
+      ],
+      "videos": [
+        {
+          "id": "oracleBgVideo",
+          "paused": true,
+          "ready": 4
+        },
+        {
+          "id": "revealFxVideo",
+          "paused": true,
+          "ready": 0
+        },
+        {
+          "id": "bgA",
+          "paused": true,
+          "ready": 0
+        },
+        {
+          "id": "bgB",
+          "paused": true,
+          "ready": 0
+        }
+      ],
+      "visibleButtons": [
+        {
+          "id": "btnArcade",
+          "text": "Arcade"
+        },
+        {
+          "id": "btnArcadeStunt",
+          "text": "Stunt Mode"
+        },
+        {
+          "id": "btnScores",
+          "text": "Scores"
+        },
+        {
+          "id": "btnPractice",
+          "text": "Practice"
+        },
+        {
+          "id": "btnGalaxyBack",
+          "text": "← Oracle"
+        }
+      ]
+    },
+    {
+      "name": "oracle-return",
+      "seconds": 10.001648999999816,
+      "taskMs": 507.9720000000001,
+      "scriptMs": 5.2639999999999905,
+      "layoutMs": 3.105,
+      "heap": 4472188,
+      "frames": {},
+      "animations": [
+        {
+          "name": "titleSweep",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "titleSparklePop",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "titleSparklePop",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "arcadeFlameFlicker",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "arcadeOrbPulse",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "orbFloat",
+          "state": "running",
+          "id": "orb",
+          "tag": "DIV"
+        },
+        {
+          "name": "orbSpecSweep",
+          "state": "running",
+          "id": "orb",
+          "tag": "DIV"
+        }
+      ],
+      "videos": [
+        {
+          "id": "oracleBgVideo",
+          "paused": false,
+          "ready": 4
+        },
+        {
+          "id": "revealFxVideo",
+          "paused": true,
+          "ready": 4
+        },
+        {
+          "id": "bgA",
+          "paused": true,
+          "ready": 0
+        },
+        {
+          "id": "bgB",
+          "paused": true,
+          "ready": 0
+        }
+      ],
+      "visibleButtons": [
+        {
+          "id": "openGalaxy",
+          "text": ""
+        },
+        {
+          "id": "openSettings",
+          "text": ""
+        },
+        {
+          "id": "ask",
+          "text": "Reveal"
+        }
+      ]
+    },
+    {
+      "name": "arcade-start",
+      "seconds": 10.0022170000002,
+      "taskMs": 1446.7470000000003,
+      "scriptMs": 837.9820000000002,
+      "layoutMs": 102.79700000000001,
+      "heap": 18519628,
+      "frames": {
+        "frame": 1200,
+        "anonymous": 600
+      },
+      "animations": [
+        {
+          "name": "crosshairPulse",
+          "state": "running",
+          "id": "canvasCrosshair",
+          "tag": "DIV"
+        },
+        {
+          "name": "cmdStaticFlash",
+          "state": "running",
+          "id": "commanderStatic",
+          "tag": "DIV"
+        },
+        {
+          "name": "plasmaModeParticles",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "plasmaModeCorePulse",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        }
+      ],
+      "videos": [
+        {
+          "id": "oracleBgVideo",
+          "paused": true,
+          "ready": 4
+        },
+        {
+          "id": "revealFxVideo",
+          "paused": true,
+          "ready": 0
+        },
+        {
+          "id": "bgA",
+          "paused": true,
+          "ready": 0
+        },
+        {
+          "id": "bgB",
+          "paused": true,
+          "ready": 0
+        }
+      ],
+      "visibleButtons": [
+        {
+          "id": "arcadeBack",
+          "text": "← Modes"
+        },
+        {
+          "id": "hudBombBtn",
+          "text": "×0"
+        },
+        {
+          "id": "hudFreezeBtn",
+          "text": "×0"
+        },
+        {
+          "id": "hudMissileBtn",
+          "text": "×0"
+        },
+        {
+          "id": "plasmaModeBtn",
+          "text": "NET • AUTO"
+        }
+      ]
+    },
+    {
+      "name": "menu-after-play",
+      "seconds": 10.001984000000448,
+      "taskMs": 1065.3980000000001,
+      "scriptMs": 735.0249999999999,
+      "layoutMs": 0,
+      "heap": 13200856,
+      "frames": {
+        "frame": 1200,
+        "anonymous": 600
+      },
+      "animations": [
+        {
+          "name": "menuLogoBreathe",
+          "state": "running",
+          "id": "menuLogoCanvas",
+          "tag": "CANVAS"
+        },
+        {
+          "name": "plasmaModeParticles",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        },
+        {
+          "name": "plasmaModeCorePulse",
+          "state": "running",
+          "id": "",
+          "tag": "SPAN"
+        }
+      ],
+      "videos": [
+        {
+          "id": "oracleBgVideo",
+          "paused": true,
+          "ready": 4
+        },
+        {
+          "id": "revealFxVideo",
+          "paused": true,
+          "ready": 0
+        },
+        {
+          "id": "bgA",
+          "paused": true,
+          "ready": 0
+        },
+        {
+          "id": "bgB",
+          "paused": true,
+          "ready": 0
+        }
+      ],
+      "visibleButtons": [
+        {
+          "id": "btnArcadeNew",
+          "text": "New Game"
+        },
+        {
+          "id": "btnArcadeResume",
+          "text": "Resume"
+        },
+        {
+          "id": "btnArcadeLevelSelect",
+          "text": "Level Select"
+        },
+        {
+          "id": "btnArcadeMenuBack",
+          "text": "← Back"
+        },
+        {
+          "id": "btnGalaxyBack",
+          "text": "← Oracle"
+        },
+        {
+          "id": "plasmaModeBtn",
+          "text": "NET • AUTO"
+        }
+      ]
+    }
+  ]
+}

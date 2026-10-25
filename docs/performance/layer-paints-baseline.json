@@ -1,0 +1,204 @@
+{
+  "runningAnimations": [
+    {
+      "name": "CSSTransition",
+      "target": "#commanderTicker",
+      "props": [
+        "opacity"
+      ],
+      "area": 10041,
+      "visible": true,
+      "opacity": "0.0164479"
+    },
+    {
+      "name": "CSSTransition",
+      "target": "#commanderTicker",
+      "props": [
+        "transform"
+      ],
+      "area": 10041,
+      "visible": true,
+      "opacity": "0.0164479"
+    },
+    {
+      "name": "crosshairPulse",
+      "target": "#canvasCrosshair",
+      "props": [
+        "transform",
+        "opacity"
+      ],
+      "area": 792,
+      "visible": true,
+      "opacity": "0.956191"
+    },
+    {
+      "name": "levelTitleOut",
+      "target": "#levelTitleBanner",
+      "props": [
+        "opacity"
+      ],
+      "area": 9890,
+      "visible": true,
+      "opacity": "0.139119"
+    },
+    {
+      "name": "cmdStaticFlash",
+      "target": "#commanderStatic",
+      "props": [
+        "opacity"
+      ],
+      "area": 15625,
+      "visible": true,
+      "opacity": "0"
+    },
+    {
+      "name": "sigbarWave",
+      "target": "sigbar sigbar-active",
+      "props": [
+        "height"
+      ],
+      "area": 11,
+      "visible": true,
+      "opacity": "1"
+    },
+    {
+      "name": "sigbarWave",
+      "target": "sigbar sigbar-active",
+      "props": [
+        "height"
+      ],
+      "area": 15,
+      "visible": true,
+      "opacity": "1"
+    },
+    {
+      "name": "sigbarWave",
+      "target": "sigbar sigbar-active",
+      "props": [
+        "height"
+      ],
+      "area": 27,
+      "visible": true,
+      "opacity": "1"
+    },
+    {
+      "name": "sigbarWave",
+      "target": "sigbar sigbar-active",
+      "props": [
+        "height"
+      ],
+      "area": 10,
+      "visible": true,
+      "opacity": "1"
+    },
+    {
+      "name": "sigbarWave",
+      "target": "sigbar sigbar-active",
+      "props": [
+        "height"
+      ],
+      "area": 17,
+      "visible": true,
+      "opacity": "1"
+    },
+    {
+      "name": "plasmaModeParticles",
+      "target": "plasmaModeBtn__particles",
+      "props": [
+        "transform"
+      ],
+      "area": 1496,
+      "visible": true,
+      "opacity": "0.24"
+    },
+    {
+      "name": "plasmaModeCorePulse",
+      "target": "plasmaModeBtn__core",
+      "props": [
+        "filter"
+      ],
+      "area": 900,
+      "visible": true,
+      "opacity": "0.98"
+    }
+  ],
+  "paintedLayers": [],
+  "mutations5s": [
+    [
+      "#hudQuadBadge attributes:aria-hidden",
+      300
+    ],
+    [
+      "#hudPulseBadge attributes:aria-hidden",
+      300
+    ],
+    [
+      "#hudGameTimer childList",
+      300
+    ],
+    [
+      "#hudLevel childList",
+      300
+    ],
+    [
+      "#hudLives childList",
+      300
+    ],
+    [
+      "#hudScore childList",
+      300
+    ],
+    [
+      "#hudMultiplier childList",
+      300
+    ],
+    [
+      "#hudTimer attributes:class",
+      300
+    ],
+    [
+      "#arcadeTimerBackdrop attributes:class",
+      300
+    ],
+    [
+      "#hudMissileBtn attributes:disabled",
+      300
+    ],
+    [
+      "#commanderTickerText childList",
+      28
+    ],
+    [
+      "#commanderImg attributes:src",
+      20
+    ],
+    [
+      "#bgTint attributes:style",
+      14
+    ],
+    [
+      "sigbar attributes:class",
+      5
+    ],
+    [
+      "sigbar sigbar-active attributes:class",
+      5
+    ],
+    [
+      "#commanderHUD attributes:class",
+      2
+    ],
+    [
+      "#commanderTicker attributes:class",
+      1
+    ],
+    [
+      "#levelTitleBanner attributes:class",
+      1
+    ],
+    [
+      "#levelTitleBanner attributes:aria-hidden",
+      1
+    ]
+  ]
+}

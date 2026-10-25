@@ -223,7 +223,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-08-11 10:00";
+const BUILD_TS = "2026-10-25 12:30";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -558,9 +558,10 @@ function gameplayPreloadSfxMap() {
 const PRACTICE_MAX_ASTEROIDS = 40;
 const PRACTICE_SPAWN_COOLDOWN_MS = 1000;
 const PRACTICE_ENABLED = false;
-// 2026-06-12: net charge/highlight response sped up ~20% (1000 → 800) so the cage locks faster.
-// The previous 1000ms is the "hard mode" candidate value for a future difficulty setting.
-const PLASMA_CAGE_CHARGE_MS = 800;
+// 2026-10-25 (GAME-01): net charge/highlight cut 800 → 150ms so the net is fireable almost as soon as
+// it's drawn; the short hold still blocks an accidental flick from firing. History: 1000 → 800 on
+// 2026-06-12 (1000ms remains the "hard mode" candidate for a future difficulty setting).
+const PLASMA_CAGE_CHARGE_MS = 150;
 const PLASMA_CAGE_COOLDOWN_MS = 5000;
 const PLASMA_HUD_COLOR = "#00FFE6";
 const PLASMA_HUD_RADIUS = 14;
@@ -1262,10 +1263,13 @@ const menuLogoWarp = (() => {
   let startTs = 0;
 
   function sizeCanvas() {
-    const rect = menuLogoCanvas.getBoundingClientRect();
+    // The breathing transform changes getBoundingClientRect() every frame. Size the
+    // backing store from untransformed layout dimensions so that visual scaling does
+    // not repeatedly reset the canvas and allocate new rendering buffers.
+    const layout = getComputedStyle(menuLogoCanvas);
     const dpr = nativeCanvasDpr();
-    const w = Math.max(1, Math.round(rect.width * dpr));
-    const h = Math.max(1, Math.round(rect.height * dpr));
+    const w = Math.max(1, Math.round((parseFloat(layout.width) || menuLogoCanvas.clientWidth) * dpr));
+    const h = Math.max(1, Math.round((parseFloat(layout.height) || menuLogoCanvas.clientHeight) * dpr));
     if (menuLogoCanvas.width !== w || menuLogoCanvas.height !== h) {
       menuLogoCanvas.width = w;
       menuLogoCanvas.height = h;
@@ -7273,6 +7277,19 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+// 2026-10-25: per-frame HUD writers touch the DOM only on change. Rewriting identical text still
+// replaces the text node (and classList.remove of an absent class still rewrites the attribute),
+// forcing layout + a layer repaint every frame; on iOS each repaint swaps in a fresh backing buffer.
+function setTextIfChanged(el, text) {
+  if (el && el.textContent !== text) el.textContent = text;
+}
+function setAttrIfChanged(el, name, value) {
+  if (el && el.getAttribute(name) !== value) el.setAttribute(name, value);
+}
+function setStyleIfChanged(el, prop, value) {
+  if (el && el.style[prop] !== value) el.style[prop] = value;
+}
+
 function inferPolarity(answer) {
   const text = String(answer || "").toLowerCase();
   if (
@@ -7880,10 +7897,10 @@ function waitVideoReady(video) {
 
 function setGalaxyBackgroundDim(ratio = 0) {
   if (!bgTint) return;
-  const safe = clamp(ratio, 0, 1);
-  const alpha = (0.14 + safe * 0.34).toFixed(3);
-  const vignette = (0.22 + safe * 0.18).toFixed(3);
-  bgTint.style.background = `radial-gradient(circle at 50% 32%, rgba(140, 90, 255, ${alpha}), rgba(0, 0, 0, 0.54)), radial-gradient(circle at 50% 50%, rgba(0,0,0,0), rgba(0,0,0,${vignette}))`;
+  // 2026-10-25: crossfade to the static ratio-1 overlay (.bgTint::after) instead of rewriting
+  // full-screen gradients — opacity is composited, so the timer dim no longer repaints the layer.
+  const dim = clamp(ratio, 0, 1).toFixed(2);
+  if (bgTint.style.getPropertyValue("--bg-dim") !== dim) bgTint.style.setProperty("--bg-dim", dim);
 }
 
 // 2026-06-26: blur+grayscale the just-completed level's background during the scorecard so the
@@ -8701,6 +8718,7 @@ function initGalaxyCanvas() {
   const slotLoopHandles = new Set(); // handles returned by audioEngine.playLoop(...) — see note below
   let slotRaf = 0;                   // single in-flight requestAnimationFrame handle
   let slotOverlay = null;            // DOM overlay root, mounted by enterSlot()
+  let slotHidGalaxyBg = false;       // enterSlot() paused the starfield under the opaque cabinet
   // Live-shell state (step 3). enterSlot() owns the between-level window: it mounts the cabinet
   // overlay, shows the banked token count, locks input briefly, and hands control to startLevel()
   // on exit via slotOnExit. Reels/payouts/jackpot/visibility are deliberately NOT here yet.
@@ -8789,6 +8807,9 @@ function initGalaxyCanvas() {
       slotOverlay = null;
     }
     galaxyView?.classList.remove("slot-active");
+    // 2026-10-25: restore the starfield enterSlot() paused — the Modes menu relies on it without
+    // re-showing it (startLevel/stopGalaxyLoop re-show/hide it on the other exits anyway).
+    if (slotHidGalaxyBg) { slotHidGalaxyBg = false; window.galaxyBackground?.show(); }
     // Reset live-shell state. slotOnExit is intentionally cleared here too — exitSlot() captures it
     // BEFORE calling teardown, so the handoff still fires; this just prevents a stale callback.
     slotOnExit = null;
@@ -9562,6 +9583,9 @@ function initGalaxyCanvas() {
     slotEls.lever?.classList.toggle("disabled", !slotLeverEnabled());
     // reels
     for (const r of slotReels) {
+      // Static reels retain their canvas pixels. Still paint the last settling
+      // frame even when the physics below changes the state to "stopped".
+      const reelWasMoving = r.state === "spinning" || r.state === "stopping" || r.state === "settle";
       if (r.state === "spinning") { r.pos += r.vel * dt; }
       else if (r.state === "stopping") {
         const s = Math.min(1, ((now - r.stopT0) / 1000) / SLOT_STOP_DUR), s2 = s * s, s3 = s2 * s;
@@ -9578,7 +9602,7 @@ function initGalaxyCanvas() {
           if (slotReels.every((x) => x.state === "stopped")) slotOnAllStopped();
         }
       }
-      slotDrawReel(r);
+      if (reelWasMoving) slotDrawReel(r);
     }
     if (slotWinFx.active) slotDrawFX(now, dt);
     slotTrackRaf(slotFrame);
@@ -9864,6 +9888,10 @@ function initGalaxyCanvas() {
       [bgVideoA, bgVideoB].forEach((v) => { try { v?.pause(); } catch {} });
     }
     galaxyView?.classList.add("slot-active");
+    // 2026-10-25: the starfield canvas kept painting at full rate under the opaque cabinet
+    // (PERF-04: slot idle held the WebKit GPU process at ~103% CPU). slotTeardown() restores it.
+    const starfield = document.getElementById("galaxyBgCanvas");
+    if (starfield && starfield.style.display !== "none") { slotHidGalaxyBg = true; window.galaxyBackground?.hide(); }
     slotClearWinFx();
     if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
     slotSyncCabinetStats(); // lives + current inventory in the cabinet HUD
@@ -9890,6 +9918,10 @@ function initGalaxyCanvas() {
     const slotBeginLeverDrag = (e) => {
       if (!slotLeverEnabled()) return;
       slotLever.mode = "drag";
+      // 2026-10-25: idle reels stop repainting and iOS releases their layer buffers, so the first
+      // spin reallocated all three in the pull frame (~33ms hitch). Repaint once on grab so the
+      // allocation happens mid-drag instead.
+      slotReels.forEach((r) => slotDrawReel(r));
       try { slotEls.lever.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       const rect = slotEls.track.getBoundingClientRect();
       const knobTop = rect.top + slotLever.value * slotLeverTravel;
@@ -10075,6 +10107,10 @@ function initGalaxyCanvas() {
   // pulsing teal glow a UFO explosion gives (reuses the _ufoBlasted glow family; see applyPulseBlastGlow).
   // Tighter than UFO's 220 since the pulse is a precision weapon — tune after playtest.
   const PULSE_BLAST_RADIUS = 160;
+  // 2026-10-25: every pulse shot vaporizes any stroid whose edge is within this distance of the impact
+  // (plus the fragments its own hit just split off) — the cannon demolishes on contact instead of
+  // needing to be held on one rock while it splits down.
+  const PULSE_KILL_RADIUS = 70;
   // 2026-07-01: every level gets one guaranteed Pulse Cannon early; these levels also get a SECOND
   // drop later in the level (~58% elapsed) for an extra mid/late-level burst window.
   const SECOND_PULSE_LEVELS = new Set([9, 11, 13, 14, 15]);
@@ -10536,13 +10572,13 @@ function initGalaxyCanvas() {
 
   function renderLives() {
     if (!hudLives) return;
-    hudLives.textContent = `Lives: ${arcadeLives}`;
+    setTextIfChanged(hudLives, `Lives: ${arcadeLives}`);
   }
 
   function renderScore() {
-    if (slotEls.scoreVal) slotEls.scoreVal.textContent = String(arcadeScore);
+    setTextIfChanged(slotEls.scoreVal, String(arcadeScore));
     if (!hudScore) return;
-    hudScore.textContent = `Score: ${arcadeScore}`;
+    setTextIfChanged(hudScore, `Score: ${arcadeScore}`);
     const beatsFirst = Number.isFinite(leaderboardThresholds.firstScore)
       && arcadeScore > leaderboardThresholds.firstScore;
     const beatsThird = Number.isFinite(leaderboardThresholds.thirdScore)
@@ -10602,14 +10638,15 @@ function initGalaxyCanvas() {
     const count = playerMissileInventory;
     const has = count > 0;
     const reloading = nowM < missileReloadUntil;
-    hudMissileBtn.style.display = "";
+    setStyleIfChanged(hudMissileBtn, "display", "");
     // 2026-07-01: rocket icon lives in a static <img>; only the count text updates (was 🚀 glyph).
     const label = `\xD7${count}`;
     if (hudMissileCount && hudMissileCount.textContent !== label) {
       hudMissileCount.textContent = label;
     }
     // can't fire with no stock, while reloading, or while a missile is already in flight
-    hudMissileBtn.disabled = !has || reloading || !!activeMissile;
+    const disabled = !has || reloading || !!activeMissile;
+    if (hudMissileBtn.disabled !== disabled) hudMissileBtn.disabled = disabled;
     hudMissileBtn.classList.toggle("has-missiles", has && !reloading);
     hudMissileBtn.classList.toggle("reloading", reloading);
     // pulse only when reload is complete, a missile is stocked, none in flight, not aiming
@@ -10621,7 +10658,7 @@ function initGalaxyCanvas() {
       const prog = reloading
         ? clamp(1 - (missileReloadUntil - nowM) / MISSILE_RELOAD_MS, 0, 1)
         : (has ? 1 : 0);
-      hudMissileReload.style.width = `${(prog * 100).toFixed(1)}%`;
+      setStyleIfChanged(hudMissileReload, "width", `${(prog * 100).toFixed(1)}%`);
     }
   }
 
@@ -10632,7 +10669,7 @@ function initGalaxyCanvas() {
     const remaining = quadShotUntil - performance.now();
     const active = remaining > 0;
     hudQuadBadge.classList.toggle("active", active);
-    hudQuadBadge.setAttribute("aria-hidden", active ? "false" : "true");
+    setAttrIfChanged(hudQuadBadge, "aria-hidden", active ? "false" : "true");
     if (active && hudQuadTime) {
       const label = `${Math.ceil(remaining / 1000)}s`;
       if (hudQuadTime.textContent !== label) hudQuadTime.textContent = label;
@@ -10649,7 +10686,7 @@ function initGalaxyCanvas() {
     if (!active && pulseWasActive) onPulseEnd();
     if (!hudPulseBadge) return;
     hudPulseBadge.classList.toggle("active", active);
-    hudPulseBadge.setAttribute("aria-hidden", active ? "false" : "true");
+    setAttrIfChanged(hudPulseBadge, "aria-hidden", active ? "false" : "true");
     if (active && hudPulseTime) {
       const label = `${Math.ceil(remaining / 1000)}s`;
       if (hudPulseTime.textContent !== label) hudPulseTime.textContent = label;
@@ -10766,7 +10803,7 @@ function initGalaxyCanvas() {
   function renderScoreMultiplier(now = performance.now()) {
     if (!hudMultiplier) return;
     const multiplier = engineMode === "arcade" ? getArcadeScoreMultiplier(now) : 1;
-    hudMultiplier.textContent = `${multiplier.toFixed(1)}x`;
+    setTextIfChanged(hudMultiplier, `${multiplier.toFixed(1)}x`);
   }
 
   function scheduleScoreRender() {
@@ -11532,8 +11569,8 @@ function initGalaxyCanvas() {
   function positionHudTimerOnCanvas() {
     if (!hudTimer || !galaxyPlayCanvas) return;
     const rect = galaxyPlayCanvas.getBoundingClientRect();
-    hudTimer.style.left = `${rect.left + rect.width / 2}px`;
-    hudTimer.style.top = `${rect.top + rect.height / 2}px`;
+    setStyleIfChanged(hudTimer, "left", `${rect.left + rect.width / 2}px`);
+    setStyleIfChanged(hudTimer, "top", `${rect.top + rect.height / 2}px`);
   }
 
   function updateGameTimerHud(now) {
@@ -11543,7 +11580,7 @@ function initGalaxyCanvas() {
     const elapsed = practiceEndless
       ? Math.max(0, now - practiceStartedAt)
       : (gameTimer.running ? gameTimer.elapsed + (now - gameTimer.startedAt) : gameTimer.elapsed);
-    hudGameTimer.textContent = `RUN ${formatRunTime(elapsed)}`;
+    setTextIfChanged(hudGameTimer, `RUN ${formatRunTime(elapsed)}`);
   }
 
   function updateArcadeHud(now) {
@@ -11554,16 +11591,17 @@ function initGalaxyCanvas() {
     updateGameTimerHud(now);
     updatePlasmaModeBtn(now); // 2026-07-04: refresh the conformed recharge pill every frame
     // Part 8: Practice shows "PRACTICE" where the level number normally goes.
-    if (hudLevel) hudLevel.textContent = practiceEndless
+    setTextIfChanged(hudLevel, practiceEndless
       ? "PRACTICE"
-      : `LEVEL ${ARCADE_LEVELS[currentLevelIndex]?.level || 1}`;
+      : `LEVEL ${ARCADE_LEVELS[currentLevelIndex]?.level || 1}`);
     renderLives();
     renderScore();
     renderScoreMultiplier(now);
     if (hudTimer) {
-      positionHudTimerOnCanvas();
       const showNumber = engineMode === "arcade" && arcadeActive && safeRemaining <= 20000 && safeRemaining > 0;
-      hudTimer.textContent = showNumber ? String(Math.ceil(safeRemaining / 1000)) : "";
+      // Layout read only while the countdown is on screen (it forced a layout every frame).
+      if (showNumber) positionHudTimerOnCanvas();
+      setTextIfChanged(hudTimer, showNumber ? String(Math.ceil(safeRemaining / 1000)) : "");
       hudTimer.classList.toggle("visible", showNumber);
       hudTimer.classList.toggle("warning", showNumber && safeRemaining <= 10000 && safeRemaining > 5000);
       hudTimer.classList.toggle("critical", showNumber && safeRemaining <= 5000);
@@ -11576,14 +11614,16 @@ function initGalaxyCanvas() {
       } else if (!showNumber) {
         _timerNumberVisible = false;
         _timerSlammed = false;
-        hudTimer.classList.remove("slam", "warning", "critical");
+        hudTimer.classList.toggle("slam", false);
+        hudTimer.classList.toggle("warning", false);
+        hudTimer.classList.toggle("critical", false);
       }
     }
-    if (arcadeTimerGhost) arcadeTimerGhost.textContent = "";
+    setTextIfChanged(arcadeTimerGhost, "");
     if (arcadeTimerBackdrop) {
       const ratio = levelDurationMs > 0 ? 1 - safeRemaining / levelDurationMs : 0;
-      arcadeTimerBackdrop.style.opacity = "0";
-      arcadeTimerBackdrop.classList.remove("danger");
+      setStyleIfChanged(arcadeTimerBackdrop, "opacity", "0");
+      arcadeTimerBackdrop.classList.toggle("danger", false);
       setGalaxyBackgroundDim(ratio);
     }
     if (engineMode === "arcade" && arcadeActive && safeRemaining <= 10000 && safeRemaining > 0) {
@@ -13906,7 +13946,7 @@ function initGalaxyCanvas() {
   }
 
   // 2026-07-03: net charge/highlight delay. In Training + Practice the highlight/lock lands almost
-  // instantly so the cadet isn't waiting to fire; the real game keeps the full 800ms feel.
+  // instantly so the cadet isn't waiting to fire; the real game uses PLASMA_CAGE_CHARGE_MS (150ms).
   function plasmaCageChargeMs() {
     return (stuntActive || practiceEndless) ? 120 : PLASMA_CAGE_CHARGE_MS;
   }
@@ -16214,6 +16254,7 @@ function initGalaxyCanvas() {
       computePlayfield();
       setTimeout(computePlayfield, 50);
       startGalaxyLoop();
+      window.galaxyBackground?.show(); // un-freeze the starfield paused by showModeSelect()
       const resumeLevel = ARCADE_LEVELS[currentLevelIndex]?.level || 1;
       playArcadeMusicForLevel(resumeLevel);
       arcadeResumeAvailable = false;
@@ -18272,6 +18313,9 @@ function initGalaxyCanvas() {
       // through pause/resume). cancelPulseCannon is a no-op when the weapon isn't active.
       clearPendingTimedWeapon();
       cancelPulseCannon({ promoteQueued: false });
+      // 2026-10-25 (PERF-03): the level starfield kept repainting at full rate behind the paused
+      // menu. Freeze it on its last frame; startArcadeFromSave() resumes it.
+      window.galaxyBackground?.pause?.();
     } else {
       commBoxController.hide();
       commBoxController.clearPortraitOverride(); // 2026-06-16: clean exit restores CMDR (SPC owns L13/14)
@@ -20084,6 +20128,14 @@ function initGalaxyCanvas() {
 
   function frame(now) {
     if (!galaxyRunning) return;
+    // 2026-10-25: the slot owns the between-level window and its onExit starts the next level, so
+    // the finished level has nothing to simulate or draw under the opaque cabinet. Idle the loop
+    // (PIXI stays alive, so exiting the slot pays no renderer re-init).
+    if (isSlotActive()) {
+      sim.last = 0;
+      galaxyRaf = requestAnimationFrame(frame);
+      return;
+    }
     trackFpsOverlay();
     if (now - sim.last < 16) {
       galaxyRaf = requestAnimationFrame(frame);
@@ -20334,6 +20386,27 @@ function initGalaxyCanvas() {
     }
   }
 
+  // 2026-10-25: area kill for a pulse shot. Per-stroid booms are suppressed (as with the plasma net)
+  // so ~12 shots/s don't stack a wall of explosions; one boom per killing shot keeps the punch.
+  // Freeze-combo credit is skipped so the spray can't farm frozen-kill combos.
+  function vaporizePulseArea(x, y) {
+    if (tutorialFireBlocked) return 0;
+    let killed = 0;
+    let biggest = 1;
+    for (let i = sim.asteroids.length - 1; i >= 0; i -= 1) {
+      const a = sim.asteroids[i];
+      if (!a || a.tossed) continue;
+      if (Math.hypot(a.x - x, a.y - y) - (a.r || 0) > PULSE_KILL_RADIUS) continue;
+      biggest = Math.max(biggest, a.kind || 1);
+      vaporizeAsteroidByIndex(i, true, true);
+      killed += 1;
+    }
+    if (killed > 0) {
+      playAsteroidExplosionBoom(biggest, boomStackVolume(0.9, { minRatio: 0.7 }), 0.92 + Math.random() * 0.14);
+    }
+    return killed;
+  }
+
   // 2026-07-01: Pulse Cannon single shot. Aims at the held pointer, applies a small oscillating
   // turret sweep (so the stream reads as a rotating cannon, deliberately less precise than a laser),
   // fires through resolveShotAt, and plays an alternating fire report. Marksman is deferred: a pulse
@@ -20354,8 +20427,9 @@ function initGalaxyCanvas() {
     const sx = clamp(cx + Math.cos(ang) * dist, 0, sim.width);
     const sy = clamp(cy + Math.sin(ang) * dist, 0, sim.height);
     _pulseShot = true;
-    const hit = resolveShotAt(sx, sy, now, galaxyGesture.isTouch === true, true);
+    const pointHit = resolveShotAt(sx, sy, now, galaxyGesture.isTouch === true, true);
     _pulseShot = false;
+    const hit = vaporizePulseArea(sx, sy) > 0 || pointHit;
     // 2026-07-02: stamp a teal electric ring at the shot point (over the X-blast) as the fire signature.
     spawnPulseFireBurst(sx, sy);
     // 2026-07-02: highlight nearby stroids with the UFO-explosion glow, centered on the shot point.
@@ -20924,7 +20998,9 @@ function initGalaxyCanvas() {
     // must NOT grab a stroid/mine for tossing. Tapping on/near a stroid to target it was being
     // hijacked into a toss-grab, so the missile/bomb never fired (the tutorial "missile didn't
     // fire" bug). Suppress the grab entirely in either aim mode so the tap reaches handleArcadeTap.
-    if (engineMode === "arcade" && arcadeActive && !missileAimMode && !bombAimMode) {
+    // 2026-10-25: the armed Pulse Cannon also suppresses grabs — a press on a big stroid was starting
+    // a toss-grab, so nothing fired until release (the "hold it over a rock" playtest complaint).
+    if (engineMode === "arcade" && arcadeActive && !missileAimMode && !bombAimMode && !pulseCannonActive()) {
       // 2026-06-11: mines take grab priority over stroids at an overlapping point (rarer,
       // more deliberate). A plain tap that never becomes a hold/flick falls back to the tap
       // path below (arm/detonate for mines, split for stroids) via launchStroidToss → cancel.

@@ -1,0 +1,32 @@
+{
+  "freshMenu": {
+    "taskMsPerS": 23.1,
+    "scriptMsPerS": 12.3,
+    "ops": {
+      "menuLogoCanvas": 984,
+      "(anon)": 720,
+      "galaxyPlayCanvas": 10920
+    },
+    "pixiDraws": 0
+  },
+  "gameplay": {
+    "taskMsPerS": 93.4,
+    "scriptMsPerS": 53.2,
+    "ops": {
+      "(anon)": 590,
+      "galaxyBgCanvas": 199440
+    },
+    "pixiDraws": 120
+  },
+  "pausedMenu": {
+    "taskMsPerS": 89.4,
+    "scriptMsPerS": 65.3,
+    "ops": {
+      "(anon)": 644,
+      "galaxyPlayCanvas": 11400,
+      "galaxyBgCanvas": 199527
+    },
+    "pixiDraws": 0
+  },
+  "errors": []
+}

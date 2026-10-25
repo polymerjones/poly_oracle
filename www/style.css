@@ -183,6 +183,11 @@ body.reveal-screen-shake #oracleView {
   opacity: 0;
 }
 
+/* Completed loading must not leave an invisible infinite animation running. */
+#oracleBgWarmup.warmup-done .warmup-pip {
+  animation: none;
+}
+
 #oracleBgWarmup .warmup-pip {
   font-size: 12px;
   letter-spacing: 0.22em;
@@ -1619,7 +1624,20 @@ select:focus-visible {
   inset: 0;
   pointer-events: none;
   z-index: 1;
-  background: radial-gradient(circle at 50% 30%, rgba(140, 90, 255, 0.18), rgba(0, 0, 0, 0.55));
+  /* 2026-10-25: static gradients (dim ratio 0) + a ratio-1 overlay faded in via --bg-dim opacity.
+     Rewriting the gradients per frame repainted a full-screen layer and reallocated its buffer. */
+  background: radial-gradient(circle at 50% 32%, rgba(140, 90, 255, 0.14), rgba(0, 0, 0, 0.54)),
+    radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.22));
+}
+
+.bgTint::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: var(--bg-dim, 0);
+  will-change: opacity;
+  background: radial-gradient(circle at 50% 32%, rgba(140, 90, 255, 0.48), rgba(0, 0, 0, 0.54)),
+    radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.40));
 }
 
 .galaxy-view::after {

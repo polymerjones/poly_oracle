@@ -716,6 +716,14 @@ const galaxyBackground = (() => {
     raf = 0;
   }
 
+  // 2026-10-25: keep the last frame on screen but stop repainting (paused-game menu backdrop).
+  // show() resumes the animation.
+  function pause() {
+    running = false;
+    cancelAnimationFrame(raf);
+    raf = 0;
+  }
+
   function resize(w, h) {
     W = w;
     H = h;
@@ -788,7 +796,7 @@ const galaxyBackground = (() => {
     shoots = [];
   }
 
-  return { init, show, hide, resize, setTheme, setLevel, triggerWarp, setHectic, destroy };
+  return { init, show, hide, pause, resize, setTheme, setLevel, triggerWarp, setHectic, destroy };
 })();
 
 window.galaxyBackground = galaxyBackground;

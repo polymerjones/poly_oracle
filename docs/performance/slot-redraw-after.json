@@ -1,0 +1,10 @@
+{
+  "idle": 0,
+  "moving": 135,
+  "settled": 0,
+  "tokensBefore": "3",
+  "tokenAfterPull": "2",
+  "tokensAfter": "2",
+  "reelHasPixels": true,
+  "errors": []
+}

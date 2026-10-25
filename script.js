@@ -223,7 +223,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-07-06 16:42";
+const BUILD_TS = "2026-08-11 10:00";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -5415,9 +5415,13 @@ function darkenStage(on) {
   stage.classList.toggle("ritual-dark", !!on);
 }
 
+function timeoutAfter(ms, value = null) {
+  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+}
+
 async function speakLine(text, { rate = 1, pitch = 1.1, voiceName = "", timeoutMs = 6000 } = {}) {
   if (!text) return;
-  const nativeSpoken = await speakNativeText(text, { rate, pitch, voiceName });
+  const nativeSpoken = await speakNativeText(text, { rate, pitch, voiceName, timeoutMs });
   if (nativeSpoken) return;
   if (!("speechSynthesis" in window)) return;
   const synth = window.speechSynthesis;
@@ -7013,19 +7017,20 @@ function primeSpeechFromGesture() {
   }
 }
 
-async function speakNativeText(text, { rate = 1, pitch = 1.2, voiceName = "" } = {}) {
+async function speakNativeText(text, { rate = 1, pitch = 1.2, voiceName = "", timeoutMs = 7000 } = {}) {
   const plugin = getNativeTtsPlugin();
   if (!plugin) return false;
 
   try {
-    if (typeof plugin.stop === "function") await plugin.stop();
+    const callTimeoutMs = Math.max(1200, timeoutMs + 500);
+    if (typeof plugin.stop === "function") await Promise.race([plugin.stop(), timeoutAfter(900)]);
     // Plugin API takes the voice as an index into getSupportedVoices(), not a name.
-    const voices = await warmNativeTtsVoices();
+    const voices = await Promise.race([warmNativeTtsVoices(), timeoutAfter(1200, [])]);
     const selectedVoiceName = voiceName || resolvePrimaryVoiceName();
     const voiceIndex = voices.findIndex((voice) => getVoiceId(voice) === selectedVoiceName);
     const selectedVoice = voiceIndex >= 0 ? voices[voiceIndex] : null;
 
-    await plugin.speak({
+    const spoke = await Promise.race([plugin.speak({
       text,
       lang: selectedVoice?.lang || "en-US",
       voice: voiceIndex >= 0 ? voiceIndex : undefined,
@@ -7035,8 +7040,8 @@ async function speakNativeText(text, { rate = 1, pitch = 1.2, voiceName = "" } =
       pitch: Math.max(0.5, Math.min(2, pitch * 0.85)),
       volume: state.whisper ? 0.5 : 1,
       category: "ambient",
-    });
-    return true;
+    }).then(() => true), timeoutAfter(callTimeoutMs, false)]);
+    return !!spoke;
   } catch (error) {
     if (!nativeTtsWarned) {
       nativeTtsWarned = true;
@@ -15675,9 +15680,9 @@ function initGalaxyCanvas() {
     if (accuracyBonus > 0) addArcadeScore(accuracyBonus);
     const scoreAfter = arcadeScore;
     triggerHapticNotification(hapticNotificationType.Success);
-    // 2026-06-23: L13/L14 are SPC levels (SPC face, CMDR voice muted), but the end-of-level praise
-    // is the Commander's line ("Phenomenal work, cadet"). Show HIS mug (correct crop via the standard
-    // commander portrait) and let his voice through for this one comm instead of SPC's face. The next
+    // 2026-06-23: L13/L14 are SPC-host levels, but the end-of-level praise is the Commander's line
+    // ("Phenomenal work, cadet"). Show HIS mug (correct crop via the standard commander portrait)
+    // and, on L14, let his voice through for this one comm instead of SPC's face. The next
     // startLevel() re-applies the right portrait override (SPC for L14, CMDR for L15).
     const _lcCfg = ARCADE_LEVELS[currentLevelIndex];
     if (_lcCfg && (_lcCfg.level === 13 || _lcCfg.level === 14)) {
@@ -16087,7 +16092,7 @@ function initGalaxyCanvas() {
     showLevelIntro(cfg.level);
 
     // 2026-06-17: levels 13 & 14 swap the CMDR portrait for SPC. SPC owns the comm box (her bonus
-    // VO pool fires via isSpcMode/_spcMode) and CMDR voice lines are muted (see muteCmdrVO below).
+    // VO pool fires via isSpcMode/_spcMode); L14 additionally mutes CMDR voice (see muteCmdrVO below).
     // Every other level clears the override so CMDR is restored (handles in/out + retry/restart).
     const isSpcLevel = cfg.level === 13 || cfg.level === 14;
     if (isSpcLevel) {
@@ -16099,9 +16104,10 @@ function initGalaxyCanvas() {
     } else {
       commBoxController.clearPortraitOverride();
     }
-    // 2026-06-17: silence CMDR voice on the SPC levels (SPC's face, no CMDR voice). Captions still
-    // type, all SFX/music unaffected. Reset to false on every level transition in clearGameplayEntities().
-    commBoxController.setMuteCmdrVO(isSpcLevel);
+    // 2026-06-17: L14 is the SPC-only level: silence CMDR voice there (captions still type, all
+    // SFX/music unaffected). L13 is a two-character level, so Commander remains audible when his
+    // lines trade off with SPC. Reset to false on every level transition in clearGameplayEntities().
+    commBoxController.setMuteCmdrVO(cfg.level === 14);
 
     const levelNum = cfg.level;
     let levelStartVO = null;
@@ -16144,8 +16150,8 @@ function initGalaxyCanvas() {
         });
         return;
       }
-      // 2026-06-17: levels 13 & 14 — SPC owns the comm box and CMDR voice is muted, so greet the
-      // cadet with one of her own intro lines instead of the muted CMDR line.
+      // 2026-06-17: levels 13 & 14 — SPC owns the comm box, so greet the cadet with one of her own
+      // intro lines. L14 remains SPC-only; L13 allows Commander to trade off during gameplay.
       // 2026-06-24: pick from POOL_SPC_LEVEL_START for variety; red themes (L13) get the
       // "gettin' hot in here" line.
       // 2026-07-03: L14's OFFICIAL opener is hard-set to the "peeing their pants" line (was a random

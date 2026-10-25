@@ -1,4 +1,9 @@
 node_modules
 backups
 ios
+android
+local
+prototypes
+store-assets
+art-source
 *.psd

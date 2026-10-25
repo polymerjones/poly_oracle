@@ -30,7 +30,7 @@ npm run cap:open:android
 ```
 
 ## Store Submission (2026)
-- See `STORE_SUBMISSION_RUNBOOK_2026.md` for Apple + Google upload flow.
+- See `docs/store/STORE_SUBMISSION_RUNBOOK_2026.md` for Apple + Google upload flow.
 
 ## Native iOS Voice (Recommended)
 Poly Oracle now supports a hybrid speech layer:

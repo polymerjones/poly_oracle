@@ -2881,7 +2881,7 @@ select:focus-visible {
 }
 
 /* ============================================================
-   Comm box redesign (2026-06-20) — see comm_box_preview.html.
+   Comm box redesign (2026-06-20) — see tools/dev-pages/comm_box_preview.html.
    Chamfered frame + layered glow, Rajdhani dialogue, speaker name
    above the box. One shared element: Training / Practice / Arcade
    (incl. L13/L14 SPC) all route through #commanderHUD.

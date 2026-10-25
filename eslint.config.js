@@ -41,7 +41,6 @@ export default [
       "api/**",
       "firebase-config.js",
       "firebase-config.example.js",
-      "updated script.js",
       "**/*.bak",
     ],
   },

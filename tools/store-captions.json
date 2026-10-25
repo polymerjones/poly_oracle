@@ -1,0 +1,65 @@
+{
+  "canvas": {
+    "width": 1080,
+    "height": 1920
+  },
+  "band": {
+    "height": 320,
+    "style": "scrim",
+    "color": "#04060f",
+    "opacity": 0.82
+  },
+  "text": {
+    "font": "DIN Alternate",
+    "weight": "bold",
+    "size": 78,
+    "lineHeight": 88,
+    "color": "#ffffff",
+    "letterSpacing": 3,
+    "uppercase": true,
+    "top": 104,
+    "maxCharsPerLine": 22
+  },
+  "subtitle": {
+    "enabled": true,
+    "font": "Arial Narrow",
+    "weight": "bold",
+    "size": 38,
+    "color": "#b9c6d8",
+    "letterSpacing": 2,
+    "gap": 18
+  },
+  "accent": {
+    "enabled": true,
+    "color": "#33cfff",
+    "width": 168,
+    "thickness": 5,
+    "gap": 30
+  },
+  "captions": [
+    {
+      "title": "Read the Oracle",
+      "subtitle": "Every answer bends reality"
+    },
+    {
+      "title": "Shatter the swarm",
+      "subtitle": "Precision beats panic"
+    },
+    {
+      "title": "Arm the pulse cannon",
+      "subtitle": "One shot, total clear"
+    },
+    {
+      "title": "Freeze time",
+      "subtitle": "Then take your shot"
+    },
+    {
+      "title": "Chain your combos",
+      "subtitle": "Multipliers stack fast"
+    },
+    {
+      "title": "Survive the gauntlet",
+      "subtitle": "15 levels, no mercy"
+    }
+  ]
+}

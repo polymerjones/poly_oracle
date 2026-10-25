@@ -154,6 +154,108 @@ function hideAndroidStatusBar() {
   } catch { /* status bar plugin is Android-native only here */ }
 }
 document.addEventListener("DOMContentLoaded", hideAndroidStatusBar);
+
+// 2026-10-25 (ADS): rewarded-ad service over @capacitor-community/admob. Native only — on web
+// (polyoracle.app) isSupported() is false and every ad offer stays hidden. Grants are decided by
+// the plugin's Rewarded event only: Dismissed without Rewarded grants nothing. iOS sends
+// non-personalized requests (no ATT prompt, by design). Swap ADS_USE_TEST_UNITS off and fill in
+// the production unit IDs (and Info.plist / AndroidManifest app IDs) before release.
+const ADS_USE_TEST_UNITS = true;
+const ADS_REWARDED_UNIT = {
+  ios: ADS_USE_TEST_UNITS ? "ca-app-pub-3940256099942544/1712485313" : "",
+  android: ADS_USE_TEST_UNITS ? "ca-app-pub-3940256099942544/5224354917" : "",
+};
+const ADS_RETRY_AFTER_FAIL_MS = 30000;
+// A late Rewarded event can trail Dismissed by a beat; wait this long before settling a show.
+const ADS_REWARD_GRACE_MS = 300;
+const adService = (() => {
+  let state = "idle"; // idle | loading | ready | showing | failed | unsupported
+  let initPromise = null;
+  let plugin = null;
+  let failedAt = 0;
+  let current = null; // { rewarded, resolve, settleTimer }
+  let hooks = { onOpen: null, onClose: null };
+  const subscribers = new Set();
+
+  function platform() {
+    return globalThis.Capacitor?.getPlatform?.() || "web";
+  }
+  function isSupported() {
+    const p = platform();
+    return (p === "ios" || p === "android") && !!globalThis.Capacitor?.Plugins?.AdMob && !!ADS_REWARDED_UNIT[p];
+  }
+  function setState(next) {
+    state = next;
+    subscribers.forEach((fn) => { try { fn(next); } catch { /* subscriber errors are theirs */ } });
+  }
+  function settle() {
+    const c = current;
+    if (!c) return;
+    current = null;
+    clearTimeout(c.settleTimer);
+    try { hooks.onClose?.(); } catch { /* hook errors must not strand the promise */ }
+    setState("idle");
+    c.resolve({ rewarded: c.rewarded });
+    setTimeout(preload, 500);
+  }
+  function init() {
+    if (initPromise) return initPromise;
+    initPromise = (async () => {
+      if (!isSupported()) { setState("unsupported"); return false; }
+      plugin = globalThis.Capacitor.Plugins.AdMob;
+      await plugin.initialize({ initializeForTesting: ADS_USE_TEST_UNITS });
+      try {
+        let info = await plugin.requestConsentInfo();
+        if (info?.status === "REQUIRED" && info?.isConsentFormAvailable) info = await plugin.showConsentForm();
+        if (info && info.canRequestAds === false) { failedAt = performance.now(); setState("failed"); return false; }
+      } catch { /* consent lookup failed — let the SDK decide per request */ }
+      plugin.addListener("onRewardedVideoAdReward", () => { if (current) current.rewarded = true; });
+      plugin.addListener("onRewardedVideoAdDismissed", () => {
+        if (current) current.settleTimer = setTimeout(settle, ADS_REWARD_GRACE_MS);
+      });
+      plugin.addListener("onRewardedVideoAdFailedToShow", () => settle());
+      return true;
+    })().catch(() => { failedAt = performance.now(); setState("failed"); return false; });
+    return initPromise;
+  }
+  async function preload() {
+    if (!isSupported()) return;
+    if (state === "loading" || state === "ready" || state === "showing") return;
+    if (state === "failed" && performance.now() - failedAt < ADS_RETRY_AFTER_FAIL_MS) return;
+    if (!(await init())) return;
+    setState("loading");
+    try {
+      await plugin.prepareRewardVideoAd({
+        adId: ADS_REWARDED_UNIT[platform()],
+        isTesting: ADS_USE_TEST_UNITS,
+        npa: platform() === "ios",
+      });
+      setState("ready");
+    } catch {
+      failedAt = performance.now();
+      setState("failed");
+    }
+  }
+  // Resolves { rewarded } once the ad is closed (or could not be shown).
+  function show() {
+    return new Promise((resolve) => {
+      if (state !== "ready" || current) { resolve({ rewarded: false }); return; }
+      current = { rewarded: false, resolve, settleTimer: 0 };
+      setState("showing");
+      try { hooks.onOpen?.(); } catch { /* ducking is best-effort */ }
+      plugin.showRewardVideoAd().catch(() => { if (current && !current.rewarded) settle(); });
+    });
+  }
+  return {
+    isSupported,
+    isReady: () => state === "ready",
+    getState: () => state,
+    preload,
+    show,
+    setHooks(next) { hooks = { ...hooks, ...next }; },
+    subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); },
+  };
+})();
 // Android native-TTS voice cache (see warmNativeTtsVoices). Declared up here because
 // init() runs mid-module and the voice-catalog path reads these during startup.
 let nativeTtsVoices = [];
@@ -223,7 +325,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 13:52";
+const BUILD_TS = "2026-10-25 14:23";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -943,6 +1045,69 @@ function setSavedArcadeLevel(level) {
   }
 }
 
+function readCheatJson(key) {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) || "{}");
+    return v && typeof v === "object" ? v : {};
+  } catch { return {}; }
+}
+
+function writeCheatJson(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable — cheats stay in memory only */ }
+}
+
+// { [cheatId]: { watched, firstAt } } with entries older than the TTL dropped.
+function getCheatProgress() {
+  const all = readCheatJson(STORAGE_CHEAT_PROGRESS);
+  const now = Date.now();
+  let pruned = false;
+  for (const id of Object.keys(all)) {
+    if (!all[id] || now - (all[id].firstAt || 0) > CHEAT_PROGRESS_TTL_MS) { delete all[id]; pruned = true; }
+  }
+  if (pruned) writeCheatJson(STORAGE_CHEAT_PROGRESS, all);
+  return all;
+}
+
+function getArmedCheats() {
+  return readCheatJson(STORAGE_CHEATS_ARMED);
+}
+
+function isCheatOwned(id) {
+  return id === "levelselect" ? hasCheatLevelSelect() : !!getArmedCheats()[id];
+}
+
+// Count one completed ad toward a cheat; on the last one, grant it. Returns true when granted.
+function recordCheatAd(id) {
+  const all = getCheatProgress();
+  const entry = all[id] || { watched: 0, firstAt: Date.now() };
+  entry.watched += 1;
+  if (entry.watched < CHEAT_ADS_REQUIRED) {
+    all[id] = entry;
+    writeCheatJson(STORAGE_CHEAT_PROGRESS, all);
+    return false;
+  }
+  delete all[id];
+  writeCheatJson(STORAGE_CHEAT_PROGRESS, all);
+  if (id === "levelselect") {
+    setCheatLevelSelect();
+  } else {
+    writeCheatJson(STORAGE_CHEATS_ARMED, { ...getArmedCheats(), [id]: true });
+  }
+  return true;
+}
+
+// A new run takes every armed cheat (and drops the previous run's).
+function consumeArmedCheatsForRun() {
+  activeRunCheats = getArmedCheats();
+  writeCheatJson(STORAGE_RUN_CHEATS, activeRunCheats);
+  writeCheatJson(STORAGE_CHEATS_ARMED, {});
+  return activeRunCheats;
+}
+
+function runHasGameplayCheats() {
+  return Object.keys(activeRunCheats).some((id) => activeRunCheats[id]);
+}
+
 function markDevAssistedRun() {
   try { localStorage.setItem(STORAGE_DEV_ASSISTED_RUN, "1"); } catch {}
 }
@@ -959,6 +1124,69 @@ function setDevModeOn(on) {
   devModeOn = !!on;
   document.body.classList.toggle("dev-mode", devModeOn);
   if (btnDevMode) btnDevMode.textContent = devModeOn ? "Dev Mode: On" : "Dev Mode: Off";
+}
+
+function formatCheatExpiry(firstAt) {
+  const msLeft = Math.max(0, CHEAT_PROGRESS_TTL_MS - (Date.now() - firstAt));
+  const h = Math.floor(msLeft / 3600000);
+  return h >= 1 ? `${h}h` : `${Math.max(1, Math.ceil(msLeft / 60000))}m`;
+}
+
+function renderCheatCodesPanel() {
+  if (!cheatCodesList) return;
+  const native = adService.isSupported();
+  const ready = adService.isReady();
+  const progress = getCheatProgress();
+  cheatCodesList.innerHTML = "";
+  for (const cheat of CHEAT_CATALOG) {
+    const row = document.createElement("div");
+    row.className = "cheatRow";
+    const owned = isCheatOwned(cheat.id);
+    const p = progress[cheat.id];
+    let status;
+    if (owned) status = cheat.id === "levelselect" ? "Unlocked" : "Armed for your next run";
+    else if (p) status = `${p.watched} / ${CHEAT_ADS_REQUIRED} ads watched · progress resets in ${formatCheatExpiry(p.firstAt)}`;
+    else status = `Requires ${CHEAT_ADS_REQUIRED} rewarded ads`;
+    row.innerHTML = `
+      <div class="cheatInfo">
+        <div class="cheatName"></div>
+        <div class="cheatDesc"></div>
+        <div class="cheatStatus"></div>
+      </div>
+      <button class="cheatWatchBtn" type="button"></button>`;
+    row.querySelector(".cheatName").textContent = cheat.name;
+    row.querySelector(".cheatDesc").textContent = cheat.desc;
+    row.querySelector(".cheatStatus").textContent = status;
+    const btn = row.querySelector(".cheatWatchBtn");
+    if (owned) {
+      btn.textContent = "✓";
+      btn.disabled = true;
+    } else if (!native) {
+      btn.textContent = "Available in the app";
+      btn.disabled = true;
+    } else {
+      const next = (p?.watched || 0) + 1;
+      btn.textContent = ready ? `Watch ad ${next}/${CHEAT_ADS_REQUIRED}` : "Ad loading…";
+      btn.disabled = !ready;
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        const { rewarded } = await adService.show();
+        if (rewarded && recordCheatAd(cheat.id)) {
+          triggerHapticNotification(hapticNotificationType.Success);
+          if (cheat.id === "levelselect") galaxyCanvasController?.syncArcadeMenuButtons?.();
+        }
+        renderCheatCodesPanel();
+      });
+    }
+    cheatCodesList.appendChild(row);
+  }
+}
+
+function wireCheatCodesMenu() {
+  if (!btnCheatCodes || !cheatCodesPanel) return;
+  btnCheatCodes.addEventListener("click", () => galaxyCanvasController?.showCheatCodesMenu?.());
+  btnCheatsBack?.addEventListener("click", () => galaxyCanvasController?.closeCheatCodesMenu?.());
+  adService.subscribe(() => { if (cheatCodesPanel.classList.contains("show")) renderCheatCodesPanel(); });
 }
 
 function wireDevModeEntry() {
@@ -1606,6 +1834,31 @@ const DEV_MODE_TAP_WINDOW_MS = 1500;
 const STORAGE_DEV_ASSISTED_RUN = "poly_oracle_dev_assisted_run";
 let devModeRevealed = false;
 let devModeOn = false;
+// 2026-10-25 (ADS-01): Cheat Codes earned with rewarded ads. Each costs CHEAT_ADS_REQUIRED ads;
+// partial progress expires CHEAT_PROGRESS_TTL_MS after the first ad. Level Select is permanent
+// (writes the existing STORAGE_CHEAT_LEVELSELECT key); the rest are "armed" and then consumed by
+// the next run that starts, becoming that run's cheats (persisted so Resume keeps them). A run
+// with any gameplay cheat can't submit to the Polyverse scoreboard.
+const btnCheatCodes = document.getElementById("btnCheatCodes");
+const cheatCodesPanel = document.getElementById("cheatCodesPanel");
+const cheatCodesList = document.getElementById("cheatCodesList");
+const btnCheatsBack = document.getElementById("btnCheatsBack");
+const STORAGE_CHEAT_PROGRESS = "poly_oracle_cheat_progress";
+const STORAGE_CHEATS_ARMED = "poly_oracle_cheats_armed";
+const STORAGE_RUN_CHEATS = "poly_oracle_run_cheats";
+const CHEAT_ADS_REQUIRED = 3;
+const CHEAT_PROGRESS_TTL_MS = 24 * 60 * 60 * 1000;
+const CHEAT_EXTRA_LIVES = 2;
+const CHEAT_QUAD_SPAN_MS = 60 * 60 * 1000; // "unlimited" Quad Shot = an hour-long timer, re-armed
+const CHEAT_CATALOG = [
+  { id: "levelselect", name: "Unlock Level Select", desc: "Start from any level. Permanent." },
+  { id: "missiles", name: "Unlimited Missiles", desc: "Homing missiles never run out (reload still applies). Next run." },
+  { id: "bombs", name: "Unlimited Bombs", desc: "Bombs never run out (up to 3 on the field). Next run." },
+  { id: "quad", name: "Unlimited Quad Shot", desc: "Quad Shot all run long. Next run." },
+  { id: "loadout", name: "Stocked Loadout", desc: "Every level starts with 3 bombs and 3 freezes. Next run." },
+  { id: "lives", name: "Extra Lives", desc: `+${CHEAT_EXTRA_LIVES} lives. Next run.` },
+];
+let activeRunCheats = readCheatJson(STORAGE_RUN_CHEATS);
 const hudQuadTime = document.getElementById("hudQuadTime");
 const hudPulseBadge = document.getElementById("hudPulseBadge");
 const hudPulseTime = document.getElementById("hudPulseTime");
@@ -4845,6 +5098,7 @@ function addListeners() {
     btnArcadeNew.addEventListener("click", () => galaxyCanvasController?.startArcadeNew?.());
   }
   wireDevModeEntry();
+  wireCheatCodesMenu();
   if (btnArcadeResume) {
     btnArcadeResume.addEventListener("click", () => galaxyCanvasController?.startArcadeResume?.());
   }
@@ -7614,11 +7868,14 @@ async function submitLeaderboardScore(initials, score) {
 
 function showInitialsEntry(score, runMsg = "") {
   const safeScore = Math.max(0, Math.floor(Number(score) || 0));
-  if (isDevAssistedRun()) {
-    // 2026-10-25 (DEV-01): Dev Mode was used this run — never offer a scoreboard submission.
+  const devAssisted = isDevAssistedRun();
+  if (devAssisted || runHasGameplayCheats()) {
+    // 2026-10-25 (DEV-01 / ADS-01): Dev Mode or a Cheat Code was used this run — never offer a
+    // scoreboard submission.
     clearDevAssistedRun();
+    const why = devAssisted ? "Dev Mode was" : "Cheat Codes were";
     const devOverlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
-      <p class="leaderboardSub">Score ${safeScore}. Dev Mode was used this run — score not submitted.</p>
+      <p class="leaderboardSub">Score ${safeScore}. ${why} used this run — score not submitted.</p>
       <button id="leaderboardSkip" class="leaderboardBtn" type="button">View Scoreboard</button>
     `);
     devOverlay.querySelector("#leaderboardSkip")?.addEventListener("click", () => showLeaderboard());
@@ -9413,8 +9670,8 @@ function initGalaxyCanvas() {
   }
   function slotCappedExclusions() {
     const ex = new Set();
-    if (playerBombInventory >= MAX_BOMB_INVENTORY) ex.add("bomb");
-    if (playerMissileInventory >= MAX_MISSILE_INVENTORY) ex.add("missile");
+    if (playerBombInventory >= MAX_BOMB_INVENTORY || activeRunCheats.bombs) ex.add("bomb");
+    if (playerMissileInventory >= MAX_MISSILE_INVENTORY || activeRunCheats.missiles) ex.add("missile");
     if (playerFreezeInventory >= MAX_FREEZE_INVENTORY) ex.add("freeze");
     return ex;
   }
@@ -10111,7 +10368,277 @@ function initGalaxyCanvas() {
     startGalaxyLoop();
   }
 
-  function handoffAfterScorecard(continueToNextLevel) {
+  // ── 2026-10-25 (GAME-02/03): every-other-level reward box ───────────────────────────────────
+  // Shown after clearing L2, L4, L6… in Arcade. Never opens by itself: taps 1–2 rattle it, tap 3
+  // opens it. Contents: 1 item roll + 1 per combo this level (max +3), plus 1 slot token. Items are
+  // bomb/freeze/missile, skipping full (or cheat-unlimited) ones; anything that can't fit becomes a
+  // token. COLLECT ×2 (rewarded ad, native only) grants the same list twice. One grant per box.
+  const REWARD_BOX_MAX_COMBO_ROLLS = 3;
+  const REWARD_BOX_TAPS_TO_OPEN = 3;
+  const TOKEN_AD_REWARD = 2;
+  const REWARD_ITEM_INFO = {
+    bomb: { label: "Bomb", art: "powerups/powerup_bomb.png" },
+    freeze: { label: "Freeze", art: "powerups/powerup_freeze.png" },
+    missile: { label: "Missile", art: "powerups/powerup_missile.png" },
+    token: { label: "Slot Token", art: "powerups/powerup_goldbars.png" },
+  };
+  const rewardBoxesOpened = new Set(); // cleared levels whose box was shown this run
+  let _rbxStylesInjected = false;
+
+  function ensureRewardBoxStyles() {
+    ensureLsrStyles();
+    if (_rbxStylesInjected) return;
+    _rbxStylesInjected = true;
+    const s = document.createElement("style");
+    s.id = "rbxStyles";
+    // Static glow only — no idle infinite animations (the remaster's idle-cost rule); the rattle
+    // and open are one-shot animations.
+    s.textContent = `
+      .rbx-overlay{position:fixed;inset:0;z-index:9500;display:flex;align-items:center;justify-content:center;pointer-events:auto;background:radial-gradient(circle at 50% 42%,rgba(6,16,30,.93),rgba(1,4,10,.97));}
+      .rbx-panel{display:grid;justify-items:center;gap:14px;text-align:center;}
+      .rbx-sub{font-size:.85rem;letter-spacing:.08em;color:#bfe;opacity:.85;max-width:300px;}
+      .rbx-box{position:relative;width:132px;height:112px;border:0;background:none;padding:0;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+      .rbx-body{position:absolute;left:8px;right:8px;bottom:0;height:72px;border-radius:10px;background:linear-gradient(180deg,#123a4a,#06202b);border:2px solid rgba(0,255,209,.7);box-shadow:0 0 22px rgba(0,255,209,.35),inset 0 0 18px rgba(0,255,209,.18);}
+      .rbx-body::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:18px;transform:translateX(-50%);background:linear-gradient(180deg,#ffd76a,#c8961c);}
+      .rbx-lid{position:absolute;left:0;right:0;top:12px;height:30px;border-radius:9px;background:linear-gradient(180deg,#1b5266,#0b3242);border:2px solid rgba(0,255,209,.8);transform-origin:12% 100%;transition:transform 380ms cubic-bezier(.2,1.4,.4,1);}
+      .rbx-lid::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:18px;transform:translateX(-50%);background:linear-gradient(180deg,#ffe28a,#d9a62a);}
+      .rbx-box.rbx-rattle{animation:rbxRattle 320ms ease-in-out;}
+      .rbx-box.rbx-open .rbx-lid{transform:translateY(-22px) rotate(-24deg);}
+      @keyframes rbxRattle{0%,100%{transform:rotate(0)}20%{transform:rotate(-7deg)}40%{transform:rotate(6deg)}60%{transform:rotate(-4deg)}80%{transform:rotate(3deg)}}
+      .rbx-hint{font-size:.8rem;letter-spacing:.2em;color:#00FFD1;}
+      .rbx-items{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;min-height:0;}
+      .rbx-item{display:grid;justify-items:center;gap:4px;font-size:.72rem;letter-spacing:.06em;color:#dff;animation:lsrRowIn 260ms ease both;}
+      .rbx-item img{width:44px;height:44px;object-fit:contain;}
+      .rbx-combo{font-size:.8rem;letter-spacing:.1em;color:#ffcc66;}
+      .rbx-actions{display:grid;gap:10px;width:100%;}
+      .rbx-btn{font:inherit;font-size:.9rem;letter-spacing:.14em;padding:12px 18px;border-radius:10px;border:1px solid rgba(0,255,209,.55);background:rgba(0,255,209,.1);color:#00FFD1;cursor:pointer;}
+      .rbx-btn.rbx-ad{border-color:rgba(255,204,102,.65);background:rgba(255,204,102,.1);color:#ffcc66;}
+      .rbx-btn[disabled]{opacity:.45;}
+      .rbx-msg{font-size:.75rem;color:#ffb3a0;min-height:1em;}
+    `;
+    document.head.appendChild(s);
+  }
+
+  // Shared shell for the between-level reward screens. While it's up the gameplay loop idles the
+  // same way it does under the scorecard (scorecardIdleAt) — the playfield is already cleared.
+  function openBreakOverlay(id, title) {
+    ensureRewardBoxStyles();
+    const overlay = document.createElement("div");
+    overlay.id = id;
+    overlay.className = "rbx-overlay";
+    const panel = document.createElement("div");
+    panel.className = "lsr-panel rbx-panel";
+    panel.innerHTML = `<div class="lsr-title"></div>`;
+    panel.querySelector(".lsr-title").textContent = title;
+    overlay.appendChild(panel);
+    // Swallow taps so a stray fire-tap can't reach the canvas underneath.
+    overlay.addEventListener("pointerdown", (e) => e.stopPropagation(), { passive: false });
+    (galaxyView || document.body).appendChild(overlay);
+    scorecardIdleAt = performance.now();
+    let closed = false;
+    function close(onDone) {
+      if (closed) return;
+      closed = true;
+      scorecardIdleAt = 0;
+      overlay.style.transition = "opacity 180ms ease";
+      overlay.style.opacity = "0";
+      setTimeout(() => { overlay.remove(); onDone?.(); }, 190);
+    }
+    return { overlay, panel, close };
+  }
+
+  function rewardBoxDue(clearedLevel) {
+    return engineMode === "arcade" && !stuntActive && clearedLevel > 0 && clearedLevel % 2 === 0
+      && !rewardBoxesOpened.has(clearedLevel);
+  }
+
+  function rollRewardBox() {
+    const bonusRolls = Math.min(REWARD_BOX_MAX_COMBO_ROLLS, comboCountThisLevel);
+    const have = { bomb: playerBombInventory, freeze: playerFreezeInventory, missile: playerMissileInventory };
+    const caps = {
+      bomb: activeRunCheats.bombs ? 0 : MAX_BOMB_INVENTORY,
+      freeze: MAX_FREEZE_INVENTORY,
+      missile: activeRunCheats.missiles ? 0 : MAX_MISSILE_INVENTORY,
+    };
+    const items = [];
+    for (let i = 0; i < 1 + bonusRolls; i += 1) {
+      const open = Object.keys(caps).filter((k) => have[k] < caps[k]);
+      const kind = open.length ? open[(Math.random() * open.length) | 0] : "token";
+      if (kind !== "token") have[kind] += 1;
+      items.push(kind);
+    }
+    items.push("token");
+    return { items, bonusRolls };
+  }
+
+  function grantRewardItems(items) {
+    for (const kind of items) {
+      if (kind === "bomb" && playerBombInventory < MAX_BOMB_INVENTORY) playerBombInventory += 1;
+      else if (kind === "freeze" && playerFreezeInventory < MAX_FREEZE_INVENTORY) playerFreezeInventory += 1;
+      else if (kind === "missile" && playerMissileInventory < MAX_MISSILE_INVENTORY) playerMissileInventory += 1;
+      else slotTokens += 1; // tokens, and any item that no longer fits
+    }
+    updateHudBombInventory();
+    updateHudFreezeInventory();
+    updateHudMissileInventory();
+  }
+
+  function showRewardBox(clearedLevel, onDone) {
+    rewardBoxesOpened.add(clearedLevel);
+    const { items, bonusRolls } = rollRewardBox();
+    const { panel, close } = openBreakOverlay("rewardBoxOverlay", "REWARD BOX");
+    panel.insertAdjacentHTML("beforeend", `
+      <button class="rbx-box" type="button" aria-label="Open the reward box"><span class="rbx-lid"></span><span class="rbx-body"></span></button>
+      <div class="rbx-hint">TAP ${REWARD_BOX_TAPS_TO_OPEN}× TO OPEN</div>
+      <div class="rbx-items" hidden></div>
+      <div class="rbx-combo" hidden></div>
+      <div class="rbx-actions" hidden></div>
+      <div class="rbx-msg"></div>`);
+    const box = panel.querySelector(".rbx-box");
+    const hint = panel.querySelector(".rbx-hint");
+    const itemsEl = panel.querySelector(".rbx-items");
+    const comboEl = panel.querySelector(".rbx-combo");
+    const actions = panel.querySelector(".rbx-actions");
+    const msg = panel.querySelector(".rbx-msg");
+    let taps = 0;
+    let granted = false;
+    let busy = false;
+
+    function finish(times) {
+      if (granted) return;
+      granted = true;
+      for (let i = 0; i < times; i += 1) grantRewardItems(items);
+      playGameSfx("level_up", 0.8);
+      close(onDone);
+    }
+
+    box.addEventListener("click", () => {
+      if (taps >= REWARD_BOX_TAPS_TO_OPEN) return;
+      taps += 1;
+      if (taps < REWARD_BOX_TAPS_TO_OPEN) {
+        box.classList.remove("rbx-rattle");
+        void box.offsetWidth; // restart the one-shot rattle on quick re-taps
+        box.classList.add("rbx-rattle");
+        playGameSfx("blip1", 0.7);
+        triggerHapticImpact(hapticImpactStyle.Light);
+        return;
+      }
+      box.classList.remove("rbx-rattle");
+      box.classList.add("rbx-open");
+      hint.hidden = true;
+      playGameSfx("pickup_weapon", 0.9);
+      triggerHapticNotification(hapticNotificationType.Success);
+      itemsEl.hidden = false;
+      items.forEach((kind, i) => {
+        const info = REWARD_ITEM_INFO[kind];
+        const el = document.createElement("div");
+        el.className = "rbx-item";
+        el.style.animationDelay = `${i * 120}ms`;
+        el.innerHTML = `<img alt=""><span></span>`;
+        el.querySelector("img").src = info.art;
+        el.querySelector("span").textContent = info.label;
+        itemsEl.appendChild(el);
+      });
+      if (bonusRolls > 0) {
+        comboEl.hidden = false;
+        comboEl.textContent = `COMBO BONUS +${bonusRolls}`;
+      }
+      actions.hidden = false;
+      actions.innerHTML = `<button class="rbx-btn rbx-collect" type="button">COLLECT</button>`;
+      actions.querySelector(".rbx-collect").addEventListener("click", () => { if (!busy) finish(1); });
+      if (adService.isSupported()) {
+        const dbl = document.createElement("button");
+        dbl.className = "rbx-btn rbx-ad";
+        dbl.type = "button";
+        dbl.textContent = "COLLECT ×2 · WATCH AD";
+        dbl.disabled = !adService.isReady();
+        dbl.addEventListener("click", async () => {
+          if (busy || granted) return;
+          busy = true;
+          dbl.disabled = true;
+          const { rewarded } = await adService.show();
+          busy = false;
+          if (rewarded) { finish(2); return; }
+          dbl.remove();
+          msg.textContent = "Ad not completed — tap COLLECT.";
+        });
+        actions.appendChild(dbl);
+      }
+    });
+  }
+
+  // Tokens 0–1 between levels (native, ad loaded): offer +2 tokens for one ad. One offer per break.
+  function offerTokenAd(next) {
+    if (engineMode !== "arcade" || stuntActive || slotTokens > 1 || !adService.isReady()) { next(); return; }
+    const { panel, close } = openBreakOverlay("tokenAdOverlay", "POLYSLOTS");
+    panel.insertAdjacentHTML("beforeend", `
+      <div class="rbx-sub"></div>
+      <div class="rbx-actions">
+        <button class="rbx-btn rbx-ad rbx-watch" type="button">WATCH AD · +${TOKEN_AD_REWARD} TOKENS</button>
+        <button class="rbx-btn rbx-skip" type="button">NO THANKS</button>
+      </div>`);
+    panel.querySelector(".rbx-sub").textContent = slotTokens === 1
+      ? `You have 1 slot token. Watch an ad for +${TOKEN_AD_REWARD} more?`
+      : `Out of slot tokens. Watch an ad for +${TOKEN_AD_REWARD}?`;
+    let busy = false;
+    panel.querySelector(".rbx-skip").addEventListener("click", () => { if (!busy) close(next); });
+    panel.querySelector(".rbx-watch").addEventListener("click", async (e) => {
+      if (busy) return;
+      busy = true;
+      e.currentTarget.disabled = true;
+      const { rewarded } = await adService.show();
+      if (rewarded) {
+        slotTokens += TOKEN_AD_REWARD;
+        playGameSfx("level_up", 0.8);
+      }
+      close(next);
+    });
+  }
+
+  // Duck music and silence comms while a full-screen ad plays; restore on close.
+  let _adMusicGainBefore = null;
+  let _adMusicHtmlVolBefore = null;
+  adService.setHooks({
+    onOpen() {
+      commBoxController.stopVO();
+      _adMusicGainBefore = audioEngine.musicGain?.gain?.value ?? null;
+      _adMusicHtmlVolBefore = audioEngine.currentMusicHtml?.node?.volume ?? null;
+      if (audioEngine.musicGain && audioEngine.ctx) {
+        const t = audioEngine.ctx.currentTime;
+        audioEngine.musicGain.gain.cancelScheduledValues(t);
+        audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, t);
+        audioEngine.musicGain.gain.linearRampToValueAtTime(0, t + 0.15);
+      }
+      if (audioEngine.currentMusicHtml?.node) audioEngine.currentMusicHtml.node.volume = 0;
+    },
+    onClose() {
+      if (audioEngine.musicGain && audioEngine.ctx && _adMusicGainBefore !== null) {
+        const t = audioEngine.ctx.currentTime;
+        audioEngine.musicGain.gain.cancelScheduledValues(t);
+        audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, t);
+        audioEngine.musicGain.gain.linearRampToValueAtTime(_adMusicGainBefore, t + 0.25);
+      }
+      if (audioEngine.currentMusicHtml?.node && _adMusicHtmlVolBefore !== null) {
+        audioEngine.currentMusicHtml.node.volume = _adMusicHtmlVolBefore;
+      }
+      _adMusicGainBefore = null;
+      _adMusicHtmlVolBefore = null;
+    },
+  });
+
+  // 2026-10-25 (GAME-02 / ADS): between-level order is scorecard → reward box (even levels) →
+  // token-ad offer (tokens 0–1, native) → slot (if tokens) → next level.
+  function handoffAfterScorecard(continueToNextLevel, clearedLevel = 0) {
+    const toSlot = () => openSlotOrContinue(continueToNextLevel);
+    const toTokenOffer = () => offerTokenAd(toSlot);
+    if (rewardBoxDue(clearedLevel)) {
+      showRewardBox(clearedLevel, toTokenOffer);
+      return;
+    }
+    toTokenOffer();
+  }
+
+  function openSlotOrContinue(continueToNextLevel) {
     if (shouldOpenSlot()) {
       // The slot owns startLevel(); after it runs, apply any reward that must land on the new level (quad).
       enterSlot({ onExit: () => {
@@ -10265,7 +10792,10 @@ function initGalaxyCanvas() {
     // 2026-06-14: the missile only enters the pool once unlocked for this level.
     const pool = POWERUP_WEIGHTS.filter(
       (w) => (w.type !== "missile" || missileUnlocked(level))
-        && (w.type !== "pulse" || pulseUnlocked(level)),
+        && (w.type !== "pulse" || pulseUnlocked(level))
+        && !(w.type === "missile" && activeRunCheats.missiles)
+        && !(w.type === "bomb" && activeRunCheats.bombs)
+        && !(w.type === "quadshot" && activeRunCheats.quad),
     );
     const total = pool.reduce((s, w) => s + w.weight, 0);
     let roll = Math.random() * total;
@@ -10365,6 +10895,7 @@ function initGalaxyCanvas() {
   let shotsHit = 0;
   let ufosKilledThisLevel = 0;
   let comboBonusThisLevel = 0;
+  let comboCountThisLevel = 0; // 2026-10-25 (GAME-03): combos earned this level — reward-box bonus rolls
   let ufo = null;
   let ufoDroneLoopHandle = null;
   let arcadeUfoSpawnAt = 0;
@@ -10662,7 +11193,7 @@ function initGalaxyCanvas() {
     const hasBombs = playerBombInventory > 0;
     hudBombBtn.style.display = "";
     // 2026-07-01: icon lives in a static <img>; only the count text updates (was an emoji glyph).
-    if (hudBombCount) hudBombCount.textContent = `\xD7${playerBombInventory}`;
+    if (hudBombCount) hudBombCount.textContent = activeRunCheats.bombs ? "\xD7\u221E" : `\xD7${playerBombInventory}`;
     hudBombBtn.disabled = !hasBombs;
     hudBombBtn.classList.toggle("has-bombs", hasBombs);
     // pulse for attention only when bombs are available and not currently aiming
@@ -10708,7 +11239,7 @@ function initGalaxyCanvas() {
     const reloading = nowM < missileReloadUntil;
     setStyleIfChanged(hudMissileBtn, "display", "");
     // 2026-07-01: rocket icon lives in a static <img>; only the count text updates (was 🚀 glyph).
-    const label = `\xD7${count}`;
+    const label = activeRunCheats.missiles ? "\xD7\u221E" : `\xD7${count}`;
     if (hudMissileCount && hudMissileCount.textContent !== label) {
       hudMissileCount.textContent = label;
     }
@@ -10739,7 +11270,7 @@ function initGalaxyCanvas() {
     hudQuadBadge.classList.toggle("active", active);
     setAttrIfChanged(hudQuadBadge, "aria-hidden", active ? "false" : "true");
     if (active && hudQuadTime) {
-      const label = `${Math.ceil(remaining / 1000)}s`;
+      const label = activeRunCheats.quad && remaining > CHEAT_QUAD_SPAN_MS / 2 ? "\u221E" : `${Math.ceil(remaining / 1000)}s`;
       if (hudQuadTime.textContent !== label) hudQuadTime.textContent = label;
     }
   }
@@ -10765,6 +11296,14 @@ function initGalaxyCanvas() {
     if (now < pulseCannonUntil) return "pulse";
     if (now < quadShotUntil) return "quadshot";
     return null;
+  }
+
+  // 2026-10-25 (ADS-01): Unlimited Quad Shot keeps quadShotUntil far in the future (the same trick
+  // the Training quad lesson uses). A Pulse pickup takes over immediately instead of queueing
+  // behind a quad that never ends; updateTimedWeaponQueue() re-arms the quad when it finishes.
+  function startCheatQuad(now = performance.now()) {
+    quadShotUntil = now + CHEAT_QUAD_SPAN_MS;
+    updateHudQuadBadge();
   }
 
   function clearPendingTimedWeapon() {
@@ -10822,6 +11361,12 @@ function initGalaxyCanvas() {
       }
       return "extended";
     }
+    if (type === "pulse" && active === "quadshot" && activeRunCheats.quad) {
+      quadShotUntil = 0;
+      updateHudQuadBadge();
+      startTimedWeapon("pulse", durationMs, now, false);
+      return "started";
+    }
     if (active && active !== type) {
       queueTimedWeapon(type, durationMs);
       playGameSfx("pickup_weapon", 0.85);
@@ -10834,6 +11379,9 @@ function initGalaxyCanvas() {
   function updateTimedWeaponQueue(now = performance.now()) {
     if (now >= pulseCannonUntil && pulseWasActive) onPulseEnd();
     promotePendingTimedWeapon(now);
+    if (activeRunCheats.quad && engineMode === "arcade" && arcadeActive && !stuntActive && !activeTimedWeapon(now)) {
+      startCheatQuad(now);
+    }
   }
 
   // 2026-07-02: Player tapped the Quad Shot badge — forfeit any remaining cluster-fire time.
@@ -11171,6 +11719,7 @@ function initGalaxyCanvas() {
     }
     addArcadeScore(points);
     comboBonusThisLevel += points;
+    comboCountThisLevel += 1;
     comboBanners.push({
       key,
       label,
@@ -11730,6 +12279,7 @@ function initGalaxyCanvas() {
     const showArcade = mode === "arcade";
     const showLevels = mode === "levels";
     const showStunt = mode === "stunt";
+    const showCheats = mode === "cheats";
     // 2026-06-24: suppress comms while the level-select grid is up; kill any in-flight/queued VO
     // the moment it opens so a leftover gameplay line can't talk over the menu.
     arcadeLevelSelectOpen = showLevels;
@@ -11740,6 +12290,12 @@ function initGalaxyCanvas() {
     if (btnArcadeStunt) btnArcadeStunt.style.display = showRoot ? "" : "none";
     if (btnScores) btnScores.style.display = showRoot ? "" : "none";
     if (btnDevMode) btnDevMode.style.display = showRoot && devModeRevealed ? "" : "none";
+    if (btnCheatCodes) btnCheatCodes.style.display = showRoot ? "" : "none";
+    if (cheatCodesPanel) {
+      cheatCodesPanel.hidden = !showCheats;
+      cheatCodesPanel.classList.toggle("show", showCheats);
+      cheatCodesPanel.setAttribute("aria-hidden", showCheats ? "false" : "true");
+    }
     if (debugLevelPanel) debugLevelPanel.style.display = "none";
     if (arcadeMenuPanel) {
       arcadeMenuPanel.hidden = !showArcade;
@@ -11756,6 +12312,14 @@ function initGalaxyCanvas() {
       stuntModeMenuPanel.classList.toggle("show", showStunt);
       stuntModeMenuPanel.setAttribute("aria-hidden", showStunt ? "false" : "true");
     }
+  }
+
+  // 2026-10-25 (ADS-01): Cheat Codes sub-menu. Opening it is the "first ad use" moment that may
+  // show the UMP consent form and starts loading an ad.
+  function showCheatCodesMenu() {
+    setArcadeSubmenu("cheats");
+    renderCheatCodesPanel();
+    void adService.preload();
   }
 
   // 2026-06-15: Stunt Mode sub-menu — Training (always available) + Practice (unlocked after
@@ -12604,7 +13168,7 @@ function initGalaxyCanvas() {
     const placed = createMineEntity(px, py);
     if (tutorialPlacedBombNoAutoArm) placed.noAutoArm = true; // tutorial: wait for the cadet to tap-arm it
     placedBombs.push(placed);
-    playerBombInventory--;
+    if (!activeRunCheats.bombs) playerBombInventory--;
     updateHudBombInventory();
     playGameSfx("blip1", 0.85);
     addWarpRing(px, py, "rgba(124,255,91,1)");
@@ -15212,7 +15776,7 @@ function initGalaxyCanvas() {
 
   function detonateInventoryBomb(aimX, aimY) {
     if (playerBombInventory <= 0) return;
-    playerBombInventory--;
+    if (!activeRunCheats.bombs) playerBombInventory--;
     updateHudBombInventory();
     // 2026-06-09: deploy at the aimed tap point (falls back to center if none given)
     const x = Number.isFinite(aimX) ? aimX : sim.width / 2;
@@ -15585,6 +16149,7 @@ function initGalaxyCanvas() {
     // startLevel() (or the slot) re-shows it.
     scorecardIdleAt = performance.now() + 250;
     window.galaxyBackground?.pause?.();
+    void adService.preload(); // load during the break, never mid-gameplay
 
     // 2026-06-26: defocus the just-completed level's background (blur+grayscale, bg video paused)
     // so it isn't sitting visible behind the scorecard. Cleared in startLevel() as the next bg loads.
@@ -15854,7 +16419,7 @@ function initGalaxyCanvas() {
             commBoxController.stopVO();
             // STUB (slot step 3): single between-level seam. Forwards straight to the next level for
             // now; later this is where the slot takes ownership and assumes the startLevel() call.
-            handoffAfterScorecard(() => startLevel(currentLevelIndex + 1));
+            handoffAfterScorecard(() => startLevel(currentLevelIndex + 1), cfg.level);
           }, 420);
         },
       });
@@ -15984,53 +16549,93 @@ function initGalaxyCanvas() {
     }, 4200));
   }
 
+  // Spend 1 life and replay the current level (TIME'S UP → Retry, and the ad Continue).
+  function retryCurrentLevel() {
+    playGameSfx("retry_appear", 1);
+    flashScreen("#00ff3b", 1500, 1);
+    retryPending = false;
+    setMenuOverlayOpen(false);
+    arcadeLives = clamp(arcadeLives - 1, 0, MAX_LIVES);
+    arcadeScore = arcadeScoreAtLevelStart;
+    slotTokens = slotTokensAtLevelStart; // 2026-07-02: erase gold-bar tokens banked during the failed attempt
+    renderLives();
+    renderScore();
+    if (arcadeLives === 1) {
+      // SPC levels: "You're not doing so hot, Cadet." in place of CMDR's low-lives line.
+      if (!queueSpcBonusVO("SPC_not_doing_hot.mp3", { priority: "high" })) {
+        commBoxController.queueVO({
+          audioSrc: commBoxController.commVoSrc(
+            commBoxController.pickFromPool("lowlives", commBoxController.POOL_LOW_LIVES),
+          ),
+          event: "lowlives",
+          priority: "high",
+        });
+      }
+    }
+    hideArcadeOverlay();
+    // 2026-06-16: the render loop + PIXI can be torn down while the fail overlay is up — e.g.
+    // the app is backgrounded at the TIME'S UP screen, where the visibilitychange restore is
+    // skipped because it's gated on arcadeActive (false here). startLevel() alone never
+    // re-inits the renderer or restarts the loop, so the retried level renders blank (most
+    // visible on L15, which is effectively always failed-on-time). Re-init before respawning.
+    if (!galaxyRunning) {
+      resizeGalaxyCanvas();
+      computePlayfield();
+    }
+    startLevel(currentLevelIndex);
+    startGalaxyLoop();
+  }
+
   function promptRetryOrGameOver() {
     retryPending = true;
     commBoxController.stopVO();
     setMenuOverlayOpen(true);
     showArcadeOverlay("TIME'S UP", "Use 1 life to retry this level?", 0, {
       buttonText: "Retry (1 Life)",
-      buttonAction: () => {
-        playGameSfx("retry_appear", 1);
-        flashScreen("#00ff3b", 1500, 1);
-        retryPending = false;
-        setMenuOverlayOpen(false);
-        arcadeLives = clamp(arcadeLives - 1, 0, MAX_LIVES);
-        arcadeScore = arcadeScoreAtLevelStart;
-        slotTokens = slotTokensAtLevelStart; // 2026-07-02: erase gold-bar tokens banked during the failed attempt
-        renderLives();
-        renderScore();
-        if (arcadeLives === 1) {
-          // SPC levels: "You're not doing so hot, Cadet." in place of CMDR's low-lives line.
-          if (!queueSpcBonusVO("SPC_not_doing_hot.mp3", { priority: "high" })) {
-            commBoxController.queueVO({
-              audioSrc: commBoxController.commVoSrc(
-                commBoxController.pickFromPool("lowlives", commBoxController.POOL_LOW_LIVES),
-              ),
-              event: "lowlives",
-              priority: "high",
-            });
-          }
-        }
-        hideArcadeOverlay();
-        // 2026-06-16: the render loop + PIXI can be torn down while the fail overlay is up — e.g.
-        // the app is backgrounded at the TIME'S UP screen, where the visibilitychange restore is
-        // skipped because it's gated on arcadeActive (false here). startLevel() alone never
-        // re-inits the renderer or restarts the loop, so the retried level renders blank (most
-        // visible on L15, which is effectively always failed-on-time). Re-init before respawning.
-        if (!galaxyRunning) {
-          resizeGalaxyCanvas();
-          computePlayfield();
-        }
-        startLevel(currentLevelIndex);
-        startGalaxyLoop();
-      },
+      buttonAction: () => retryCurrentLevel(),
       secondaryButtonText: "Game Over",
       secondaryButtonAction: () => {
         retryPending = false;
         triggerGameOver();
       },
     });
+  }
+
+  // 2026-10-25 (ADS): out of lives → one rewarded-ad Continue per run (native, ad ready). Paul chose
+  // generous: the ad pays for the retry's life AND leaves CONTINUE_BONUS_LIVES spare. The score
+  // still counts for the scoreboard. Returns false when no offer is shown.
+  const CONTINUE_BONUS_LIVES = 1;
+  let continuedThisRun = false;
+  function offerAdContinue() {
+    if (continuedThisRun || stuntActive || engineMode !== "arcade" || !adService.isReady()) return false;
+    retryPending = true;
+    commBoxController.stopVO();
+    setMenuOverlayOpen(true);
+    let busy = false;
+    showArcadeOverlay("GAME OVER", `Out of lives. Watch an ad to retry this level with +${CONTINUE_BONUS_LIVES} life?`, 0, {
+      buttonText: "Watch Ad: Continue",
+      buttonAction: async () => {
+        if (busy) return;
+        busy = true;
+        const { rewarded } = await adService.show();
+        if (!rewarded) {
+          retryPending = false;
+          triggerGameOver();
+          return;
+        }
+        continuedThisRun = true;
+        // retryCurrentLevel() spends one life, so grant that one plus the bonus.
+        arcadeLives = clamp(arcadeLives + 1 + CONTINUE_BONUS_LIVES, 0, MAX_LIVES);
+        retryCurrentLevel();
+      },
+      secondaryButtonText: "Game Over",
+      secondaryButtonAction: () => {
+        if (busy) return;
+        retryPending = false;
+        triggerGameOver();
+      },
+    });
+    return true;
   }
 
   function triggerGameOver() {
@@ -16064,6 +16669,21 @@ function initGalaxyCanvas() {
     });
   }
 
+  // 2026-10-25 (ADS-01): top up whatever this run's Cheat Codes promise at each level start.
+  function applyRunCheatsForLevel() {
+    if (engineMode !== "arcade" || stuntActive || !runHasGameplayCheats()) return;
+    if (activeRunCheats.loadout) {
+      playerBombInventory = Math.max(playerBombInventory, MAX_BOMB_INVENTORY);
+      playerFreezeInventory = Math.max(playerFreezeInventory, MAX_FREEZE_INVENTORY);
+    }
+    if (activeRunCheats.bombs) playerBombInventory = Math.max(1, playerBombInventory);
+    if (activeRunCheats.missiles) playerMissileInventory = Math.max(1, playerMissileInventory);
+    if (activeRunCheats.quad) startCheatQuad();
+    updateHudBombInventory();
+    updateHudFreezeInventory();
+    updateHudMissileInventory();
+  }
+
   function startLevel(idx) {
     const _lvlTransStartAt = performance.now();
     fdBegin(ARCADE_LEVELS[clamp(idx, 0, ARCADE_LEVELS.length - 1)]?.level || 0);
@@ -16092,6 +16712,7 @@ function initGalaxyCanvas() {
     shotsHit = 0;
     ufosKilledThisLevel = 0;
     comboBonusThisLevel = 0;
+    comboCountThisLevel = 0;
     commBoxController.show();
     commBoxController.setDamageState("normal");
     showFpsOverlay();
@@ -16301,6 +16922,7 @@ function initGalaxyCanvas() {
       }
       setTimeout(fireSecondVO, 800);
     }
+    applyRunCheatsForLevel();
     lvlTrace(`[lvltrans] end startLevel duration=${(performance.now() - _lvlTransStartAt).toFixed(1)}ms level=${cfg.level}`);
     scheduleLevelTransitionReport();
   }
@@ -16418,6 +17040,13 @@ function initGalaxyCanvas() {
     hideArcadeOverlay();
     arcadeScore = 0;
     renderScore();
+    // 2026-10-25 (ADS-01): a fresh run takes every armed Cheat Code and gets one ad Continue.
+    if (consumeArmedCheatsForRun().lives) {
+      arcadeLives = clamp(arcadeLives + CHEAT_EXTRA_LIVES, 0, MAX_LIVES);
+      renderLives();
+    }
+    continuedThisRun = false;
+    rewardBoxesOpened.clear();
     engineMode = "arcade";
     arcadeActive = true;
     retryPending = false;
@@ -18339,6 +18968,7 @@ function initGalaxyCanvas() {
 
   function showModeSelect({ preserveArcade = false, openArcadeMenu = false } = {}) {
     hideArcadeOverlay();
+    void adService.preload(); // 2026-10-25 (ADS): menus are a safe time to load the next rewarded ad
     // The combo banner layer lives on a body-level canvas (above the HUD); wipe any lingering
     // banner so it can't float over the mode-select menu when we leave mid-combo.
     comboBanners.length = 0;
@@ -18744,7 +19374,7 @@ function initGalaxyCanvas() {
         stopWarningState();
         if (arcadeLives > 0 && !retryPending) {
           promptRetryOrGameOver();
-        } else if (!retryPending) {
+        } else if (!retryPending && !offerAdContinue()) {
           triggerGameOver();
         }
       }
@@ -18945,7 +19575,7 @@ function initGalaxyCanvas() {
         // the player spends one down to 2 or fewer. Applies in both arcade and practice.
         // 2026-07-03: same rule generalized to every capped type — freeze/snowflake at max no longer
         // spawns a powerup the player picks up for zero gain (the pickup was silently wasted).
-        const bombFull = playerBombInventory >= MAX_BOMB_INVENTORY;
+        const bombFull = playerBombInventory >= MAX_BOMB_INVENTORY || !!activeRunCheats.bombs;
         const freezeFull = playerFreezeInventory >= MAX_FREEZE_INVENTORY;
         if (powerups.length < POWERUP_MAX_ONSCREEN && cfg.level >= 1 && now >= nextBombPowerupAt) {
           const puType = practiceEndless ? pick(PRACTICE_POWERUP_POOL) : pickPowerupForLevel(cfg);
@@ -20726,7 +21356,7 @@ function initGalaxyCanvas() {
     if (playerMissileInventory <= 0) return;
     const nowM = performance.now();
     playGameSfx("missile_fired", 0.95);
-    playerMissileInventory -= 1;
+    if (!activeRunCheats.missiles) playerMissileInventory -= 1;
     missileReloadUntil = nowM + MISSILE_RELOAD_MS;
     updateHudMissileInventory();
     const launchX = 80;
@@ -21478,6 +22108,15 @@ function initGalaxyCanvas() {
     showStuntModeMenu() {
       showStuntModeMenu();
     },
+    showCheatCodesMenu() {
+      showCheatCodesMenu();
+    },
+    closeCheatCodesMenu() {
+      setArcadeSubmenu("root");
+    },
+    syncArcadeMenuButtons() {
+      syncArcadeMenuButtons();
+    },
     startStuntPractice() {
       if (!isStuntTrainingComplete()) return; // gated until training is finished
       startStuntPractice();
@@ -21559,6 +22198,7 @@ function initGalaxyCanvas() {
     // in endless Practice, but never during the training lesson (stuntActive drives the quad phase).
     cancelQuad() {
       if (stuntActive) return;
+      if (activeRunCheats.quad && engineMode === "arcade") return; // Unlimited Quad Shot can't be cancelled
       if (engineMode !== "arcade" && engineMode !== "practice") return;
       cancelQuadShot();
     },

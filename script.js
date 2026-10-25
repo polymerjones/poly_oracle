@@ -223,7 +223,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 12:30";
+const BUILD_TS = "2026-10-25 13:52";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -943,6 +943,41 @@ function setSavedArcadeLevel(level) {
   }
 }
 
+function markDevAssistedRun() {
+  try { localStorage.setItem(STORAGE_DEV_ASSISTED_RUN, "1"); } catch {}
+}
+
+function clearDevAssistedRun() {
+  try { localStorage.removeItem(STORAGE_DEV_ASSISTED_RUN); } catch {}
+}
+
+function isDevAssistedRun() {
+  try { return localStorage.getItem(STORAGE_DEV_ASSISTED_RUN) === "1"; } catch { return false; }
+}
+
+function setDevModeOn(on) {
+  devModeOn = !!on;
+  document.body.classList.toggle("dev-mode", devModeOn);
+  if (btnDevMode) btnDevMode.textContent = devModeOn ? "Dev Mode: On" : "Dev Mode: Off";
+}
+
+function wireDevModeEntry() {
+  if (!menuLogoCanvas || !btnDevMode) return;
+  let taps = [];
+  menuLogoCanvas.addEventListener("pointerdown", () => {
+    const now = performance.now();
+    taps = taps.filter((t) => now - t < DEV_MODE_TAP_WINDOW_MS);
+    taps.push(now);
+    if (taps.length < DEV_MODE_TAP_COUNT) return;
+    taps = [];
+    devModeRevealed = true;
+    btnDevMode.style.display = "";
+    triggerHapticNotification(hapticNotificationType.Success);
+  });
+  btnDevMode.addEventListener("click", () => setDevModeOn(!devModeOn));
+  hudDevWin?.addEventListener("click", () => galaxyCanvasController?.devInstantWin?.());
+}
+
 function clearArcadeProgress() {
   try {
     localStorage.removeItem(STORAGE.arcadeLevel);
@@ -1560,6 +1595,17 @@ const hudMissileBtn = document.getElementById("hudMissileBtn");
 const hudMissileCount = document.getElementById("hudMissileCount");
 const hudMissileReload = document.getElementById("hudMissileReload");
 const hudQuadBadge = document.getElementById("hudQuadBadge");
+// 2026-10-25 (DEV-01): hidden Dev Mode. Three taps on the Stroids menu logo within
+// DEV_MODE_TAP_WINDOW_MS reveal the Dev Mode toggle; turning it on shows the DEV WIN HUD button.
+// Session-only on purpose (a relaunch turns it off). Any run that used a dev tool is flagged in
+// localStorage so its score never reaches the Polyverse scoreboard; a fresh run clears the flag.
+const btnDevMode = document.getElementById("btnDevMode");
+const hudDevWin = document.getElementById("hudDevWin");
+const DEV_MODE_TAP_COUNT = 3;
+const DEV_MODE_TAP_WINDOW_MS = 1500;
+const STORAGE_DEV_ASSISTED_RUN = "poly_oracle_dev_assisted_run";
+let devModeRevealed = false;
+let devModeOn = false;
 const hudQuadTime = document.getElementById("hudQuadTime");
 const hudPulseBadge = document.getElementById("hudPulseBadge");
 const hudPulseTime = document.getElementById("hudPulseTime");
@@ -4798,6 +4844,7 @@ function addListeners() {
   if (btnArcadeNew) {
     btnArcadeNew.addEventListener("click", () => galaxyCanvasController?.startArcadeNew?.());
   }
+  wireDevModeEntry();
   if (btnArcadeResume) {
     btnArcadeResume.addEventListener("click", () => galaxyCanvasController?.startArcadeResume?.());
   }
@@ -7567,6 +7614,16 @@ async function submitLeaderboardScore(initials, score) {
 
 function showInitialsEntry(score, runMsg = "") {
   const safeScore = Math.max(0, Math.floor(Number(score) || 0));
+  if (isDevAssistedRun()) {
+    // 2026-10-25 (DEV-01): Dev Mode was used this run — never offer a scoreboard submission.
+    clearDevAssistedRun();
+    const devOverlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
+      <p class="leaderboardSub">Score ${safeScore}. Dev Mode was used this run — score not submitted.</p>
+      <button id="leaderboardSkip" class="leaderboardBtn" type="button">View Scoreboard</button>
+    `);
+    devOverlay.querySelector("#leaderboardSkip")?.addEventListener("click", () => showLeaderboard());
+    return;
+  }
   galaxyCanvasController?.playArcadeMenuMusic?.({ fullVolume: true });
   playPolyverseScoreboardVo();
   const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
@@ -8719,6 +8776,9 @@ function initGalaxyCanvas() {
   let slotRaf = 0;                   // single in-flight requestAnimationFrame handle
   let slotOverlay = null;            // DOM overlay root, mounted by enterSlot()
   let slotHidGalaxyBg = false;       // enterSlot() paused the starfield under the opaque cabinet
+  // 2026-10-25: the scorecard now waits for a tap (GAME-04), so a player can idle on it for minutes.
+  // frame() idles the gameplay loop from this time on (0 = no scorecard up); see showLevelScoreReport.
+  let scorecardIdleAt = 0;
   // Live-shell state (step 3). enterSlot() owns the between-level window: it mounts the cabinet
   // overlay, shows the banked token count, locks input briefly, and hands control to startLevel()
   // on exit via slotOnExit. Reels/payouts/jackpot/visibility are deliberately NOT here yet.
@@ -10041,6 +10101,16 @@ function initGalaxyCanvas() {
 
   // The single between-level seam (replaces the step-3 stub). Decides whether the slot takes the
   // window — if so it OWNS the startLevel() call (passed as onExit); otherwise forwards straight on.
+  // Backgrounding the app on the scorecard/slot runs stopGalaxyLoop(), and the visibility restore
+  // only restarts the loop while arcadeActive (false between levels) — so re-arm it here.
+  function ensureGalaxyLoopRunning() {
+    if (galaxyRunning) return;
+    resizeGalaxyCanvas();
+    computePlayfield();
+    setTimeout(computePlayfield, 50);
+    startGalaxyLoop();
+  }
+
   function handoffAfterScorecard(continueToNextLevel) {
     if (shouldOpenSlot()) {
       // The slot owns startLevel(); after it runs, apply any reward that must land on the new level (quad).
@@ -10049,17 +10119,15 @@ function initGalaxyCanvas() {
         setMenuOverlayOpen(false);
         setGalaxyViewMode("arcade");
         setGalaxyTool("draw");
-        if (!galaxyRunning) {
-          resizeGalaxyCanvas();
-          computePlayfield();
-          setTimeout(computePlayfield, 50);
-          startGalaxyLoop();
-        }
+        ensureGalaxyLoopRunning();
         continueToNextLevel();
         slotApplyPendingRewards();
       } });
       return;
     }
+    // 2026-10-25: a player backgrounding on the scorecard came back to a dead next level (HUD up,
+    // no asteroids, frozen RUN timer) — the slot path re-armed the loop but this one didn't.
+    ensureGalaxyLoopRunning();
     continueToNextLevel();
   }
   // ───────────────────────────────────────────────────────────────────────────────────────────
@@ -11671,6 +11739,7 @@ function initGalaxyCanvas() {
     // 2026-06-14: Stunt Mode is a top-level mode now (Select Mode menu), not under Arcade
     if (btnArcadeStunt) btnArcadeStunt.style.display = showRoot ? "" : "none";
     if (btnScores) btnScores.style.display = showRoot ? "" : "none";
+    if (btnDevMode) btnDevMode.style.display = showRoot && devModeRevealed ? "" : "none";
     if (debugLevelPanel) debugLevelPanel.style.display = "none";
     if (arcadeMenuPanel) {
       arcadeMenuPanel.hidden = !showArcade;
@@ -15510,6 +15579,12 @@ function initGalaxyCanvas() {
     // the moment the scorecard appears so the playfield is empty behind it — they used to linger,
     // still rendering, until the next startLevel() cleared them on dismiss. Idempotent with that.
     clearGameplayEntities();
+    // 2026-10-25: the near-opaque scorecard covers the playfield, and it can now stay up indefinitely
+    // (GAME-04) — stop drawing underneath it. A short grace lets the cleared playfield paint once so
+    // the frozen frame isn't a ghost of the final asteroids. Starfield freezes on its last frame;
+    // startLevel() (or the slot) re-shows it.
+    scorecardIdleAt = performance.now() + 250;
+    window.galaxyBackground?.pause?.();
 
     // 2026-06-26: defocus the just-completed level's background (blur+grayscale, bg video paused)
     // so it isn't sitting visible behind the scorecard. Cleared in startLevel() as the next bg loads.
@@ -15535,7 +15610,6 @@ function initGalaxyCanvas() {
     let dismissed = false;
     let lastTapAt = 0;
     let hintVisible = false; // 2026-06-26: TAP TO CONTINUE shown — single tap may now skip
-    let autoTimer = null;
     const tallyTimers = [];
     let tallyDone = false;
     let scoreRevealComplete = false;
@@ -15577,11 +15651,11 @@ function initGalaxyCanvas() {
     function dismiss() {
       if (dismissed) return;
       dismissed = true;
+      scorecardIdleAt = 0;
       lvlTrace(`[lvltrans] scorecard dismiss elapsed=${(performance.now() - shownAt).toFixed(1)}ms`);
       // FIX 2026-06-09: restore music to its pre-scorecard level as gameplay resumes
       rampScorecardMusic(scorecardMusicGainBefore, scorecardMusicHtmlVolBefore);
       stopWriteLoop();
-      if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
       tallyTimers.forEach(t => clearTimeout(t));
       tallyTimers.length = 0;
       if (countupRaf) { cancelAnimationFrame(countupRaf); countupRaf = 0; }
@@ -15608,21 +15682,9 @@ function initGalaxyCanvas() {
       if (hintVisible || (isDoubleTap && tapNow - shownAt >= 1000)) dismiss();
     }, { passive: false });
 
-    // 2026-06-30: don't auto-advance while the level-complete comm is still talking. After the
-    // base 7s, re-poll until the VO goes idle, then dismiss. Hard cap (+8s) so a stuck/never-
-    // played VO can't pin the scorecard open. Manual dismiss paths are unaffected.
-    const autoAdvanceDeadline = performance.now() + 7000 + 8000;
-    function scheduleAutoDismiss(ms) {
-      autoTimer = setTimeout(() => {
-        if (dismissed) return;
-        if (commBoxController.isVOActive() && performance.now() < autoAdvanceDeadline) {
-          scheduleAutoDismiss(300);
-          return;
-        }
-        dismiss();
-      }, ms);
-    }
-    scheduleAutoDismiss(7000);
+    // 2026-10-25 (GAME-04): the scorecard no longer auto-advances (it used to dismiss itself after
+    // 7s, +8s grace while the level-complete VO played). An idle player now stays here until they
+    // tap — the TAP TO CONTINUE / double-tap paths above are the only ways forward.
 
     // Row-by-row tally reveal: dividers + rows appear one at a time, 200ms apart
     const revealEls = Array.from(panel.querySelectorAll(".lsr-div, .lsr-row"));
@@ -15687,6 +15749,14 @@ function initGalaxyCanvas() {
         }
       }, 150 + i * 200));
     });
+  }
+
+  // 2026-10-25 (DEV-01): Dev Mode instant win. Goes through the real levelComplete() so the
+  // scorecard, slot handoff, save and final-level win sequence all run exactly as a normal clear.
+  function devInstantWin() {
+    if (!devModeOn || engineMode !== "arcade" || !arcadeActive || stuntActive) return;
+    markDevAssistedRun();
+    levelComplete();
   }
 
   function levelComplete() {
@@ -16281,6 +16351,7 @@ function initGalaxyCanvas() {
   function startArcadeNew() {
     tapBlasts = [];
     clearArcadeProgress();
+    clearDevAssistedRun();
     setSavedArcadeLevel(1);
     arcadeLives = 0;
     arcadeScore = 0;
@@ -16342,6 +16413,7 @@ function initGalaxyCanvas() {
     arcadeLevelSelectOpen = false; // 2026-06-24: grid is dismissed — re-enable comms for the run
     const numericLevel = Math.floor(Number(levelNum));
     const safeLevel = Number.isFinite(numericLevel) ? numericLevel : 1;
+    clearDevAssistedRun(); // level-select starts a fresh run (score reset below)
     await warmArcadeAssets(safeLevel);
     hideArcadeOverlay();
     arcadeScore = 0;
@@ -20131,7 +20203,7 @@ function initGalaxyCanvas() {
     // 2026-10-25: the slot owns the between-level window and its onExit starts the next level, so
     // the finished level has nothing to simulate or draw under the opaque cabinet. Idle the loop
     // (PIXI stays alive, so exiting the slot pays no renderer re-init).
-    if (isSlotActive()) {
+    if (isSlotActive() || (scorecardIdleAt && now >= scorecardIdleAt)) {
       sim.last = 0;
       galaxyRaf = requestAnimationFrame(frame);
       return;
@@ -21378,6 +21450,9 @@ function initGalaxyCanvas() {
     },
     startArcadeFromSave() {
       startArcadeFromSave();
+    },
+    devInstantWin() {
+      devInstantWin();
     },
     startArcadeNew() {
       startArcadeNew();

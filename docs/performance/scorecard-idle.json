@@ -1,0 +1,54 @@
+{
+  "direct": {
+    "gameplay": {
+      "taskMsPerS": 147.2,
+      "ops": {
+        "(anon)": 900,
+        "galaxyBgCanvas": 298997
+      },
+      "pixiDraws": 180
+    },
+    "scorecard": {
+      "taskMsPerS": 24.9,
+      "ops": {},
+      "pixiDraws": 0
+    },
+    "stillUp": 1,
+    "nextLevel": {
+      "taskMsPerS": 127.7,
+      "ops": {
+        "(anon)": 900,
+        "galaxyBgCanvas": 299035
+      },
+      "pixiDraws": 180
+    },
+    "hud": "LEVEL 2",
+    "errors": []
+  },
+  "backgrounded": {
+    "gameplay": {
+      "taskMsPerS": 150.4,
+      "ops": {
+        "(anon)": 900,
+        "galaxyBgCanvas": 299216
+      },
+      "pixiDraws": 180
+    },
+    "scorecard": {
+      "taskMsPerS": 37.9,
+      "ops": {},
+      "pixiDraws": 0
+    },
+    "stillUp": 1,
+    "nextLevel": {
+      "taskMsPerS": 124.3,
+      "ops": {
+        "(anon)": 900,
+        "galaxyBgCanvas": 299233
+      },
+      "pixiDraws": 180
+    },
+    "hud": "LEVEL 2",
+    "errors": []
+  }
+}

@@ -22,6 +22,7 @@
       href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&display=swap"
       rel="stylesheet"
     />
+    <link rel="preload" as="image" href="assets/video/oracle_bg_poster.jpg" />
     <link rel="stylesheet" href="style.css?v=3.3" />
   </head>
   <body>
@@ -287,6 +288,8 @@
           <button id="btnArcadeStunt" class="modeBtn" type="button">Stunt Mode</button>
           <button id="btnScores" class="modeBtn" type="button">Scores</button>
           <button id="btnPractice" class="modeBtn" type="button">Practice</button>
+          <!-- 2026-10-25 (DEV-01): hidden until the Stroids logo is tapped 3× — see wireDevModeEntry() -->
+          <button id="btnDevMode" class="modeBtn devModeBtn" type="button" style="display:none">Dev Mode: Off</button>
           <button id="btnGalaxyBack" class="modeBackBtn" type="button">← Oracle</button>
         </div>
       </div>
@@ -304,6 +307,7 @@
       </header>
       <div id="arcadeHud" class="arcadeHud" aria-hidden="true">
         <button id="arcadeBack" class="hudBtn" type="button">← Modes</button>
+        <button id="hudDevWin" class="hudBtn hudDevWin" type="button" aria-label="Dev: win level">DEV WIN</button>
         <div class="hudCenter">
           <div id="hudGameTimer" class="hudGameTimer">RUN 00:00</div>
           <div id="hudLevel" class="hudLevel">LEVEL 1</div>

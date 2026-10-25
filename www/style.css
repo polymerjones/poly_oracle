@@ -176,11 +176,25 @@ body.reveal-screen-shake #oracleView {
   justify-content: center;
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 22px);
   opacity: 1;
-  transition: opacity 600ms ease;
+  transition: opacity 600ms ease, visibility 0s linear 600ms;
+}
+
+/* 2026-10-25 (FIX-01): iOS launch showed the page's navy body gradient ("blank blue") between the
+   splash and the bg video's first presented frame — WKWebView doesn't reliably paint the <video>
+   poster before decode. Paint the same poster here, with the video's own filter so the hand-off is
+   seamless; it fades with the pip on the first presented frame. */
+#oracleBgWarmup::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: #000 url("assets/video/oracle_bg_poster.jpg") center / cover no-repeat;
+  filter: saturate(1.08) contrast(1.02) brightness(0.66);
 }
 
 #oracleBgWarmup.warmup-done {
   opacity: 0;
+  visibility: hidden;
 }
 
 /* Completed loading must not leave an invisible infinite animation running. */
@@ -1479,7 +1493,8 @@ select:focus-visible {
     font-size: 16px;
   }
 
-  .oracle-bg-video {
+  .oracle-bg-video,
+  #oracleBgWarmup::before {
     opacity: 1;
     filter: saturate(1.14) contrast(1.12) brightness(0.54);
   }
@@ -3201,3 +3216,11 @@ select:focus-visible {
   opacity: 0.32;
   transition: opacity 0.18s ease;
 }
+
+/* 2026-10-25 (DEV-01): hidden developer mode. The Stroids logo canvas takes taps (the wrap stays
+   pointer-events:none so the empty space around it doesn't swallow menu taps). The DEV WIN HUD
+   button only exists while body.dev-mode is set. */
+.menuLogoCanvas { pointer-events: auto; -webkit-tap-highlight-color: transparent; }
+.devModeBtn { border-color: rgba(255, 170, 0, 0.6); color: #ffcc66; }
+.hudDevWin { display: none; border-color: rgba(255, 170, 0, 0.7); color: #ffcc66; font-weight: 700; }
+body.dev-mode .hudDevWin { display: inline-block; }

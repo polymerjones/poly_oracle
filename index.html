@@ -293,7 +293,7 @@
           <button id="btnArcadeStunt" class="modeBtn" type="button">Stunt Mode</button>
           <button id="btnScores" class="modeBtn" type="button">Scores</button>
           <button id="btnCheatCodes" class="modeBtn" type="button">Cheat Codes</button>
-          <button id="btnPractice" class="modeBtn" type="button">Practice</button>
+          <!-- 2026-10-25: Practice removed from Select Mode — it lives under Stunt Mode (btnStuntPractice). -->
           <!-- 2026-10-25 (DEV-01): hidden until the Stroids logo is tapped 3× — see wireDevModeEntry() -->
           <button id="btnDevMode" class="modeBtn devModeBtn" type="button" style="display:none">Dev Mode: Off</button>
           <button id="btnGalaxyBack" class="modeBackBtn" type="button">← Oracle</button>
@@ -312,7 +312,10 @@
         </div>
       </header>
       <div id="arcadeHud" class="arcadeHud" aria-hidden="true">
-        <button id="arcadeBack" class="hudBtn" type="button">← Modes</button>
+        <div class="hudLeftGroup">
+          <button id="arcadeBack" class="hudBtn" type="button">← Modes</button>
+          <button id="hudSlotBtn" class="hudSlotBtn" type="button" aria-label="Open Poly Slot" style="display:none"><img class="hudBtnIcon" src="slotart/jackpot.png" alt="" aria-hidden="true"><span class="hudBtnCount" id="hudSlotCount">×0</span></button>
+        </div>
         <button id="hudDevWin" class="hudBtn hudDevWin" type="button" aria-label="Dev: win level">DEV WIN</button>
         <div class="hudCenter">
           <div id="hudGameTimer" class="hudGameTimer">RUN 00:00</div>

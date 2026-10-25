@@ -21,6 +21,34 @@ const pixiRenderer = (() => {
   let debrisContainer = null;
   let shrapnelContainer = null;
   let flashContainer = null;
+  // 2026-10-25: the level-timer perimeter used its own full-screen 2D canvas (z2) that was cleared
+  // and re-stroked every frame — one extra full-screen layer upload per frame on iOS. It now lives
+  // here, on top of the stage, and only rebuilds when the visible stroke changes.
+  let timerGraphics = null;
+  let _timerKey = '';
+  const _cssColorCache = new Map();
+  let _ufoGeomKey = '';
+  const shrapnelGfxPool = [];
+  let _reducedMotionMQ = null;
+  // 2026-10-25: powerups + placed mines moved off the full-screen 2D FX overlay (which then had to
+  // repaint every frame one was on screen — i.e. nearly always). Their glow/gradient art is baked
+  // once into textures instead of per-frame shadowBlur / createRadialGradient.
+  let fallbackRingG = null;
+  let powerupLayer = null;
+  let mineLayer = null;
+  let mineArcG = null;
+  const overlayTex = {};
+  const _imgTextures = new WeakMap();
+  const OVL_K = 2; // bake overlay textures at 2x design size so scaled sprites stay crisp
+  // 2026-10-25: shared detonation budget so up to 9 bombs (MAX_BOMB_INVENTORY) can blow together
+  // cheaply — only BOMB_FULL_MAX blasts get the full ring stack + debris; extras are "lite"; debris
+  // shares one pool; one screen flash per window; fireball is a baked sprite, not 4 big ADD circles.
+  const BOMB_FULL_MAX = 3;
+  const BOMB_DEBRIS_TOTAL = 80; // == debrisContainer capacity
+  const BOMB_FLASH_WINDOW_MS = 150;
+  let _lastBombFlashAt = -Infinity;
+  let bombFxLayer = null;
+  let dissolveLayer = null; // Pulse Cannon plasma ghosts (just above the live asteroids)
 
   const asteroidSprites = new Map();
   const particleSprites = new Map();
@@ -118,24 +146,25 @@ const pixiRenderer = (() => {
   let landmineGraphics = null;
   let glowTexture = null;
 
+  // 2026-10-25: smooth radial falloff (was three hard-edged discs at .9/.25/.08 alpha, which banded
+  // visibly on every explosion particle once scaled up). Same size and roughly the same energy profile,
+  // so particle scale/brightness tuning is unchanged.
   function createGlowTexture(rendererApp, size = 32) {
-    const g = new PIXI.Graphics();
-    g.beginFill(0xffffff, 0.08);
-    g.drawCircle(size / 2, size / 2, size / 2);
-    g.endFill();
-    g.beginFill(0xffffff, 0.25);
-    g.drawCircle(size / 2, size / 2, (size / 2) * 0.65);
-    g.endFill();
-    g.beginFill(0xffffff, 0.9);
-    g.drawCircle(size / 2, size / 2, (size / 2) * 0.3);
-    g.endFill();
-    const rt = PIXI.RenderTexture.create({
-      width: size,
-      height: size,
-    });
-    rendererApp.renderer.render(g, { renderTexture: rt });
-    g.destroy();
-    return rt;
+    const c = document.createElement('canvas');
+    c.width = size;
+    c.height = size;
+    const x = c.getContext('2d');
+    const h = size / 2;
+    const g = x.createRadialGradient(h, h, 0, h, h, h);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.3, 'rgba(255,255,255,0.85)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.35)');
+    g.addColorStop(0.65, 'rgba(255,255,255,0.2)');
+    g.addColorStop(0.85, 'rgba(255,255,255,0.06)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = g;
+    x.fillRect(0, 0, size, size);
+    return PIXI.Texture.from(c);
   }
 
   async function init(mountEl, width, height, isNative) {
@@ -264,12 +293,27 @@ const pixiRenderer = (() => {
       app.stage.addChild(debrisContainer);
       app.stage.addChild(shrapnelContainer);
       app.stage.addChild(flashContainer);
+      timerGraphics = new PIXI.Graphics();
+      app.stage.addChild(timerGraphics); // above everything, like the old z2 canvas over PIXI
+      // Overlay order matches the old 2D overlay: powerups, then mines on top.
+      fallbackRingG = new PIXI.Graphics();
+      powerupLayer = new PIXI.Container();
+      mineLayer = new PIXI.Container();
+      mineArcG = new PIXI.Graphics();
+      app.stage.addChild(fallbackRingG, powerupLayer, mineLayer, mineArcG);
+      dissolveLayer = new PIXI.Container();
+      app.stage.addChildAt(dissolveLayer, app.stage.getChildIndex(asteroidContainer) + 1);
+      bakeOverlayTextures();
+      _timerKey = '';
+      _ufoGeomKey = '';
       starGraphics = starContainer;
       plasmaGraphics = new PIXI.Graphics();
       plasmaContainer.addChild(plasmaGraphics);
       bombGraphics = new PIXI.Graphics();
       bombGraphics.blendMode = PIXI.BLEND_MODES.ADD; // 2026-06-14: firey explosion (was a black implosion)
       bombContainer.addChild(bombGraphics);
+      bombFxLayer = new PIXI.Container();
+      bombContainer.addChildAt(bombFxLayer, 0); // fireballs under the ring strokes
       landmineGraphics = new PIXI.Graphics();
       landmineContainer.addChild(landmineGraphics);
 
@@ -547,7 +591,8 @@ const pixiRenderer = (() => {
       const t = ring.life / ring.ttl;
       const radius = ring.baseR + (ring.maxR - ring.baseR) * t;
       const alpha = ring.alpha * (1 - t);
-      const color = parseRgbaTint(ring.color) || 0x70ffb2;
+      if (ring._pixiTint == null) ring._pixiTint = parseRgbaTint(ring.color) || 0x70ffb2;
+      const color = ring._pixiTint;
 
       g.clear();
       g.lineStyle(1.8, color, Math.max(0, alpha));
@@ -622,8 +667,12 @@ const pixiRenderer = (() => {
       const alpha = Math.max(0, (ring.alpha || 1) * (1 - t));
       const points = Math.max(18, ring.segments || 28);
       const jitter = (ring.jitter || 10) * (1 - t);
-      const colorA = parseRgbaTint(ring.colorA || ring.color || 'rgba(0,255,209,1)');
-      const colorB = parseRgbaTint(ring.colorB || 'rgba(255,255,255,1)');
+      if (ring._pixiTintA == null) {
+        ring._pixiTintA = parseRgbaTint(ring.colorA || ring.color || 'rgba(0,255,209,1)');
+        ring._pixiTintB = parseRgbaTint(ring.colorB || 'rgba(255,255,255,1)');
+      }
+      const colorA = ring._pixiTintA;
+      const colorB = ring._pixiTintB;
 
       g.clear();
       for (let pass = 0; pass < 2; pass += 1) {
@@ -672,7 +721,14 @@ const pixiRenderer = (() => {
       ufoDisplay.width = r * 3.2;
       ufoDisplay.height = r * 1.8;
     } else if (ufoFallback) {
-      drawUFOGraphics(ufoFallback, ufoGlowFallback, ufoState.r || 24, damaged);
+      // 2026-10-25: geometry depends only on radius + damaged — rebuilding it (and re-running the
+      // glow BlurFilter) every frame was pure waste on the UFO levels.
+      const r = ufoState.r || 24;
+      const key = `${r}|${damaged ? 1 : 0}`;
+      if (key !== _ufoGeomKey) {
+        _ufoGeomKey = key;
+        drawUFOGraphics(ufoFallback, ufoGlowFallback, r, damaged);
+      }
     }
   }
 
@@ -685,12 +741,15 @@ const pixiRenderer = (() => {
 
     const BlurFilter = PIXI.filters?.BlurFilter || PIXI.BlurFilter;
     if (glowG && BlurFilter) {
+      glowG.cacheAsBitmap = false; // re-bake below
       glowG.beginFill(glowColor, 0.12);
       glowG.drawCircle(0, 0, r * 2.15);
       glowG.endFill();
       if (!glowG.filters || glowG.filters.length === 0) {
         glowG.filters = [new BlurFilter(10)];
       }
+      // Blur once into a cached texture instead of a multi-pass filter render every frame.
+      glowG.cacheAsBitmap = true;
     } else {
       g.beginFill(glowColor, 0.08);
       g.drawCircle(0, 0, r * 2.55);
@@ -1133,11 +1192,17 @@ const pixiRenderer = (() => {
   function triggerBombDetonation(x, y, radius) {
     const effectRadius = Number.isFinite(radius) ? radius : 220;
     const visualRadius = Math.min(280, Math.max(80, effectRadius * 0.4));
+    const now = performance.now();
+    let full = 0;
+    for (let i = 0; i < activeBombs.length; i += 1) {
+      if (!activeBombs[i].lite && now - activeBombs[i].start < 1400) full += 1;
+    }
     activeBombs.push({
       x,
       y,
       visualRadius,
-      start: performance.now(),
+      start: now,
+      lite: full >= BOMB_FULL_MAX,
       flashTriggered: false,
       debrisSpawned: false,
     });
@@ -1149,7 +1214,8 @@ const pixiRenderer = (() => {
 
   function spawnBombDebris(bomb, now) {
     const colors = [0xff6600, 0xffaa00, 0xffffff, 0x00ffd1];
-    for (let i = 0; i < 40; i += 1) {
+    const n = Math.min(40, BOMB_DEBRIS_TOTAL - activeDebris.length);
+    for (let i = 0; i < n; i += 1) {
       const sprite = debrisPool.pop() || new PIXI.Sprite(PIXI.Texture.WHITE);
       const angle = Math.random() * Math.PI * 2;
       const speed = 160 + Math.random() * 520;
@@ -1199,6 +1265,7 @@ const pixiRenderer = (() => {
   function updateBombEffects(now) {
     if (!bombGraphics) return;
     bombGraphics.clear();
+    let fx = 0;
 
     for (let i = activeBombs.length - 1; i >= 0; i -= 1) {
       const bomb = activeBombs[i];
@@ -1212,31 +1279,31 @@ const pixiRenderer = (() => {
         const grow = Math.pow(t, 0.55); // fast out, ease near the end
         const fade = 1 - t;
         const coreR = r * (0.18 + grow * 0.95);
-        // outer red/orange glow
-        bombGraphics.beginFill(0xff3300, 0.55 * fade);
-        bombGraphics.drawCircle(bomb.x, bomb.y, coreR * 1.35);
-        bombGraphics.endFill();
-        // mid orange body
-        bombGraphics.beginFill(0xff7a00, 0.7 * fade);
-        bombGraphics.drawCircle(bomb.x, bomb.y, coreR);
-        bombGraphics.endFill();
-        // hot yellow inner
-        bombGraphics.beginFill(0xffcc33, 0.8 * fade);
-        bombGraphics.drawCircle(bomb.x, bomb.y, coreR * 0.6);
-        bombGraphics.endFill();
-        // white-hot center (brightest at the start)
-        bombGraphics.beginFill(0xffffff, 0.9 * (1 - grow));
-        bombGraphics.drawCircle(bomb.x, bomb.y, coreR * 0.32);
-        bombGraphics.endFill();
+        // fireball + white-hot center (brightest at the start) as baked ADD sprites
+        const ball = layerSprite(bombFxLayer, fx++, overlayTex.fireball);
+        ball.position.set(bomb.x, bomb.y);
+        ball.width = ball.height = coreR * 1.35 * 2;
+        ball.alpha = fade;
+        ball.tint = 0xffffff;
+        ball.blendMode = PIXI.BLEND_MODES.ADD;
+        const core = layerSprite(bombFxLayer, fx++, overlayTex.disc);
+        core.position.set(bomb.x, bomb.y);
+        core.width = core.height = coreR * 0.32 * 2;
+        core.alpha = 0.9 * (1 - grow);
+        core.tint = 0xffffff;
+        core.blendMode = PIXI.BLEND_MODES.ADD;
         // leading shock edge
         bombGraphics.lineStyle(3, 0xffdd88, 0.6 * fade);
         bombGraphics.drawCircle(bomb.x, bomb.y, coreR * 1.4);
         if (!bomb.flashTriggered) {
           bomb.flashTriggered = true;
-          flashAlpha = 1.0;
-          if (flashContainer?._rect) {
-            flashContainer._rect.tint = 0xfff0d0;
-            flashContainer._rect.alpha = flashAlpha;
+          if (now - _lastBombFlashAt >= BOMB_FLASH_WINDOW_MS) {
+            _lastBombFlashAt = now;
+            flashAlpha = 1.0;
+            if (flashContainer?._rect) {
+              flashContainer._rect.tint = 0xfff0d0;
+              flashContainer._rect.alpha = flashAlpha;
+            }
           }
         }
       } else if (age < 1400) {
@@ -1246,7 +1313,8 @@ const pixiRenderer = (() => {
           { delay: 160, from: 0, to: 3.0, color: 0xffffff, alpha: 0.3 },
           { delay: 240, from: 0, to: 3.5, color: 0x4400ff, alpha: 0.25 },
         ];
-        for (let j = 0; j < rings.length; j += 1) {
+        const ringCount = bomb.lite ? 1 : rings.length;
+        for (let j = 0; j < ringCount; j += 1) {
           const ring = rings[j];
           const rt = Math.max(0, Math.min(1, (age - 420 - ring.delay) / (750 - ring.delay)));
           if (rt <= 0 || rt >= 1) continue;
@@ -1259,12 +1327,13 @@ const pixiRenderer = (() => {
         }
       }
 
-      if (age >= 120 && !bomb.debrisSpawned && debrisContainer) {
+      if (age >= 120 && !bomb.debrisSpawned && !bomb.lite && debrisContainer) {
         bomb.debrisSpawned = true;
         spawnBombDebris(bomb, now);
       }
       if (age >= 1800) activeBombs.splice(i, 1);
     }
+    hideLayerFrom(bombFxLayer, fx);
 
     updateBombDebris(now);
   }
@@ -1327,11 +1396,9 @@ const pixiRenderer = (() => {
 
   function syncShrapnel(shrapnel, now) {
     if (!shrapnelContainer) return;
-    const oldChildren = shrapnelContainer.removeChildren();
-    for (let i = 0; i < oldChildren.length; i += 1) {
-      oldChildren[i].destroy();
-    }
-
+    // 2026-10-25: pooled — this used to destroy and re-create one Graphics per shrapnel every frame
+    // (GC + GPU buffer churn during the L12/L13 bomb/mine chains).
+    let used = 0;
     for (let i = 0; i < shrapnel.length; i += 1) {
       const sh = shrapnel[i];
       const age = now - sh.startedAt;
@@ -1343,8 +1410,15 @@ const pixiRenderer = (() => {
           : 1;
       if (alpha <= 0) continue;
 
-      const g = new PIXI.Graphics();
-      shrapnelContainer.addChild(g);
+      let g = shrapnelGfxPool[used];
+      if (!g) {
+        g = new PIXI.Graphics();
+        shrapnelGfxPool.push(g);
+        shrapnelContainer.addChild(g);
+      }
+      used += 1;
+      g.clear();
+      g.visible = true;
 
       if (sh.isPulse) {
         g.lineStyle(3, 0x00ffd1, alpha * 0.8);
@@ -1366,12 +1440,289 @@ const pixiRenderer = (() => {
         g.drawCircle(sh.x, sh.y, size);
       }
     }
+    for (let i = used; i < shrapnelGfxPool.length; i += 1) {
+      const g = shrapnelGfxPool[i];
+      if (!g.visible) break; // everything past the first hidden one is already hidden
+      g.clear();
+      g.visible = false;
+    }
+  }
+
+  function bakeTexture(size, paint) {
+    const c = document.createElement('canvas');
+    c.width = size;
+    c.height = size;
+    paint(c.getContext('2d'), size / 2);
+    return PIXI.Texture.from(c);
+  }
+
+  function bakeOverlayTextures() {
+    const K = OVL_K;
+    // Missile powerup ring: radius 26, 2.5px stroke, shadowBlur 14 (drawPowerups' missile branch).
+    const ring = (color) => bakeTexture(Math.ceil((26 + 22) * 2 * K), (x, c) => {
+      x.beginPath();
+      x.arc(c, c, 26 * K, 0, Math.PI * 2);
+      x.strokeStyle = color;
+      x.lineWidth = 2.5 * K;
+      x.shadowColor = color;
+      x.shadowBlur = 14 * K;
+      x.stroke();
+    });
+    overlayTex.missileRingGold = ring('#ffd700');
+    overlayTex.missileRingRed = ring('#ff3333');
+    overlayTex.ringPad = 26 + 22; // design half-size of the ring textures
+    overlayTex.disc = bakeTexture(64 * K, (x, c) => {
+      x.beginPath();
+      x.arc(c, c, 32 * K, 0, Math.PI * 2);
+      x.fillStyle = '#ffffff';
+      x.fill();
+    });
+    // Mine hull (drawPlacedBombsOverlay), baked at design radius 32 — the 2D code's r=14 inner stop
+    // of 2px scales to r*0.143.
+    const R = 32 * K;
+    const hull = (armed) => bakeTexture(2 * R, (x, c) => {
+      const g = x.createRadialGradient(c - R * 0.35, c - R * 0.35, R * 0.143, c, c, R * 1.15);
+      g.addColorStop(0, armed ? 'rgba(92,44,44,0.98)' : 'rgba(56,58,66,0.98)');
+      g.addColorStop(0.6, armed ? 'rgba(38,28,28,0.98)' : 'rgba(26,30,40,0.98)');
+      g.addColorStop(1, 'rgba(12,16,24,0.98)');
+      x.beginPath();
+      x.arc(c, c, R, 0, Math.PI * 2);
+      x.fillStyle = g;
+      x.fill();
+    });
+    overlayTex.mineHullArmed = hull(true);
+    overlayTex.mineHullIdle = hull(false);
+    // Phase ring: 1.4px at r=14 → 3.2px at design radius 32; padded so the stroke isn't clipped.
+    overlayTex.mineRing = bakeTexture(2 * (R + 3 * K), (x, c) => {
+      x.beginPath();
+      x.arc(c, c, R, 0, Math.PI * 2);
+      x.strokeStyle = '#ffffff';
+      x.lineWidth = 3.2 * K;
+      x.stroke();
+    });
+    overlayTex.mineRingScale = (R + 3 * K) / R; // texture half-size / ring radius
+    // Soft radial glow (the 32px glowTexture has hard steps that show when scaled up).
+    overlayTex.softGlow = bakeTexture(64 * K, (x, c) => {
+      const g = x.createRadialGradient(c, c, 0, c, c, c);
+      g.addColorStop(0, 'rgba(255,255,255,0.9)');
+      g.addColorStop(0.35, 'rgba(255,255,255,0.35)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = g;
+      x.fillRect(0, 0, 2 * c, 2 * c);
+    });
+    // Bomb fireball: the three additive discs updateBombEffects used to fill per frame (radii
+    // 1.35 / 1.0 / 0.6 of coreR at alpha .55/.7/.8). Baked as opaque bands holding their summed
+    // additive colour, so an ADD sprite at alpha=fade adds exactly what the three layers did.
+    // Texture half-size = 1.35 coreR.
+    overlayTex.fireball = bakeTexture(128 * K, (x, c) => {
+      const u = c / 1.35;
+      [[1.35, 'rgb(140,28,0)'], [1.0, 'rgb(255,113,0)'], [0.6, 'rgb(255,255,0)']].forEach(([rr, col]) => {
+        x.beginPath();
+        x.arc(c, c, rr * u, 0, Math.PI * 2);
+        x.fillStyle = col;
+        x.fill();
+      });
+    });
+  }
+
+  function imgTexture(img) {
+    let t = _imgTextures.get(img);
+    if (!t) {
+      t = PIXI.Texture.from(img);
+      _imgTextures.set(img, t);
+    }
+    return t;
+  }
+
+  // Index-reused sprites: immediate-mode drawing without per-frame allocation.
+  function layerSprite(layer, i, tex) {
+    let sp = layer.children[i];
+    if (!sp) {
+      sp = new PIXI.Sprite();
+      sp.anchor.set(0.5);
+      layer.addChild(sp);
+    }
+    if (sp.texture !== tex) sp.texture = tex;
+    sp.visible = true;
+    sp.rotation = 0;
+    return sp;
+  }
+  function hideLayerFrom(layer, n) {
+    for (let i = n; i < layer.children.length; i += 1) layer.children[i].visible = false;
+  }
+
+  // powerups: [{ x, y, size, alpha, scale, blinkRed, missile, img|null, r, ringColor }]
+  // mines: [{ x, y, r, armed, playerArmed, pulse, blink, cdR, cdT, cdAlpha, cdW }] (cdR 0 = none)
+  // dissolves: [{ spriteKey, x, y, r, rot, vx, vy, t0 }] — each drawn as its own sprite tinted
+  // plasma-teal, drifting on its velocity, swelling and fading, over an additive teal glow.
+  function syncDissolves(dissolves, now, durMs) {
+    let n = 0;
+    for (let i = 0; i < dissolves.length; i += 1) {
+      const d = dissolves[i];
+      const age = now - d.t0;
+      const t = age / durMs;
+      if (t < 0 || t >= 1) continue;
+      const sec = age / 1000;
+      const x = d.x + d.vx * sec;
+      const y = d.y + d.vy * sec;
+      const glow = layerSprite(dissolveLayer, n++, overlayTex.softGlow);
+      glow.position.set(x, y);
+      glow.width = glow.height = d.r * (3 + t * 1.5);
+      glow.tint = 0x00ffd1;
+      glow.alpha = (1 - t) * 0.85;
+      glow.blendMode = PIXI.BLEND_MODES.ADD;
+      const tex = textures[d.spriteKey || 'roid01'] || textures.roid01 || PIXI.Texture.WHITE;
+      const ghost = layerSprite(dissolveLayer, n++, tex);
+      ghost.position.set(x, y);
+      ghost.rotation = d.rot + t * 0.6;
+      ghost.width = ghost.height = d.r * 2 * (1 + t * 0.25);
+      ghost.tint = t < 0.15 ? 0xeafffb : 0x5cffe0; // white-hot flash, then plasma teal
+      ghost.alpha = 1 - t * t;
+      ghost.blendMode = PIXI.BLEND_MODES.ADD;
+    }
+    hideLayerFrom(dissolveLayer, n);
+  }
+
+  function syncOverlays(powerups, mines, dissolves, now, dissolveMs) {
+    if (!powerupLayer) return false;
+    if (dissolveLayer && dissolves) syncDissolves(dissolves, now, dissolveMs || 340);
+    let n = 0;
+    fallbackRingG.clear();
+    for (let i = 0; i < powerups.length; i += 1) {
+      const p = powerups[i];
+      if (!p.img) {
+        // Art still decoding: the 2D path's plain ring (no shadow/emoji — first frames only).
+        const col = cssColorToHex(p.ringColor);
+        fallbackRingG.lineStyle(2, col, p.alpha);
+        fallbackRingG.drawCircle(p.x, p.y, p.r * p.scale);
+        fallbackRingG.lineStyle(0);
+        fallbackRingG.beginFill(0x001e1e, 0.7 * p.alpha);
+        fallbackRingG.drawCircle(p.x, p.y, (p.r - 3) * p.scale);
+        fallbackRingG.endFill();
+        continue;
+      }
+      if (p.missile) {
+        const sp = layerSprite(powerupLayer, n++, p.blinkRed ? overlayTex.missileRingRed : overlayTex.missileRingGold);
+        sp.position.set(p.x, p.y);
+        sp.width = sp.height = overlayTex.ringPad * 2 * p.scale;
+        sp.alpha = p.alpha;
+        sp.tint = 0xffffff;
+      }
+      const art = layerSprite(powerupLayer, n++, imgTexture(p.img));
+      art.position.set(p.x, p.y);
+      art.width = art.height = p.size * p.scale;
+      art.alpha = p.alpha;
+      art.tint = 0xffffff;
+      if (p.blinkRed) {
+        const tintSp = layerSprite(powerupLayer, n++, overlayTex.disc);
+        tintSp.position.set(p.x, p.y);
+        tintSp.width = tintSp.height = p.size * p.scale;
+        tintSp.alpha = 0.38 * p.alpha;
+        tintSp.tint = 0xff3333;
+      }
+    }
+    hideLayerFrom(powerupLayer, n);
+
+    n = 0;
+    mineArcG.clear();
+    for (let i = 0; i < mines.length; i += 1) {
+      const m = mines[i];
+      const armed = m.armed;
+      const hull = layerSprite(mineLayer, n++, armed ? overlayTex.mineHullArmed : overlayTex.mineHullIdle);
+      hull.position.set(m.x, m.y);
+      hull.width = hull.height = m.r * 2;
+      hull.alpha = 1;
+      hull.tint = 0xffffff;
+      const ring = layerSprite(mineLayer, n++, overlayTex.mineRing);
+      ring.position.set(m.x, m.y);
+      ring.width = ring.height = m.r * 2 * overlayTex.mineRingScale;
+      ring.tint = m.playerArmed ? 0xff0000 : armed ? 0xff4444 : 0x44ff88;
+      ring.alpha = 0.55 + m.pulse * 0.3;
+      const lr = armed ? 4 + m.pulse * 2 : 3 + m.pulse;
+      const light = layerSprite(mineLayer, n++, overlayTex.disc);
+      light.position.set(m.x + m.r * 0.35, m.y - m.r * 0.35);
+      light.width = light.height = lr * 2;
+      light.tint = armed ? 0xff5050 : 0x7cff5b;
+      light.alpha = armed ? 0.6 + 0.4 * m.blink : 0.5 + 0.5 * m.blink;
+      if (m.cdR > 0) {
+        mineArcG.lineStyle(m.cdW, 0xff2222, m.cdAlpha);
+        strokeArcFresh(mineArcG, m.x, m.y, m.cdR, -Math.PI / 2, -Math.PI / 2 + m.cdT * Math.PI * 2);
+      }
+    }
+    hideLayerFrom(mineLayer, n);
+    return true;
+  }
+
+  function cssColorToHex(str) {
+    let v = _cssColorCache.get(str);
+    if (v === undefined) {
+      try { v = new PIXI.Color(str).toNumber(); } catch { v = parseRgbaTint(str); }
+      if (_cssColorCache.size > 512) _cssColorCache.clear(); // Practice's hue sweep mints many strings
+      _cssColorCache.set(str, v);
+    }
+    return v;
+  }
+
+  // Same walk as script.js strokeTimerPerimeterPath: clockwise from the top-left, `len` px long.
+  function traceTimerPath(g, len, x, y, w, h) {
+    let remaining = len;
+    let cx = x;
+    let cy = y;
+    g.moveTo(x, y);
+    const seg = (nx, ny, segLen) => {
+      if (remaining <= 0) return;
+      const use = Math.min(remaining, segLen);
+      const t = segLen > 0 ? use / segLen : 0;
+      g.lineTo(cx + (nx - cx) * t, cy + (ny - cy) * t);
+      cx = nx;
+      cy = ny;
+      remaining -= use;
+    };
+    seg(x + w, y, w);
+    seg(x + w, y + h, h);
+    seg(x, y + h, w);
+    seg(x, y, h);
+  }
+
+  // spec: null (hidden) or { progress 0..1, color (CSS string), x, y, w, h }. glow mimics the 2D
+  // path's shadowBlur (non-iOS) with a wide translucent under-stroke.
+  function setTimerPerimeter(spec, glow) {
+    if (!timerGraphics) return false;
+    if (!spec) {
+      if (_timerKey) {
+        timerGraphics.clear();
+        _timerKey = '';
+      }
+      return true;
+    }
+    const { x, y, w, h, color } = spec;
+    const perimeter = Math.max(1, 2 * (w + h));
+    const len = Math.round(perimeter * Math.max(0, Math.min(1, spec.progress)) * 2) / 2; // 0.5px steps
+    const key = `${len}|${color}|${x},${y},${w},${h}|${glow ? 1 : 0}`;
+    if (key === _timerKey) return true;
+    _timerKey = key;
+    const g = timerGraphics;
+    const join = PIXI.LINE_JOIN.ROUND;
+    const cap = PIXI.LINE_CAP.ROUND;
+    g.clear();
+    g.lineStyle({ width: 3, color: 0xb4becd, alpha: 0.1, join, cap });
+    g.drawRect(x, y, w, h);
+    if (len <= 0) return true;
+    const hex = cssColorToHex(color);
+    if (glow) {
+      g.lineStyle({ width: 9, color: hex, alpha: 0.2, join, cap });
+      traceTimerPath(g, len, x, y, w, h);
+    }
+    g.lineStyle({ width: 3, color: hex, alpha: 1, join, cap });
+    traceTimerPath(g, len, x, y, w, h);
+    return true;
   }
 
   function draw(sim, laserBeams, canvasFlash, ufoState, plasmaCage, landmine, bombShrapnel, now, plasmaChargeMs) {
     if (!app) return false;
     const frameBudgetExceeded = !!sim._frameBudgetExceeded;
-    const prefersReducedMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (!_reducedMotionMQ) _reducedMotionMQ = window.matchMedia?.('(prefers-reduced-motion: reduce)') || { matches: false };
+    const prefersReducedMotion = !!_reducedMotionMQ.matches;
 
     drawStars(sim.stars, now, prefersReducedMotion, frameBudgetExceeded);
     syncAsteroids(sim.asteroids);
@@ -1417,12 +1768,26 @@ const pixiRenderer = (() => {
     debrisContainer = null;
     shrapnelContainer = null;
     flashContainer = null;
+    timerGraphics = null;
+    fallbackRingG = null;
+    powerupLayer = null;
+    mineLayer = null;
+    mineArcG = null;
+    dissolveLayer = null;
+    for (const k of Object.keys(overlayTex)) {
+      if (overlayTex[k]?.destroy) overlayTex[k].destroy(true);
+      delete overlayTex[k];
+    }
+    _timerKey = '';
+    _ufoGeomKey = '';
+    shrapnelGfxPool.length = 0;
     starGraphics = null;
     ufoDisplay = null;
     ufoFallback = null;
     ufoGlowFallback = null;
     plasmaGraphics = null;
     bombGraphics = null;
+    bombFxLayer = null;
     landmineGraphics = null;
     asteroidSprites.clear();
     particleSprites.clear();
@@ -1451,7 +1816,7 @@ const pixiRenderer = (() => {
     _plasmaBorderFlash = 0;
   }
 
-  return { init, draw, resize, destroy, triggerBombDetonation, triggerShockwave, triggerPlasmaRectFlash };
+  return { init, draw, resize, destroy, setTimerPerimeter, syncOverlays, triggerBombDetonation, triggerShockwave, triggerPlasmaRectFlash };
 })();
 
 window.pixiRenderer = pixiRenderer;

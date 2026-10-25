@@ -3235,3 +3235,6 @@ body.dev-mode .hudDevWin { display: inline-block; }
 .cheatStatus { font-size: 0.7rem; color: #ffcc66; letter-spacing: 0.02em; }
 .cheatWatchBtn { flex: none; min-width: 92px; min-height: 40px; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255, 204, 102, 0.6); background: rgba(255, 204, 102, 0.1); color: #ffcc66; font: inherit; font-size: 0.74rem; font-weight: 700; }
 .cheatWatchBtn[disabled] { opacity: 0.5; }
+/* 2026-10-25: earned cheats become an On/Off switch for their 24h window */
+.cheatWatchBtn.cheatToggle { min-width: 64px; border-color: rgba(183, 201, 255, 0.35); background: rgba(255, 255, 255, 0.04); color: rgba(183, 201, 255, 0.75); letter-spacing: 0.12em; }
+.cheatWatchBtn.cheatToggle.on { border-color: rgba(0, 255, 209, 0.7); background: rgba(0, 255, 209, 0.14); color: #00ffd1; box-shadow: 0 0 12px rgba(0, 255, 209, 0.25); }

@@ -168,6 +168,8 @@ const ADS_REWARDED_UNIT = {
 const ADS_RETRY_AFTER_FAIL_MS = 30000;
 // A late Rewarded event can trail Dismissed by a beat; wait this long before settling a show.
 const ADS_REWARD_GRACE_MS = 300;
+// An ad pod loads each next ad after the previous one closes; give up if one takes longer than this.
+const ADS_POD_LOAD_TIMEOUT_MS = 15000;
 const adService = (() => {
   let state = "idle"; // idle | loading | ready | showing | failed | unsupported
   let initPromise = null;
@@ -175,6 +177,8 @@ const adService = (() => {
   let failedAt = 0;
   let current = null; // { rewarded, resolve, settleTimer }
   let hooks = { onOpen: null, onClose: null };
+  let inPod = false;
+  let audioHeld = false;
   const subscribers = new Set();
 
   function platform() {
@@ -193,10 +197,21 @@ const adService = (() => {
     if (!c) return;
     current = null;
     clearTimeout(c.settleTimer);
-    try { hooks.onClose?.(); } catch { /* hook errors must not strand the promise */ }
+    if (!inPod) releaseAudio();
     setState("idle");
     c.resolve({ rewarded: c.rewarded });
     setTimeout(preload, 500);
+  }
+  // onOpen/onClose bracket a single ad, or a whole pod so the music stays off between its ads.
+  function holdAudio() {
+    if (audioHeld) return;
+    audioHeld = true;
+    try { hooks.onOpen?.(); } catch { /* silencing is best-effort */ }
+  }
+  function releaseAudio() {
+    if (!audioHeld) return;
+    audioHeld = false;
+    try { hooks.onClose?.(); } catch { /* hook errors must not strand the promise */ }
   }
   function init() {
     if (initPromise) return initPromise;
@@ -242,16 +257,57 @@ const adService = (() => {
       if (state !== "ready" || current) { resolve({ rewarded: false }); return; }
       current = { rewarded: false, resolve, settleTimer: 0 };
       setState("showing");
-      try { hooks.onOpen?.(); } catch { /* ducking is best-effort */ }
+      holdAudio();
       plugin.showRewardVideoAd().catch(() => { if (current && !current.rewarded) settle(); });
     });
+  }
+  function waitReady(timeoutMs) {
+    return new Promise((resolve) => {
+      if (state === "ready") { resolve(true); return; }
+      let done = false;
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        subscribers.delete(onState);
+        resolve(ok);
+      };
+      const onState = (s) => { if (s === "ready") finish(true); else if (s === "failed") finish(false); };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      subscribers.add(onState);
+      void preload().then(() => { if (state === "failed") finish(false); });
+    });
+  }
+  // Ad pod: up to `count` rewarded ads back to back from one tap (the count is disclosed before
+  // the first, per AdMob policy). Stops at the first ad that is skipped or fails to load.
+  // onAdRewarded(n) fires after each completed ad; onProgress(i) before ad i (0-based) loads.
+  async function showPod(count, { onAdRewarded, onProgress } = {}) {
+    if (inPod || current) return { earned: 0 };
+    inPod = true;
+    let earned = 0;
+    try {
+      for (let i = 0; i < count; i++) {
+        try { onProgress?.(i); } catch { /* UI only */ }
+        if (!(await waitReady(ADS_POD_LOAD_TIMEOUT_MS))) break;
+        const { rewarded } = await show();
+        if (!rewarded) break;
+        earned += 1;
+        try { onAdRewarded?.(earned); } catch { /* the caller's grant must not end the pod */ }
+      }
+    } finally {
+      inPod = false;
+      releaseAudio();
+    }
+    return { earned };
   }
   return {
     isSupported,
     isReady: () => state === "ready",
+    isInPod: () => inPod,
     getState: () => state,
     preload,
     show,
+    showPod,
     setHooks(next) { hooks = { ...hooks, ...next }; },
     subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); },
   };
@@ -325,7 +381,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 14:23";
+const BUILD_TS = "2026-10-25 14:49";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1068,8 +1124,19 @@ function getCheatProgress() {
   return all;
 }
 
+// Earned gameplay cheats: { [id]: expiresAt }. Each stays on for CHEAT_ACTIVE_MS from unlock,
+// across every run started in that window (and survives closing the app).
 function getArmedCheats() {
-  return readCheatJson(STORAGE_CHEATS_ARMED);
+  const all = readCheatJson(STORAGE_CHEATS_ARMED);
+  const now = Date.now();
+  let changed = false;
+  for (const id of Object.keys(all)) {
+    // Pre-24h builds stored `true` (one run); give those a fresh window.
+    if (typeof all[id] !== "number") { all[id] = now + CHEAT_ACTIVE_MS; changed = true; }
+    if (all[id] <= now) { delete all[id]; changed = true; }
+  }
+  if (changed) writeCheatJson(STORAGE_CHEATS_ARMED, all);
+  return all;
 }
 
 function isCheatOwned(id) {
@@ -1091,16 +1158,31 @@ function recordCheatAd(id) {
   if (id === "levelselect") {
     setCheatLevelSelect();
   } else {
-    writeCheatJson(STORAGE_CHEATS_ARMED, { ...getArmedCheats(), [id]: true });
+    writeCheatJson(STORAGE_CHEATS_ARMED, { ...getArmedCheats(), [id]: Date.now() + CHEAT_ACTIVE_MS });
+    setCheatSwitchedOff(id, false);
   }
   return true;
 }
 
-// A new run takes every armed cheat (and drops the previous run's).
+// Earned cheats the player switched off in the Cheat Codes menu: { [id]: true }.
+function getCheatsSwitchedOff() {
+  return readCheatJson(STORAGE_CHEATS_OFF);
+}
+
+function setCheatSwitchedOff(id, off) {
+  const all = getCheatsSwitchedOff();
+  if (off) all[id] = true;
+  else delete all[id];
+  writeCheatJson(STORAGE_CHEATS_OFF, all);
+}
+
+// A new run turns on every switched-on cheat still inside its 24h window. A cheat that expires mid-run
+// stays on until that run ends.
 function consumeArmedCheatsForRun() {
-  activeRunCheats = getArmedCheats();
+  const active = getArmedCheats();
+  const off = getCheatsSwitchedOff();
+  activeRunCheats = Object.fromEntries(Object.keys(active).filter((id) => !off[id]).map((id) => [id, true]));
   writeCheatJson(STORAGE_RUN_CHEATS, activeRunCheats);
-  writeCheatJson(STORAGE_CHEATS_ARMED, {});
   return activeRunCheats;
 }
 
@@ -1126,10 +1208,13 @@ function setDevModeOn(on) {
   if (btnDevMode) btnDevMode.textContent = devModeOn ? "Dev Mode: On" : "Dev Mode: Off";
 }
 
+function formatTimeLeft(msLeft) {
+  const h = Math.floor(Math.max(0, msLeft) / 3600000);
+  return h >= 1 ? `${h}h` : `${Math.max(1, Math.ceil(Math.max(0, msLeft) / 60000))}m`;
+}
+
 function formatCheatExpiry(firstAt) {
-  const msLeft = Math.max(0, CHEAT_PROGRESS_TTL_MS - (Date.now() - firstAt));
-  const h = Math.floor(msLeft / 3600000);
-  return h >= 1 ? `${h}h` : `${Math.max(1, Math.ceil(msLeft / 60000))}m`;
+  return formatTimeLeft(CHEAT_PROGRESS_TTL_MS - (Date.now() - firstAt));
 }
 
 function renderCheatCodesPanel() {
@@ -1144,9 +1229,13 @@ function renderCheatCodesPanel() {
     const owned = isCheatOwned(cheat.id);
     const p = progress[cheat.id];
     let status;
-    if (owned) status = cheat.id === "levelselect" ? "Unlocked" : "Armed for your next run";
+    if (owned) {
+      status = cheat.id === "levelselect"
+        ? "Unlocked"
+        : `Active · ${formatTimeLeft(getArmedCheats()[cheat.id] - Date.now())} left`;
+    }
     else if (p) status = `${p.watched} / ${CHEAT_ADS_REQUIRED} ads watched · progress resets in ${formatCheatExpiry(p.firstAt)}`;
-    else status = `Requires ${CHEAT_ADS_REQUIRED} rewarded ads`;
+    else status = `Watch ${CHEAT_ADS_REQUIRED} short ads in a row to unlock`;
     row.innerHTML = `
       <div class="cheatInfo">
         <div class="cheatName"></div>
@@ -1158,23 +1247,43 @@ function renderCheatCodesPanel() {
     row.querySelector(".cheatDesc").textContent = cheat.desc;
     row.querySelector(".cheatStatus").textContent = status;
     const btn = row.querySelector(".cheatWatchBtn");
-    if (owned) {
+    if (owned && cheat.id !== "levelselect") {
+      // Earned: the row becomes an On/Off switch for the rest of its 24h window.
+      const on = !getCheatsSwitchedOff()[cheat.id];
+      btn.textContent = on ? "ON" : "OFF";
+      btn.classList.add("cheatToggle");
+      btn.classList.toggle("on", on);
+      btn.setAttribute("role", "switch");
+      btn.setAttribute("aria-checked", String(on));
+      if (!on) row.querySelector(".cheatStatus").textContent = `Off · ${formatTimeLeft(getArmedCheats()[cheat.id] - Date.now())} left`;
+      btn.addEventListener("click", () => {
+        setCheatSwitchedOff(cheat.id, on);
+        hapticTap();
+        renderCheatCodesPanel();
+      });
+    } else if (owned) {
       btn.textContent = "✓";
       btn.disabled = true;
     } else if (!native) {
       btn.textContent = "Available in the app";
       btn.disabled = true;
     } else {
-      const next = (p?.watched || 0) + 1;
-      btn.textContent = ready ? `Watch ad ${next}/${CHEAT_ADS_REQUIRED}` : "Ad loading…";
-      btn.disabled = !ready;
+      // One tap plays the whole ad pod (the remaining ads back to back). A skipped ad or a
+      // failed load stops the pod; finished ads still count toward the 24h progress.
+      const watched = p?.watched || 0;
+      const remaining = CHEAT_ADS_REQUIRED - watched;
+      btn.textContent = !ready ? "Ad loading…" : remaining === 1 ? "Watch 1 ad" : `Watch ${remaining} ads`;
+      btn.disabled = !ready || adService.isInPod();
       btn.addEventListener("click", async () => {
         btn.disabled = true;
-        const { rewarded } = await adService.show();
-        if (rewarded && recordCheatAd(cheat.id)) {
-          triggerHapticNotification(hapticNotificationType.Success);
-          if (cheat.id === "levelselect") galaxyCanvasController?.syncArcadeMenuButtons?.();
-        }
+        await adService.showPod(remaining, {
+          onProgress: (i) => { btn.textContent = `Ad ${watched + i + 1} of ${CHEAT_ADS_REQUIRED}…`; },
+          onAdRewarded: () => {
+            if (!recordCheatAd(cheat.id)) return;
+            triggerHapticNotification(hapticNotificationType.Success);
+            if (cheat.id === "levelselect") galaxyCanvasController?.syncArcadeMenuButtons?.();
+          },
+        });
         renderCheatCodesPanel();
       });
     }
@@ -1186,7 +1295,9 @@ function wireCheatCodesMenu() {
   if (!btnCheatCodes || !cheatCodesPanel) return;
   btnCheatCodes.addEventListener("click", () => galaxyCanvasController?.showCheatCodesMenu?.());
   btnCheatsBack?.addEventListener("click", () => galaxyCanvasController?.closeCheatCodesMenu?.());
-  adService.subscribe(() => { if (cheatCodesPanel.classList.contains("show")) renderCheatCodesPanel(); });
+  adService.subscribe(() => {
+    if (cheatCodesPanel.classList.contains("show") && !adService.isInPod()) renderCheatCodesPanel();
+  });
 }
 
 function wireDevModeEntry() {
@@ -1836,9 +1947,9 @@ let devModeRevealed = false;
 let devModeOn = false;
 // 2026-10-25 (ADS-01): Cheat Codes earned with rewarded ads. Each costs CHEAT_ADS_REQUIRED ads;
 // partial progress expires CHEAT_PROGRESS_TTL_MS after the first ad. Level Select is permanent
-// (writes the existing STORAGE_CHEAT_LEVELSELECT key); the rest are "armed" and then consumed by
-// the next run that starts, becoming that run's cheats (persisted so Resume keeps them). A run
-// with any gameplay cheat can't submit to the Polyverse scoreboard.
+// (writes the existing STORAGE_CHEAT_LEVELSELECT key); the rest stay active for CHEAT_ACTIVE_MS
+// and every run started in that window gets them (persisted so Resume keeps them). A run with any
+// gameplay cheat can't submit to the Polyverse scoreboard.
 const btnCheatCodes = document.getElementById("btnCheatCodes");
 const cheatCodesPanel = document.getElementById("cheatCodesPanel");
 const cheatCodesList = document.getElementById("cheatCodesList");
@@ -1846,17 +1957,19 @@ const btnCheatsBack = document.getElementById("btnCheatsBack");
 const STORAGE_CHEAT_PROGRESS = "poly_oracle_cheat_progress";
 const STORAGE_CHEATS_ARMED = "poly_oracle_cheats_armed";
 const STORAGE_RUN_CHEATS = "poly_oracle_run_cheats";
+const STORAGE_CHEATS_OFF = "poly_oracle_cheats_off";
 const CHEAT_ADS_REQUIRED = 3;
 const CHEAT_PROGRESS_TTL_MS = 24 * 60 * 60 * 1000;
+const CHEAT_ACTIVE_MS = 24 * 60 * 60 * 1000; // an earned gameplay cheat stays on this long
 const CHEAT_EXTRA_LIVES = 2;
 const CHEAT_QUAD_SPAN_MS = 60 * 60 * 1000; // "unlimited" Quad Shot = an hour-long timer, re-armed
 const CHEAT_CATALOG = [
   { id: "levelselect", name: "Unlock Level Select", desc: "Start from any level. Permanent." },
-  { id: "missiles", name: "Unlimited Missiles", desc: "Homing missiles never run out (reload still applies). Next run." },
-  { id: "bombs", name: "Unlimited Bombs", desc: "Bombs never run out (up to 3 on the field). Next run." },
-  { id: "quad", name: "Unlimited Quad Shot", desc: "Quad Shot all run long. Next run." },
-  { id: "loadout", name: "Stocked Loadout", desc: "Every level starts with 3 bombs and 3 freezes. Next run." },
-  { id: "lives", name: "Extra Lives", desc: `+${CHEAT_EXTRA_LIVES} lives. Next run.` },
+  { id: "missiles", name: "Unlimited Missiles", desc: "Homing missiles never run out (reload still applies). 24 hours." },
+  { id: "bombs", name: "Unlimited Bombs", desc: "Bombs never run out (up to 3 on the field). 24 hours." },
+  { id: "quad", name: "Unlimited Quad Shot", desc: "Quad Shot on every level. 24 hours." },
+  { id: "loadout", name: "Stocked Loadout", desc: "Every level starts with 3 bombs and 3 freezes. 24 hours." },
+  { id: "lives", name: "Extra Lives", desc: `+${CHEAT_EXTRA_LIVES} lives at the start of every game. 24 hours.` },
 ];
 let activeRunCheats = readCheatJson(STORAGE_RUN_CHEATS);
 const hudQuadTime = document.getElementById("hudQuadTime");
@@ -9043,6 +9156,7 @@ function initGalaxyCanvas() {
   let slotInputLockedUntil = 0;      // anti-misclick: taps/exits ignored until this timestamp
   let slotContinueArmedAt = Infinity;// "TAP TO CONTINUE" only accepts taps after this timestamp
   let slotContinueShown = false;     // true once the continue overlay is up
+  let slotTokenAdUsed = false;       // the +tokens ad is offered once per break
   let slotPaused = false;            // true while backgrounded (step 4) — a PAUSE, never a teardown
   const slotEls = {};                // cached child refs of the mounted overlay
   // Reel engine (step 5a). Mechanics only: weighted strips, spin physics, lever, token-per-pull.
@@ -9158,7 +9272,9 @@ function initGalaxyCanvas() {
   // non-final path anyway). Flip to false to skip the slot entirely; later this can become a cadence.
   const SLOT_OPEN_AFTER_EVERY_LEVEL = true;
   function shouldOpenSlot() {
-    return SLOT_OPEN_AFTER_EVERY_LEVEL && slotTokens > 0;
+    if (!SLOT_OPEN_AFTER_EVERY_LEVEL) return false;
+    // With no tokens, open anyway when a rewarded ad can top them up (the cabinet offers it).
+    return slotTokens > 0 || (engineMode === "arcade" && !stuntActive && adService.isReady());
   }
 
   // ── POLYSLOTS reel engine (step 5a) ────────────────────────────────────────────────────────
@@ -9862,7 +9978,7 @@ function initGalaxyCanvas() {
     slotState = SLOT_STATE.READY; slotAfterResolve();
   }
   function slotAfterResolve() {
-    if (slotTokens <= 0) { slotShowContinue(SLOT_FINAL_RESULT_HOLD_MS); return; }
+    if (slotTokens <= 0) { slotOutOfTokens(SLOT_FINAL_RESULT_HOLD_MS); return; }
     slotEls.skip?.classList.add("show");
     if (!slotEls.result || !slotEls.result.classList.contains("none")) setSlotHint("PULL AGAIN");
     else setSlotHint("");
@@ -10074,6 +10190,13 @@ function initGalaxyCanvas() {
       .ps-skip:hover{opacity:1;color:#00FFD1;border-color:rgba(0,255,209,.42);}
       .ps-continue{position:absolute;inset:0;z-index:12;display:flex;align-items:center;justify-content:center;border-radius:14px;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .35s;background:radial-gradient(circle at 50% 50%,rgba(2,10,20,.86),rgba(1,4,10,.95));}
       .ps-continue.show{opacity:1;pointer-events:auto;}
+      .ps-tokenoffer{position:absolute;left:50%;top:70%;transform:translateX(-50%);z-index:11;display:flex;flex-direction:column;gap:7px;align-items:stretch;min-width:70%;padding:8px;border-radius:12px;background:rgba(2,10,20,.92);border:1px solid rgba(0,255,209,.35);box-shadow:0 0 24px rgba(0,0,0,.6);opacity:0;pointer-events:none;transition:opacity .35s;}
+      .ps-tokenoffer.show{opacity:1;pointer-events:auto;}
+      .ps-tokenoffer button{font-family:inherit;letter-spacing:.1em;white-space:nowrap;border-radius:9px;padding:10px 12px;cursor:pointer;}
+      .ps-offer-watch{font-size:clamp(.74rem,2.8vw,.95rem);color:#08121e;background:linear-gradient(180deg,#ffd76a,#ffb238);border:1px solid #ffe19a;box-shadow:0 0 14px rgba(255,190,70,.45);}
+      .ps-offer-watch:disabled{opacity:.6;}
+      .ps-offer-continue{font-size:clamp(.74rem,2.6vw,.9rem);color:#00FFD1;background:rgba(8,18,32,.92);border:1px solid rgba(0,255,209,.42);}
+      .cabinet-loading .ps-tokenoffer{opacity:0;}
       .ps-continue-inner{position:absolute;top:73.5%;left:50%;transform:translateX(-50%);font-size:clamp(.88rem,3.2vw,1.05rem);letter-spacing:.14em;color:#00FFD1;text-align:center;text-shadow:0 0 16px rgba(0,255,209,.6);border:1px solid rgba(0,255,209,.42);border-radius:10px;padding:12px 18px;min-width:62%;animation:psBlink 1.2s steps(2,jump-none) infinite;}
     `;
     document.head.appendChild(s);
@@ -10112,6 +10235,10 @@ function initGalaxyCanvas() {
           <div class="ps-slot nuke" data-k="nuke"><img class="ps-hudicon" src="slotart/nuke.png" alt=""><b id="psInvNuke">0</b></div>
         </div>
         <button class="ps-skip" id="psSkip" type="button">SKIP ▸</button>
+        <div class="ps-tokenoffer" id="psTokenOffer">
+          <button class="ps-offer-watch" type="button"></button>
+          <button class="ps-offer-continue" type="button">CONTINUE ▸</button>
+        </div>
         <div class="ps-continue" id="psContinue"><div class="ps-continue-inner" id="psContinueInner">TAP TO CONTINUE</div></div>
       </div>
     `;
@@ -10131,6 +10258,7 @@ function initGalaxyCanvas() {
     slotEls.skip = overlay.querySelector("#psSkip");
     slotEls.continue = overlay.querySelector("#psContinue");
     slotEls.continueInner = overlay.querySelector("#psContinueInner");
+    slotEls.tokenOffer = overlay.querySelector("#psTokenOffer");
     slotEls.result = overlay.querySelector("#psResult");
     slotEls.reels = overlay.querySelector("#psReels");
     slotEls.alienFx = overlay.querySelector("#psAlienFx");
@@ -10191,6 +10319,7 @@ function initGalaxyCanvas() {
     slotState = SLOT_STATE.ENTERING;
     slotOnExit = typeof onExit === "function" ? onExit : null;
     slotContinueShown = false;
+    slotTokenAdUsed = false;
     slotContinueArmedAt = Infinity;
     slotInputLockedUntil = performance.now() + SLOT_LOCKOUT_MS;
     ensureSlotStyles();
@@ -10278,11 +10407,59 @@ function initGalaxyCanvas() {
     }, SLOT_LOCKOUT_MS);
     // SKIP appears after a beat (only if we're idle on the slot, not already leaving via continue).
     slotTrackTimeout(() => {
-      if (!slotContinueShown && slotState === SLOT_STATE.READY) slotEls.skip?.classList.add("show");
+      if (!slotContinueShown && slotState === SLOT_STATE.READY && !slotEls.tokenOffer?.classList.contains("show")) {
+        slotEls.skip?.classList.add("show");
+      }
     }, SLOT_SKIP_DELAY_MS);
-    // No tokens banked → there's nothing to play; go straight to the continue overlay.
-    if (slotTokens <= 0) slotShowContinue();
+    // No tokens banked → offer tokens for an ad (native), else go straight to the continue overlay.
+    if (slotTokens <= 0) slotOutOfTokens();
     lvlTrace(`[slot] enter tokens=${slotTokens}`);
+  }
+
+  // 2026-10-25 (ADS): out of tokens inside the cabinet. On native with an ad loaded (once per
+  // break), the machine stays visible with WATCH AD · +3 TOKENS / CONTINUE — so a player sees what
+  // the tokens are for before being asked. Otherwise (web, no ad, already used) → TAP TO CONTINUE.
+  function slotOutOfTokens(delayMs = 0) {
+    if (delayMs > 0) {
+      slotTrackTimeout(() => slotOutOfTokens(0), delayMs);
+      return;
+    }
+    if (slotTokenAdUsed || !adService.isReady() || !slotEls.tokenOffer) { slotShowContinue(); return; }
+    slotTokenAdUsed = true;
+    setSlotHint("OUT OF TOKENS");
+    slotEls.skip?.classList.remove("show");
+    slotEls.tokenOffer.classList.add("show");
+    playGameSfx("slot_outoftokens", 0.8);
+    const watch = slotEls.tokenOffer.querySelector(".ps-offer-watch");
+    const cont = slotEls.tokenOffer.querySelector(".ps-offer-continue");
+    watch.textContent = `WATCH AD · +${TOKEN_AD_REWARD} TOKENS`;
+    watch.disabled = false;
+    let busy = false;
+    const hideOffer = () => slotEls.tokenOffer?.classList.remove("show");
+    slotTrackListener(cont, "click", (e) => {
+      e.stopPropagation();
+      if (busy || performance.now() < slotInputLockedUntil) return;
+      busy = true;
+      hideOffer();
+      exitSlot();
+    });
+    slotTrackListener(watch, "click", async (e) => {
+      e.stopPropagation();
+      if (busy) return;
+      busy = true;
+      watch.disabled = true;
+      const { rewarded } = await adService.show();
+      if (!isSlotActive() || slotState === SLOT_STATE.EXITING) return;
+      hideOffer();
+      if (!rewarded) { slotShowContinue(); return; }
+      slotTokens += TOKEN_AD_REWARD;
+      if (slotEls.tokenCount) slotEls.tokenCount.textContent = String(slotTokens);
+      slotFlashRewardEl(slotEls.tokensBox);
+      playGameSfx("pickup_gold", 0.9);
+      slotInputLockedUntil = performance.now() + SLOT_LOCKOUT_MS;
+      setSlotHint("PULL THE LEVER");
+      slotEls.skip?.classList.add("show");
+    });
   }
 
   // Full-panel TAP TO CONTINUE. Armed after a delay so the tap that emptied the bank (step 4) can't
@@ -10375,7 +10552,7 @@ function initGalaxyCanvas() {
   // token. COLLECT ×2 (rewarded ad, native only) grants the same list twice. One grant per box.
   const REWARD_BOX_MAX_COMBO_ROLLS = 3;
   const REWARD_BOX_TAPS_TO_OPEN = 3;
-  const TOKEN_AD_REWARD = 2;
+  const TOKEN_AD_REWARD = 3;
   const REWARD_ITEM_INFO = {
     bomb: { label: "Bomb", art: "powerups/powerup_bomb.png" },
     freeze: { label: "Freeze", art: "powerups/powerup_freeze.png" },
@@ -10567,75 +10744,47 @@ function initGalaxyCanvas() {
     });
   }
 
-  // Tokens 0–1 between levels (native, ad loaded): offer +2 tokens for one ad. One offer per break.
-  function offerTokenAd(next) {
-    if (engineMode !== "arcade" || stuntActive || slotTokens > 1 || !adService.isReady()) { next(); return; }
-    const { panel, close } = openBreakOverlay("tokenAdOverlay", "POLYSLOTS");
-    panel.insertAdjacentHTML("beforeend", `
-      <div class="rbx-sub"></div>
-      <div class="rbx-actions">
-        <button class="rbx-btn rbx-ad rbx-watch" type="button">WATCH AD · +${TOKEN_AD_REWARD} TOKENS</button>
-        <button class="rbx-btn rbx-skip" type="button">NO THANKS</button>
-      </div>`);
-    panel.querySelector(".rbx-sub").textContent = slotTokens === 1
-      ? `You have 1 slot token. Watch an ad for +${TOKEN_AD_REWARD} more?`
-      : `Out of slot tokens. Watch an ad for +${TOKEN_AD_REWARD}?`;
-    let busy = false;
-    panel.querySelector(".rbx-skip").addEventListener("click", () => { if (!busy) close(next); });
-    panel.querySelector(".rbx-watch").addEventListener("click", async (e) => {
-      if (busy) return;
-      busy = true;
-      e.currentTarget.disabled = true;
-      const { rewarded } = await adService.show();
-      if (rewarded) {
-        slotTokens += TOKEN_AD_REWARD;
-        playGameSfx("level_up", 0.8);
-      }
-      close(next);
-    });
-  }
-
-  // Duck music and silence comms while a full-screen ad plays; restore on close.
-  let _adMusicGainBefore = null;
-  let _adMusicHtmlVolBefore = null;
+  // Silence the game while a full-screen ad (or ad pod) plays. Suspend the AudioContext and pause
+  // HTML music instead of ramping gains: a gain snapshot taken while iOS still had the ctx
+  // interrupted from the previous ad read 0 and "restored" the music to silence for good.
+  let _adSuspendedCtx = false;
+  let _adPausedMusic = null;
   adService.setHooks({
     onOpen() {
       commBoxController.stopVO();
-      _adMusicGainBefore = audioEngine.musicGain?.gain?.value ?? null;
-      _adMusicHtmlVolBefore = audioEngine.currentMusicHtml?.node?.volume ?? null;
-      if (audioEngine.musicGain && audioEngine.ctx) {
-        const t = audioEngine.ctx.currentTime;
-        audioEngine.musicGain.gain.cancelScheduledValues(t);
-        audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, t);
-        audioEngine.musicGain.gain.linearRampToValueAtTime(0, t + 0.15);
-      }
-      if (audioEngine.currentMusicHtml?.node) audioEngine.currentMusicHtml.node.volume = 0;
+      const node = audioEngine.currentMusicHtml?.node;
+      _adPausedMusic = node && !node.paused ? node : null;
+      _adPausedMusic?.pause();
+      _adSuspendedCtx = !!audioEngine.ctx && audioEngine.ctx.state !== "closed";
+      if (_adSuspendedCtx) audioEngine.ctx.suspend().catch(() => {});
     },
     onClose() {
-      if (audioEngine.musicGain && audioEngine.ctx && _adMusicGainBefore !== null) {
-        const t = audioEngine.ctx.currentTime;
-        audioEngine.musicGain.gain.cancelScheduledValues(t);
-        audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, t);
-        audioEngine.musicGain.gain.linearRampToValueAtTime(_adMusicGainBefore, t + 0.25);
-      }
-      if (audioEngine.currentMusicHtml?.node && _adMusicHtmlVolBefore !== null) {
-        audioEngine.currentMusicHtml.node.volume = _adMusicHtmlVolBefore;
-      }
-      _adMusicGainBefore = null;
-      _adMusicHtmlVolBefore = null;
+      const ctxToResume = _adSuspendedCtx;
+      const music = _adPausedMusic;
+      _adSuspendedCtx = false;
+      _adPausedMusic = null;
+      // The ad SDK hands the audio session back a beat after dismiss, so retry briefly.
+      const restore = () => {
+        if (ctxToResume && audioEngine.ctx && audioEngine.ctx.state !== "running") {
+          audioEngine.ctx.resume().catch(() => {});
+        }
+        if (music && music === audioEngine.currentMusicHtml?.node && music.paused) music.play().catch(() => {});
+      };
+      restore();
+      setTimeout(restore, 400);
+      setTimeout(restore, 1200);
     },
   });
 
   // 2026-10-25 (GAME-02 / ADS): between-level order is scorecard → reward box (even levels) →
-  // token-ad offer (tokens 0–1, native) → slot (if tokens) → next level.
+  // slot (if tokens, or 0 tokens with a token ad ready — offered inside the cabinet) → next level.
   function handoffAfterScorecard(continueToNextLevel, clearedLevel = 0) {
     const toSlot = () => openSlotOrContinue(continueToNextLevel);
-    const toTokenOffer = () => offerTokenAd(toSlot);
     if (rewardBoxDue(clearedLevel)) {
-      showRewardBox(clearedLevel, toTokenOffer);
+      showRewardBox(clearedLevel, toSlot);
       return;
     }
-    toTokenOffer();
+    toSlot();
   }
 
   function openSlotOrContinue(continueToNextLevel) {
@@ -17040,7 +17189,7 @@ function initGalaxyCanvas() {
     hideArcadeOverlay();
     arcadeScore = 0;
     renderScore();
-    // 2026-10-25 (ADS-01): a fresh run takes every armed Cheat Code and gets one ad Continue.
+    // 2026-10-25 (ADS-01): a fresh run turns on every active (24h) Cheat Code and gets one ad Continue.
     if (consumeArmedCheatsForRun().lives) {
       arcadeLives = clamp(arcadeLives + CHEAT_EXTRA_LIVES, 0, MAX_LIVES);
       renderLives();

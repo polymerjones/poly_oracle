@@ -16,6 +16,10 @@ const fs=require('node:fs');
  await p.locator('.arcadeLevelBtn',{hasText:/^3$/}).click();await p.waitForTimeout(6000);
  const st=()=>p.evaluate(()=>galaxyCanvasController.__auditState());
  const btnHiddenNoTokens=await p.locator('#hudSlotBtn').isDisabled();
+ // 0 tokens: still openable (inventory-style); no dimming curtain; RESUME PLAY goes back to the level.
+ await p.locator('#hudSlotBtn').click({force:true});await p.waitForTimeout(1400);
+ const zero={slot:(await st()).slot,resumeLabel:await p.locator('#psModes').textContent(),curtain:await p.locator('#polyslots .ps-continue.show').count()};
+ await p.locator('#psModes').click();await p.waitForTimeout(900);zero.closed=!(await st()).slot;
  await p.evaluate(()=>galaxyCanvasController.__auditGiveTokens(3));await p.waitForTimeout(300);
  const hint=await p.locator('.slotHudHint').count();
  const before=await st();
@@ -23,19 +27,21 @@ const fs=require('node:fs');
  const open1=await st();
  await p.waitForTimeout(4000);
  const open2=await st();
- await p.waitForTimeout(300);await p.locator('#psSkip').click();
+ await p.waitForTimeout(300);await p.locator('#psModes').click();
  await p.waitForTimeout(1200);
  const after=await st();
  // Level clear → scorecard → (odd level: no reward box) → straight into the next level, no slot.
  await p.evaluate(()=>{galaxyCanvasController.__auditDevOn();galaxyCanvasController.devInstantWin()});await p.waitForTimeout(2500);
  await p.mouse.click(215,600);await p.waitForTimeout(400);await p.mouse.click(215,600);await p.waitForTimeout(3500);
  const next={level:await p.evaluate(()=>galaxyCanvasController.__auditLevel()),...await st()};
- const r={next,btnDisabledWithoutTokens:btnHiddenNoTokens,hintShown:hint===1,before,open1,open2,after,errors};
+ const r={zero,next,btnDisabledWithoutTokens:btnHiddenNoTokens,hintShown:hint===1,before,open1,open2,after,errors};
  r.frozenWhileOpen=Math.abs(open2.ast[0]?.[0]-open1.ast[0]?.[0])<=1&&Math.abs(open2.ast[0]?.[1]-open1.ast[0]?.[1])<=1;
  r.timeLostMs=Math.round(open1.remaining-after.remaining); // ~ exit beat + post-close wait, not the ~4.3s the cabinet was open
  r.runLostMs=Math.round(after.run-before.run);
  console.log(JSON.stringify(r,null,1));if(process.argv[2])fs.writeFileSync(process.argv[2],JSON.stringify(r,null,2));
  if(errors.length)throw new Error(errors.join('; '));
+ if(btnHiddenNoTokens)throw new Error('HUD slot button disabled at 0 tokens');
+ if(!zero.slot||!/RESUME/.test(zero.resumeLabel)||zero.curtain||!zero.closed)throw new Error('0-token mid-level open/resume wrong: '+JSON.stringify(zero));
  if(!open1.slot||after.slot)throw new Error('slot did not open/close');
  if(!r.frozenWhileOpen)throw new Error('asteroids moved while the slot was open');
  if(r.timeLostMs>2500)throw new Error(`level timer drained while the slot was open: ${r.timeLostMs}ms`);

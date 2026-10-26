@@ -2133,36 +2133,43 @@ select:focus-visible {
 /* Poly Slot (opens the slot cabinet mid-level; count = banked tokens). Purple twin of the
    weapon chips; dim when empty, lit when tokens are banked. */
 .hudSlotBtn {
+  /* Rectangular "mini cabinet" (not a pill) so it never reads as a weapon chip. */
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  min-height: 36px;
-  min-width: 46px;
-  border-radius: 999px;
-  padding: 5px 10px;
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: #fff;
+  gap: 5px;
+  min-height: 38px;
+  border-radius: 8px;
+  padding: 3px 9px 3px 6px;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #ffe7a8;
   white-space: nowrap;
-  border: 1.5px solid rgba(185, 150, 255, 0.75);
-  background: rgba(26, 10, 46, 0.85);
-  opacity: 0.35;
+  border: 1.5px solid rgba(255, 211, 106, 0.85);
+  background: linear-gradient(180deg, rgba(64, 24, 104, 0.95), rgba(28, 8, 52, 0.95));
+  opacity: 1; /* always lit while openable (inventory-style), even at 0 tokens */
   transition: opacity 160ms ease, box-shadow 160ms ease;
+}
+.hudSlotIcon {
+  width: 38px;
+  height: 25px;
+  flex: 0 0 auto;
+  pointer-events: none;
 }
 .hudSlotBtn.has-tokens {
   opacity: 1;
-  box-shadow: 0 0 10px rgba(185, 150, 255, 0.5);
+  box-shadow: 0 0 12px rgba(255, 200, 90, 0.55), inset 0 0 8px rgba(255, 211, 106, 0.18);
 }
 .hudSlotBtn:disabled {
   cursor: default;
+  opacity: 0.4;
 }
 .hudSlotBtn.slot-attention {
   animation: slotAttention 0.9s ease-in-out 6;
 }
 @keyframes slotAttention {
-  0%, 100% { box-shadow: 0 0 8px rgba(185, 150, 255, 0.5); transform: scale(1); }
-  50% { box-shadow: 0 0 22px rgba(205, 170, 255, 0.95); transform: scale(1.08); }
+  0%, 100% { box-shadow: 0 0 8px rgba(255, 200, 90, 0.5); transform: scale(1); }
+  50% { box-shadow: 0 0 24px rgba(255, 215, 110, 1); transform: scale(1.08); }
 }
 .slotHudHint {
   position: fixed;
@@ -3314,3 +3321,228 @@ body.dev-mode .hudDevWin { display: inline-block; }
 /* 2026-10-25: earned cheats become an On/Off switch for their 24h window */
 .cheatWatchBtn.cheatToggle { min-width: 64px; border-color: rgba(183, 201, 255, 0.35); background: rgba(255, 255, 255, 0.04); color: rgba(183, 201, 255, 0.75); letter-spacing: 0.12em; }
 .cheatWatchBtn.cheatToggle.on { border-color: rgba(0, 255, 209, 0.7); background: rgba(0, 255, 209, 0.14); color: #00ffd1; box-shadow: 0 0 12px rgba(0, 255, 209, 0.25); }
+
+/* ── 2026-10-25: AD THEATER — branded stage that covers the game for a whole rewarded-ad pod ──
+   Static backdrop; the only motion is opacity/transform (compositor-only), and only while shown. */
+.adTheater {
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px));
+  background:
+    radial-gradient(ellipse at 50% 38%, rgba(120, 60, 220, 0.35), transparent 60%),
+    radial-gradient(ellipse at 20% 80%, rgba(0, 200, 255, 0.16), transparent 55%),
+    linear-gradient(180deg, #05030f, #0a0620 55%, #020108);
+  color: #e9e3ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  pointer-events: auto;
+}
+.adTheater.show { display: flex; animation: adTheaterIn 240ms ease-out both; }
+.adTheater.closing { animation: adTheaterOut 260ms ease-in both; }
+@keyframes adTheaterIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes adTheaterOut { from { opacity: 1; } to { opacity: 0; } }
+.adTheaterStars {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, #fff, transparent),
+    radial-gradient(1px 1px at 78% 12%, #cfe8ff, transparent),
+    radial-gradient(1.5px 1.5px at 34% 72%, #fff, transparent),
+    radial-gradient(1px 1px at 88% 64%, #e6d8ff, transparent),
+    radial-gradient(1px 1px at 52% 40%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 8% 58%, #bfefff, transparent),
+    radial-gradient(1px 1px at 66% 86%, #fff, transparent),
+    radial-gradient(1px 1px at 24% 92%, #d8ccff, transparent);
+  opacity: 0.8;
+}
+.adTheaterStage {
+  position: relative;
+  width: min(420px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  text-align: center;
+}
+.adTheaterMarquee {
+  display: grid;
+  gap: 2px;
+  padding: 12px 26px;
+  border-radius: 14px;
+  border: 2px solid rgba(255, 210, 120, 0.85);
+  background: rgba(30, 10, 50, 0.7);
+  box-shadow: 0 0 18px rgba(255, 190, 90, 0.45), inset 0 0 14px rgba(255, 190, 90, 0.18);
+}
+.adTheaterBrand { font-size: 0.72rem; letter-spacing: 0.42em; color: #ffd98a; }
+.adTheaterTitle {
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  color: #fff;
+  text-shadow: 0 0 10px rgba(185, 150, 255, 0.9), 0 0 22px rgba(0, 255, 209, 0.45);
+}
+.adTheaterScreen {
+  width: 100%;
+  display: grid;
+  gap: 12px;
+  padding: 22px 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(0, 255, 209, 0.45);
+  background: linear-gradient(180deg, rgba(4, 18, 32, 0.92), rgba(2, 8, 18, 0.96));
+  box-shadow: 0 0 30px rgba(0, 255, 209, 0.16), inset 0 0 26px rgba(0, 255, 209, 0.07);
+}
+.adTheaterFor { font-size: 0.8rem; letter-spacing: 0.12em; color: #ffcc66; min-height: 1em; }
+.adTheaterFor:empty { display: none; }
+.adTheaterStatus {
+  font-size: 1.05rem;
+  letter-spacing: 0.1em;
+  color: #00ffd1;
+  text-shadow: 0 0 10px rgba(0, 255, 209, 0.5);
+}
+.adTheaterPips { display: flex; justify-content: center; gap: 10px; }
+.adTheaterPip {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0, 255, 209, 0.6);
+  background: transparent;
+}
+.adTheaterPip.done { background: #00ffd1; box-shadow: 0 0 10px rgba(0, 255, 209, 0.8); }
+.adTheaterPip.now { border-color: #fff; animation: adTheaterPipNow 0.9s ease-in-out infinite alternate; }
+@keyframes adTheaterPipNow { from { transform: scale(0.85); opacity: 0.6; } to { transform: scale(1.15); opacity: 1; } }
+.adTheaterNote { font-size: 0.74rem; line-height: 1.5; letter-spacing: 0.04em; color: rgba(225, 215, 255, 0.75); max-width: 320px; }
+.adTheaterNote b { color: #fff; }
+.adTheaterStop {
+  font: inherit;
+  font-size: 0.8rem;
+  letter-spacing: 0.14em;
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.8);
+}
+.adTheaterStop[disabled] { opacity: 0.5; }
+@media (prefers-reduced-motion: reduce) {
+  .adTheater.show, .adTheater.closing, .adTheaterPip.now { animation: none; }
+}
+
+/* ── 2026-10-25: FX LAB trial looks (body classes set by applyTrials() in script.js) ──────────
+   Only active when picked in the Dev Mode FX Lab or baked into TRIAL_DEFAULTS. */
+/* Titles: SHINY — a light band sweeps across the text (React Bits ShinyText, CSS-only). Menu titles
+   only: the level banner has its own in/out animation, so it gets the DECRYPT reveal (JS) instead. */
+body.fx-title-shiny .galaxyModeTitle,
+body.fx-title-shiny .arcadeMenuTitle {
+  background: linear-gradient(110deg, #9fb6ff 38%, #ffffff 50%, #9fb6ff 62%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 0 8px rgba(120, 200, 255, 0.55));
+  animation: fxShine 2.6s linear infinite;
+}
+@keyframes fxShine { from { background-position: 130% 0; } to { background-position: -130% 0; } }
+/* Titles: GLITCH — brief RGB-split jolts (React Bits GlitchText, CSS-only). */
+body.fx-title-glitch .galaxyModeTitle,
+body.fx-title-glitch .arcadeMenuTitle {
+  animation: fxGlitch 3.2s steps(1) infinite;
+}
+@keyframes fxGlitch {
+  0%, 86%, 100% { text-shadow: 0 0 10px rgba(120, 200, 255, 0.5); transform: none; }
+  88% { text-shadow: -3px 0 rgba(255, 40, 120, 0.9), 3px 0 rgba(0, 255, 230, 0.9); transform: translateX(1px) skewX(-6deg); }
+  91% { text-shadow: 3px 0 rgba(255, 40, 120, 0.9), -3px 0 rgba(0, 255, 230, 0.9); transform: translateX(-2px); }
+  94% { text-shadow: -1px 0 rgba(255, 40, 120, 0.8), 1px 0 rgba(0, 255, 230, 0.8); transform: none; }
+}
+/* Menu cards: HOLO — iridescent foil band sweeps across (transform-only, compositor). */
+body.fx-holo-cards .galaxyModeCard,
+body.fx-holo-cards .lsr-panel {
+  position: relative;
+  overflow: hidden;
+}
+body.fx-holo-cards .galaxyModeCard::before,
+body.fx-holo-cards .lsr-panel::before {
+  content: "";
+  position: absolute;
+  inset: -40% -60%;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 40%, rgba(255, 120, 220, 0.16) 45%, rgba(120, 255, 240, 0.2) 50%, rgba(255, 240, 140, 0.16) 55%, transparent 60%);
+  mix-blend-mode: screen;
+  transform: translateX(-60%);
+  animation: fxHoloSweep 5.5s ease-in-out infinite;
+  z-index: 0;
+}
+@keyframes fxHoloSweep { 0%, 55% { transform: translateX(-60%); } 85%, 100% { transform: translateX(60%); } }
+/* Buttons: STAR BORDER — a light orbits the button edge (React Bits StarBorder; rotate-only). */
+body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn) {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn)::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 260%;
+  aspect-ratio: 1;
+  z-index: -1;
+  background: conic-gradient(from 0deg, transparent 0 78%, rgba(255, 255, 255, 0.95) 88%, transparent 96%);
+  transform: translate(-50%, -50%) rotate(0deg);
+  animation: fxStarOrbit 3s linear infinite;
+}
+body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn)::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(125deg, rgba(123, 226, 255, 0.95), rgba(246, 167, 255, 0.92));
+}
+@keyframes fxStarOrbit { to { transform: translate(-50%, -50%) rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  body.fx-title-shiny .galaxyModeTitle, body.fx-title-shiny .arcadeMenuTitle,
+  body.fx-title-glitch .galaxyModeTitle, body.fx-title-glitch .arcadeMenuTitle,
+  body.fx-holo-cards .galaxyModeCard::before, body.fx-holo-cards .lsr-panel::before,
+  body.fx-star-buttons .modeBtn::before { animation: none; }
+}
+
+/* ── FX LAB panel (Dev Mode only) — Monkey Trubble-style trial chips ───────────────────────── */
+.fxLab {
+  position: fixed;
+  inset: 0;
+  z-index: 19000;
+  display: none;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(24px + env(safe-area-inset-bottom, 0px));
+  background: rgba(4, 6, 16, 0.97);
+  color: #dfe8ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.fxLab.show { display: block; }
+.fxLabHead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.fxLabHead h2 { margin: 0; font-size: 1.1rem; letter-spacing: 0.2em; color: #00ffd1; }
+.fxLabClose { font: inherit; font-size: 0.85rem; padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(0, 255, 209, 0.6); background: rgba(0, 255, 209, 0.1); color: #00ffd1; }
+.fxLabSec { border: 1px solid var(--sec, #5fd3ff); border-radius: 12px; padding: 10px 12px; margin: 12px 0; }
+.fxLabSec h4 { margin: 0 0 8px; font-size: 0.72rem; letter-spacing: 0.16em; color: var(--sec, #5fd3ff); }
+.fxLabRow { margin: 10px 0; }
+.fxLabRow small { display: block; margin-bottom: 6px; font-size: 0.68rem; letter-spacing: 0.08em; color: rgba(223, 232, 255, 0.7); }
+.fxLabChips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fxLabChips button {
+  font: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.05);
+  color: #dfe8ff;
+}
+.fxLabChips button[aria-checked="true"] { border-color: var(--sec, #5fd3ff); background: rgba(95, 211, 255, 0.18); color: #fff; box-shadow: 0 0 10px rgba(95, 211, 255, 0.35); }
+.fxLabChips button.fxLabPreview { border-style: dashed; }
+.fxLabNote { font-size: 0.68rem; line-height: 1.5; color: rgba(223, 232, 255, 0.6); margin: 4px 0 0; }
+.fxLabCopy { width: 100%; margin-top: 8px; font: inherit; font-size: 0.8rem; padding: 10px; border-radius: 10px; border: 1px solid rgba(255, 211, 106, 0.7); background: rgba(255, 211, 106, 0.1); color: #ffd36a; }

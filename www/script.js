@@ -170,6 +170,93 @@ const ADS_RETRY_AFTER_FAIL_MS = 30000;
 const ADS_REWARD_GRACE_MS = 300;
 // An ad pod loads each next ad after the previous one closes; give up if one takes longer than this.
 const ADS_POD_LOAD_TIMEOUT_MS = 15000;
+// 2026-10-25: AD THEATER — a branded space stage that covers the game for a whole ad pod. Google
+// rewarded ads can't be chained into one reel (each is its own full-screen ad with its own
+// "Collect reward" close), so between ads the webview is exposed; without this the game popped
+// back for a moment before the next ad (playtest: "the ad window minimizes and pops back up").
+// Static markup + compositor-only CSS motion; no canvas loop.
+const adTheater = (() => {
+  let root = null;
+  let els = null;
+  let stopRequested = false;
+  function build() {
+    root = document.createElement("div");
+    root.id = "adTheater";
+    root.className = "adTheater";
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-label", "Ad Theater");
+    root.innerHTML = `
+      <div class="adTheaterStars" aria-hidden="true"></div>
+      <div class="adTheaterStage">
+        <div class="adTheaterMarquee"><span class="adTheaterBrand">POLY ORACLE</span><span class="adTheaterTitle">AD THEATER</span></div>
+        <div class="adTheaterScreen">
+          <div class="adTheaterFor"></div>
+          <div class="adTheaterStatus">Now showing…</div>
+          <div class="adTheaterPips"></div>
+        </div>
+        <div class="adTheaterNote">Each ad ends with <b>Collect reward</b> — the next one starts automatically.</div>
+        <button class="adTheaterStop" type="button">Stop after this ad</button>
+      </div>`;
+    document.body.appendChild(root);
+    els = {
+      forEl: root.querySelector(".adTheaterFor"),
+      status: root.querySelector(".adTheaterStatus"),
+      pips: root.querySelector(".adTheaterPips"),
+      note: root.querySelector(".adTheaterNote"),
+      stop: root.querySelector(".adTheaterStop"),
+    };
+    els.stop.addEventListener("click", () => {
+      stopRequested = true;
+      els.stop.disabled = true;
+      els.stop.textContent = "Stopping…";
+    });
+  }
+  function setPips(total, done, current) {
+    let html = "";
+    for (let i = 0; i < total; i++) {
+      const cls = i < done ? "done" : i === current ? "now" : "";
+      html += `<span class="adTheaterPip ${cls}"></span>`;
+    }
+    els.pips.innerHTML = html;
+  }
+  return {
+    open({ label = "", total = 1, done = 0 } = {}) {
+      if (!root) build();
+      stopRequested = false;
+      els.forEl.textContent = label ? `Unlocking: ${label}` : "";
+      els.stop.disabled = false;
+      els.stop.textContent = "Stop after this ad";
+      els.stop.hidden = total - done <= 1;
+      els.note.hidden = false;
+      setPips(total, done, done);
+      els.status.textContent = "Now showing…";
+      root.classList.remove("closing");
+      root.classList.add("show");
+    },
+    // Between ads (and before the first): which ad is coming up.
+    progress({ total, done }) {
+      if (!root) return;
+      setPips(total, done, done);
+      els.status.textContent = `Ad ${done + 1} of ${total} — loading…`;
+      if (total - done <= 1) els.stop.hidden = true;
+    },
+    stopRequested: () => stopRequested,
+    // End card, then fade out. resultText e.g. "Cheat unlocked!" / "Progress saved — 2 of 3".
+    close(resultText = "", holdMs = 0) {
+      if (!root || !root.classList.contains("show")) return Promise.resolve();
+      els.stop.hidden = true;
+      els.note.hidden = true;
+      if (resultText) els.status.textContent = resultText;
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          root.classList.add("closing");
+          setTimeout(() => { root.classList.remove("show", "closing"); resolve(); }, 260);
+        }, holdMs);
+      });
+    },
+  };
+})();
+
 const adService = (() => {
   let state = "idle"; // idle | loading | ready | showing | failed | unsupported
   let initPromise = null;
@@ -279,14 +366,22 @@ const adService = (() => {
     });
   }
   // Ad pod: up to `count` rewarded ads back to back from one tap (the count is disclosed before
-  // the first, per AdMob policy). Stops at the first ad that is skipped or fails to load.
+  // the first, per AdMob policy). Stops at the first ad that is skipped or fails to load, or when
+  // the player taps "Stop after this ad" in the Ad Theater. The theater covers the game for the
+  // whole pod (theater: { label, total, done } — total/done are the overall progress, e.g. 3 / 1).
   // onAdRewarded(n) fires after each completed ad; onProgress(i) before ad i (0-based) loads.
-  async function showPod(count, { onAdRewarded, onProgress } = {}) {
+  // finish(earned) may return the end-card text the theater shows before it fades out.
+  async function showPod(count, { onAdRewarded, onProgress, theater = null, finish = null } = {}) {
     if (inPod || current) return { earned: 0 };
     inPod = true;
     let earned = 0;
+    const total = theater?.total ?? count;
+    const done0 = theater?.done ?? 0;
+    adTheater.open({ label: theater?.label || "", total, done: done0 });
     try {
       for (let i = 0; i < count; i++) {
+        if (i > 0 && adTheater.stopRequested()) break;
+        adTheater.progress({ total, done: done0 + i });
         try { onProgress?.(i); } catch { /* UI only */ }
         if (!(await waitReady(ADS_POD_LOAD_TIMEOUT_MS))) break;
         const { rewarded } = await show();
@@ -298,6 +393,13 @@ const adService = (() => {
       inPod = false;
       releaseAudio();
     }
+    let endText = "";
+    try { endText = finish?.(earned) || ""; } catch { /* UI only */ }
+    if (!endText) {
+      const reached = done0 + earned;
+      endText = earned === 0 ? "No ad watched — nothing lost." : reached >= total ? "Reward unlocked!" : `Progress saved — ${reached} of ${total}`;
+    }
+    await adTheater.close(endText, 1100);
     return { earned };
   }
   return {
@@ -381,7 +483,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 16:35";
+const BUILD_TS = "2026-10-25 17:04";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -547,6 +649,13 @@ function bgKeyForLevel(_levelNum) {
 }
 
 const GAME_SFX = {
+  // 2026-10-25: FX Lab sound-trial candidates (see TRIAL_ROWS) — unused files auditioned in Dev Mode.
+  lab_advfire_full: "newsfx/advfire.mp3",
+  lab_zap2: "newsfx/Inst 2_bip.2lazerzap.mp3",
+  lab_zap5: "newsfx/Inst 2_bip.5lazerzap.mp3",
+  lab_zap6: "newsfx/Inst 2_bip.6lazerzap.mp3",
+  lab_maybeshot: "newsfx/maybeshotwav.mp3",
+  lab_blast1: "gamesfx/blast1.mp3",
   orb_tap: "taporb.mp3",
   orb_rub2: "gamesfx/orb_rub2.mp3",
   warp: "assets/newsfx/subswoosh.mp3",
@@ -1209,6 +1318,8 @@ function setDevModeOn(on) {
   devModeOn = !!on;
   document.body.classList.toggle("dev-mode", devModeOn);
   if (btnDevMode) btnDevMode.textContent = devModeOn ? "Dev Mode: On" : "Dev Mode: Off";
+  if (btnFxLab) btnFxLab.style.display = devModeOn && btnDevMode?.style.display !== "none" ? "" : "none";
+  applyTrials(); // Dev Mode on → lab picks go live; off → back to the shipped defaults
 }
 
 function formatTimeLeft(msLeft) {
@@ -1280,6 +1391,12 @@ function renderCheatCodesPanel() {
       btn.addEventListener("click", async () => {
         btn.disabled = true;
         await adService.showPod(remaining, {
+          theater: { label: cheat.name, total: CHEAT_ADS_REQUIRED, done: watched },
+          finish: (earned) => {
+            if (watched + earned < CHEAT_ADS_REQUIRED) return "";
+            celebrateCheatUnlock(); // 2026-10-25: nuclear holo confetti + sting (FX Lab trials)
+            return `${cheat.name} unlocked!`;
+          },
           onProgress: (i) => { btn.textContent = `Ad ${watched + i + 1} of ${CHEAT_ADS_REQUIRED}…`; },
           onAdRewarded: () => {
             if (!recordCheatAd(cheat.id)) return;
@@ -1304,6 +1421,7 @@ function wireCheatCodesMenu() {
 }
 
 function wireDevModeEntry() {
+  applyTrials(); // shipped TRIAL_DEFAULTS looks (Dev Mode is off at launch)
   if (!menuLogoCanvas || !btnDevMode) return;
   let taps = [];
   menuLogoCanvas.addEventListener("pointerdown", () => {
@@ -1317,6 +1435,7 @@ function wireDevModeEntry() {
     triggerHapticNotification(hapticNotificationType.Success);
   });
   btnDevMode.addEventListener("click", () => setDevModeOn(!devModeOn));
+  btnFxLab?.addEventListener("click", openFxLab);
   hudDevWin?.addEventListener("click", () => galaxyCanvasController?.devInstantWin?.());
 }
 
@@ -1627,11 +1746,18 @@ const menuLogoWarp = (() => {
   let imgReady = false;
   let pendingPlay = false;
   img.onload = () => {
-    imgReady = true;
-    if (pendingPlay) {
-      pendingPlay = false;
-      play();
-    }
+    // 2026-10-25: decode the 1136×912 logo up front (off the first warp frame) — otherwise the
+    // first drawImage decoded it synchronously right as the Stroids menu opened (playtest: menu
+    // "struggling to open" / logo glitch).
+    const ready = () => {
+      imgReady = true;
+      if (pendingPlay) {
+        pendingPlay = false;
+        play();
+      }
+    };
+    if (typeof img.decode === "function") img.decode().then(ready, ready);
+    else ready();
   };
   img.src = "assets/stroids_menu_logo.png";
 
@@ -1639,7 +1765,12 @@ const menuLogoWarp = (() => {
   let rafId = 0;
   let startTs = 0;
 
+  // 2026-10-25: measured once per play()/resize instead of a getComputedStyle every animation
+  // frame (a forced style recalc 60x/s during the warp and 30x/s for the idle shimmer).
+  let _sizeCache = null;
+  window.addEventListener("resize", () => { _sizeCache = null; });
   function sizeCanvas() {
+    if (_sizeCache && menuLogoCanvas.width === _sizeCache.w && menuLogoCanvas.height === _sizeCache.h) return _sizeCache;
     // The breathing transform changes getBoundingClientRect() every frame. Size the
     // backing store from untransformed layout dimensions so that visual scaling does
     // not repeatedly reset the canvas and allocate new rendering buffers.
@@ -1651,6 +1782,8 @@ const menuLogoWarp = (() => {
       menuLogoCanvas.width = w;
       menuLogoCanvas.height = h;
     }
+    // Don't cache a zero/hidden layout (menu not displayed yet) — re-measure next frame.
+    _sizeCache = w > 1 && h > 1 ? { w, h } : null;
     return { w, h };
   }
 
@@ -1884,6 +2017,7 @@ const menuLogoWarp = (() => {
       return;
     }
     stop();
+    _sizeCache = null; // re-measure on each fresh play (layout may have changed while hidden)
     if (prefersReducedMotion) {
       drawSharp();
       return;
@@ -1944,12 +2078,127 @@ const hudQuadBadge = document.getElementById("hudQuadBadge");
 // Session-only on purpose (a relaunch turns it off). Any run that used a dev tool is flagged in
 // localStorage so its score never reaches the Polyverse scoreboard; a fresh run clears the flag.
 const btnDevMode = document.getElementById("btnDevMode");
+const btnFxLab = document.getElementById("btnFxLab"); // 2026-10-25: Dev Mode → FX Lab
 const hudDevWin = document.getElementById("hudDevWin");
 const DEV_MODE_TAP_COUNT = 3;
 const DEV_MODE_TAP_WINDOW_MS = 1500;
 const STORAGE_DEV_ASSISTED_RUN = "poly_oracle_dev_assisted_run";
 let devModeRevealed = false;
 let devModeOn = false;
+
+// ── FX LAB trials (2026-10-25, Monkey Trubble pattern) ─────────────────────────────────────────
+// TRIAL_DEFAULTS is what players get. In Dev Mode the FX Lab's chip picks (localStorage) apply live
+// so looks/sounds can be judged on the phone; approved picks get baked into TRIAL_DEFAULTS.
+const TRIALS_KEY = "poly_oracle_trials";
+const TRIAL_DEFAULTS = {
+  laser: "x", warp: "off", titles: "plain", cards: "plain", buttons: "plain", cheatFx: "confetti",
+  sfxLaser: "advfire", sfxPulse: "default", sfxBomb: "default", sfxKill: "default", sfxCheat: "slot_jackpot", sfxLevelStart: "none",
+};
+// [key, section, label, [[value, chip label], ...], optional preview]
+const TRIAL_ROWS = [
+  ["laser", "look", "PRIMARY LASER (fire a level to see it)", [["x", "TAP X (CURRENT)"], ["beam", "ENERGY BEAM"], ["bolt", "PHOTON BOLT"]]],
+  ["warp", "look", "LEVEL WARP TRANSITION", [["off", "OFF (CURRENT)"], ["tunnel", "LIGHT TUNNEL"], ["streaks", "HYPERSPEED STREAKS"]], "warp"],
+  ["titles", "look", "MENU TITLES (+ LEVEL BANNER DECRYPT)", [["plain", "PLAIN (CURRENT)"], ["shiny", "SHINY"], ["decrypt", "DECRYPT"], ["glitch", "GLITCH"]]],
+  ["cards", "look", "MENU CARDS", [["plain", "PLAIN (CURRENT)"], ["holo", "HOLO FOIL"]]],
+  ["buttons", "look", "MENU BUTTONS", [["plain", "PLAIN (CURRENT)"], ["star", "STAR BORDER"]]],
+  ["cheatFx", "look", "CHEAT UNLOCK FX", [["off", "OFF"], ["confetti", "NUCLEAR HOLO CONFETTI"]], "confetti"],
+  ["sfxLaser", "sound", "LASER FIRE", [["advfire", "ADVFIRE LIGHT (CURRENT)"], ["lab_advfire_full", "ADVFIRE FULL"], ["lab_zap2", "ZAP 2"], ["lab_zap5", "ZAP 5"], ["lab_zap6", "ZAP 6"], ["lab_maybeshot", "SHOT"]]],
+  ["sfxPulse", "sound", "PULSE CANNON SHOT", [["default", "FIRE 1/2 (CURRENT)"], ["lab_zap5", "ZAP 5"], ["smallblast", "SMALL BLAST"], ["lab_zap6", "ZAP 6"]]],
+  ["sfxBomb", "sound", "BOMB BOOM", [["default", "MINE + BIG (CURRENT)"], ["bigbang", "BIG BANG"], ["powexplode", "POW"], ["lab_blast1", "BLAST 1"], ["distantexplode", "DISTANT"]]],
+  ["sfxKill", "sound", "STROID KILL", [["default", "BY SIZE (CURRENT)"], ["crunch", "CRUNCH"], ["smallblast", "SMALL BLAST"], ["crack", "CRACK"], ["powexplode", "POW"]]],
+  ["sfxCheat", "sound", "CHEAT UNLOCK STING", [["none", "NONE"], ["slot_jackpot", "JACKPOT"], ["slot_bigwin", "BIG WIN"], ["life_gain", "POP + SPARKLE"], ["level_up", "LEVEL UP"]]],
+  ["sfxLevelStart", "sound", "LEVEL START", [["none", "NONE (CURRENT)"], ["warp", "SUB SWOOSH"], ["lastlevelstart", "BOSS START"], ["reveal_flash", "REVEAL FLASH"], ["newreveal005", "REVEAL 5"]]],
+];
+let trials = { ...TRIAL_DEFAULTS };
+try { trials = { ...TRIAL_DEFAULTS, ...JSON.parse(localStorage.getItem(TRIALS_KEY) || "{}") }; } catch { /* defaults */ }
+function trial(k) {
+  return devModeOn ? (trials[k] ?? TRIAL_DEFAULTS[k]) : TRIAL_DEFAULTS[k];
+}
+// Sound trials: the GAME_SFX key for a slot, or `fallback` when the pick is "default".
+function sfxTrial(slot, fallback) {
+  const v = trial(slot);
+  return !v || v === "default" ? fallback : v;
+}
+function applyTrials() {
+  const b = document.body;
+  if (!b) return;
+  b.classList.toggle("fx-title-shiny", trial("titles") === "shiny");
+  b.classList.toggle("fx-title-glitch", trial("titles") === "glitch");
+  b.classList.toggle("fx-holo-cards", trial("cards") === "holo");
+  b.classList.toggle("fx-star-buttons", trial("buttons") === "star");
+  document.querySelectorAll(".fxLabChips[data-trial]").forEach((row) => {
+    for (const btn of row.querySelectorAll("button[data-value]")) {
+      btn.setAttribute("aria-checked", String(trials[row.dataset.trial] === btn.dataset.value));
+    }
+  });
+}
+// Fire the cheat-unlock celebration (FX + sting) per the trials.
+function celebrateCheatUnlock() {
+  if (trial("cheatFx") === "confetti") window.polyFx?.playNuclearConfetti?.();
+  const sting = trial("sfxCheat");
+  if (sting && sting !== "none") window.playGameSfx?.(sting, 0.9, { important: true });
+}
+function playLevelWarpTrial(opts) {
+  const kind = trial("warp");
+  if (kind === "tunnel") window.polyFx?.playTunnel?.(opts);
+  else if (kind === "streaks") window.polyFx?.playStreaks?.(opts);
+}
+
+let _fxLab = null;
+function openFxLab() {
+  if (!_fxLab) {
+    _fxLab = document.createElement("div");
+    _fxLab.className = "fxLab";
+    _fxLab.setAttribute("role", "dialog");
+    _fxLab.setAttribute("aria-label", "FX Lab");
+    const sec = (id, title, color, note) => {
+      const rows = TRIAL_ROWS.filter((r) => r[1] === id).map(([key, , label, opts, preview]) => `
+        <div class="fxLabRow"><small>${label}</small><div class="fxLabChips" data-trial="${key}">
+          ${opts.map(([v, l]) => `<button type="button" role="radio" data-value="${v}">${l}</button>`).join("")}
+          ${preview ? `<button type="button" class="fxLabPreview" data-preview="${preview}">\u25B6 PREVIEW</button>` : ""}
+        </div></div>`).join("");
+      return `<div class="fxLabSec" style="--sec:${color}"><h4>${title}</h4>${rows}${note ? `<p class="fxLabNote">${note}</p>` : ""}</div>`;
+    };
+    _fxLab.innerHTML = `
+      <div class="fxLabHead"><h2>FX LAB</h2><button class="fxLabClose" type="button">DONE</button></div>
+      <p class="fxLabNote">Tap a chip to try it — it goes live immediately while Dev Mode is on (sounds play when tapped). Players keep the defaults until the picks are baked in.</p>
+      ${sec("look", "LOOK", "#ff9a3c", "Titles/cards/buttons show on the menus behind this panel. Laser + warp show in a level.")}
+      ${sec("sound", "SOUND (TAP TO HEAR)", "#5fd3ff")}
+      <button class="fxLabCopy" type="button">COPY PICKS</button>
+      <p class="fxLabNote fxLabPicks"></p>`;
+    document.body.appendChild(_fxLab);
+    _fxLab.querySelector(".fxLabClose").addEventListener("click", () => _fxLab.classList.remove("show"));
+    _fxLab.addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      if (btn.dataset.preview === "warp") { playLevelWarpTrial({ zIndex: 20500 }); return; }
+      if (btn.dataset.preview === "confetti") { celebrateCheatUnlock(); return; }
+      const row = btn.closest(".fxLabChips[data-trial]");
+      if (row && btn.dataset.value) {
+        trials[row.dataset.trial] = btn.dataset.value;
+        try { localStorage.setItem(TRIALS_KEY, JSON.stringify(trials)); } catch { /* session only */ }
+        applyTrials();
+        const key = row.dataset.trial;
+        if (key.startsWith("sfx")) {
+          const v = btn.dataset.value;
+          const demo = v === "default"
+            ? { sfxPulse: "pulse_cannon_fire1", sfxBomb: "landmine_boom", sfxKill: "explosion_med" }[key]
+            : v === "none" ? "" : v;
+          if (demo) window.playGameSfx?.(demo, 0.9, { important: true });
+        }
+        if (key === "titles" && btn.dataset.value === "decrypt") document.querySelectorAll(".galaxyModeTitle, .arcadeMenuTitle").forEach((el) => window.polyFx?.decryptText?.(el));
+      }
+      if (btn.classList.contains("fxLabCopy")) {
+        const changed = Object.fromEntries(Object.entries(trials).filter(([k, v]) => TRIAL_DEFAULTS[k] !== v));
+        const text = JSON.stringify(changed);
+        _fxLab.querySelector(".fxLabPicks").textContent = `Picks: ${text}`;
+        try { navigator.clipboard?.writeText(text); } catch { /* shown on screen too */ }
+      }
+    });
+  }
+  applyTrials();
+  _fxLab.classList.add("show");
+}
 // 2026-10-25 (ADS-01): Cheat Codes earned with rewarded ads. Each costs CHEAT_ADS_REQUIRED ads;
 // partial progress expires CHEAT_PROGRESS_TTL_MS after the first ad. Level Select is permanent
 // (writes the existing STORAGE_CHEAT_LEVELSELECT key); the rest stay active for CHEAT_ACTIVE_MS
@@ -9117,6 +9366,7 @@ function initGalaxyCanvas() {
   // both can coexist. Same entity shape/phases; updated/drawn/exploded by the shared helpers.
   let placedBombs = [];
   const pulseDissolves = []; // Pulse Cannon plasma ghosts — see addPulseDissolve
+  const laserShotFx = []; // FX Lab beam/bolt shots — see drawLaserShotFx
   const PULSE_DISSOLVE_MS = 340;
   const PULSE_DISSOLVE_MAX = 24;
   let landmineSpawnedThisLevel = false;
@@ -10167,6 +10417,10 @@ function initGalaxyCanvas() {
          from prototypes/slot-machine.html — TUNE fractions are of the cabinet box). */
       .cabinet-loading .ps-reels,.cabinet-loading .ps-lever,.cabinet-loading .ps-result,.cabinet-loading .ps-hint,.cabinet-loading .ps-hud,.cabinet-loading .ps-skip,.cabinet-loading .ps-continue,.cabinet-loading .ps-lifeaward{opacity:0;}
       .ps-gamehud{position:absolute;left:max(10px,env(safe-area-inset-left,0px));right:max(10px,env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px));z-index:3;display:flex;align-items:center;justify-content:space-between;gap:10px;color:#dff;}
+      .ps-modebtn.ps-resume{border-color:rgba(0,255,209,.75);background:rgba(0,60,52,.85);color:#00FFD1;box-shadow:0 0 14px rgba(0,255,209,.35);}
+      .ps-skip.ps-hidden{display:none;}
+      .ps-modebtn.ps-resume.ps-attn{animation:psResumeAttn .8s ease-in-out infinite alternate;}
+      @keyframes psResumeAttn{from{box-shadow:0 0 8px rgba(0,255,209,.35);}to{box-shadow:0 0 22px rgba(0,255,209,.9);}}
       .ps-modebtn{min-height:40px;border:1px solid rgba(255,255,255,.2);border-radius:999px;background:rgba(7,14,30,.76);color:#dff;padding:8px 12px;font:800 13px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em;}
       .ps-score{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;font-size:clamp(12px,3.1vw,15px);font-weight:800;text-shadow:0 0 10px rgba(0,255,209,.45);}
       .ps-score span{padding:7px 9px;border:1px solid rgba(255,255,255,.14);border-radius:999px;background:rgba(7,14,30,.64);}
@@ -10408,16 +10662,18 @@ function initGalaxyCanvas() {
       e.stopPropagation();
       if (performance.now() >= slotContinueArmedAt) exitSlot();
     }, { passive: false });
-    if (slotMidLevel && slotEls.skip) slotEls.skip.textContent = "BACK TO GAME ▸";
+    // Mid-level (opened from the HUD): no "← Modes" — the top-left button is ▶ RESUME PLAY, which
+    // closes the cabinet straight back into the paused level (Paul, playtest: Modes led to a frozen
+    // Stroids menu). The bottom SKIP is redundant there, so it stays hidden.
+    if (slotMidLevel && slotEls.modes) {
+      slotEls.modes.textContent = "\u25B6 RESUME PLAY";
+      slotEls.modes.classList.add("ps-resume");
+      slotEls.skip?.classList.add("ps-hidden");
+    }
     slotTrackListener(slotEls.modes, "click", (e) => {
       e.stopPropagation();
       if (slotMidLevel) {
-        // Mid-level: un-pause the level's clocks first, then take the normal paused-to-menu path so
-        // Resume returns to the same level with the same time left.
-        const onExit = slotOnExit;
-        slotTeardown(SLOT_REASON.MENU);
-        onExit?.();
-        showModeSelect({ preserveArcade: true, openArcadeMenu: true });
+        if (slotState === SLOT_STATE.READY || slotState === SLOT_STATE.ENTERING) exitSlot();
         return;
       }
       slotTeardown(SLOT_REASON.MENU);
@@ -10502,6 +10758,7 @@ function initGalaxyCanvas() {
     const cont = slotEls.tokenOffer.querySelector(".ps-offer-continue");
     watch.textContent = `WATCH AD · +${TOKEN_AD_REWARD} TOKENS`;
     watch.disabled = false;
+    if (slotMidLevel) cont.textContent = "RESUME PLAY";
     let busy = false;
     const hideOffer = () => slotEls.tokenOffer?.classList.remove("show");
     slotTrackListener(cont, "click", (e) => {
@@ -10539,6 +10796,14 @@ function initGalaxyCanvas() {
       return;
     }
     slotContinueShown = true;
+    if (slotMidLevel) {
+      // Mid-level: no dimming TAP TO CONTINUE curtain — the cabinet stays viewable (inventory
+      // screen) and the top-left ▶ RESUME PLAY is the way back.
+      setSlotHint("GOLD BARS = TOKENS");
+      slotEls.modes?.classList.add("ps-attn");
+      playGameSfx("slot_outoftokens", 0.8);
+      return;
+    }
     setSlotHint("");
     slotEls.skip?.classList.remove("show");
     slotEls.continue?.classList.add("show");
@@ -10864,9 +11129,10 @@ function initGalaxyCanvas() {
   // powerup lifetimes, mine fuses, timed weapons, missile reload, RUN timer) keeps running in real
   // time. On resume they're all pushed forward by the time the cabinet was open.
   function canOpenSlotMidLevel() {
+    // Always openable during a live level, even with 0 tokens (Paul: "think inventory on a Zelda
+    // game") — the cabinet shows the bank/inventory and offers the token ad if one is loaded.
     return engineMode === "arcade" && arcadeActive && !retryPending && !stuntActive && !practiceEndless
-      && galaxyRunning && !isSlotActive() && performance.now() >= arcadePausedUntil
-      && (slotTokens > 0 || adService.isReady());
+      && galaxyRunning && !isSlotActive() && performance.now() >= arcadePausedUntil;
   }
 
   function shiftGameplayClock(d) {
@@ -12614,6 +12880,12 @@ function initGalaxyCanvas() {
   }
 
   function setArcadeSubmenu(mode = "root") {
+    // 2026-10-25: FX Lab "decrypt" titles — scramble-reveal the menu titles on every menu switch.
+    if (trial("titles") === "decrypt") {
+      requestAnimationFrame(() => document.querySelectorAll(".galaxyModeTitle, .arcadeMenuTitle").forEach((el) => {
+        if (el.offsetParent) window.polyFx?.decryptText?.(el);
+      }));
+    }
     const showRoot = mode === "root";
     const showArcade = mode === "arcade";
     const showLevels = mode === "levels";
@@ -12629,6 +12901,7 @@ function initGalaxyCanvas() {
     if (btnArcadeStunt) btnArcadeStunt.style.display = showRoot ? "" : "none";
     if (btnScores) btnScores.style.display = showRoot ? "" : "none";
     if (btnDevMode) btnDevMode.style.display = showRoot && devModeRevealed ? "" : "none";
+    if (btnFxLab) btnFxLab.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
     if (btnCheatCodes) btnCheatCodes.style.display = showRoot ? "" : "none";
     if (cheatCodesPanel) {
       cheatCodesPanel.hidden = !showCheats;
@@ -12838,8 +13111,10 @@ function initGalaxyCanvas() {
     el.classList.toggle("training", !!opts.training);
     if (!label) { el.textContent = ""; el.setAttribute("aria-hidden", "true"); return; }
     el.textContent = label;
+    el.dataset.fxBusy = "0"; // new label: a running decrypt must not restore the old text
     void el.offsetWidth; // restart the entrance animation
     el.classList.add("show");
+    if (trial("titles") === "decrypt") window.polyFx?.decryptText?.(el, { durationMs: 900 });
     el.setAttribute("aria-hidden", "false");
     levelTitleTimer = setTimeout(() => {
       el.classList.add("fadeOut");
@@ -13182,7 +13457,7 @@ function initGalaxyCanvas() {
   function playPlayerFireSound() {
     // FIXED 2026-06-08: Safari desktop needs HTML Audio path — WebAudio context stalls on rapid fire
     if (isSafariDesktop) {
-      audioEngine.playHtmlAudio("advfire", { volume: clamp(0.86 * (state.whisper ? 0.55 : 1), 0, 1), rate: 1 });
+      audioEngine.playHtmlAudio(sfxTrial("sfxLaser", "advfire"), { volume: clamp(0.86 * (state.whisper ? 0.55 : 1), 0, 1), rate: 1 });
       return;
     }
     // 2026-06-09: ensure the AudioContext is resumed (Chrome desktop can stay suspended until a gesture)
@@ -13190,7 +13465,7 @@ function initGalaxyCanvas() {
     // 2026-06-24: small detune jitter on every shot — rapid identical advfire buffers were summing
     // into a resonant low boom (worst under quadshot); this de-correlates their phase, staying crisp.
     // 2026-07-02: base laser tap bumped 0.86 → 1.0 (louder plasma report per playtest).
-    playGameSfx("advfire", 1.0, { detune: (Math.random() - 0.5) * 100 });
+    playGameSfx(sfxTrial("sfxLaser", "advfire"), 1.0, { detune: (Math.random() - 0.5) * 100 });
   }
 
   function startUfoDrone() {
@@ -13213,7 +13488,7 @@ function initGalaxyCanvas() {
   function playSingleAsteroidBoom(kind, volume, rate) {
     const mediumKeys = ["explosion_med", "explosion_med_alt"];
     const smallKeys = ["explosion_small", "explosion_small_alt"];
-    const key = kind >= 3 ? "explosion_big" : kind === 2 ? pick(mediumKeys) : pick(smallKeys);
+    const key = sfxTrial("sfxKill", "") || (kind >= 3 ? "explosion_big" : kind === 2 ? pick(mediumKeys) : pick(smallKeys));
     playGameSfx(key, volume * 1.8, { rate, forceHtmlOnIOS: true });
   }
 
@@ -13271,6 +13546,8 @@ function initGalaxyCanvas() {
   }
 
   function playBigBoomSound() {
+    const labBoom = sfxTrial("sfxBomb", "");
+    if (labBoom) { playGameSfx(labBoom, 1.6); return; }
     playGameSfx("landmine_boom", 1.8);
     if (isIOSNative) {
       setTimeout(() => playGameSfx("explosion_big", 1.26), 100);
@@ -16232,6 +16509,7 @@ function initGalaxyCanvas() {
       resetBoomBurst(); // drop any pending cluster-boom timer so it can't fire across a transition
       sim.lightningRings.length = 0;
       pulseDissolves.length = 0;
+      laserShotFx.length = 0;
     }
     sim.shooting = null;
     landmine = null;
@@ -17147,6 +17425,12 @@ function initGalaxyCanvas() {
       fdPhase("warp", () => window.galaxyBackground?.triggerWarp());
     }
     lvlTrace(`[lvltrans] after triggerWarp invoked=${currentLevelIndex > 0}`);
+    // 2026-10-25: FX Lab trials — level-start warp effect + level-start sound (both off by default).
+    playLevelWarpTrial();
+    {
+      const startSfx = trial("sfxLevelStart");
+      if (startSfx && startSfx !== "none") playGameSfx(startSfx, 0.9, { important: true });
+    }
     fdPhase("music", () => playArcadeMusicForLevel(cfg.level));
     if (cfg.level === 10) {
       playGameSfx("lastlevelstart", 0.96);
@@ -20420,6 +20704,56 @@ function initGalaxyCanvas() {
   // (spawnPulseFireBurst / pulseFireBursts). This stub keeps the call sites harmless.
   function drawPulseMuzzle() { /* muzzle FX removed — see pulseFireBursts */ }
 
+  // 2026-10-25: FX Lab primary-laser looks (trial "laser"). Drawn on the antialiased 2D FX overlay.
+  // BEAM: a white-hot core + teal glow from the ship to the tap, flaring and thinning over ~140ms.
+  // BOLT: a short bright streak that travels ship → tap in ~90ms, leaving a fading tail.
+  const LASER_BEAM_MS = 140;
+  const LASER_BOLT_MS = 90;
+  function drawLaserShotFx(tctx, now) {
+    if (!tctx || laserShotFx.length === 0) return;
+    tctx.save();
+    tctx.lineCap = "round";
+    tctx.globalCompositeOperation = "lighter";
+    for (let i = laserShotFx.length - 1; i >= 0; i -= 1) {
+      const f = laserShotFx[i];
+      const age = now - f.t0;
+      if (f.kind === "beam") {
+        const t = age / LASER_BEAM_MS;
+        if (t >= 1) { laserShotFx.splice(i, 1); continue; }
+        const k = 1 - t;
+        tctx.globalAlpha = k * 0.45;
+        tctx.strokeStyle = _levelPrimaryColor;
+        tctx.lineWidth = 9 * k + 2;
+        tctx.beginPath(); tctx.moveTo(f.ox, f.oy); tctx.lineTo(f.x, f.y); tctx.stroke();
+        tctx.globalAlpha = k;
+        tctx.strokeStyle = "#eafffb";
+        tctx.lineWidth = 2.4 * k + 0.6;
+        tctx.beginPath(); tctx.moveTo(f.ox, f.oy); tctx.lineTo(f.x, f.y); tctx.stroke();
+        // impact flare
+        tctx.globalAlpha = k * 0.8;
+        tctx.fillStyle = "#eafffb";
+        tctx.beginPath(); tctx.arc(f.x, f.y, 3 + 6 * k, 0, Math.PI * 2); tctx.fill();
+      } else {
+        const t = age / LASER_BOLT_MS;
+        if (t >= 1.6) { laserShotFx.splice(i, 1); continue; }
+        const head = Math.min(1, t);
+        const tail = Math.max(0, head - 0.35);
+        const fade = t <= 1 ? 1 : 1 - (t - 1) / 0.6;
+        const hx = f.ox + (f.x - f.ox) * head, hy = f.oy + (f.y - f.oy) * head;
+        const tx = f.ox + (f.x - f.ox) * tail, ty = f.oy + (f.y - f.oy) * tail;
+        tctx.globalAlpha = 0.5 * fade;
+        tctx.strokeStyle = _levelPrimaryColor;
+        tctx.lineWidth = 7;
+        tctx.beginPath(); tctx.moveTo(tx, ty); tctx.lineTo(hx, hy); tctx.stroke();
+        tctx.globalAlpha = fade;
+        tctx.strokeStyle = "#ffffff";
+        tctx.lineWidth = 2.2;
+        tctx.beginPath(); tctx.moveTo(tx, ty); tctx.lineTo(hx, hy); tctx.stroke();
+      }
+    }
+    tctx.restore();
+  }
+
   // 2026-06-11: spawn + advance the fire trail behind an in-flight tossed asteroid. Stepped
   // from update() (dt-based) so it never double-advances when draw() runs more than once.
   function stepFlameTrail(dt, now) {
@@ -20805,6 +21139,7 @@ function initGalaxyCanvas() {
       drawLandmineCountdownOverlay(ufoFxCtx || ctx);
       if (!_overlaysOnPixi) drawPlacedBombsOverlay(ufoFxCtx || ctx);
       drawFreezeOverlay(ufoFxCtx || ctx);
+      drawLaserShotFx(ufoFxCtx || ctx, now);
       drawAndStepTapBlasts(ufoFxCtx || ctx);
       drawPulseMuzzle(ufoFxCtx || ctx);
       // KEEP LAST: the missile crosshair (drawMissileFx) must render AFTER drawPowerups on the same
@@ -21470,6 +21805,14 @@ function initGalaxyCanvas() {
       tapBlasts.push(_shotBlastRef);
     }
     const markShotHit = () => { if (_shotBlastRef) _shotBlastRef.hit = true; };
+    // 2026-10-25: FX Lab primary-laser trial — a beam/bolt from the ship (screen centre) to the tap.
+    if (!pulse) {
+      const laserLook = trial("laser");
+      if (laserLook !== "x") {
+        if (laserShotFx.length >= 10) laserShotFx.shift();
+        laserShotFx.push({ x: sx, y: sy, ox: sim.width / 2, oy: sim.height / 2, t0: performance.now(), kind: laserLook });
+      }
+    }
     shotsFired += 1;
     // 2026-06-23: while quadshot is active, bombs and UFOs die in one hit — the bomb skips its
     // arming step and detonates on the spot, the UFO is destroyed on the first hit — to sell the
@@ -21613,7 +21956,7 @@ function initGalaxyCanvas() {
     }
     // alternating fire1/fire2 with pitch jitter so a sustained stream never combs into one harsh tone
     // 2026-07-02: pulse fire read too quiet in playtest — bumped 0.7 → 0.9 (~+25%).
-    playGameSfx(pulseFireToggle ? "pulse_cannon_fire2" : "pulse_cannon_fire1", 0.9, {
+    playGameSfx(sfxTrial("sfxPulse", pulseFireToggle ? "pulse_cannon_fire2" : "pulse_cannon_fire1"), 0.9, {
       important: true,
       detune: (Math.random() - 0.5) * 90,
     });

@@ -483,7 +483,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 17:27";
+const BUILD_TS = "2026-10-25 17:47";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1418,6 +1418,70 @@ function wireCheatCodesMenu() {
   adService.subscribe(() => {
     if (cheatCodesPanel.classList.contains("show") && !adService.isInPod()) renderCheatCodesPanel();
   });
+}
+
+// ── 2026-10-25: game entry tile on the Oracle page + Stroids byline / What's New ───────────────
+// What's new for players in this build (opened from SPC's mug beside the byline). Bump `version`
+// and rewrite `lines` for every release; the mug breathes + shows NEW until the notes are read.
+const RELEASE_NOTES = {
+  version: "4.1",
+  lines: [
+    "NEW: POLYSLOTS lives on your HUD — tap it any time mid-level to spin. The game pauses, and your tokens carry through the whole run.",
+    "NEW: Photon bolts fire from your cockpit, and a light-tunnel warp launches every level.",
+    "NEW: Settings — set Music and SFX volume.",
+    "Carry up to 9 bombs, and big chain blasts stay smooth.",
+    "Pulse Cannon kills now dissolve in plasma instead of vanishing.",
+    "Cheat-code ads now play back to back in the Ad Theater — no more popping back into the game between ads.",
+    "Fixes: snappier menus, buzzer-beater clears now count, and Unlimited Missiles stays unlimited.",
+  ],
+};
+const NOTES_SEEN_KEY = "poly_oracle_notes_seen";
+const PLAY_TILE_SEEN_KEY = "poly_oracle_play_tile_seen";
+function notesSeen() {
+  try { return localStorage.getItem(NOTES_SEEN_KEY) === RELEASE_NOTES.version; } catch { return false; }
+}
+let _whatsNewEl = null;
+function openWhatsNew() {
+  try { localStorage.setItem(NOTES_SEEN_KEY, RELEASE_NOTES.version); } catch { /* session only */ }
+  document.getElementById("whatsNewBtn")?.classList.remove("fresh");
+  if (!_whatsNewEl) {
+    _whatsNewEl = document.createElement("div");
+    _whatsNewEl.className = "whatsNewOverlay";
+    _whatsNewEl.setAttribute("role", "dialog");
+    _whatsNewEl.setAttribute("aria-label", "What's new");
+    _whatsNewEl.addEventListener("click", (e) => {
+      if (e.target === _whatsNewEl || e.target.closest(".whatsNewDone")) _whatsNewEl.classList.remove("show");
+    });
+    document.body.appendChild(_whatsNewEl);
+  }
+  _whatsNewEl.innerHTML = `
+    <div class="whatsNewCard">
+      <div class="whatsNewHead"><img src="assets/ui/spc_news_mug.png" alt="">
+        <div><div class="whatsNewKicker">WHAT'S NEW</div><div class="whatsNewName">STROIDS IN THE POLYVERSE</div><div class="whatsNewVer">Version ${RELEASE_NOTES.version}</div></div></div>
+      <ul class="whatsNewList">${RELEASE_NOTES.lines.map((l) => `<li>${l}</li>`).join("")}</ul>
+      <button class="modeBtn whatsNewDone" type="button">Got it</button>
+    </div>`;
+  _whatsNewEl.classList.remove("show");
+  void _whatsNewEl.offsetWidth;
+  _whatsNewEl.classList.add("show");
+}
+function wirePolyverseBranding() {
+  const tile = document.getElementById("playStroidsTile");
+  if (tile) {
+    let seen = false;
+    try { seen = localStorage.getItem(PLAY_TILE_SEEN_KEY) === "1"; } catch { /* first run */ }
+    tile.classList.toggle("first-run", !seen);
+    tile.addEventListener("click", () => {
+      try { localStorage.setItem(PLAY_TILE_SEEN_KEY, "1"); } catch { /* ignore */ }
+      tile.classList.remove("first-run");
+      openGalaxy?.click(); // same entry as the header asteroid
+    });
+  }
+  const mug = document.getElementById("whatsNewBtn");
+  if (mug) {
+    mug.classList.toggle("fresh", !notesSeen());
+    mug.addEventListener("click", openWhatsNew);
+  }
 }
 
 function wireDevModeEntry() {
@@ -5515,6 +5579,7 @@ function addListeners() {
     btnArcadeNew.addEventListener("click", () => galaxyCanvasController?.startArcadeNew?.());
   }
   wireDevModeEntry();
+  wirePolyverseBranding();
   wireCheatCodesMenu();
   if (btnArcadeResume) {
     btnArcadeResume.addEventListener("click", () => galaxyCanvasController?.startArcadeResume?.());

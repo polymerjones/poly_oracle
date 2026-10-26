@@ -513,7 +513,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 18:56";
+const BUILD_TS = "2026-10-25 19:04";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -10994,6 +10994,14 @@ function initGalaxyCanvas() {
     if (slotState === SLOT_STATE.EXITING || slotState === SLOT_STATE.DISPOSED) return;
     slotState = SLOT_STATE.EXITING;
     slotInputLockedUntil = Infinity; // freeze all further input during the exit beat
+    // 2026-10-25 (playtest): mid-level (HUD) exits skip the dimmed "RESUMING…" beat — straight back
+    // into the paused level. The between-levels path keeps its short "ENTERING NEXT LEVEL…" beat.
+    if (slotMidLevel) {
+      const onExit = slotOnExit;
+      slotTeardown(SLOT_REASON.SLOT_EXIT);
+      onExit?.();
+      return;
+    }
     if (slotEls.continueInner) slotEls.continueInner.textContent = slotMidLevel ? "RESUMING…" : "ENTERING NEXT LEVEL…";
     slotEls.continue?.classList.add("show");
     slotTrackTimeout(() => {

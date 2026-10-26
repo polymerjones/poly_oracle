@@ -5,7 +5,7 @@ const fs=require('node:fs');
 (async()=>{const b=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,args:['--autoplay-policy=no-user-gesture-required']});try{
  const p=await b.newPage({viewport:{width:430,height:932},deviceScaleFactor:3});p.setDefaultTimeout(15000);
  await p.route('**/*',r=>r.request().url().startsWith('http://127.0.0.1:8765')?r.continue():r.abort());
- await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#openGalaxy').click();await p.locator('#btnArcade').click();await p.locator('#btnArcadeNew').click();await p.waitForTimeout(6000);
+ await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#playStroidsTile').click();await p.locator('#btnArcade').click();await p.locator('#btnArcadeNew').click();await p.waitForTimeout(6000);
  const cdp=await p.context().newCDPSession(p);await cdp.send('Profiler.enable');await cdp.send('Profiler.setSamplingInterval',{interval:200});await cdp.send('Profiler.start');
  await p.waitForTimeout(5000);const {profile}=await cdp.send('Profiler.stop');
  const dt=profile.timeDeltas;const self=new Map();const byId=new Map(profile.nodes.map(n=>[n.id,n]));

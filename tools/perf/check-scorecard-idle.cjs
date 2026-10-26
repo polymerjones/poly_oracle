@@ -17,7 +17,7 @@ const fs=require('node:fs');
   const sample=async(ms)=>{await wrapPixi();await p.evaluate(()=>{window.__ops={};window.__pixiDraws=0});const a=await task();await p.waitForTimeout(ms);const z=await task();
    return {taskMsPerS:+((z-a)*1000/(ms/1000)).toFixed(1),...await p.evaluate(()=>({ops:window.__ops,pixiDraws:window.__pixiDraws}))}};
   const setHidden=(h)=>p.evaluate((h)=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>h});document.dispatchEvent(new Event('visibilitychange'))},h);
-  await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#openGalaxy').click();await p.waitForTimeout(3000);
+  await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#playStroidsTile').click();await p.waitForTimeout(3000);
   for(let i=0;i<3;i++){await p.locator('#menuLogoCanvas').click({force:true});await p.waitForTimeout(120)}
   await p.locator('#btnDevMode').click();await p.waitForTimeout(800); // menu buttons replay their click after a press-pause
   await p.locator('#btnArcade').click();await p.waitForTimeout(800);await p.locator('#btnArcadeNew').click();await p.waitForTimeout(7000);

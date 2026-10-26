@@ -9,7 +9,7 @@ const DIR=process.argv[2];
  await p.route('**/*',r=>r.request().url().startsWith('http://127.0.0.1:8765')?r.continue():r.abort());
  await p.addInitScript(()=>{try{localStorage.removeItem('poly_oracle_trials');localStorage.setItem('poly-oracle-game-beaten','true')}catch{}});
  const shot=async(n)=>{if(DIR)await p.screenshot({path:`${DIR}/fxlab-${n}.png`})};
- await p.goto('http://127.0.0.1:8765');await p.locator('#openGalaxy').click();await p.waitForTimeout(1500);
+ await p.goto('http://127.0.0.1:8765');await p.locator('#playStroidsTile').click();await p.waitForTimeout(1500);
  for(let i=0;i<3;i++){await p.locator('#menuLogoCanvas').dispatchEvent('pointerdown');await p.waitForTimeout(80)}
  await p.locator('#btnDevMode').click();await p.waitForTimeout(400);
  await p.locator('#btnFxLab').click();await p.waitForTimeout(400);

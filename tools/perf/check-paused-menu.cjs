@@ -11,7 +11,7 @@ const fs=require('node:fs');
  const metric=async()=>{const {metrics}=await cdp.send('Performance.getMetrics');const m=Object.fromEntries(metrics.map(x=>[x.name,x.value]));return {task:m.TaskDuration,script:m.ScriptDuration}};
  const sample=async(ms)=>{await p.evaluate(()=>{window.__ops={};window.__pixiDraws=0});const a=await metric();await p.waitForTimeout(ms);const z=await metric();
   return {taskMsPerS:+((z.task-a.task)*1000/(ms/1000)).toFixed(1),scriptMsPerS:+((z.script-a.script)*1000/(ms/1000)).toFixed(1),...await p.evaluate(()=>({ops:window.__ops,pixiDraws:window.__pixiDraws}))}};
- await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#openGalaxy').click();await p.waitForTimeout(4000);
+ await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#playStroidsTile').click();await p.waitForTimeout(4000);
  const freshMenu=await sample(4000);
  await p.locator('#btnArcade').click();await p.locator('#btnArcadeNew').click();await p.waitForTimeout(6000);
  await p.evaluate(()=>{const d=window.pixiRenderer.draw;window.pixiRenderer.draw=function(...a){window.__pixiDraws++;return d.apply(this,a)}});

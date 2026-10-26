@@ -7,7 +7,7 @@ const fs=require('node:fs');
   window.__logoWrites={width:0,height:0};
   for(const key of ['width','height']){const d=Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype,key);Object.defineProperty(HTMLCanvasElement.prototype,key,{...d,set(v){if(this.id==='menuLogoCanvas')window.__logoWrites[key]++;return d.set.call(this,v)}})}
  });
- await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#openGalaxy').click();await p.waitForTimeout(4000);
+ await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#playStroidsTile').click();await p.waitForTimeout(4000);
  async function sample(name){await p.evaluate(()=>window.__logoWrites={width:0,height:0});await p.waitForTimeout(6000);return {name,...await p.evaluate(()=>({writes:window.__logoWrites,width:menuLogoCanvas.width,height:menuLogoCanvas.height,cssWidth:getComputedStyle(menuLogoCanvas).width,visualWidth:menuLogoCanvas.getBoundingClientRect().width}))}}
  const results=[await sample('breathing-enabled')];await p.addStyleTag({content:'#menuLogoCanvas {animation:none!important}'});await p.waitForTimeout(500);results.push(await sample('breathing-disabled'));
  await p.setViewportSize({width:390,height:844});await p.waitForTimeout(500);

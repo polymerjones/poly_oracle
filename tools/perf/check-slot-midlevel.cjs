@@ -12,7 +12,7 @@ const fs=require('node:fs');
    src=src.replace(seam,'    __auditDevOn() { devModeOn = true; },\n    __auditLevel() { return ARCADE_LEVELS[currentLevelIndex]?.level; },\n    __auditGiveTokens(n) { slotTokens = n; },\n    __auditState() { const n = performance.now(); return { remaining: levelEndsAt - n, run: gameTimer.running ? n - gameTimer.startedAt : 0, tokens: slotTokens, slot: isSlotActive(), ast: sim.asteroids.map((a) => [Math.round(a.x), Math.round(a.y)]).slice(0, 3) }; },\n'+seam);
    return r.fulfill({contentType:'application/javascript',body:src})}return r.continue()});
  await p.addInitScript(()=>{try{localStorage.setItem('poly-oracle-game-beaten','true');localStorage.setItem('poly_slot_hint_seen','0')}catch{}});
- await p.goto('http://127.0.0.1:8765');await p.locator('#openGalaxy').click();await p.locator('#btnArcade').click();await p.locator('#btnArcadeLevelSelect').click();
+ await p.goto('http://127.0.0.1:8765');await p.locator('#playStroidsTile').click();await p.locator('#btnArcade').click();await p.locator('#btnArcadeLevelSelect').click();
  await p.locator('.arcadeLevelBtn',{hasText:/^3$/}).click();await p.waitForTimeout(6000);
  const st=()=>p.evaluate(()=>galaxyCanvasController.__auditState());
  const btnHiddenNoTokens=await p.locator('#hudSlotBtn').isDisabled();

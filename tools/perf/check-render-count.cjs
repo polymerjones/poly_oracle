@@ -3,7 +3,7 @@ const fs=require('node:fs');
 (async()=>{const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,args:['--autoplay-policy=no-user-gesture-required']});try{
  const p=await browser.newPage({viewport:{width:430,height:932},deviceScaleFactor:3});p.setDefaultTimeout(15000);
  await p.route('**/*',r=>r.request().url().startsWith('http://127.0.0.1:8765')?r.continue():r.abort());
- await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#openGalaxy').click();await p.locator('#btnArcade').click();await p.locator('#btnArcadeNew').click();await p.waitForTimeout(5000);
+ await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#playStroidsTile').click();await p.locator('#btnArcade').click();await p.locator('#btnArcadeNew').click();await p.waitForTimeout(5000);
  await p.evaluate(async()=>{const app=await window.pixiRenderer.init();window.__counts={draw:0,render:0,effectTicks:0};
   const probe=()=>{window.__counts.effectTicks++};app.ticker.add(probe);window.__removeProbe=()=>app.ticker.remove(probe);
   const render=app.renderer.render;app.renderer.render=function(...args){window.__counts.render++;return render.apply(this,args)};

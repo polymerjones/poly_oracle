@@ -34,9 +34,9 @@ const fs = require('fs');
   await measure('oracle-no-video');
   if (!(await page.locator('#oracleBgVideo').evaluate(v=>v.paused))) throw new Error('Video isolation invalid: playback restarted');
  }
- await page.locator('#openGalaxy').click();await page.waitForTimeout(4000);await measure('stroids-menu');
+ await page.locator('#playStroidsTile').click();await page.waitForTimeout(4000);await measure('stroids-menu');
  await page.locator('#btnGalaxyBack').click();await page.waitForTimeout(4000);await measure('oracle-return');
- await page.locator('#openGalaxy').click();await page.waitForTimeout(1000);await page.locator('#btnArcade').click();await page.locator('#btnArcadeNew').click();await page.waitForTimeout(8000);await measure('arcade-start');
+ await page.locator('#playStroidsTile').click();await page.waitForTimeout(1000);await page.locator('#btnArcade').click();await page.locator('#btnArcadeNew').click();await page.waitForTimeout(8000);await measure('arcade-start');
  await page.locator('#arcadeBack').click();await page.waitForTimeout(1000);await measure('menu-after-play');
  fs.writeFileSync(process.argv[2]||'docs/performance/browser-baseline.json',JSON.stringify({environment:'Desktop headless Chromium, 430x932 DPR3; web path; 10s samples; RAF probe overhead included',errors,samples},null,2));
  } finally { await browser.close(); }

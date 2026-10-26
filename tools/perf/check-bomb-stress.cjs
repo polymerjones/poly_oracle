@@ -9,7 +9,7 @@ const fs=require('node:fs');
  const errors=[];p.on('pageerror',e=>errors.push(e.message));
  await p.route('**/*',r=>r.request().url().startsWith('http://127.0.0.1:8765')?r.continue():r.abort());
  await p.addInitScript(()=>{try{localStorage.setItem('poly-oracle-game-beaten','true')}catch{}});
- await p.goto('http://127.0.0.1:8765');await p.locator('#openGalaxy').click();await p.locator('#btnArcade').click();await p.locator('#btnArcadeLevelSelect').click();
+ await p.goto('http://127.0.0.1:8765');await p.locator('#playStroidsTile').click();await p.locator('#btnArcade').click();await p.locator('#btnArcadeLevelSelect').click();
  await p.locator('.arcadeLevelBtn',{hasText:/^12$/}).click();await p.waitForTimeout(8000);
  const r=await p.evaluate(()=>new Promise(res=>{const pr=window.pixiRenderer;const d=pr.draw;const times=[];
   pr.draw=function(...a){const s=performance.now();const out=d.apply(this,a);times.push(performance.now()-s);return out};

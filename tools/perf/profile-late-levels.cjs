@@ -24,7 +24,7 @@ const results={};try{
   const paints={};let layers=[];cdp.on('LayerTree.layerPainted',e=>{paints[e.layerId]=(paints[e.layerId]||0)+1});cdp.on('LayerTree.layerTreeDidChange',e=>{if(e.layers)layers=e.layers});
   const metric=async()=>{const {metrics}=await cdp.send('Performance.getMetrics');const m=Object.fromEntries(metrics.map(x=>[x.name,x.value]));return {task:m.TaskDuration,script:m.ScriptDuration}};
   await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});
-  await p.locator('#openGalaxy').click();await p.locator('#btnArcade').click();
+  await p.locator('#playStroidsTile').click();await p.locator('#btnArcade').click();
   await p.locator('#btnArcadeLevelSelect').click();
   await p.locator('.arcadeLevelBtn',{hasText:new RegExp('^'+lv+'$')}).click();
   await p.waitForTimeout(9000);

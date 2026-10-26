@@ -12,7 +12,7 @@ const fs=require('node:fs');
    Object.defineProperty(HTMLCanvasElement.prototype,prop,{configurable:true,get:d.get,set(v){if(c.on){const k=label(this)+' <- '+stack();c.sizeWrites[k]=(c.sizeWrites[k]||0)+1}return d.set.call(this,v)}})}
   const ce=Document.prototype.createElement;Document.prototype.createElement=function(t,...a){if(c.on&&String(t).toLowerCase()==='canvas'){c.created++;const k=stack();c.createdStacks[k]=(c.createdStacks[k]||0)+1}return ce.call(this,t,...a)};
   const C=CanvasRenderingContext2D.prototype;for(const m of ['createRadialGradient','createLinearGradient']){const f=C[m];C[m]=function(...a){if(c.on){const k=label(this.canvas)+' '+m+' <- '+stack();c.gradients[k]=(c.gradients[k]||0)+1}return f.apply(this,a)}}});
- await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#openGalaxy').click();await p.locator('#btnArcade').click();await p.locator('#btnArcadeNew').click();await p.waitForTimeout(6000);
+ await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#playStroidsTile').click();await p.locator('#btnArcade').click();await p.locator('#btnArcadeNew').click();await p.waitForTimeout(6000);
  // Tap around the playfield so weapons/effects fire.
  await p.evaluate(()=>window.__churn.on=true);
  for(let i=0;i<25;i++){await p.mouse.click(60+(i*53)%310,220+(i*97)%420);await p.waitForTimeout(200)}

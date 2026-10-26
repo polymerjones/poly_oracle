@@ -16,7 +16,7 @@ const fs=require('node:fs');
   }return r.continue();
  });
  await p.addInitScript(()=>{window.__bgOps=0;const C=CanvasRenderingContext2D.prototype;for(const m of ['clearRect','fillRect','drawImage']){const f=C[m];C[m]=function(...a){if(this.canvas.id==='galaxyBgCanvas')window.__bgOps++;return f.apply(this,a)}}});
- await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#openGalaxy').click();await p.locator('#btnArcade').click();await p.locator('#btnArcadeNew').click();await p.waitForTimeout(5000);
+ await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#playStroidsTile').click();await p.locator('#btnArcade').click();await p.locator('#btnArcadeNew').click();await p.waitForTimeout(5000);
  await p.evaluate(()=>{window.__draws=0;const draw=window.pixiRenderer.draw;window.pixiRenderer.draw=function(...a){window.__draws++;return draw.apply(this,a)}});
  const sample=async(ms)=>{await p.evaluate(()=>{window.__draws=0;window.__bgOps=0});await p.waitForTimeout(ms);return p.evaluate(()=>({draws:window.__draws,bgOps:window.__bgOps}))};
  const gameplay=await sample(3000);

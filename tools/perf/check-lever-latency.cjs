@@ -18,7 +18,7 @@ const fs=require('node:fs');
  // First reel-canvas paint after pointerdown = reels visibly moving.
  await p.addInitScript(()=>{window.__firstSpinPaint=0;window.__armed=false;const clear=CanvasRenderingContext2D.prototype.clearRect;
   CanvasRenderingContext2D.prototype.clearRect=function(...a){if(window.__armed&&!window.__firstSpinPaint&&this.canvas.id.startsWith('psReelC')&&document.getElementById('psTokenCount')?.textContent==='2')window.__firstSpinPaint=performance.now();return clear.apply(this,a)}});
- await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#openGalaxy').click();await p.evaluate(()=>galaxyCanvasController.__auditOpenSlot());await p.waitForTimeout(5000);
+ await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#playStroidsTile').click();await p.evaluate(()=>galaxyCanvasController.__auditOpenSlot());await p.waitForTimeout(5000);
  const track=await p.locator('#psTrack').boundingBox();const knob=await p.locator('#psKnob').boundingBox();
  const x=knob.x+knob.width/2,y0=knob.y+knob.height/2,y1=track.y+track.height-2;
  await p.mouse.move(x,y0);

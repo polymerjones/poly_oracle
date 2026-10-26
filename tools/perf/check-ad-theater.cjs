@@ -18,7 +18,7 @@ const fs=require('node:fs');
   // sample theater coverage every 50ms
   window.__cov=[];setInterval(()=>{const t=document.getElementById('adTheater');window.__cov.push({t:Math.round(performance.now()),on:!!t&&t.classList.contains('show'),shows:window.__adShows,status:t?.querySelector('.adTheaterStatus')?.textContent||''})},50);
  });
- await p.goto('http://127.0.0.1:8765');await p.locator('#openGalaxy').click();await p.waitForTimeout(800);
+ await p.goto('http://127.0.0.1:8765');await p.locator('#playStroidsTile').click();await p.waitForTimeout(800);
  await p.locator('#btnCheatCodes').click();await p.waitForTimeout(2500);
  const btn=p.locator('.cheatRow',{hasText:'Unlimited Missiles'}).locator('.cheatWatchBtn');
  await btn.waitFor();const label=await btn.textContent();

@@ -14,7 +14,7 @@ const fs=require('node:fs');
   }return r.continue();
  });
  await p.addInitScript(()=>{window.__reelPaints=0;const clear=CanvasRenderingContext2D.prototype.clearRect;CanvasRenderingContext2D.prototype.clearRect=function(...a){if(this.canvas.id.startsWith('psReelC'))window.__reelPaints++;return clear.apply(this,a)}});
- await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#openGalaxy').click();await p.evaluate(()=>galaxyCanvasController.__auditOpenSlot());await p.waitForTimeout(5000);
+ await p.goto('http://127.0.0.1:8765',{waitUntil:'domcontentloaded'});await p.locator('#playStroidsTile').click();await p.evaluate(()=>galaxyCanvasController.__auditOpenSlot());await p.waitForTimeout(5000);
  const sample=async(ms)=>{await p.evaluate(()=>window.__reelPaints=0);await p.waitForTimeout(ms);return p.evaluate(()=>window.__reelPaints)};
  const idle=await sample(3000);
  const before=await p.locator('#psTokenCount').textContent();

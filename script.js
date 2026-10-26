@@ -170,6 +170,36 @@ const ADS_RETRY_AFTER_FAIL_MS = 30000;
 const ADS_REWARD_GRACE_MS = 300;
 // An ad pod loads each next ad after the previous one closes; give up if one takes longer than this.
 const ADS_POD_LOAD_TIMEOUT_MS = 15000;
+// ── 2026-10-25: Game Center (iOS) alongside our Polyverse Scoreboard ───────────────────────────
+// Native plugin: ios/App/App/GameCenterPlugin.swift (registered in MainViewController). The
+// leaderboard ID must match the one created in App Store Connect → Game Center → Leaderboards.
+// Google Play Games (Android) follows once the Play Console is set up.
+const GAME_CENTER_LEADERBOARD_ID = "polyverse_high_score";
+const gameCenter = {
+  alias: "",
+  _signIn: null,
+  plugin() { return globalThis.Capacitor?.Plugins?.GameCenter || null; },
+  available() { return !!this.plugin() && globalThis.Capacitor?.getPlatform?.() === "ios"; },
+  signIn() {
+    if (!this.available()) return Promise.resolve(false);
+    if (!this._signIn) {
+      this._signIn = this.plugin().signIn()
+        .then((r) => { this.alias = r?.alias || ""; return !!r?.authenticated; })
+        .catch(() => { this._signIn = null; return false; });
+    }
+    return this._signIn;
+  },
+  async submit(score) {
+    if (!this.available() || !(score > 0)) return;
+    if (!(await this.signIn())) return;
+    try { await this.plugin().submitScore({ leaderboardId: GAME_CENTER_LEADERBOARD_ID, score: Math.floor(score) }); } catch { /* best-effort */ }
+  },
+  async show() {
+    if (!(await this.signIn())) return false;
+    try { return !!(await this.plugin().showLeaderboard({ leaderboardId: GAME_CENTER_LEADERBOARD_ID }))?.shown; } catch { return false; }
+  },
+};
+
 // 2026-10-25: AD THEATER — a branded space stage that covers the game for a whole ad pod. Google
 // rewarded ads can't be chained into one reel (each is its own full-screen ad with its own
 // "Collect reward" close), so between ads the webview is exposed; without this the game popped
@@ -483,7 +513,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 17:56";
+const BUILD_TS = "2026-10-25 18:05";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -6019,6 +6049,7 @@ function flashScreen(color = "#ffffff", ms = 250, peak = 0.9) {
 }
 
 function openGalaxyView() {
+  void gameCenter.signIn(); // first Stroids open: Game Center "Welcome back" banner (or sign-in sheet once)
   setSettingsOpen(false);
   vault.hidden = true;
   oracleView.hidden = true;
@@ -8333,10 +8364,12 @@ async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubm
     const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
       ${renderLeaderboardRows(rows, highlightId)}
       <div class="leaderboardActions">
+        ${gameCenter.available() ? `<button id="leaderboardGameCenter" class="leaderboardBtn" type="button">Game Center</button>` : ""}
         <button id="leaderboardClose" class="leaderboardBtn" type="button">${closeText}</button>
       </div>
     `);
     overlay.querySelector("#leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
+    overlay.querySelector("#leaderboardGameCenter")?.addEventListener("click", () => { void gameCenter.show(); });
   } catch (error) {
     const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
       <p class="leaderboardSub">Scores unavailable offline. Connect to the internet to view the Polyverse Scoreboard.</p>
@@ -8366,6 +8399,8 @@ async function submitLeaderboardScore(initials, score) {
 function showInitialsEntry(score, runMsg = "") {
   const safeScore = Math.max(0, Math.floor(Number(score) || 0));
   const devAssisted = isDevAssistedRun();
+  // Game Center gets the same honest scores as the Polyverse board (never cheat/dev runs).
+  if (!devAssisted && !runHasGameplayCheats()) void gameCenter.submit(safeScore);
   if (devAssisted || runHasGameplayCheats()) {
     // 2026-10-25 (DEV-01 / ADS-01): Dev Mode or a Cheat Code was used this run — never offer a
     // scoreboard submission.

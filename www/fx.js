@@ -28,7 +28,10 @@
       const tick = (now) => {
         if (document.hidden) { finish(); return; } // never run behind a backgrounded app
         const t = Math.min(1, (now - t0) / durMs);
-        step(t, Math.min(0.05, (now - last) / 1000));
+        // rAF timestamps are frame-start times and can precede the performance.now() taken at start,
+        // so the first dt can be negative — clamp it (a negative dt grew the confetti flash ring's
+        // radius below zero → IndexSizeError).
+        step(Math.max(0, t), Math.max(0, Math.min(0.05, (now - last) / 1000)));
         last = now;
         if (t >= 1) finish();
         else raf = requestAnimationFrame(tick);

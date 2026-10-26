@@ -3499,12 +3499,12 @@ body.fx-holo-cards .lsr-panel::before {
 }
 @keyframes fxHoloSweep { 0%, 55% { transform: translateX(-60%); } 85%, 100% { transform: translateX(60%); } }
 /* Buttons: STAR BORDER — a light orbits the button edge (React Bits StarBorder; rotate-only). */
-body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn) {
+body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile) {
   position: relative;
   overflow: hidden;
   isolation: isolate;
 }
-body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn)::before {
+body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::before {
   content: "";
   position: absolute;
   left: 50%;
@@ -3516,7 +3516,7 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn)::before {
   transform: translate(-50%, -50%) rotate(0deg);
   animation: fxStarOrbit 3s linear infinite;
 }
-body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn)::after {
+body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::after {
   content: "";
   position: absolute;
   inset: 2px;
@@ -3796,3 +3796,131 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn)::after {
 .whatsNewVer { font-size: 0.72rem; color: rgba(183, 201, 255, 0.7); }
 .whatsNewDone { display: block; margin: 0 auto; min-width: 140px; }
 .whatsNewList { margin: 0 0 14px; padding-left: 18px; display: grid; gap: 8px; font-size: 0.86rem; line-height: 1.4; }
+
+/* ── 2026-10-25: POLYVERSE hub (navigation overhaul) ──────────────────────────────────────────
+   One-tap hero + a 2-column tile grid. All motion is transform/opacity (compositor-only) and runs
+   once on entry/press — no idle loops beyond the hero's slow sheen. */
+.polyHub { display: grid; gap: 10px; }
+.polyHub[hidden] { display: none; }
+.polyHub:not([hidden]) .polyHero { animation: hubPop 420ms cubic-bezier(0.2, 0.9, 0.3, 1.25) both; }
+.polyHero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 74px;
+  padding: 12px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: linear-gradient(120deg, #6fdcff 0%, #a98bff 52%, #f6a7ff 100%);
+  color: #0a1734;
+  box-shadow: 0 10px 26px rgba(120, 140, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  overflow: hidden;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 110ms ease;
+}
+.polyHero:active { transform: scale(0.97); }
+.polyHero.launch { animation: heroLaunch 170ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+@keyframes heroLaunch { 0% { transform: scale(0.97); } 60% { transform: scale(1.06); filter: brightness(1.25); } 100% { transform: scale(1.02); filter: brightness(1.4); } }
+.polyHeroIcon {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 1.2rem;
+  padding-left: 3px;
+  color: #fff;
+  background: rgba(10, 23, 52, 0.85);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.35);
+}
+.polyHeroText { display: grid; text-align: left; line-height: 1.1; }
+.polyHeroMain { font-size: 1.45rem; font-weight: 900; letter-spacing: 0.12em; }
+.polyHeroSub { font-size: 0.74rem; font-weight: 800; letter-spacing: 0.16em; opacity: 0.75; }
+.polyHeroSheen {
+  position: absolute;
+  inset: -40% -60%;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.45) 50%, transparent 58%);
+  transform: translateX(-60%);
+  animation: pstSheen 3.8s ease-in-out infinite;
+}
+.polyHeroNew {
+  justify-self: center;
+  margin-top: -4px;
+  padding: 4px 10px;
+  border: 0;
+  background: none;
+  color: rgba(183, 201, 255, 0.75);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.polyTiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.modeBtn.polyTile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 84px;
+  padding: 12px 12px 10px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background:
+    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 60%),
+    linear-gradient(160deg, rgba(20, 30, 60, 0.95), rgba(10, 16, 34, 0.95));
+  color: #e7efff;
+  text-align: left;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+.modeBtn.polyTile:not(:disabled):not(.locked):active { transform: scale(0.95); }
+.polyTileIcon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 16%, rgba(0, 0, 0, 0.3));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.polyTileIcon svg { width: 22px; height: 22px; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.polyTileIcon img { width: 28px; height: 28px; object-fit: contain; }
+.polyTileLabel { font-size: 0.9rem; font-weight: 800; letter-spacing: 0.06em; }
+.polyTile.fresh-news::after {
+  content: "NEW";
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font: 900 0.6rem/1 ui-monospace, Menlo, monospace;
+  color: #0a1734;
+  background: #ffd36a;
+}
+/* entry cascade — restarts whenever the hub is shown again */
+.polyHub:not([hidden]) .polyTile { animation: tileIn 460ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+.polyHub:not([hidden]) .polyTile:nth-child(1) { animation-delay: 40ms; }
+.polyHub:not([hidden]) .polyTile:nth-child(2) { animation-delay: 80ms; }
+.polyHub:not([hidden]) .polyTile:nth-child(3) { animation-delay: 120ms; }
+.polyHub:not([hidden]) .polyTile:nth-child(4) { animation-delay: 160ms; }
+.polyHub:not([hidden]) .polyTile:nth-child(5) { animation-delay: 200ms; }
+.polyHub:not([hidden]) .polyTile:nth-child(6) { animation-delay: 240ms; }
+@keyframes tileIn { from { opacity: 0; transform: translateY(16px) scale(0.92); } to { opacity: 1; transform: none; } }
+@keyframes hubPop { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: none; } }
+/* sub-screens whiz in from the right */
+.arcadeMenuPanel.show, .arcadeLevelPanel.show { animation: panelIn 320ms cubic-bezier(0.2, 0.9, 0.3, 1.15) both; }
+@keyframes panelIn { from { opacity: 0; transform: translateX(34px); } to { opacity: 1; transform: none; } }
+/* the whole card glides up when the Stroids menu opens */
+.galaxy-view.mode-menu .galaxyModeCard { animation: cardRise 420ms cubic-bezier(0.2, 0.9, 0.3, 1.1) both; }
+@keyframes cardRise { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .polyHub:not([hidden]) .polyHero, .polyHub:not([hidden]) .polyTile, .polyHeroSheen,
+  .arcadeMenuPanel.show, .arcadeLevelPanel.show, .galaxy-view.mode-menu .galaxyModeCard { animation: none; }
+}

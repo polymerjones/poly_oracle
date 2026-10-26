@@ -483,7 +483,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 17:47";
+const BUILD_TS = "2026-10-25 17:56";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -5511,7 +5511,7 @@ function addListeners() {
   }
 
   if (btnArcade) {
-    btnArcade.textContent = "Arcade";
+    // (2026-10-25: label lives in the hub tile markup — no textContent rewrite)
     btnArcade.addEventListener("click", () => {
       galaxyCanvasController?.openArcadeMenu?.();
     });
@@ -5607,9 +5607,24 @@ function addListeners() {
     btnArcadeScores.addEventListener("click", () => showLeaderboard());
   }
   if (btnScores) {
-    btnScores.textContent = "Scores";
     btnScores.addEventListener("click", () => showLeaderboard());
   }
+  // 2026-10-25: POLYVERSE hub hero (one-tap PLAY / CONTINUE) + What's New tile.
+  document.getElementById("btnPlayHero")?.addEventListener("click", (e) => {
+    const hero = e.currentTarget;
+    if (hero.classList.contains("launch")) return;
+    audioEngine.play("menu_hit", { volume: 0.9 });
+    hero.classList.add("launch"); // whiz-zoom, then go
+    setTimeout(() => {
+      hero.classList.remove("launch");
+      galaxyCanvasController?.playFromHub?.();
+    }, 170);
+  });
+  document.getElementById("btnHeroNew")?.addEventListener("click", () => galaxyCanvasController?.startArcadeNew?.());
+  document.getElementById("btnHubNews")?.addEventListener("click", () => {
+    openWhatsNew();
+    document.getElementById("btnHubNews")?.classList.remove("fresh-news");
+  });
   if (btnArcadeMenuBack) {
     btnArcadeMenuBack.addEventListener("click", () => galaxyCanvasController?.showModeSelect?.());
   }
@@ -12974,8 +12989,26 @@ function initGalaxyCanvas() {
   }
 
   function syncArcadeEntryLabel() {
-    if (!btnArcade) return;
-    btnArcade.textContent = "Arcade";
+    // 2026-10-25: the Arcade tile's label is static hub markup now.
+  }
+
+  // POLYVERSE hub hero: CONTINUE · LEVEL N when there's a live/saved run, else PLAY · NEW GAME.
+  function syncPlayHero() {
+    const main = document.getElementById("polyHeroMain");
+    const sub = document.getElementById("polyHeroSub");
+    const newer = document.getElementById("btnHeroNew");
+    if (!main || !sub) return;
+    const canResume = arcadeResumeAvailable || hasArcadeSave();
+    const lvl = arcadeResumeAvailable ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : getSavedArcadeLevel();
+    main.textContent = canResume ? "CONTINUE" : "PLAY";
+    sub.textContent = canResume ? `LEVEL ${lvl}` : "NEW GAME \u00B7 LEVEL 1";
+    if (newer) newer.hidden = !canResume;
+    document.getElementById("btnHubNews")?.classList.toggle("fresh-news", !notesSeen());
+  }
+
+  function playFromHub() {
+    if (arcadeResumeAvailable || hasArcadeSave()) startArcadeResume();
+    else startArcadeNew();
   }
 
   function setArcadeSubmenu(mode = "root") {
@@ -12990,6 +13023,12 @@ function initGalaxyCanvas() {
     const showLevels = mode === "levels";
     const showStunt = mode === "stunt";
     const showCheats = mode === "cheats";
+    // 2026-10-25: POLYVERSE hub — the hero + tiles show only on the root screen; sub-screens carry
+    // their own titles, so the hub title hides there too.
+    const polyHub = document.getElementById("polyHub");
+    if (polyHub) polyHub.hidden = !showRoot;
+    if (galaxyModeTitleEl) galaxyModeTitleEl.hidden = !showRoot;
+    if (showRoot) syncPlayHero();
     // 2026-06-24: suppress comms while the level-select grid is up; kill any in-flight/queued VO
     // the moment it opens so a leftover gameplay line can't talk over the menu.
     arcadeLevelSelectOpen = showLevels;
@@ -13073,6 +13112,7 @@ function initGalaxyCanvas() {
   }
 
   function syncArcadeMenuButtons() {
+    syncPlayHero();
     if (btnArcadeResume) btnArcadeResume.disabled = !(arcadeResumeAvailable || hasArcadeSave());
     if (btnArcadeLevelSelect) {
       // 2026-07-05: one gate for both attrs via isLevelSelectUnlocked (beat the game OR the orb
@@ -23035,6 +23075,9 @@ function initGalaxyCanvas() {
     },
     openSlotMidLevel() {
       return openSlotMidLevel();
+    },
+    playFromHub() {
+      playFromHub();
     },
     startStuntMode() {
       startStuntMode();

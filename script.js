@@ -483,7 +483,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 17:04";
+const BUILD_TS = "2026-10-25 17:09";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1727,11 +1727,9 @@ const canvasCrosshair = document.getElementById("canvasCrosshair");
 const galaxyModeSelect = document.getElementById("galaxyModeSelect");
 const menuLogoCanvas = document.getElementById("menuLogoCanvas");
 
-// STROIDS menu logo "warp-in": a retro SNES/Genesis raster-distortion reveal. The logo
-// materializes out of horizontal raster bars (per-row X displacement + scanline wobble +
-// a chromatic shimmer ghost) rather than sliding/scaling in, then resolves perfectly sharp
-// with a residual glow (the glow is a static CSS drop-shadow on the canvas). Lightweight:
-// one sliced drawImage pass + two ghost draws per frame for ~1.1s, then it stops.
+// STROIDS menu logo: drawn once, revealed by a compositor-only CSS "glitch-in" on #menuLogoWrap
+// (2026-10-25 — replaced the per-frame canvas raster-bar warp, which was too expensive on device),
+// then handed to the idle shimmer below. The glow is a static CSS drop-shadow on the canvas.
 // 2026-06-22: this IIFE MUST stay AFTER `const menuLogoCanvas` above — it reads that binding at
 // module-eval time, so declaring it earlier (the original bug) threw a TDZ ReferenceError that
 // aborted the whole script (dead UI, no galaxy bg). Keep it here, after the DOM lookups.
@@ -1761,9 +1759,10 @@ const menuLogoWarp = (() => {
   };
   img.src = "assets/stroids_menu_logo.png";
 
-  const DURATION = 1150;
+  const REVEAL_MS = 900; // matches .menuLogoWrap.logo-reveal in style.css
+  const logoWrap = document.getElementById("menuLogoWrap");
   let rafId = 0;
-  let startTs = 0;
+  let revealTimer = 0;
 
   // 2026-10-25: measured once per play()/resize instead of a getComputedStyle every animation
   // frame (a forced style recalc 60x/s during the warp and 30x/s for the idle shimmer).
@@ -1787,10 +1786,6 @@ const menuLogoWarp = (() => {
     return { w, h };
   }
 
-  function easeOutCubic(t) {
-    return 1 - Math.pow(1 - t, 3);
-  }
-
   function drawSharp() {
     if (!imgReady) return;
     const { w, h } = sizeCanvas();
@@ -1798,73 +1793,6 @@ const menuLogoWarp = (() => {
     ctx.globalCompositeOperation = "source-over";
     ctx.clearRect(0, 0, w, h);
     ctx.drawImage(img, 0, 0, w, h);
-  }
-
-  function frame(ts) {
-    if (!startTs) startTs = ts;
-    const elapsed = ts - startTs;
-    const p = Math.min(1, elapsed / DURATION);
-    const { w, h } = sizeCanvas();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.clearRect(0, 0, w, h);
-
-    if (!imgReady) {
-      rafId = requestAnimationFrame(frame);
-      return;
-    }
-
-    // opacity climbs in after a faint-shimmer beat (~8%) and is fully solid by ~80%
-    const reveal = easeOutCubic(Math.min(1, Math.max(0, (p - 0.08) / 0.72)));
-    // all distortion decays to exactly 0 at p === 1 so the final state is dead sharp
-    const decay = Math.pow(1 - p, 1.6);
-    const maxShift = w * 0.1 * decay; // horizontal raster-bar displacement
-    const t = elapsed / 1000;
-
-    const sliceCount = 54;
-    const sliceH = h / sliceCount;
-    const srcSliceH = img.height / sliceCount;
-
-    for (let i = 0; i < sliceCount; i++) {
-      const ph = i / sliceCount;
-      // layered sines => unstable "reality resolving" raster wobble
-      const dx =
-        Math.sin(ph * 22 + t * 14) * maxShift +
-        Math.sin(ph * 7 + t * 9) * maxShift * 0.5;
-      // per-row opacity flicker, strongest early, gone by the end
-      const flick = 1 - decay * 0.5 * (0.5 + 0.5 * Math.sin(ph * 40 + t * 30));
-      ctx.globalAlpha = reveal * Math.max(0, Math.min(1, flick));
-      ctx.drawImage(
-        img,
-        0,
-        i * srcSliceH,
-        img.width,
-        srcSliceH + 1,
-        dx,
-        i * sliceH,
-        w,
-        sliceH + 1
-      );
-    }
-
-    // chromatic shimmer: additive ghosts split left/right, fading with the distortion
-    if (decay > 0.02) {
-      const chroma = w * 0.018 * decay;
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = reveal * decay * 0.5;
-      ctx.drawImage(img, -chroma, 0, w, h);
-      ctx.drawImage(img, chroma, 0, w, h);
-      ctx.globalCompositeOperation = "source-over";
-    }
-
-    ctx.globalAlpha = 1;
-
-    if (p < 1) {
-      rafId = requestAnimationFrame(frame);
-    } else {
-      drawSharp(); // guarantee a clean final frame
-      rafId = 0;
-      startIdle(); // hand off to the continuous "living logo" shimmer
-    }
   }
 
   // ── continuous "living logo" idle shimmer (runs after the warp resolves) ──────────────
@@ -2001,7 +1929,9 @@ const menuLogoWarp = (() => {
   }
 
   function startIdle() {
-    if (prefersReducedMotion) {
+    // 2026-10-25: FX Lab "LOGO IDLE: static" skips the 30fps shimmer (each redraw also re-runs the
+    // canvas's CSS drop-shadow blurs) so its menu cost can be A/B'd on device.
+    if (prefersReducedMotion || trial("logoIdle") === "static") {
       drawSharp();
       return;
     }
@@ -2018,18 +1948,25 @@ const menuLogoWarp = (() => {
     }
     stop();
     _sizeCache = null; // re-measure on each fresh play (layout may have changed while hidden)
-    if (prefersReducedMotion) {
-      drawSharp();
-      return;
+    drawSharp();
+    if (prefersReducedMotion) return;
+    // 2026-10-25: the warp-in is now a compositor-only CSS reveal on the wrapper (transform +
+    // opacity jolts, see .menuLogoWrap.logo-reveal). The old canvas raster-bar warp redrew 54
+    // slices + 2 ghost copies per frame — and every redraw also re-ran the canvas's two CSS
+    // drop-shadow blurs — which stuttered the Stroids menu open on device (playtest).
+    if (logoWrap) {
+      logoWrap.classList.remove("logo-reveal");
+      void logoWrap.offsetWidth; // restart the reveal on every fresh menu entry
+      logoWrap.classList.add("logo-reveal");
     }
-    startTs = 0;
-    rafId = requestAnimationFrame(frame);
+    revealTimer = setTimeout(() => { revealTimer = 0; startIdle(); }, REVEAL_MS);
   }
 
   function stop() {
     idleRunning = false;
     if (rafId) cancelAnimationFrame(rafId);
     rafId = 0;
+    if (revealTimer) { clearTimeout(revealTimer); revealTimer = 0; }
   }
 
   return { play, drawSharp, stop };
@@ -2091,7 +2028,7 @@ let devModeOn = false;
 // so looks/sounds can be judged on the phone; approved picks get baked into TRIAL_DEFAULTS.
 const TRIALS_KEY = "poly_oracle_trials";
 const TRIAL_DEFAULTS = {
-  laser: "x", warp: "off", titles: "plain", cards: "plain", buttons: "plain", cheatFx: "confetti",
+  laser: "x", warp: "off", titles: "plain", cards: "plain", buttons: "plain", cheatFx: "confetti", logoIdle: "shimmer",
   sfxLaser: "advfire", sfxPulse: "default", sfxBomb: "default", sfxKill: "default", sfxCheat: "slot_jackpot", sfxLevelStart: "none",
 };
 // [key, section, label, [[value, chip label], ...], optional preview]
@@ -2101,6 +2038,7 @@ const TRIAL_ROWS = [
   ["titles", "look", "MENU TITLES (+ LEVEL BANNER DECRYPT)", [["plain", "PLAIN (CURRENT)"], ["shiny", "SHINY"], ["decrypt", "DECRYPT"], ["glitch", "GLITCH"]]],
   ["cards", "look", "MENU CARDS", [["plain", "PLAIN (CURRENT)"], ["holo", "HOLO FOIL"]]],
   ["buttons", "look", "MENU BUTTONS", [["plain", "PLAIN (CURRENT)"], ["star", "STAR BORDER"]]],
+  ["logoIdle", "look", "STROIDS LOGO IDLE (menu framerate A/B)", [["shimmer", "LIVING SHIMMER (CURRENT)"], ["static", "STATIC (CHEAPEST)"]]],
   ["cheatFx", "look", "CHEAT UNLOCK FX", [["off", "OFF"], ["confetti", "NUCLEAR HOLO CONFETTI"]], "confetti"],
   ["sfxLaser", "sound", "LASER FIRE", [["advfire", "ADVFIRE LIGHT (CURRENT)"], ["lab_advfire_full", "ADVFIRE FULL"], ["lab_zap2", "ZAP 2"], ["lab_zap5", "ZAP 5"], ["lab_zap6", "ZAP 6"], ["lab_maybeshot", "SHOT"]]],
   ["sfxPulse", "sound", "PULSE CANNON SHOT", [["default", "FIRE 1/2 (CURRENT)"], ["lab_zap5", "ZAP 5"], ["smallblast", "SMALL BLAST"], ["lab_zap6", "ZAP 6"]]],

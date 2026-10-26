@@ -513,7 +513,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 18:43";
+const BUILD_TS = "2026-10-25 18:48";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1495,7 +1495,16 @@ function openWhatsNew() {
   void _whatsNewEl.offsetWidth;
   _whatsNewEl.classList.add("show");
 }
+// 2026-10-25: Paul's Orb pick (tools/reactbits-lab COPY PICKS) behind the Oracle crystal ball.
+const ORACLE_ORB_SETTINGS = { tiltX: 0.44, wobble: 3, opacity: 1, glow: 3, bleed: 3, highlight: 1.33, hoverIntensity: 1.81 };
+function mountOracleOrb() {
+  const host = document.getElementById("oracleOrbFx");
+  if (!host || !window.oracleOrb || prefersReducedMotion) return;
+  window.oracleOrb.mount(host, { ...ORACLE_ORB_SETTINGS, dpr: isCapacitorNative ? 1 : undefined });
+}
+
 function wirePolyverseBranding() {
+  mountOracleOrb();
   const tile = document.getElementById("playStroidsTile");
   if (tile) {
     let seen = false;

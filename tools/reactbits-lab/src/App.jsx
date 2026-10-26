@@ -6,6 +6,7 @@ import manifest from "./rb/manifest.json";
 import HudConcepts, { HUD_CONCEPTS } from "./HudConcepts.jsx";
 
 const HUD_NOTES = {
+  D: "Hybrid of A + C: C's chamfered top panels (pause/lives · level + score · multiplier — no time bar, the perimeter border stays the clock) and A's dashboard slimmed to ~86px holding the weapons, POLYSLOTS and the NET/AUTO plasma control. Comm box sits above the dash like a cockpit monitor. Tap weapons to arm, tap NET to toggle.",
   A: "Cockpit glass canopy up top (pause + ship lives on the left strut, big score readout, multiplier gauge right). Weapons move to an illuminated dashboard console along the bottom — thumb-reachable.",
   B: "Minimal fighter-jet visor: corner brackets, mono readouts (level/time top-left, score + life pips + multiplier top-right). Weapons sit on a right-edge rail. Keeps the most playfield clear.",
   C: "Command deck: three chamfered holo panels across the top (pause/lives · level, score, time bar · multiplier) and a chamfered weapon tray at the bottom with POLYSLOTS built in.",
@@ -168,7 +169,7 @@ function PropRow({ k, v, def, onChange }) {
 export default function App() {
   const [selected, setSelected] = useState(manifest[0]?.name);
   const [mode, setMode] = useState("effects"); // effects | hud
-  const [hud, setHud] = useState("A");
+  const [hud, setHud] = useState("D");
   const [scene, setScene] = useState("hub");
   const [filter, setFilter] = useState("");
   const [favs, setFavs] = useState(() => load(FAV_KEY, []));

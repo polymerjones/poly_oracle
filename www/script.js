@@ -513,7 +513,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 19:06";
+const BUILD_TS = "2026-10-25 19:11";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1505,13 +1505,30 @@ function mountOracleOrb() {
 
 // 2026-10-25 (Paul): the same Orb glowing behind the between-level cards (scorecard / reward box),
 // which otherwise sit over a frozen black-and-white starfield. Mounted only while a card is open.
+// Ring colours from the level theme (--level-primary set by applyLevelTheme): the theme colour, a
+// lighter tint of it, and a deep shade for the inner body — so each level's break glows in its colour.
+function levelOrbColors() {
+  const hex = (galaxyView && getComputedStyle(galaxyView).getPropertyValue("--level-primary").trim()) || "";
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  let rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const peak = Math.max(...rgb, 1);
+  rgb = rgb.map((v) => Math.round((v / peak) * 255)); // brighten dark themes
+  const mix = (t, k) => rgb.map((v) => Math.round(v + (t - v) * k));
+  const toHex = (c) => `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+  return [toHex(rgb), toHex(mix(255, 0.45)), toHex(rgb.map((v) => Math.round(v * 0.28)))];
+}
 function attachBreakOrb(overlay) {
   if (!overlay || overlay._orb || !window.oracleOrb || prefersReducedMotion) return;
   const host = document.createElement("div");
   host.className = "break-orb-fx";
   host.setAttribute("aria-hidden", "true");
   overlay.prepend(host);
-  overlay._orb = window.oracleOrb.mount(host, { ...ORACLE_ORB_SETTINGS, glow: 2.4, bleed: 2.4, dpr: isCapacitorNative ? 1 : undefined });
+  const colors = levelOrbColors();
+  overlay._orb = window.oracleOrb.mount(host, {
+    ...ORACLE_ORB_SETTINGS, glow: 2.4, bleed: 2.4, dpr: isCapacitorNative ? 1 : undefined, ...(colors ? { colors } : {}),
+  });
 }
 function detachBreakOrb(overlay) {
   if (!overlay?._orb) return;
@@ -2199,10 +2216,21 @@ function celebrateCheatUnlock() {
   const sting = trial("sfxCheat");
   if (sting && sting !== "none") window.playGameSfx?.(sting, 0.9, { important: true });
 }
-function playLevelWarpTrial(opts) {
+// opts.color (CSS hex) tints the warp to the level's theme colour (LEVEL_THEMES primary); dark
+// themes are brightened (max channel → 1) so e.g. L4's indigo still reads as a vivid tunnel.
+function playLevelWarpTrial(opts = {}) {
   const kind = trial("warp");
-  if (kind === "tunnel") window.polyFx?.playTunnel?.(opts);
-  else if (kind === "streaks") window.polyFx?.playStreaks?.(opts);
+  const m = /^#?([0-9a-f]{6})$/i.exec(opts.color || "");
+  let warpOpts = opts;
+  if (m) {
+    const n = parseInt(m[1], 16);
+    let rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => v / 255);
+    const peak = Math.max(...rgb, 0.001);
+    rgb = rgb.map((v) => Math.min(1, v / peak));
+    warpOpts = { ...opts, tint: rgb, color: rgb.map((v) => Math.round(v * 255)).join(",") };
+  }
+  if (kind === "tunnel") window.polyFx?.playTunnel?.(warpOpts);
+  else if (kind === "streaks") window.polyFx?.playStreaks?.(warpOpts);
 }
 
 // ── Settings (2026-10-25): MUSIC + SFX volume dials, like Monkey Trubble's ───────────────────
@@ -17617,7 +17645,7 @@ function initGalaxyCanvas() {
     }
     lvlTrace(`[lvltrans] after triggerWarp invoked=${currentLevelIndex > 0}`);
     // 2026-10-25: FX Lab trials — level-start warp effect + level-start sound (both off by default).
-    playLevelWarpTrial();
+    playLevelWarpTrial({ color: _levelPrimaryColor }); // tunnel takes the level's theme colour
     {
       const startSfx = trial("sfxLevelStart");
       if (startSfx && startSfx !== "none") playGameSfx(startSfx, 0.9, { important: true });

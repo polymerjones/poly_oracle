@@ -7,14 +7,14 @@ const Galaxy = lazy(() => import("./rb/Galaxy/Galaxy.jsx"));
 const ICON = { bomb: "/art/powerup_bomb.png", freeze: "/art/powerup_freeze.png", missile: "/art/powerup_missile.png" };
 const WEAPONS = [["bomb", 3, "#ff8c5a"], ["freeze", 1, "#88ddff"], ["missile", 2, "#ffd700"]];
 
-function Field() {
+function Field({ commBottom = 120 }) {
   return (
     <>
       <div className="hcBg"><Suspense fallback={null}><Galaxy density={1.1} starSpeed={0.35} hueShift={200} glowIntensity={0.35} transparent={false} /></Suspense></div>
       <img className="hcRock" style={{ left: "18%", top: "38%", width: 74 }} src="/art/roid01.png" alt="" />
       <img className="hcRock" style={{ left: "62%", top: "52%", width: 96, transform: "rotate(40deg)" }} src="/art/roid01.png" alt="" />
       <img className="hcRock" style={{ left: "40%", top: "26%", width: 50, transform: "rotate(-30deg)" }} src="/art/roid01.png" alt="" />
-      <div className="hcComm"><img src="/art/spc_news_portrait.png" alt="" /><div><small>CMDR</small>WELCOME TO THE POLYVERSE.</div></div>
+      <div className="hcComm" style={{ bottom: commBottom }}><img src="/art/spc_news_portrait.png" alt="" /><div><small>CMDR</small>WELCOME TO THE POLYVERSE.</div></div>
     </>
   );
 }
@@ -84,13 +84,37 @@ function Deck({ armed, setArmed }) {
   );
 }
 
-export const HUD_CONCEPTS = [["A", "A · Canopy"], ["B", "B · Visor"], ["C", "C · Command Deck"]];
+// D — HYBRID (Paul: "I like A and C"): C's chamfered top panels (no time bar — the perimeter timer
+// border stays the clock) + A's illuminated dashboard, slimmed, absorbing the weapons, POLYSLOTS and
+// the NET/AUTO plasma control; the comm box sits above the dash like a cockpit monitor.
+function Hybrid({ armed, setArmed }) {
+  const [net, setNet] = useState("AUTO");
+  return (
+    <div className="hcD">
+      <div className="hcD-perim"><i /></div>
+      <div className="hcC-top hcD-top">
+        <div className="hcC-panel"><button className="hcPause small">❚❚</button><div className="hcLives">{[0, 1, 2].map((i) => <span key={i} className={i < 2 ? "on" : ""}>▲</span>)}</div></div>
+        <div className="hcC-panel wide"><small>LEVEL 3 · BLUE MOON</small><b>12,480</b></div>
+        <div className="hcC-panel"><small>MULT</small><b className="mult">×2.8</b></div>
+      </div>
+      <div className="hcD-dash">
+        <div className="hcD-bays">
+          {WEAPONS.map(([k, n, c]) => <Weapon key={k} kind={k} count={n} color={c} armed={armed === k} onTap={() => setArmed(armed === k ? "" : k)} cls="hcA-key hcD-key" />)}
+          <button className="hcA-slot hcD-slot"><img src="/art/hud_polyslots.png" alt="" /><b>×3</b></button>
+          <button className="hcD-net" onClick={() => setNet(net === "AUTO" ? "MANUAL" : "AUTO")}><i /><span>NET</span><b>{net}</b></button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export const HUD_CONCEPTS = [["D", "D · Hybrid (A + C)"], ["A", "A · Canopy"], ["B", "B · Visor"], ["C", "C · Command Deck"]];
 export default function HudConcepts({ which }) {
   const [armed, setArmed] = useState("");
-  const C = which === "B" ? Visor : which === "C" ? Deck : Canopy;
+  const C = which === "B" ? Visor : which === "C" ? Deck : which === "D" ? Hybrid : Canopy;
   return (
     <div className="hc">
-      <Field />
+      <Field commBottom={which === "D" ? 100 : 120} />
       <C armed={armed} setArmed={setArmed} />
     </div>
   );

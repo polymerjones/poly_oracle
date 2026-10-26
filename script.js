@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-26 16:26";
+const BUILD_TS = "2026-10-26 16:32";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -12089,9 +12089,6 @@ function initGalaxyCanvas() {
       target: () => tipElTarget(plasmaChargeChip), snap: () => ({ m: plasmaCage.mode }), done: (s) => plasmaCage.mode !== s.m },
     { id: "netPlaced", anyLevel: true, line: "TAP THE NET (OR DETONATE) TO FIRE IT",
       when: () => !!plasmaCage.placed, target: () => tipPlacedNet(), snap: () => ({}), done: () => !plasmaCage.placed },
-    { id: "toss", line: "HOLD A STROID, THEN SWIPE TO TOSS IT",
-      when: () => tipsLearned().has("fire") && !!tipStroid(), target: lockedStroid,
-      snap: () => ({}), done: () => !!sim.tossedAsteroid || sim.asteroids.some((a) => a.tossed) },
   ];
   let _tipTimer = 0;
   let _tipReadyAt = 0;      // no tip before this (level banner / gap after the last tip)

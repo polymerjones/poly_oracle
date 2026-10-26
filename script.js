@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-26 16:32";
+const BUILD_TS = "2026-10-26 16:44";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -5831,6 +5831,7 @@ function addListeners() {
     openWhatsNew();
     document.getElementById("btnHubNews")?.classList.remove("fresh-news");
   });
+  wirePolyRing();
   if (btnArcadeMenuBack) {
     btnArcadeMenuBack.addEventListener("click", () => galaxyCanvasController?.showModeSelect?.());
   }
@@ -8459,6 +8460,133 @@ function drawWrappedText(ctx, text, centerX, startY, maxWidth, lineHeight) {
   if (line.trim()) ctx.fillText(line.trim(), centerX, y);
 }
 
+// 2026-10-26: POLYVERSE hub card ring (Paul: the tiles "look like emojis"). Port of Monkey Trubble's
+// avatar ring: drag or flick to turn it, it coasts, then a critically damped spring snaps the nearest
+// card to the front. Tapping a side card turns the ring to it; tapping the front card is a normal
+// .modeBtn click (press flash, menu VO, nav). The RAF loop stops at rest and never runs while hidden.
+// State lives inside: init() runs mid-module, so top-level consts declared down here would be in TDZ.
+function wirePolyRing() {
+  const POLY_RING_KEY = "poly_hub_ring_front";
+  const polyRing = { cards: [], step: 0, r: 0, angle: 0, vel: 0, target: 0, drag: null, raf: 0, last: 0, front: -1, tickAt: 0, swallowClick: false };
+  const ring = document.getElementById("polyRing");
+  const cam = ring?.querySelector(".polyRingCam");
+  if (!ring || !cam) return;
+  const W = 112, GAP = 34;
+  const wrapDeg = (d) => ((d + 180) % 360 + 360) % 360 - 180;
+  const cards = [...cam.querySelectorAll(".polyTile")];
+  const n = cards.length;
+  Object.assign(polyRing, { cards, step: 360 / n, r: Math.max(W, n * (W + GAP) / (2 * Math.PI)) });
+  cards.forEach((c, i) => {
+    const place = `rotateY(${i * polyRing.step}deg) translateZ(${polyRing.r.toFixed(1)}px)`;
+    c.style.transform = place;
+    c.style.setProperty("--place", place); // keeps the 3D placement under the .modeBtn :active rule
+    c.dataset.ringIndex = i;
+  });
+  const nameEl = document.getElementById("polyRingName");
+  const apply = (quiet) => {
+    const { step, angle } = polyRing;
+    cam.style.transform = `translateZ(${(-polyRing.r).toFixed(1)}px) rotateX(-4deg) rotateY(${(-angle).toFixed(2)}deg)`;
+    const reach = 100;
+    cards.forEach((c, i) => {
+      const rel = Math.abs(wrapDeg(i * step - angle));
+      const vis = rel < reach ? "" : "hidden";
+      if (c._vis !== vis) { c._vis = vis; c.style.visibility = vis; }
+      if (vis) return;
+      const shade = (Math.round(Math.min(0.75, rel / 80) * 20) / 20).toFixed(2);
+      const fade = (Math.round(Math.max(0, Math.min(1, (reach - rel) / (reach * 0.3))) * 20) / 20).toFixed(2);
+      if (c._shade !== shade) { c._shade = shade; c.style.setProperty("--shade", shade); }
+      if (c._fade !== fade) { c._fade = fade; c.style.opacity = fade; }
+    });
+    const front = ((Math.round(angle / step) % n) + n) % n;
+    if (front === polyRing.front) return;
+    cards[polyRing.front]?.classList.remove("on");
+    cards[front].classList.add("on");
+    polyRing.front = front;
+    if (nameEl) {
+      nameEl.textContent = cards[front].querySelector(".polyTileLabel")?.textContent || "";
+      nameEl.style.setProperty("--ring-accent", cards[front].style.getPropertyValue("--accent"));
+    }
+    try { localStorage.setItem(POLY_RING_KEY, String(front)); } catch { /* storage optional */ }
+    const now = performance.now();
+    if (!quiet && now - polyRing.tickAt > 45) {
+      polyRing.tickAt = now;
+      audioEngine.play("menu_hit", { volume: 0.14 });
+      triggerHapticImpact(hapticImpactStyle.Light);
+    }
+  };
+  const tick = (now) => {
+    const dt = Math.min(0.033, (now - (polyRing.last || now)) / 1000);
+    polyRing.last = now;
+    if (!ring.getClientRects().length) { polyRing.raf = polyRing.last = 0; polyRing.drag = null; return; } // hub hidden: stop
+    if (!polyRing.drag) {
+      const k = 110, d = 2 * Math.sqrt(k);
+      polyRing.vel += ((polyRing.target - polyRing.angle) * k - polyRing.vel * d) * dt;
+      polyRing.angle += polyRing.vel * dt;
+      if (Math.abs(polyRing.target - polyRing.angle) < 0.02 && Math.abs(polyRing.vel) < 0.1) {
+        polyRing.angle = polyRing.target; polyRing.vel = 0; apply();
+        polyRing.raf = polyRing.last = 0;
+        return;
+      }
+    }
+    apply();
+    polyRing.raf = requestAnimationFrame(tick);
+  };
+  const wake = () => { if (!polyRing.raf) polyRing.raf = requestAnimationFrame(tick); };
+  const turnTo = (i) => { polyRing.target = polyRing.angle + wrapDeg(i * polyRing.step - polyRing.angle); wake(); };
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+  const perPx = () => 180 / (Math.PI * polyRing.r);
+  ring.addEventListener("pointerdown", (e) => {
+    polyRing.swallowClick = false;
+    polyRing.drag = { x: e.clientX, a0: polyRing.angle, lastX: e.clientX, lastT: e.timeStamp, moved: false, id: e.pointerId };
+    polyRing.vel = 0;
+    wake();
+  });
+  ring.addEventListener("pointermove", (e) => {
+    const g = polyRing.drag;
+    if (!g) return;
+    const dx = e.clientX - g.x;
+    if (!g.moved && Math.abs(dx) > 6) {
+      g.moved = true;
+      try { ring.setPointerCapture(g.id); } catch { /* already released */ }
+    }
+    if (!g.moved) return;
+    polyRing.angle = g.a0 - dx * perPx();
+    const dt = Math.max(1, e.timeStamp - g.lastT);
+    polyRing.vel = polyRing.vel * 0.4 + (-(e.clientX - g.lastX) * perPx() / dt * 1000) * 0.6;
+    g.lastX = e.clientX; g.lastT = e.timeStamp;
+  });
+  const end = (e) => {
+    const g = polyRing.drag;
+    if (!g) return;
+    polyRing.drag = null;
+    if (!g.moved) { wake(); return; } // a tap: the click handler below decides
+    polyRing.swallowClick = true; // the click that follows a drag must not open a card
+    if (e.timeStamp - g.lastT > 90 || reduceMotion?.matches) polyRing.vel = 0;
+    const coast = polyRing.angle + polyRing.vel * 0.32;
+    polyRing.target = Math.round(coast / polyRing.step) * polyRing.step;
+    wake();
+  };
+  ring.addEventListener("pointerup", end);
+  ring.addEventListener("pointercancel", end);
+  // Document capture runs ahead of galaxyModeSelect's capture-phase press/nav handler, so a drag or a
+  // side-card tap never reaches it; the front card's tap (and its delayed replay) passes through.
+  document.addEventListener("click", (e) => {
+    const card = e.target?.closest?.(".polyTile");
+    if (!card || !ring.contains(card)) return;
+    const i = +card.dataset.ringIndex;
+    if (polyRing.swallowClick || i !== polyRing.front) {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      if (!polyRing.swallowClick) turnTo(i);
+      polyRing.swallowClick = false;
+    }
+  }, true);
+  let saved = 0;
+  try { saved = Math.max(0, Math.min(n - 1, parseInt(localStorage.getItem(POLY_RING_KEY), 10) || 0)); } catch { /* storage optional */ }
+  polyRing.angle = polyRing.target = saved * polyRing.step;
+  apply(true);
+}
+
 function hapticTap() {
   if (state.minimal) return;
   if (navigator.vibrate) navigator.vibrate(8);
@@ -9465,13 +9593,18 @@ function initGalaxyCanvas() {
   plasmaChargeChip.id = "plasmaChargeChip";
   plasmaChargeChip.className = "plasmaChargeChip";
   plasmaChargeChip.setAttribute("aria-label", "Plasma net mode: auto");
-  plasmaChargeChip.innerHTML = '<span class="pcc__ring" aria-hidden="true"></span><span class="pcc__core" aria-hidden="true"></span><span class="pcc__mode" aria-hidden="true">A</span>';
-  {
-    const inv = document.querySelector("#arcadeHud .hudInventoryGroup");
-    const before = document.getElementById("hudQuadBadge");
-    if (inv) inv.insertBefore(plasmaChargeChip, before && before.parentNode === inv ? before : null);
-    else document.body.appendChild(plasmaChargeChip);
-  }
+  // 2026-10-26 (playtest): next to the weapons it read as a fourth weapon. It's a big cockpit toggle
+  // switch in the bottom-right corner now (NET plate, AUTO/MAN lever that flips, charge gauge, ready
+  // lamp), on the same top-most layer as DETONATE so a comm box can't cover it.
+  plasmaChargeChip.innerHTML = [
+    '<span class="pns__title" aria-hidden="true">NET</span>',
+    '<span class="pns__body" aria-hidden="true">',
+    '  <span class="pns__gauge"><i></i></span>',
+    '  <span class="pns__toggle"><b class="pns__pos pns__pos--auto">AUTO</b><span class="pns__well"><span class="pns__bat"></span></span><b class="pns__pos pns__pos--man">MAN</b></span>',
+    "</span>",
+    '<span class="pns__lamp" aria-hidden="true"></span>',
+  ].join("");
+  (document.getElementById("commanderHUD")?.parentNode || document.body).appendChild(plasmaChargeChip);
   plasmaChargeChip.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -9491,7 +9624,7 @@ function initGalaxyCanvas() {
   const COCKPIT_PARTS = {
     pause: "arcadeBack", devwin: "hudDevWin", lives: "hudLives", run: "hudGameTimer", level: "hudLevel",
     score: "hudScore", mult: "hudMultiplier", bomb: "hudBombBtn", freeze: "hudFreezeBtn",
-    missile: "hudMissileBtn", slots: "hudSlotBtn", net: "plasmaChargeChip", quad: "hudQuadBadge",
+    missile: "hudMissileBtn", slots: "hudSlotBtn", quad: "hudQuadBadge", // net: its own corner switch now
     pulse: "hudPulseBadge", comm: "commanderHUD",
   };
   let cockpitApplied = false;
@@ -9699,7 +9832,11 @@ function initGalaxyCanvas() {
     // 2026-07-05: hidden during Stunt training — the pill overlapped the SPC caption text on
     // iPhone (playtest screenshots) and no tutorial step uses it (net is taught by gesture).
     // Note stunt sets arcadeActive=true, so training must be excluded explicitly.
-    const show = (arcadeActive || practiceEndless) && !stuntActive;
+    // 2026-10-26: the net switch lives outside #arcadeHud now, so it also steps aside for the slot
+    // machine and the scorecard (try: both are declared further down initGalaxyCanvas).
+    let overlayUp = false;
+    try { overlayUp = isSlotActive() || scorecardIdleAt > 0; } catch { /* not initialised yet */ }
+    const show = (arcadeActive || practiceEndless) && !stuntActive && !overlayUp;
     if (!show) {
       if (_plasmaModeBtnSig !== "hide") {
         _plasmaModeBtnSig = "hide";
@@ -9738,7 +9875,6 @@ function initGalaxyCanvas() {
     }
     plasmaChargeChip.dataset.state = state;
     plasmaChargeChip.dataset.mode = manual ? "manual" : "auto";
-    plasmaChargeChip.querySelector(".pcc__mode").textContent = manual ? "M" : "A";
     plasmaChargeChip.style.setProperty("--plasma-fill", `${(fill * 100).toFixed(1)}%`);
     plasmaChargeChip.setAttribute(
       "aria-label",

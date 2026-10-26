@@ -3952,58 +3952,93 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.polyTiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.modeBtn.polyTile {
+/* 2026-10-26: the hub tiles are a 2.5D card ring (Monkey Trubble's avatar ring). wirePolyRing() turns
+   .polyRingCam and writes each card's --shade/opacity only when they change; nothing animates at rest. */
+.polyRing {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 84px;
-  padding: 12px 12px 10px;
-  border-radius: 16px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  background:
-    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 60%),
-    linear-gradient(160deg, rgba(20, 30, 60, 0.95), rgba(10, 16, 34, 0.95));
-  color: #e7efff;
-  text-align: left;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  height: 196px;
+  margin: 0 -18px;
   overflow: hidden;
+  touch-action: pan-y;
+  cursor: grab;
+  perspective: 1000px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+  -webkit-user-select: none;
+  user-select: none;
 }
-.modeBtn.polyTile:not(:disabled):not(.locked):active { transform: scale(0.95); }
-.polyTileIcon {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 16%, rgba(0, 0, 0, 0.3));
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
+.polyRingCam { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-style: preserve-3d; }
+.modeBtn.polyTile {
+  position: absolute;
+  left: -56px;
+  top: -80px;
+  width: 112px;
+  height: 160px;
+  padding: 0;
+  border-radius: 14px;
+  border: 2px solid color-mix(in srgb, var(--accent) 70%, #000);
+  background: #070b18;
+  color: #fff;
+  overflow: hidden;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.55);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
 }
-.polyTileIcon svg { width: 22px; height: 22px; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.polyTileIcon img { width: 28px; height: 28px; object-fit: contain; }
-.polyTileLabel { font-size: 0.9rem; font-weight: 800; letter-spacing: 0.06em; }
+/* the base .modeBtn :active scale would overwrite the card's rotateY/translateZ placement */
+.modeBtn.polyTile:not(:disabled):not(.locked):active { transform: var(--place); filter: brightness(1.15); }
+.polyCardArt { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; -webkit-user-drag: none; }
+.polyTileLabel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 16px 4px 7px;
+  background: linear-gradient(transparent, rgba(4, 8, 20, 0.92) 45%);
+  font: 900 0.72rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--accent);
+  pointer-events: none;
+}
+.modeBtn.polyTile::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: #000;
+  opacity: var(--shade, 0);
+  pointer-events: none;
+}
+.modeBtn.polyTile.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 75%, transparent), 0 8px 18px rgba(0, 0, 0, 0.55);
+}
 .polyTile.fresh-news::after {
   content: "NEW";
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
   padding: 2px 6px;
   border-radius: 6px;
   font: 900 0.6rem/1 ui-monospace, Menlo, monospace;
   color: #0a1734;
   background: #ffd36a;
 }
-/* entry cascade — restarts whenever the hub is shown again */
-.polyHub:not([hidden]) .polyTile { animation: tileIn 460ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
-.polyHub:not([hidden]) .polyTile:nth-child(1) { animation-delay: 40ms; }
-.polyHub:not([hidden]) .polyTile:nth-child(2) { animation-delay: 80ms; }
-.polyHub:not([hidden]) .polyTile:nth-child(3) { animation-delay: 120ms; }
-.polyHub:not([hidden]) .polyTile:nth-child(4) { animation-delay: 160ms; }
-.polyHub:not([hidden]) .polyTile:nth-child(5) { animation-delay: 200ms; }
-.polyHub:not([hidden]) .polyTile:nth-child(6) { animation-delay: 240ms; }
+.polyRingName {
+  margin-top: -2px;
+  min-height: 1.2em;
+  text-align: center;
+  font: 900 1.05rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ring-accent, #e7efff);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--ring-accent, #7be2ff) 60%, transparent);
+}
+.polyHub:not([hidden]) .polyRing { animation: tileIn 460ms cubic-bezier(0.2, 0.9, 0.3, 1.2) 60ms both; }
 @keyframes tileIn { from { opacity: 0; transform: translateY(16px) scale(0.92); } to { opacity: 1; transform: none; } }
 @keyframes hubPop { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: none; } }
 /* sub-screens whiz in from the right */
@@ -4013,7 +4048,7 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
 .galaxy-view.mode-menu .galaxyModeCard { animation: cardRise 420ms cubic-bezier(0.2, 0.9, 0.3, 1.1) both; }
 @keyframes cardRise { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .polyHub:not([hidden]) .polyHero, .polyHub:not([hidden]) .polyTile, .polyHeroSheen,
+  .polyHub:not([hidden]) .polyHero, .polyHub:not([hidden]) .polyRing, .polyHeroSheen,
   .arcadeMenuPanel.show, .arcadeLevelPanel.show, .galaxy-view.mode-menu .galaxyModeCard { animation: none; }
 }
 
@@ -4021,28 +4056,8 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
 .galaxyModeSelect > :last-child { margin-bottom: auto; }
 .galaxyModeSelect { padding-top: max(22px, env(safe-area-inset-top, 0px)); padding-bottom: max(22px, env(safe-area-inset-bottom, 0px)); }
 
-/* 2026-10-25: hub buttons get the bevel + light sweep Paul liked on the old buttons. Bevel = top
-   highlight + bottom shade; the sweep is a transform-only sheen, staggered per tile. */
-.modeBtn.polyTile {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -3px 6px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.35);
-}
-.modeBtn.polyTile::before {
-  content: "";
-  position: absolute;
-  inset: -40% -70%;
-  pointer-events: none;
-  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.22) 50%, transparent 58%);
-  transform: translateX(-60%);
-  animation: tileSweep 5.2s ease-in-out infinite;
-}
-.polyTiles .polyTile:nth-child(2)::before { animation-delay: 0.35s; }
-.polyTiles .polyTile:nth-child(3)::before { animation-delay: 0.7s; }
-.polyTiles .polyTile:nth-child(4)::before { animation-delay: 1.05s; }
-.polyTiles .polyTile:nth-child(5)::before { animation-delay: 1.4s; }
-.polyTiles .polyTile:nth-child(6)::before { animation-delay: 1.75s; }
-@keyframes tileSweep { 0%, 62% { transform: translateX(-60%); } 88%, 100% { transform: translateX(60%); } }
 .polyHero { box-shadow: 0 10px 26px rgba(120, 140, 255, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.55), inset 0 -4px 8px rgba(40, 20, 110, 0.35); }
-@media (prefers-reduced-motion: reduce) { .modeBtn.polyTile::before, .menuOracleBadge { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .menuOracleBadge { animation: none; } }
 
 /* HUD: keep the slot button narrow so the weapon chips never crowd Lives/Score (playtest) */
 .hudSlotCount { font-size: 0.72rem; padding: 2px 4px; }
@@ -4105,86 +4120,139 @@ body.cockpit-free.cockpit-preview #cockpitLayer > [data-cockpit="net"],
 body.cockpit-free.cockpit-preview #cockpitLayer > [data-cockpit="devwin"] { display: inline-flex !important; }
 
 /* ── 2026-10-26: plasma net split ────────────────────────────────────────────────────────────────
-   #plasmaChargeChip sits with the weapons (classic: 4th inventory column; cockpit: the top weapons
-   rail) — a conic charge ring + A/M badge, tap toggles the mode. #plasmaModeBtn (above) is now
-   DETONATE only and is displayed only while a manual net is placed. */
-/* Classic: the three weapons keep the top row (a 4th column collided with the centre stats on
-   phones); the chip takes row 2 under the missile, the quad/pulse badges flow below it. */
-.hudInventoryGroup .plasmaChargeChip { grid-column: 3; justify-self: center; }
+   #plasmaChargeChip is a big cockpit toggle switch fixed in the bottom-right corner (playtest: next
+   to the weapons it read as a weapon). A NET plate with a vertical charge gauge, an AUTO/MAN lever
+   that flips through depth, and a ready lamp; tap toggles the mode (or fires a placed net).
+   #plasmaModeBtn is DETONATE only, shown only while a manual net is placed, just left of the switch. */
 .plasmaChargeChip {
   --pc: 0, 255, 230;
-  position: relative;
+  position: fixed;
+  right: max(12px, env(safe-area-inset-right, 0px));
+  bottom: max(14px, calc(env(safe-area-inset-bottom, 0px) + 2px));
+  z-index: 9500;
   display: none;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 40px;
-  padding: 0;
-  border-radius: 999px;
-  border: 1.5px solid rgba(var(--pc), 0.7);
-  background: rgba(6, 20, 26, 0.86);
+  gap: 4px;
+  width: 78px;
+  padding: 6px 6px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(var(--pc), 0.55);
+  background:
+    radial-gradient(circle at 7px 7px, #8a96a8 0 1.6px, transparent 2.2px),
+    radial-gradient(circle at calc(100% - 7px) 7px, #8a96a8 0 1.6px, transparent 2.2px),
+    radial-gradient(circle at 7px calc(100% - 7px), #8a96a8 0 1.6px, transparent 2.2px),
+    radial-gradient(circle at calc(100% - 7px) calc(100% - 7px), #8a96a8 0 1.6px, transparent 2.2px),
+    linear-gradient(165deg, #2a3242 0%, #141a26 55%, #0c1019 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -3px 6px rgba(0, 0, 0, 0.55), 0 6px 16px rgba(0, 0, 0, 0.55);
+  color: #cfe9ff;
   touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
   -webkit-user-select: none;
   user-select: none;
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
 }
-.plasmaChargeChip:active { transform: scale(0.94); }
-.plasmaChargeChip[data-mode="manual"] { --pc: 255, 205, 90; background: rgba(18, 16, 6, 0.88); }
-.plasmaChargeChip[data-state="ready"] { box-shadow: 0 0 10px rgba(var(--pc), 0.42); }
-.plasmaChargeChip[data-state="detonate"] { --pc: 255, 120, 80; box-shadow: 0 0 12px rgba(var(--pc), 0.55); }
-.plasmaChargeChip .pcc__ring {
+.plasmaChargeChip:active { transform: scale(0.96); }
+.plasmaChargeChip[data-mode="manual"] { --pc: 255, 205, 90; }
+.plasmaChargeChip[data-state="detonate"] { --pc: 255, 120, 80; }
+.plasmaChargeChip[data-state="ready"],
+.plasmaChargeChip[data-state="detonate"] {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -3px 6px rgba(0, 0, 0, 0.55), 0 0 14px rgba(var(--pc), 0.45), 0 6px 16px rgba(0, 0, 0, 0.55);
+}
+.pns__title {
+  font: 900 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.3em;
+  padding-left: 0.3em;
+  color: rgb(var(--pc));
+  text-shadow: 0 0 6px rgba(var(--pc), 0.6);
+}
+.pns__body { display: flex; align-items: stretch; gap: 6px; }
+/* charge gauge: fills bottom-up from --plasma-fill */
+.pns__gauge {
+  position: relative;
+  width: 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+.pns__gauge i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--plasma-fill, 0%);
+  background: linear-gradient(to top, rgba(var(--pc), 0.55), rgb(var(--pc)));
+  box-shadow: 0 0 6px rgba(var(--pc), 0.8);
+}
+.pns__toggle { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.pns__pos {
+  font: 800 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+  color: rgba(207, 233, 255, 0.35);
+  transition: color 160ms ease, text-shadow 160ms ease;
+}
+.plasmaChargeChip:not([data-mode="manual"]) .pns__pos--auto,
+.plasmaChargeChip[data-mode="manual"] .pns__pos--man { color: rgb(var(--pc)); text-shadow: 0 0 6px rgba(var(--pc), 0.7); }
+/* the lever: a chrome bat on a pivot in a recessed well; flips through depth between AUTO and MAN */
+.pns__well {
+  position: relative;
+  width: 34px;
+  height: 46px;
+  border-radius: 9px;
+  background: radial-gradient(ellipse at 50% 50%, #05070c 0 30%, #1b2230 70%);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.08);
+  perspective: 120px;
+}
+.pns__well::after {
+  content: "";
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 26px;
-  height: 26px;
+  width: 14px;
+  height: 14px;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: conic-gradient(rgba(var(--pc), 0.95) var(--plasma-fill, 0%), rgba(255, 255, 255, 0.13) 0);
-  -webkit-mask: radial-gradient(circle, transparent 8.5px, #000 9.5px);
-  mask: radial-gradient(circle, transparent 8.5px, #000 9.5px);
-  pointer-events: none;
+  background: radial-gradient(circle at 35% 30%, #d9e2ee, #5c6878 60%, #262d39);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
-.plasmaChargeChip .pcc__core {
+.pns__bat {
   position: absolute;
   left: 50%;
-  top: 50%;
+  bottom: 50%;
+  z-index: 1;
   width: 10px;
-  height: 10px;
-  transform: translate(-50%, -50%) scale(0.55);
-  border-radius: 50%;
-  background: radial-gradient(circle, #fff 0 20%, rgba(var(--pc), 0.95) 45%, rgba(var(--pc), 0) 72%);
-  opacity: 0.35;
-  transition: opacity 160ms ease, transform 160ms ease;
-  pointer-events: none;
+  height: 22px;
+  margin-left: -5px;
+  border-radius: 5px 5px 3px 3px;
+  background: linear-gradient(90deg, #6b7686, #f2f6fb 45%, #9aa6b6 70%, #4d5766);
+  box-shadow: 0 0 6px rgba(var(--pc), 0.45);
+  transform-origin: 50% 100%;
+  transform: rotateX(18deg);
+  transition: transform 220ms cubic-bezier(0.3, 1.4, 0.5, 1);
 }
-.plasmaChargeChip[data-state="ready"] .pcc__core,
-.plasmaChargeChip[data-state="detonate"] .pcc__core {
-  opacity: 1;
-  transform: translate(-50%, -50%) scale(1);
+.plasmaChargeChip[data-mode="manual"] .pns__bat { transform: rotateX(162deg); }
+.pns__lamp {
+  width: 26px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(var(--pc), 0.18);
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+.plasmaChargeChip[data-state="ready"] .pns__lamp,
+.plasmaChargeChip[data-state="detonate"] .pns__lamp {
+  background: rgb(var(--pc));
+  box-shadow: 0 0 8px rgba(var(--pc), 0.9);
   animation: plasmaModeCorePulse 1.75s ease-in-out infinite;
 }
-.plasmaChargeChip .pcc__mode {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 3px;
-  border-radius: 8px;
-  background: rgb(var(--pc));
-  color: #041014;
-  font: 800 9px/15px ui-monospace, SFMono-Regular, Menlo, monospace;
-  text-align: center;
-  box-shadow: 0 0 6px rgba(var(--pc), 0.6);
-  pointer-events: none;
-}
+@media (prefers-reduced-motion: reduce) { .pns__bat { transition: none; } .pns__lamp { animation: none !important; } }
 /* DETONATE: bigger, unmistakable, and only on screen while a net is placed. */
 #plasmaModeBtn[data-state="detonate"] {
   min-width: 156px;
   min-height: 50px;
   font-size: 13px;
-  bottom: max(10px, calc(env(safe-area-inset-bottom, 0px) - 4px));
+  bottom: max(28px, calc(env(safe-area-inset-bottom, 0px) + 16px));
+  right: calc(max(12px, env(safe-area-inset-right, 0px)) + 88px); /* just left of the net switch */
 }
 
 /* 2026-10-26 (app-switch audit): returning to a frozen run. */

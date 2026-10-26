@@ -321,14 +321,19 @@
               <span class="polyHeroSheen" aria-hidden="true"></span>
             </button>
             <button id="btnHeroNew" class="polyHeroNew" type="button" hidden>or start a new game</button>
-            <div class="polyTiles">
-              <button id="btnArcade" class="modeBtn polyTile" type="button" style="--accent:#7be2ff"><span class="polyTileIcon"><img src="astgfx/roid01.png" alt=""></span><span class="polyTileLabel">Arcade</span></button>
-              <button id="btnArcadeStunt" class="modeBtn polyTile" type="button" style="--accent:#b48cff"><span class="polyTileIcon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5"/></svg></span><span class="polyTileLabel">Stunt Mode</span></button>
-              <button id="btnScores" class="modeBtn polyTile" type="button" style="--accent:#ffd36a"><span class="polyTileIcon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v3a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4M12 12v4M8 20h8M9 16h6"/></svg></span><span class="polyTileLabel">Scoreboard</span></button>
-              <button id="btnCheatCodes" class="modeBtn polyTile" type="button" style="--accent:#9dff5a"><span class="polyTileIcon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="1.8"/><path d="M12 9.2 9.3 4.6a8 8 0 0 1 5.4 0L12 9.2ZM9.6 13.4l-5.3.1a8 8 0 0 0 2.7 4.7l2.6-4.8ZM14.4 13.4l2.6 4.8a8 8 0 0 0 2.7-4.7l-5.3-.1Z"/></svg></span><span class="polyTileLabel">Cheat Codes</span></button>
-              <button id="btnSettings" class="modeBtn polyTile" type="button" style="--accent:#ff9ad5"><span class="polyTileIcon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M12 4v16M19 4v16"/><circle cx="5" cy="9" r="2.2"/><circle cx="12" cy="15" r="2.2"/><circle cx="19" cy="7" r="2.2"/></svg></span><span class="polyTileLabel">Settings</span></button>
-              <button id="btnHubNews" class="modeBtn polyTile" type="button" style="--accent:#5fd3ff"><span class="polyTileIcon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"/></svg></span><span class="polyTileLabel">What&apos;s New</span></button>
+            <!-- 2026-10-26: the hub tiles are a 2.5D card ring now (Monkey Trubble avatar-ring pattern, see wirePolyRing).
+                 Same buttons/IDs, so the delegated .modeBtn click flow is unchanged; the front card's tap passes through. -->
+            <div id="polyRing" class="polyRing">
+              <div class="polyRingCam">
+                <button id="btnArcade" class="modeBtn polyTile" type="button" style="--accent:#7be2ff"><img class="polyCardArt" src="assets/ui/hub/arcade.webp" alt="" draggable="false"><span class="polyTileLabel">Arcade</span></button>
+                <button id="btnArcadeStunt" class="modeBtn polyTile" type="button" style="--accent:#b48cff"><img class="polyCardArt" src="assets/ui/hub/stunt.webp" alt="" draggable="false"><span class="polyTileLabel">Stunt Mode</span></button>
+                <button id="btnScores" class="modeBtn polyTile" type="button" style="--accent:#ffd36a"><img class="polyCardArt" src="assets/ui/hub/scores.webp" alt="" draggable="false"><span class="polyTileLabel">Scoreboard</span></button>
+                <button id="btnCheatCodes" class="modeBtn polyTile" type="button" style="--accent:#9dff5a"><img class="polyCardArt" src="assets/ui/hub/cheats.webp" alt="" draggable="false"><span class="polyTileLabel">Cheat Codes</span></button>
+                <button id="btnSettings" class="modeBtn polyTile" type="button" style="--accent:#ff9ad5"><img class="polyCardArt" src="assets/ui/hub/settings.webp" alt="" draggable="false"><span class="polyTileLabel">Settings</span></button>
+                <button id="btnHubNews" class="modeBtn polyTile" type="button" style="--accent:#5fd3ff"><img class="polyCardArt" src="assets/ui/hub/news.webp" alt="" draggable="false"><span class="polyTileLabel">What&apos;s New</span></button>
+              </div>
             </div>
+            <div id="polyRingName" class="polyRingName" aria-hidden="true"></div>
           </div>
           <!-- 2026-10-25: Practice removed from Select Mode — it lives under Stunt Mode (btnStuntPractice). -->
           <!-- 2026-10-25 (DEV-01): hidden until the Stroids logo is tapped 3× — see wireDevModeEntry() -->

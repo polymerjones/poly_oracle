@@ -12,6 +12,7 @@
     "cap:init": "npx cap init \"Poly Oracle\" com.polyoracle.app --web-dir www",
     "cap:add:ios": "npx cap add ios",
     "cap:add:android": "npx cap add android",
+    "lab": "npm --prefix tools/reactbits-lab run dev",
     "cap:sync": "npm run prepare:web && npx cap sync ios",
     "cap:sync:all": "npm run prepare:web && npx cap sync",
     "cap:open:ios": "npx cap open ios",

@@ -513,7 +513,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 18:05";
+const BUILD_TS = "2026-10-25 18:43";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1486,7 +1486,7 @@ function openWhatsNew() {
   }
   _whatsNewEl.innerHTML = `
     <div class="whatsNewCard">
-      <div class="whatsNewHead"><img src="assets/ui/spc_news_mug.png" alt="">
+      <div class="whatsNewHead"><img src="assets/ui/spc_news_portrait.png" alt="">
         <div><div class="whatsNewKicker">WHAT'S NEW</div><div class="whatsNewName">STROIDS IN THE POLYVERSE</div><div class="whatsNewVer">Version ${RELEASE_NOTES.version}</div></div></div>
       <ul class="whatsNewList">${RELEASE_NOTES.lines.map((l) => `<li>${l}</li>`).join("")}</ul>
       <button class="modeBtn whatsNewDone" type="button">Got it</button>
@@ -1507,6 +1507,8 @@ function wirePolyverseBranding() {
       openGalaxy?.click(); // same entry as the header asteroid
     });
   }
+  // The Poly Oracle app icon on the Stroids logo goes back to the Oracle page.
+  document.getElementById("menuOracleBadge")?.addEventListener("click", () => closeGalaxyView());
   const mug = document.getElementById("whatsNewBtn");
   if (mug) {
     mug.classList.toggle("fresh", !notesSeen());

@@ -37,3 +37,6 @@ www/vo/
 
 # Local screen recordings / demo overlays (not for the repo)
 www/*.mov
+
+# React Bits lab build output
+tools/reactbits-lab/dist/

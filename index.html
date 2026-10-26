@@ -41,6 +41,17 @@
     <div id="oracleBgWarmup" aria-hidden="true"><span class="warmup-pip">✦ warming up ✦</span></div>
 
     <section id="oracleView" class="view">
+      <!-- 2026-10-25: the game entry, made obvious (playtesters missed the small asteroid icon). -->
+      <button id="playStroidsTile" class="play-stroids-tile" type="button" aria-label="Play Stroids in the Polyverse">
+        <img class="pst-logo" src="assets/ui/stroids_logo_tile.png" alt="" aria-hidden="true">
+        <span class="pst-text">
+          <span class="pst-kicker">THE GAME</span>
+          <span class="pst-title">STROIDS IN THE POLYVERSE</span>
+          <span class="pst-play">&#9654; PLAY</span>
+        </span>
+        <span class="pst-sheen" aria-hidden="true"></span>
+        <span class="pst-hint" aria-hidden="true">NEW? TAP TO PLAY</span>
+      </button>
       <main class="stage" id="stage" aria-live="polite">
         <div id="flash" aria-hidden="true"></div>
         <div id="mist" aria-hidden="true"></div>
@@ -113,17 +124,6 @@
         </section>
       </main>
 
-      <!-- 2026-10-25: the game entry, made obvious (playtesters missed the small asteroid icon). -->
-      <button id="playStroidsTile" class="play-stroids-tile" type="button" aria-label="Play Stroids in the Polyverse">
-        <img class="pst-logo" src="assets/ui/stroids_logo_tile.png" alt="" aria-hidden="true">
-        <span class="pst-text">
-          <span class="pst-kicker">THE GAME</span>
-          <span class="pst-title">STROIDS IN THE POLYVERSE</span>
-          <span class="pst-play">&#9654; PLAY</span>
-        </span>
-        <span class="pst-sheen" aria-hidden="true"></span>
-        <span class="pst-hint" aria-hidden="true">NEW? TAP TO PLAY</span>
-      </button>
 
       <div id="settingsBackdrop" class="panel-backdrop" hidden></div>
       <aside id="settingsPanel" class="settings-panel" hidden aria-label="Settings panel">
@@ -267,11 +267,11 @@
       <div id="galaxyModeSelect" class="galaxyModeSelect" aria-hidden="true">
         <div id="menuLogoWrap" class="menuLogoWrap" aria-hidden="true">
           <canvas id="menuLogoCanvas" class="menuLogoCanvas" width="640" height="514"></canvas>
-          <img class="menuOracleBadge" src="assets/ui/poly_oracle_badge.png" alt="" aria-hidden="true">
+          <button id="menuOracleBadge" class="menuOracleBadge" type="button" aria-label="Back to Poly Oracle"><img src="assets/ui/poly_oracle_icon.png" alt=""></button>
         </div>
         <!-- 2026-10-25: byline like Monkey Trubble; SPC's mug opens What's New (breathes until read). -->
         <div class="menuByline">
-          <button id="whatsNewBtn" class="whatsNewBtn" type="button" aria-label="What's new"><img src="assets/ui/spc_news_mug.png" alt=""></button>
+          <button id="whatsNewBtn" class="whatsNewBtn" type="button" aria-label="What's new"><img src="assets/ui/spc_news_portrait.png" alt=""></button>
           <span class="menuBylineText">A GAME BY POLYMER JONES</span>
         </div>
         <div class="galaxyModeCard">

@@ -1714,7 +1714,11 @@ select:focus-visible {
   display: none;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* 2026-10-25: scrolls when taller than the screen (the hub + Dev buttons were clipped off the
+     bottom on device). Auto margins on the first/last child keep it centred when it fits. */
+  justify-content: flex-start;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   gap: 18px;
   padding: 22px;
   background: rgba(4, 8, 20, 0.58);
@@ -3709,16 +3713,26 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
 /* ── Stroids menu branding: Poly Oracle badge on the logo + "A GAME BY POLYMER JONES" byline ── */
 .menuLogoWrap { position: relative; }
 .menuOracleBadge {
+  /* The real Poly Oracle app icon; breathes so it reads as tappable → back to the Oracle page. */
   position: absolute;
-  top: 4%;
-  left: max(4px, calc(50% - min(210px, 43vw)));
-  width: clamp(44px, 13vw, 58px);
-  height: auto;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25), 0 0 14px rgba(190, 120, 255, 0.6);
-  transform: rotate(-10deg);
-  pointer-events: none;
+  top: 34%;
+  left: max(2px, calc(50% - min(214px, 45vw)));
+  z-index: 2;
+  width: clamp(46px, 13vw, 58px);
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: 24%;
+  background: none;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.28), 0 0 16px rgba(190, 120, 255, 0.65);
+  pointer-events: auto; /* the logo wrap itself ignores pointers */
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  animation: oracleBadgeBreathe 2.6s ease-in-out infinite;
 }
+.menuOracleBadge img { width: 100%; height: 100%; border-radius: inherit; display: block; }
+.menuOracleBadge::after { content: ""; position: absolute; inset: -10px; } /* bigger tap target */
+@keyframes oracleBadgeBreathe { 0%, 100% { transform: rotate(-8deg) scale(1); } 50% { transform: rotate(-8deg) scale(1.08); } }
 .menuByline {
   display: flex;
   align-items: center;
@@ -3736,11 +3750,11 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
 .whatsNewBtn {
   position: relative;
   flex: none;
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 51px; /* 2:3 — SPC from the torso up */
   padding: 0;
   border: 2px solid #ffd36a;
-  border-radius: 8px;
+  border-radius: 7px;
   overflow: hidden;
   background: #0b1630;
   transform: rotate(-6deg);
@@ -3790,7 +3804,7 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
   color: #d7e5ff;
 }
 .whatsNewHead { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
-.whatsNewHead img { width: 64px; height: 64px; border-radius: 12px; border: 2px solid #ffd36a; transform: rotate(-5deg); }
+.whatsNewHead img { width: 60px; height: 90px; object-fit: cover; border-radius: 10px; border: 2px solid #ffd36a; transform: rotate(-5deg); }
 .whatsNewKicker { font-size: 0.66rem; letter-spacing: 0.3em; color: #ffd36a; font-weight: 800; }
 .whatsNewName { font-size: 1.05rem; font-weight: 900; letter-spacing: 0.08em; }
 .whatsNewVer { font-size: 0.72rem; color: rgba(183, 201, 255, 0.7); }
@@ -3924,3 +3938,35 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
   .polyHub:not([hidden]) .polyHero, .polyHub:not([hidden]) .polyTile, .polyHeroSheen,
   .arcadeMenuPanel.show, .arcadeLevelPanel.show, .galaxy-view.mode-menu .galaxyModeCard { animation: none; }
 }
+
+.galaxyModeSelect > :first-child { margin-top: auto; }
+.galaxyModeSelect > :last-child { margin-bottom: auto; }
+.galaxyModeSelect { padding-top: max(22px, env(safe-area-inset-top, 0px)); padding-bottom: max(22px, env(safe-area-inset-bottom, 0px)); }
+
+/* 2026-10-25: hub buttons get the bevel + light sweep Paul liked on the old buttons. Bevel = top
+   highlight + bottom shade; the sweep is a transform-only sheen, staggered per tile. */
+.modeBtn.polyTile {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -3px 6px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+.modeBtn.polyTile::before {
+  content: "";
+  position: absolute;
+  inset: -40% -70%;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.22) 50%, transparent 58%);
+  transform: translateX(-60%);
+  animation: tileSweep 5.2s ease-in-out infinite;
+}
+.polyTiles .polyTile:nth-child(2)::before { animation-delay: 0.35s; }
+.polyTiles .polyTile:nth-child(3)::before { animation-delay: 0.7s; }
+.polyTiles .polyTile:nth-child(4)::before { animation-delay: 1.05s; }
+.polyTiles .polyTile:nth-child(5)::before { animation-delay: 1.4s; }
+.polyTiles .polyTile:nth-child(6)::before { animation-delay: 1.75s; }
+@keyframes tileSweep { 0%, 62% { transform: translateX(-60%); } 88%, 100% { transform: translateX(60%); } }
+.polyHero { box-shadow: 0 10px 26px rgba(120, 140, 255, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.55), inset 0 -4px 8px rgba(40, 20, 110, 0.35); }
+@media (prefers-reduced-motion: reduce) { .modeBtn.polyTile::before, .menuOracleBadge { animation: none; } }
+
+/* HUD: the POLYSLOTS badge was wide enough to push the weapon chips over Lives/Score (playtest) */
+.hudSlotLogo { height: 15px; }
+.hudSlotBtn { min-height: 30px; padding: 2px 5px 2px 3px; gap: 3px; }
+.hudSlotCount { font-size: 0.72rem; padding: 2px 4px; }

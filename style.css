@@ -2150,32 +2150,37 @@ select:focus-visible {
 /* Poly Slot (opens the slot cabinet mid-level; count = banked tokens). Purple twin of the
    weapon chips; dim when empty, lit when tokens are banked. */
 .hudSlotBtn {
-  /* Rectangular "mini cabinet" (not a pill) so it never reads as a weapon chip. */
+  /* 2026-10-25: the real POLYSLOTS neon wordmark (cropped from slotart/cabinet.png) on a mini
+     cabinet plate — reads as "the slot machine", never as a weapon chip. */
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 5px;
-  min-height: 38px;
-  border-radius: 8px;
-  padding: 3px 9px 3px 6px;
-  font-size: 0.85rem;
-  font-weight: 800;
-  color: #ffe7a8;
-  white-space: nowrap;
-  border: 1.5px solid rgba(255, 211, 106, 0.85);
-  background: linear-gradient(180deg, rgba(64, 24, 104, 0.95), rgba(28, 8, 52, 0.95));
+  min-height: 34px;
+  border-radius: 7px;
+  padding: 3px 7px 3px 4px;
+  border: 1.5px solid rgba(0, 220, 255, 0.75);
+  background: linear-gradient(180deg, #1c1e26, #0d0e14);
+  box-shadow: 0 0 8px rgba(0, 200, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   opacity: 1; /* always lit while openable (inventory-style), even at 0 tokens */
   transition: opacity 160ms ease, box-shadow 160ms ease;
 }
-.hudSlotIcon {
-  width: 38px;
-  height: 25px;
-  flex: 0 0 auto;
+.hudSlotLogo {
+  height: 22px;
+  width: auto;
+  display: block;
   pointer-events: none;
+  -webkit-user-drag: none;
+}
+.hudSlotCount {
+  font: 800 0.8rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #ffe08a;
+  padding: 3px 5px;
+  border-radius: 5px;
+  background: rgba(255, 210, 100, 0.12);
+  border: 1px solid rgba(255, 210, 100, 0.45);
 }
 .hudSlotBtn.has-tokens {
-  opacity: 1;
-  box-shadow: 0 0 12px rgba(255, 200, 90, 0.55), inset 0 0 8px rgba(255, 211, 106, 0.18);
+  box-shadow: 0 0 14px rgba(0, 220, 255, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 .hudSlotBtn:disabled {
   cursor: default;
@@ -2185,8 +2190,8 @@ select:focus-visible {
   animation: slotAttention 0.9s ease-in-out 6;
 }
 @keyframes slotAttention {
-  0%, 100% { box-shadow: 0 0 8px rgba(255, 200, 90, 0.5); transform: scale(1); }
-  50% { box-shadow: 0 0 24px rgba(255, 215, 110, 1); transform: scale(1.08); }
+  0%, 100% { box-shadow: 0 0 8px rgba(0, 220, 255, 0.5); transform: scale(1); }
+  50% { box-shadow: 0 0 24px rgba(0, 230, 255, 1); transform: scale(1.08); }
 }
 .slotHudHint {
   position: fixed;
@@ -3563,3 +3568,66 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn)::after {
 .fxLabChips button.fxLabPreview { border-style: dashed; }
 .fxLabNote { font-size: 0.68rem; line-height: 1.5; color: rgba(223, 232, 255, 0.6); margin: 4px 0 0; }
 .fxLabCopy { width: 100%; margin-top: 8px; font: inherit; font-size: 0.8rem; padding: 10px; border-radius: 10px; border: 1px solid rgba(255, 211, 106, 0.7); background: rgba(255, 211, 106, 0.1); color: #ffd36a; }
+
+/* ── 2026-10-25: Stroids SETTINGS (MUSIC / SFX volume) — styled like the Select Mode card ─────── */
+.settingsOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 18000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(2, 4, 12, 0.72);
+}
+.settingsOverlay.show { display: flex; }
+.settingsCard {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 22px 20px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: linear-gradient(170deg, rgba(12, 22, 46, 0.97), rgba(10, 17, 34, 0.96));
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.45);
+  color: #d7e5ff;
+}
+.settingsTitle { margin: 0; text-align: center; font-size: 1.15rem; letter-spacing: 0.2em; }
+.settingsSection { font-size: 0.72rem; letter-spacing: 0.18em; color: rgba(183, 201, 255, 0.7); }
+.settingsRow {
+  display: grid;
+  grid-template-columns: 56px 1fr 34px;
+  align-items: center;
+  gap: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-size: 0.85rem;
+}
+.settingsVal { text-align: right; font-variant-numeric: tabular-nums; color: #7be2ff; }
+.settingsVol {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(123, 226, 255, 0.95) 0 var(--fill, 100%), rgba(255, 255, 255, 0.14) var(--fill, 100%) 100%);
+  outline: none;
+}
+.settingsVol::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7be2ff, #f6a7ff);
+  border: 2px solid #0a1734;
+  box-shadow: 0 0 10px rgba(123, 226, 255, 0.6);
+}
+.settingsVol::-moz-range-thumb {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7be2ff, #f6a7ff);
+  border: 2px solid #0a1734;
+}
+.settingsDone { margin-top: 4px; }

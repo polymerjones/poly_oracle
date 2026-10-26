@@ -12,7 +12,6 @@ const pixiRenderer = (() => {
   let asteroidContainer = null;
   let ufoContainer = null;
   let particleContainer = null;
-  let laserContainer = null;
   let warpRingContainer = null;
   let lightningRingContainer = null;
   let plasmaContainer = null;
@@ -128,8 +127,6 @@ const pixiRenderer = (() => {
   let starsSeeded = false;
   let starFrame = 0;
 
-  const laserPool = [];
-  const activeLasers = new Map();
 
   const warpRingPool = [];
   const activeWarpRings = new Map();
@@ -266,7 +263,6 @@ const pixiRenderer = (() => {
         tint: true,
       });
       particleContainer.blendMode = PIXI.BLEND_MODES.ADD;
-      laserContainer = new PIXI.Container();
       plasmaContainer = new PIXI.Container();
       bombContainer = new PIXI.Container();
       landmineContainer = new PIXI.Container();
@@ -286,7 +282,6 @@ const pixiRenderer = (() => {
       app.stage.addChild(asteroidContainer);
       app.stage.addChild(ufoContainer);
       app.stage.addChild(particleContainer);
-      app.stage.addChild(laserContainer);
       app.stage.addChild(plasmaContainer);
       app.stage.addChild(bombContainer);
       app.stage.addChild(landmineContainer);
@@ -523,47 +518,6 @@ const pixiRenderer = (() => {
         sprite.alpha = 0;
         particleSpritePool.push(sprite);
         particleSprites.delete(p);
-      }
-    }
-  }
-
-  function syncLasers(laserBeams, now) {
-    if (!laserContainer) return;
-    const seen = new Set();
-
-    for (let i = 0; i < laserBeams.length; i += 1) {
-      const beam = laserBeams[i];
-      seen.add(beam);
-
-      let g = activeLasers.get(beam);
-      if (g) {
-        const t = Math.max(0, Math.min(1, (now - beam.startedAt) / 150));
-        g.alpha = 1 - t;
-        g.visible = true;
-        continue;
-      }
-
-      g = laserPool.pop() || new PIXI.Graphics();
-      laserContainer.addChild(g);
-      activeLasers.set(beam, g);
-      g.alpha = 1;
-      g.clear();
-      g.lineStyle(2, 0x00ffd1, 0.92);
-      g.moveTo(beam.x1, beam.y1);
-      g.lineTo(beam.x2, beam.y2);
-      g.lineStyle(6, 0x00ffd1, 0.18);
-      g.moveTo(beam.x1, beam.y1);
-      g.lineTo(beam.x2, beam.y2);
-      g.visible = true;
-    }
-
-    for (const [beam, g] of activeLasers) {
-      if (!seen.has(beam)) {
-        g.clear();
-        g.alpha = 1;
-        g.visible = false;
-        laserPool.push(g);
-        activeLasers.delete(beam);
       }
     }
   }
@@ -1718,7 +1672,7 @@ const pixiRenderer = (() => {
     return true;
   }
 
-  function draw(sim, laserBeams, canvasFlash, ufoState, plasmaCage, landmine, bombShrapnel, now, plasmaChargeMs) {
+  function draw(sim, canvasFlash, ufoState, plasmaCage, landmine, bombShrapnel, now, plasmaChargeMs) {
     if (!app) return false;
     const frameBudgetExceeded = !!sim._frameBudgetExceeded;
     if (!_reducedMotionMQ) _reducedMotionMQ = window.matchMedia?.('(prefers-reduced-motion: reduce)') || { matches: false };
@@ -1728,7 +1682,6 @@ const pixiRenderer = (() => {
     syncAsteroids(sim.asteroids);
     syncUFO(ufoState);
     syncParticles(sim.particles);
-    syncLasers(laserBeams, now);
     syncWarpRings(sim.warpRings, frameBudgetExceeded);
     syncLightningRings(sim.lightningRings || [], frameBudgetExceeded);
     drawPlasmaLayer(plasmaCage, sim.asteroids, now, plasmaChargeMs);
@@ -1759,7 +1712,6 @@ const pixiRenderer = (() => {
     asteroidContainer = null;
     ufoContainer = null;
     particleContainer = null;
-    laserContainer = null;
     warpRingContainer = null;
     lightningRingContainer = null;
     plasmaContainer = null;
@@ -1791,7 +1743,6 @@ const pixiRenderer = (() => {
     landmineGraphics = null;
     asteroidSprites.clear();
     particleSprites.clear();
-    activeLasers.clear();
     activeWarpRings.clear();
     activeLightningRings.clear();
     activeBombs.length = 0;
@@ -1800,7 +1751,6 @@ const pixiRenderer = (() => {
     particleSpritePool.length = 0;
     _ufoGlowPool.length = 0;
     _activeUfoGlows.clear();
-    laserPool.length = 0;
     warpRingPool.length = 0;
     lightningRingPool.length = 0;
     debrisPool.length = 0;

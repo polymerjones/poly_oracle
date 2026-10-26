@@ -483,7 +483,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 17:09";
+const BUILD_TS = "2026-10-25 17:27";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1436,6 +1436,7 @@ function wireDevModeEntry() {
   });
   btnDevMode.addEventListener("click", () => setDevModeOn(!devModeOn));
   btnFxLab?.addEventListener("click", openFxLab);
+  btnSettings?.addEventListener("click", openStroidsSettings);
   hudDevWin?.addEventListener("click", () => galaxyCanvasController?.devInstantWin?.());
 }
 
@@ -2028,24 +2029,25 @@ let devModeOn = false;
 // so looks/sounds can be judged on the phone; approved picks get baked into TRIAL_DEFAULTS.
 const TRIALS_KEY = "poly_oracle_trials";
 const TRIAL_DEFAULTS = {
-  laser: "x", warp: "off", titles: "plain", cards: "plain", buttons: "plain", cheatFx: "confetti", logoIdle: "shimmer",
-  sfxLaser: "advfire", sfxPulse: "default", sfxBomb: "default", sfxKill: "default", sfxCheat: "slot_jackpot", sfxLevelStart: "none",
+  // 2026-10-25: Paul's FX Lab picks baked in (bolt / tunnel / glitch / holo / star / level_up / reveal_flash).
+  laser: "bolt", warp: "tunnel", titles: "glitch", cards: "holo", buttons: "star", cheatFx: "confetti", logoIdle: "shimmer",
+  sfxLaser: "advfire", sfxPulse: "default", sfxBomb: "default", sfxKill: "default", sfxCheat: "level_up", sfxLevelStart: "reveal_flash",
 };
 // [key, section, label, [[value, chip label], ...], optional preview]
 const TRIAL_ROWS = [
-  ["laser", "look", "PRIMARY LASER (fire a level to see it)", [["x", "TAP X (CURRENT)"], ["beam", "ENERGY BEAM"], ["bolt", "PHOTON BOLT"]]],
-  ["warp", "look", "LEVEL WARP TRANSITION", [["off", "OFF (CURRENT)"], ["tunnel", "LIGHT TUNNEL"], ["streaks", "HYPERSPEED STREAKS"]], "warp"],
-  ["titles", "look", "MENU TITLES (+ LEVEL BANNER DECRYPT)", [["plain", "PLAIN (CURRENT)"], ["shiny", "SHINY"], ["decrypt", "DECRYPT"], ["glitch", "GLITCH"]]],
-  ["cards", "look", "MENU CARDS", [["plain", "PLAIN (CURRENT)"], ["holo", "HOLO FOIL"]]],
-  ["buttons", "look", "MENU BUTTONS", [["plain", "PLAIN (CURRENT)"], ["star", "STAR BORDER"]]],
-  ["logoIdle", "look", "STROIDS LOGO IDLE (menu framerate A/B)", [["shimmer", "LIVING SHIMMER (CURRENT)"], ["static", "STATIC (CHEAPEST)"]]],
+  ["laser", "look", "PRIMARY LASER (fire a level to see it)", [["x", "TAP X"], ["beam", "ENERGY BEAM"], ["bolt", "PHOTON BOLT"]]],
+  ["warp", "look", "LEVEL WARP TRANSITION", [["off", "OFF"], ["tunnel", "LIGHT TUNNEL"], ["streaks", "HYPERSPEED STREAKS"]], "warp"],
+  ["titles", "look", "MENU TITLES (+ LEVEL BANNER DECRYPT)", [["plain", "PLAIN"], ["shiny", "SHINY"], ["decrypt", "DECRYPT"], ["glitch", "GLITCH"]]],
+  ["cards", "look", "MENU CARDS", [["plain", "PLAIN"], ["holo", "HOLO FOIL"]]],
+  ["buttons", "look", "MENU BUTTONS", [["plain", "PLAIN"], ["star", "STAR BORDER"]]],
+  ["logoIdle", "look", "STROIDS LOGO IDLE (menu framerate A/B)", [["shimmer", "LIVING SHIMMER"], ["static", "STATIC (CHEAPEST)"]]],
   ["cheatFx", "look", "CHEAT UNLOCK FX", [["off", "OFF"], ["confetti", "NUCLEAR HOLO CONFETTI"]], "confetti"],
-  ["sfxLaser", "sound", "LASER FIRE", [["advfire", "ADVFIRE LIGHT (CURRENT)"], ["lab_advfire_full", "ADVFIRE FULL"], ["lab_zap2", "ZAP 2"], ["lab_zap5", "ZAP 5"], ["lab_zap6", "ZAP 6"], ["lab_maybeshot", "SHOT"]]],
-  ["sfxPulse", "sound", "PULSE CANNON SHOT", [["default", "FIRE 1/2 (CURRENT)"], ["lab_zap5", "ZAP 5"], ["smallblast", "SMALL BLAST"], ["lab_zap6", "ZAP 6"]]],
-  ["sfxBomb", "sound", "BOMB BOOM", [["default", "MINE + BIG (CURRENT)"], ["bigbang", "BIG BANG"], ["powexplode", "POW"], ["lab_blast1", "BLAST 1"], ["distantexplode", "DISTANT"]]],
-  ["sfxKill", "sound", "STROID KILL", [["default", "BY SIZE (CURRENT)"], ["crunch", "CRUNCH"], ["smallblast", "SMALL BLAST"], ["crack", "CRACK"], ["powexplode", "POW"]]],
+  ["sfxLaser", "sound", "LASER FIRE", [["advfire", "ADVFIRE LIGHT"], ["lab_advfire_full", "ADVFIRE FULL"], ["lab_zap2", "ZAP 2"], ["lab_zap5", "ZAP 5"], ["lab_zap6", "ZAP 6"], ["lab_maybeshot", "SHOT"]]],
+  ["sfxPulse", "sound", "PULSE CANNON SHOT", [["default", "FIRE 1/2"], ["lab_zap5", "ZAP 5"], ["smallblast", "SMALL BLAST"], ["lab_zap6", "ZAP 6"]]],
+  ["sfxBomb", "sound", "BOMB BOOM", [["default", "MINE + BIG"], ["bigbang", "BIG BANG"], ["powexplode", "POW"], ["lab_blast1", "BLAST 1"], ["distantexplode", "DISTANT"]]],
+  ["sfxKill", "sound", "STROID KILL", [["default", "BY SIZE"], ["crunch", "CRUNCH"], ["smallblast", "SMALL BLAST"], ["crack", "CRACK"], ["powexplode", "POW"]]],
   ["sfxCheat", "sound", "CHEAT UNLOCK STING", [["none", "NONE"], ["slot_jackpot", "JACKPOT"], ["slot_bigwin", "BIG WIN"], ["life_gain", "POP + SPARKLE"], ["level_up", "LEVEL UP"]]],
-  ["sfxLevelStart", "sound", "LEVEL START", [["none", "NONE (CURRENT)"], ["warp", "SUB SWOOSH"], ["lastlevelstart", "BOSS START"], ["reveal_flash", "REVEAL FLASH"], ["newreveal005", "REVEAL 5"]]],
+  ["sfxLevelStart", "sound", "LEVEL START", [["none", "NONE"], ["warp", "SUB SWOOSH"], ["lastlevelstart", "BOSS START"], ["reveal_flash", "REVEAL FLASH"], ["newreveal005", "REVEAL 5"]]],
 ];
 let trials = { ...TRIAL_DEFAULTS };
 try { trials = { ...TRIAL_DEFAULTS, ...JSON.parse(localStorage.getItem(TRIALS_KEY) || "{}") }; } catch { /* defaults */ }
@@ -2082,6 +2084,58 @@ function playLevelWarpTrial(opts) {
   else if (kind === "streaks") window.polyFx?.playStreaks?.(opts);
 }
 
+// ── Settings (2026-10-25): MUSIC + SFX volume dials, like Monkey Trubble's ───────────────────
+let _settingsEl = null;
+let _settingsSfxPreviewAt = 0;
+function openStroidsSettings() {
+  if (!_settingsEl) {
+    _settingsEl = document.createElement("div");
+    _settingsEl.className = "settingsOverlay";
+    _settingsEl.setAttribute("role", "dialog");
+    _settingsEl.setAttribute("aria-label", "Settings");
+    const row = (key, label) => `
+      <label class="settingsRow"><span class="settingsLabel">${label}</span>
+        <input type="range" class="settingsVol" data-key="${key}" min="0" max="100" step="5" aria-label="${label} volume">
+        <b class="settingsVal" data-val="${key}"></b></label>`;
+    _settingsEl.innerHTML = `
+      <div class="settingsCard">
+        <h2 class="settingsTitle">SETTINGS</h2>
+        <div class="settingsSection">VOLUME</div>
+        ${row("music", "MUSIC")}
+        ${row("sfx", "SFX")}
+        <button class="modeBtn settingsDone" type="button">Done</button>
+      </div>`;
+    document.body.appendChild(_settingsEl);
+    _settingsEl.addEventListener("input", (e) => {
+      const el = e.target.closest(".settingsVol");
+      if (!el) return;
+      audioSettings[el.dataset.key] = Number(el.value);
+      try { localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify(audioSettings)); } catch { /* session only */ }
+      audioEngine.applyUserVolumes();
+      syncStroidsSettings();
+      // SFX: a short sample so the new level is audible (throttled while dragging)
+      const now = performance.now();
+      if (el.dataset.key === "sfx" && now - _settingsSfxPreviewAt > 180) {
+        _settingsSfxPreviewAt = now;
+        window.playGameSfx?.("menu_hit", 0.8, { important: true });
+      }
+    });
+    _settingsEl.querySelector(".settingsDone").addEventListener("click", () => _settingsEl.classList.remove("show"));
+    _settingsEl.addEventListener("click", (e) => { if (e.target === _settingsEl) _settingsEl.classList.remove("show"); });
+  }
+  syncStroidsSettings();
+  _settingsEl.classList.add("show");
+}
+function syncStroidsSettings() {
+  if (!_settingsEl) return;
+  _settingsEl.querySelectorAll(".settingsVol").forEach((el) => {
+    const v = audioSettings[el.dataset.key];
+    el.value = String(v);
+    el.style.setProperty("--fill", `${v}%`);
+  });
+  _settingsEl.querySelectorAll(".settingsVal").forEach((el) => { el.textContent = String(audioSettings[el.dataset.val]); });
+}
+
 let _fxLab = null;
 function openFxLab() {
   if (!_fxLab) {
@@ -2092,14 +2146,14 @@ function openFxLab() {
     const sec = (id, title, color, note) => {
       const rows = TRIAL_ROWS.filter((r) => r[1] === id).map(([key, , label, opts, preview]) => `
         <div class="fxLabRow"><small>${label}</small><div class="fxLabChips" data-trial="${key}">
-          ${opts.map(([v, l]) => `<button type="button" role="radio" data-value="${v}">${l}</button>`).join("")}
+          ${opts.map(([v, l]) => `<button type="button" role="radio" data-value="${v}">${TRIAL_DEFAULTS[key] === v ? "\u2605 " : ""}${l}</button>`).join("")}
           ${preview ? `<button type="button" class="fxLabPreview" data-preview="${preview}">\u25B6 PREVIEW</button>` : ""}
         </div></div>`).join("");
       return `<div class="fxLabSec" style="--sec:${color}"><h4>${title}</h4>${rows}${note ? `<p class="fxLabNote">${note}</p>` : ""}</div>`;
     };
     _fxLab.innerHTML = `
       <div class="fxLabHead"><h2>FX LAB</h2><button class="fxLabClose" type="button">DONE</button></div>
-      <p class="fxLabNote">Tap a chip to try it — it goes live immediately while Dev Mode is on (sounds play when tapped). Players keep the defaults until the picks are baked in.</p>
+      <p class="fxLabNote">Tap a chip to try it — it goes live immediately while Dev Mode is on (sounds play when tapped). \u2605 = what players get (the shipped default).</p>
       ${sec("look", "LOOK", "#ff9a3c", "Titles/cards/buttons show on the menus behind this panel. Laser + warp show in a level.")}
       ${sec("sound", "SOUND (TAP TO HEAR)", "#5fd3ff")}
       <button class="fxLabCopy" type="button">COPY PICKS</button>
@@ -2143,6 +2197,7 @@ function openFxLab() {
 // and every run started in that window gets them (persisted so Resume keeps them). A run with any
 // gameplay cheat can't submit to the Polyverse scoreboard.
 const btnCheatCodes = document.getElementById("btnCheatCodes");
+const btnSettings = document.getElementById("btnSettings"); // 2026-10-25: MUSIC / SFX volume
 const cheatCodesPanel = document.getElementById("cheatCodesPanel");
 const cheatCodesList = document.getElementById("cheatCodesList");
 const btnCheatsBack = document.getElementById("btnCheatsBack");
@@ -4135,10 +4190,35 @@ let _musicCurrentTime = 0;
 let _musicResumeKey = "";
 let _musicResumeUrl = "";
 
+// 2026-10-25: player volume settings (Settings panel: MUSIC / SFX, 0–100). Applied through two
+// user buses (musicBus / sfxBus → masterGain) so every existing duck/ramp on musicGain and per-sound
+// gain keeps working untouched; the HTML-audio fallbacks are scaled by the same levels.
+const AUDIO_SETTINGS_KEY = "poly_oracle_audio";
+const audioSettings = { music: 100, sfx: 100 };
+try { Object.assign(audioSettings, JSON.parse(localStorage.getItem(AUDIO_SETTINGS_KEY) || "{}")); } catch { /* defaults */ }
+const userLevelGain = (v) => Math.pow(Math.max(0, Math.min(100, Number(v) || 0)) / 100, 2); // perceptual curve
+const userMusicGain = () => userLevelGain(audioSettings.music);
+const userSfxGain = () => userLevelGain(audioSettings.sfx);
+const _mediaVolume = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "volume");
+// HTML music node: code keeps writing its own levels (ducks/fades); the element plays them × MUSIC.
+function scaleMusicElementVolume(node) {
+  if (!node || node._userScaled || !_mediaVolume) return;
+  node._userScaled = true;
+  let raw = _mediaVolume.get.call(node);
+  Object.defineProperty(node, "volume", {
+    configurable: true,
+    get() { return raw; },
+    set(v) { raw = v; _mediaVolume.set.call(node, Math.max(0, Math.min(1, v * userMusicGain()))); },
+  });
+  node.volume = raw;
+}
+
 const audioEngine = {
   ctx: null,
   masterGain: null,
   musicGain: null,
+  sfxBus: null,   // player SFX volume (Settings)
+  musicBus: null, // player MUSIC volume (Settings); musicGain (+ freeze/pulse filters) → musicBus
   _freezeFilter: null,  // 2026-06-17: highpass (low-cut) in the freeze bandpass chain
   _freezeFilter2: null, // 2026-06-17: lowpass (high-cut) in the freeze bandpass chain
   _pulseFilter: null,   // 2026-07-01: lowpass (high-cut) music dip while the Pulse Cannon runs
@@ -4159,7 +4239,23 @@ const audioEngine = {
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 0.75;
     this.masterGain.connect(this.ctx.destination);
+    this.sfxBus = this.ctx.createGain();
+    this.sfxBus.gain.value = userSfxGain();
+    this.sfxBus.connect(this.masterGain);
+    this.musicBus = this.ctx.createGain();
+    this.musicBus.gain.value = userMusicGain();
+    this.musicBus.connect(this.masterGain);
     return this.ctx;
+  },
+  // Settings sliders → live levels (WebAudio buses + the playing HTML music element).
+  applyUserVolumes() {
+    if (this.ctx) {
+      const t = this.ctx.currentTime;
+      this.sfxBus?.gain.setTargetAtTime(userSfxGain(), t, 0.03);
+      this.musicBus?.gain.setTargetAtTime(userMusicGain(), t, 0.03);
+    }
+    const n = this.currentMusicHtml?.node;
+    if (n) { const raw = n.volume; n.volume = raw; } // re-run the scaling setter at the node's raw level
   },
   // ⚠️ RETIRED 2026-06-24 — DO NOT CALL. This closed + rebuilt the AudioContext between levels to
   // release leaked VO MediaElementSource nodes. It worked, but rebuilding the ctx caused level-start
@@ -4355,7 +4451,7 @@ const audioEngine = {
       node.mozPreservesPitch = true;
       node.webkitPreservesPitch = true;
     }
-    node.volume = clamp(volume, 0, 1);
+    node.volume = clamp(volume * userSfxGain(), 0, 1); // × player SFX volume (Settings)
     try {
       node.currentTime = 0;
     } catch {
@@ -4417,7 +4513,7 @@ const audioEngine = {
     source.detune.value = detune;
     gain.gain.value = clamp(volume, 0, 1);
     source.connect(gain);
-    gain.connect(this.masterGain);
+    gain.connect(this.sfxBus || this.masterGain);
     const voices = this.voices.get(name) || [];
     voices.push({ source, startedAt: ctx.currentTime });
     this.voices.set(name, voices);
@@ -4450,7 +4546,7 @@ const audioEngine = {
     source.detune.value = detune;
     gain.gain.value = clamp(volume, 0, 1);
     source.connect(gain);
-    gain.connect(this.masterGain);
+    gain.connect(this.sfxBus || this.masterGain);
     let endedResolve;
     const ended = new Promise((resolve) => {
       endedResolve = resolve;
@@ -4482,7 +4578,7 @@ const audioEngine = {
     if (!this.musicGain) {
       this.musicGain = this.ctx.createGain();
       this.musicGain.gain.value = MUSIC_MAX_GAIN;
-      if (this.masterGain) this.musicGain.connect(this.masterGain);
+      if (this.musicBus || this.masterGain) this.musicGain.connect(this.musicBus || this.masterGain);
       else this.musicGain.connect(this.ctx.destination);
     }
   },
@@ -4563,6 +4659,7 @@ const audioEngine = {
       node.preload = "auto";
       node.loop = true;
       node.playsInline = true;
+      scaleMusicElementVolume(node);
       node.volume = state.whisper ? 0.43 : Math.min(1, MUSIC_MAX_GAIN * volume);
       node.play().catch(() => {});
       this.currentMusicHtml = { key, url, node, baseVolume: volume };
@@ -4676,7 +4773,7 @@ const audioEngine = {
       priorBase = this._musicGainBeforePulse;
       this.removePulseFilter();
     }
-    const dest = this.masterGain || this.ctx.destination;
+    const dest = this.musicBus || this.masterGain || this.ctx.destination;
     const hp = this.ctx.createBiquadFilter();
     hp.type = "highpass";
     hp.frequency.value = 80;
@@ -4720,7 +4817,7 @@ const audioEngine = {
       g.linearRampToValueAtTime(target, t + 0.4);
     } catch { /* ignore */ }
     this._musicGainBeforeFreeze = null;
-    const dest = this.masterGain || this.ctx.destination;
+    const dest = this.musicBus || this.masterGain || this.ctx.destination;
     try { this.musicGain.disconnect(this._freezeFilter); } catch { /* ignore */ }
     try { this._freezeFilter.disconnect(); } catch { /* ignore */ }
     try { this._freezeFilter2?.disconnect(); } catch { /* ignore */ }
@@ -4737,7 +4834,7 @@ const audioEngine = {
   applyPulseFilter() {
     this.ensureMusic();
     if (!this.ctx || !this.musicGain || this._pulseFilter || this._freezeFilter) return;
-    const dest = this.masterGain || this.ctx.destination;
+    const dest = this.musicBus || this.masterGain || this.ctx.destination;
     const lp = this.ctx.createBiquadFilter();
     lp.type = "lowpass";
     lp.frequency.value = 600; // dim everything above 600Hz
@@ -4771,7 +4868,7 @@ const audioEngine = {
       g.linearRampToValueAtTime(target, t + 0.3);
     } catch { /* ignore */ }
     this._musicGainBeforePulse = null;
-    const dest = this.masterGain || this.ctx.destination;
+    const dest = this.musicBus || this.masterGain || this.ctx.destination;
     try { this.musicGain.disconnect(this._pulseFilter); } catch { /* ignore */ }
     try { this._pulseFilter.disconnect(); } catch { /* ignore */ }
     this.musicGain.connect(dest);
@@ -6974,7 +7071,7 @@ const orbRubDrone = {
 
     const out = ctx.createGain();
     out.gain.value = 0;
-    out.connect(audioEngine.masterGain);
+    out.connect(audioEngine.sfxBus || audioEngine.masterGain);
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
@@ -7142,7 +7239,7 @@ function startOrbRub2WebAudio() {
   source.loop = true;
   gain.gain.value = 0;
   source.connect(gain);
-  gain.connect(audioEngine.masterGain);
+  gain.connect(audioEngine.sfxBus || audioEngine.masterGain);
   source.start(now);
   gain.gain.cancelScheduledValues(now);
   gain.gain.setValueAtTime(0, now);
@@ -8904,7 +9001,6 @@ function initGalaxyCanvas() {
     lastRectCy: 0,
     lastRechargeVoAt: 0,
   };
-  const laserBeams = [];
   let tapBlasts = []; // 2026-06-09: localized X blast for iOS touch taps (replaces laser)
   const _bombShrapnel = [];
   // 2026-06-11: fire trail behind in-flight tossed asteroids — dedicated overlay array
@@ -9047,8 +9143,7 @@ function initGalaxyCanvas() {
         `FPS: ${avg}<br>` +
         `WORST: ${_fpsWorst}<br>` +
         `PARTS: ${sim?.particles?.length || 0}<br>` +
-        `ROIDS: ${sim?.asteroids?.length || 0}<br>` +
-        `LASERS: ${laserBeams?.length || 0}`;
+        `ROIDS: ${sim?.asteroids?.length || 0}`;
     }
   }
 
@@ -9305,6 +9400,7 @@ function initGalaxyCanvas() {
   let placedBombs = [];
   const pulseDissolves = []; // Pulse Cannon plasma ghosts — see addPulseDissolve
   const laserShotFx = []; // FX Lab beam/bolt shots — see drawLaserShotFx
+  let laserGunSide = 0;   // alternates the left/right cockpit gun
   const PULSE_DISSOLVE_MS = 340;
   const PULSE_DISSOLVE_MAX = 24;
   let landmineSpawnedThisLevel = false;
@@ -11167,7 +11263,7 @@ function initGalaxyCanvas() {
     const r = hudSlotBtn.getBoundingClientRect();
     _slotHintEl = document.createElement("div");
     _slotHintEl.className = "slotHudHint";
-    _slotHintEl.innerHTML = '<span class="slotHudHintArrow">\u2191</span><span>POLY SLOT \u2014 TAP TO SPIN<br>YOUR TOKENS</span>';
+    _slotHintEl.innerHTML = '<span class="slotHudHintArrow">\u2191</span><span>POLYSLOTS \u2014 TAP TO SPIN<br>YOUR TOKENS</span>';
     _slotHintEl.style.left = `${Math.max(8, r.left)}px`;
     _slotHintEl.style.top = `${r.bottom + 6}px`;
     document.body.appendChild(_slotHintEl);
@@ -12841,6 +12937,7 @@ function initGalaxyCanvas() {
     if (btnDevMode) btnDevMode.style.display = showRoot && devModeRevealed ? "" : "none";
     if (btnFxLab) btnFxLab.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
     if (btnCheatCodes) btnCheatCodes.style.display = showRoot ? "" : "none";
+    if (btnSettings) btnSettings.style.display = showRoot ? "" : "none";
     if (cheatCodesPanel) {
       cheatCodesPanel.hidden = !showCheats;
       cheatCodesPanel.classList.toggle("show", showCheats);
@@ -13507,7 +13604,7 @@ function initGalaxyCanvas() {
       source.buffer = buffer;
       gain.gain.value = clamp(0.4 * (state.whisper ? 0.55 : 1), 0, 1);
       source.connect(gain);
-      gain.connect(audioEngine.masterGain || ctx.destination);
+      gain.connect(audioEngine.sfxBus || audioEngine.masterGain || ctx.destination);
       source.start(0, offset, 0.5);
     } catch {}
   }
@@ -16036,31 +16133,6 @@ function initGalaxyCanvas() {
     plasmaCtx.clearRect(0, 0, sim.width, sim.height);
     updatePlasmaCageCharge(now);
     updatePlasmaChargeSound(now);
-    for (let i = laserBeams.length - 1; i >= 0; i -= 1) {
-      const beam = laserBeams[i];
-      const age = now - beam.startedAt;
-      if (age > 150) {
-        laserBeams.splice(i, 1);
-        continue;
-      }
-      const t = clamp(age / 150, 0, 1);
-      plasmaCtx.save();
-      plasmaCtx.globalAlpha = 1 - t;
-      plasmaCtx.strokeStyle = _levelPrimaryColor;
-      plasmaCtx.lineWidth = 2;
-      if (!isIOSNative) {
-        plasmaCtx.shadowColor = _levelPrimaryColor;
-        plasmaCtx.shadowBlur = 12;
-      }
-      plasmaCtx.beginPath();
-      plasmaCtx.moveTo(beam.x1, beam.y1);
-      plasmaCtx.lineTo(beam.x2, beam.y2);
-      plasmaCtx.stroke();
-      plasmaCtx.restore();
-    }
-    if (laserBeams.length > 8) {
-      laserBeams.splice(0, laserBeams.length - 8);
-    }
     if (plasmaCage.active) {
       // 2026-07-05: plasmaCageChargeMs() so the Training/Practice cage rect reaches its charged
       // look on the fast 120ms clock (the lock was instant but the visual still ramped over 800ms).
@@ -16509,7 +16581,6 @@ function initGalaxyCanvas() {
     plasmaCage.rechargeSoundPlayed = true;
     updatePlasmaModeBtn();
     if (!keepFx) {
-      laserBeams.length = 0;
       tapBlasts.length = 0;
       _bombShrapnel.length = 0; // in-flight bomb shrapnel keeps flying/killing under keepFx
       flameTrail.length = 0;
@@ -20642,11 +20713,26 @@ function initGalaxyCanvas() {
   // (spawnPulseFireBurst / pulseFireBursts). This stub keeps the call sites harmless.
   function drawPulseMuzzle() { /* muzzle FX removed — see pulseFireBursts */ }
 
-  // 2026-10-25: FX Lab primary-laser looks (trial "laser"). Drawn on the antialiased 2D FX overlay.
-  // BEAM: a white-hot core + teal glow from the ship to the tap, flaring and thinning over ~140ms.
-  // BOLT: a short bright streak that travels ship → tap in ~90ms, leaving a fading tail.
+  // 2026-10-25: FX Lab primary-laser looks (trial "laser"). Drawn on the antialiased 2D FX overlay,
+  // from the cockpit guns below the screen edge (see resolveShotAt) toward the tap.
+  // BEAM: a white-hot core + level-colour glow, flaring and thinning over ~140ms.
+  // BOLT (shipped): a photon streak that rushes away from the viewer — wide and bright near the gun,
+  // tapering to a point as it reaches the target (perspective), easing out as it "recedes".
   const LASER_BEAM_MS = 140;
-  const LASER_BOLT_MS = 90;
+  const LASER_BOLT_MS = 120;
+  // Filled quad from (x0,y0) width w0 to (x1,y1) width w1 — a tapered streak.
+  function fillTaper(tctx, x0, y0, w0, x1, y1, w1) {
+    const dx = x1 - x0, dy = y1 - y0;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len, ny = dx / len;
+    tctx.beginPath();
+    tctx.moveTo(x0 + nx * w0 / 2, y0 + ny * w0 / 2);
+    tctx.lineTo(x1 + nx * w1 / 2, y1 + ny * w1 / 2);
+    tctx.lineTo(x1 - nx * w1 / 2, y1 - ny * w1 / 2);
+    tctx.lineTo(x0 - nx * w0 / 2, y0 - ny * w0 / 2);
+    tctx.closePath();
+    tctx.fill();
+  }
   function drawLaserShotFx(tctx, now) {
     if (!tctx || laserShotFx.length === 0) return;
     tctx.save();
@@ -20660,33 +20746,44 @@ function initGalaxyCanvas() {
         if (t >= 1) { laserShotFx.splice(i, 1); continue; }
         const k = 1 - t;
         tctx.globalAlpha = k * 0.45;
-        tctx.strokeStyle = _levelPrimaryColor;
-        tctx.lineWidth = 9 * k + 2;
-        tctx.beginPath(); tctx.moveTo(f.ox, f.oy); tctx.lineTo(f.x, f.y); tctx.stroke();
+        tctx.fillStyle = _levelPrimaryColor;
+        fillTaper(tctx, f.ox, f.oy, 22 * k + 6, f.x, f.y, 4 * k + 1);
         tctx.globalAlpha = k;
-        tctx.strokeStyle = "#eafffb";
-        tctx.lineWidth = 2.4 * k + 0.6;
-        tctx.beginPath(); tctx.moveTo(f.ox, f.oy); tctx.lineTo(f.x, f.y); tctx.stroke();
-        // impact flare
-        tctx.globalAlpha = k * 0.8;
         tctx.fillStyle = "#eafffb";
+        fillTaper(tctx, f.ox, f.oy, 7 * k + 2, f.x, f.y, 1.5 * k + 0.5);
+        tctx.globalAlpha = k * 0.8;
         tctx.beginPath(); tctx.arc(f.x, f.y, 3 + 6 * k, 0, Math.PI * 2); tctx.fill();
       } else {
         const t = age / LASER_BOLT_MS;
-        if (t >= 1.6) { laserShotFx.splice(i, 1); continue; }
-        const head = Math.min(1, t);
-        const tail = Math.max(0, head - 0.35);
-        const fade = t <= 1 ? 1 : 1 - (t - 1) / 0.6;
-        const hx = f.ox + (f.x - f.ox) * head, hy = f.oy + (f.y - f.oy) * head;
-        const tx = f.ox + (f.x - f.ox) * tail, ty = f.oy + (f.y - f.oy) * tail;
+        if (t >= 1.5) { laserShotFx.splice(i, 1); continue; }
+        // head eases out (fast off the gun, slowing as it recedes); the streak shortens with distance
+        const u = Math.min(1, t);
+        const head = 1 - (1 - u) * (1 - u);
+        const tail = Math.max(0, head - 0.42 * (1 - head * 0.65));
+        const fade = t <= 1 ? 1 : 1 - (t - 1) / 0.5;
+        const px = (s0) => f.ox + (f.x - f.ox) * s0;
+        const py = (s0) => f.oy + (f.y - f.oy) * s0;
+        const wAt = (s0) => 18 * (1 - s0) + 1.5; // perspective: wide near the viewer, a point far away
         tctx.globalAlpha = 0.5 * fade;
-        tctx.strokeStyle = _levelPrimaryColor;
-        tctx.lineWidth = 7;
-        tctx.beginPath(); tctx.moveTo(tx, ty); tctx.lineTo(hx, hy); tctx.stroke();
+        tctx.fillStyle = _levelPrimaryColor;
+        fillTaper(tctx, px(tail), py(tail), wAt(tail) * 1.8, px(head), py(head), wAt(head) * 1.6);
         tctx.globalAlpha = fade;
-        tctx.strokeStyle = "#ffffff";
-        tctx.lineWidth = 2.2;
-        tctx.beginPath(); tctx.moveTo(tx, ty); tctx.lineTo(hx, hy); tctx.stroke();
+        tctx.fillStyle = "#ffffff";
+        fillTaper(tctx, px(tail), py(tail), wAt(tail) * 0.55, px(head), py(head), wAt(head) * 0.5);
+        // muzzle flash at the screen edge as the shot leaves the gun
+        if (t < 0.35) {
+          const m = 1 - t / 0.35;
+          tctx.globalAlpha = 0.7 * m;
+          tctx.fillStyle = _levelPrimaryColor;
+          tctx.beginPath(); tctx.arc(f.ox, f.oy - 6, 26 * m + 6, 0, Math.PI * 2); tctx.fill();
+        }
+        // small impact spark when it lands
+        if (t >= 0.9 && t < 1.5) {
+          const k = 1 - (t - 0.9) / 0.6;
+          tctx.globalAlpha = 0.85 * k;
+          tctx.fillStyle = "#eafffb";
+          tctx.beginPath(); tctx.arc(f.x, f.y, 2 + 5 * k, 0, Math.PI * 2); tctx.fill();
+        }
       }
     }
     tctx.restore();
@@ -21067,7 +21164,7 @@ function initGalaxyCanvas() {
     const _timerOnPixi = _pixiMode && pushTimerPerimeterToPixi(now);
     if (!_timerOnPixi) drawTimerPerimeterOverlay(now);
     const _overlaysOnPixi = _pixiMode && pushOverlaysToPixi();
-    if (_pixiMode && window.pixiRenderer?.draw(sim, laserBeams, canvasFlash, ufo, plasmaCage, landmine, _bombShrapnel, now, plasmaCageChargeMs())) {
+    if (_pixiMode && window.pixiRenderer?.draw(sim, canvasFlash, ufo, plasmaCage, landmine, _bombShrapnel, now, plasmaCageChargeMs())) {
       setPlasmaOverlayVisible(stroidToss.active);
       if (stroidToss.active) drawPlasmaOverlay(now);
       drawUfoFxOverlay(ctx);
@@ -21744,11 +21841,18 @@ function initGalaxyCanvas() {
     }
     const markShotHit = () => { if (_shotBlastRef) _shotBlastRef.hit = true; };
     // 2026-10-25: FX Lab primary-laser trial — a beam/bolt from the ship (screen centre) to the tap.
+    // Fired from the player's point of view: twin guns just below the bottom corners alternate
+    // (an invisible cockpit), so shots converge on the target from "behind the screen".
     if (!pulse) {
       const laserLook = trial("laser");
       if (laserLook !== "x") {
         if (laserShotFx.length >= 10) laserShotFx.shift();
-        laserShotFx.push({ x: sx, y: sy, ox: sim.width / 2, oy: sim.height / 2, t0: performance.now(), kind: laserLook });
+        laserGunSide ^= 1;
+        laserShotFx.push({
+          x: sx, y: sy,
+          ox: sim.width * (laserGunSide ? 0.82 : 0.18), oy: sim.height + 14,
+          t0: performance.now(), kind: laserLook,
+        });
       }
     }
     shotsFired += 1;

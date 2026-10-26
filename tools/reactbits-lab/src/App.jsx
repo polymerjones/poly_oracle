@@ -4,6 +4,7 @@
 import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import manifest from "./rb/manifest.json";
 import HudConcepts, { HUD_CONCEPTS } from "./HudConcepts.jsx";
+import CockpitDesigner from "./CockpitDesigner.jsx";
 
 const HUD_NOTES = {
   D: "Hybrid of A + C: C's chamfered top panels (pause/lives · level + score · multiplier — no time bar, the perimeter border stays the clock) and A's dashboard slimmed to ~86px holding the weapons, POLYSLOTS and the NET/AUTO plasma control. Comm box sits above the dash like a cockpit monitor. Tap weapons to arm, tap NET to toggle.",
@@ -168,7 +169,8 @@ function PropRow({ k, v, def, onChange }) {
 
 export default function App() {
   const [selected, setSelected] = useState(manifest[0]?.name);
-  const [mode, setMode] = useState("effects"); // effects | hud
+  const [mode, setModeState] = useState(() => load("polyLab.mode", "effects")); // effects | hud | designer
+  const setMode = (m) => { setModeState(m); try { localStorage.setItem("polyLab.mode", JSON.stringify(m)); } catch { /* ignore */ } };
   const [hud, setHud] = useState("D");
   const [scene, setScene] = useState("hub");
   const [filter, setFilter] = useState("");
@@ -211,6 +213,15 @@ export default function App() {
     setCopied(text);
   };
 
+  const modeSwitch = (
+    <div className="labModes">
+      <button className={mode === "effects" ? "on" : ""} onClick={() => setMode("effects")}>Effects</button>
+      <button className={mode === "hud" ? "on" : ""} onClick={() => setMode("hud")}>HUD concepts</button>
+      <button className={mode === "designer" ? "on" : ""} onClick={() => setMode("designer")}>Cockpit Designer</button>
+    </div>
+  );
+  if (mode === "designer") return <CockpitDesigner modeSwitch={modeSwitch} />;
+
   const groups = {};
   manifest.filter((m) => !filter || m.name.toLowerCase().includes(filter.toLowerCase()) || m.description.toLowerCase().includes(filter.toLowerCase()))
     .forEach((m) => { (groups[m.category] ||= []).push(m); });
@@ -219,10 +230,7 @@ export default function App() {
     <div className="lab">
       <aside className="labList">
         <h1>POLYVERSE<br /><span>React Bits Lab</span></h1>
-        <div className="labModes">
-          <button className={mode === "effects" ? "on" : ""} onClick={() => setMode("effects")}>Effects</button>
-          <button className={mode === "hud" ? "on" : ""} onClick={() => setMode("hud")}>Cockpit HUD</button>
-        </div>
+        {modeSwitch}
         {mode === "hud" && (
           <div className="labGroup">
             <h3>HUD concepts</h3>

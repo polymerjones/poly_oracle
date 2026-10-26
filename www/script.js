@@ -436,6 +436,7 @@ const adService = (() => {
     isSupported,
     isReady: () => state === "ready",
     isInPod: () => inPod,
+    isShowing: () => audioHeld, // an ad (or pod) is on screen
     getState: () => state,
     preload,
     show,
@@ -513,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-26 11:30";
+const BUILD_TS = "2026-10-26 16:26";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1762,6 +1763,7 @@ const prefersReducedMotion =
 const isIOSWebKit = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const isCapacitorNative = !!(globalThis.Capacitor?.isNativePlatform?.());
 const isIOSNative = isCapacitorNative && isIOSWebKit;
+const PLASMA_CANVAS_RING = false; // 2026-10-26: bottom-right canvas recharge ring → HUD charge chip
 // 2026-07-02: iPad-class = an iOS device whose SHORT edge is tablet-sized (>=640px). iPhones top
 // out well under this in both orientations, so it cleanly separates iPad from iPhone. Used to
 // nudge device-specific audio/layout (e.g. combo-callout loudness, which reads much quieter on
@@ -2167,7 +2169,9 @@ let devModeOn = false;
 // 2026-10-26: Cockpit HUD trial (Lab concept "D · Hybrid") — toggled from Dev Mode, persisted so it
 // survives relaunches (Dev Mode itself is session-only). Release players can't reach the toggle.
 const STORAGE_HUD_COCKPIT = "poly_oracle_hud_cockpit";
-let cockpitHudPref = (() => { try { return localStorage.getItem(STORAGE_HUD_COCKPIT) === "1"; } catch { return false; } })();
+// ?cockpitLab=1 = the desktop Lab's Cockpit Designer iframe: cockpit forced on (not persisted) + a bridge.
+const COCKPIT_LAB = /[?&]cockpitLab=1\b/.test(location.search);
+let cockpitHudPref = COCKPIT_LAB || (() => { try { return localStorage.getItem(STORAGE_HUD_COCKPIT) === "1"; } catch { return false; } })();
 const btnCockpitHud = document.getElementById("btnCockpitHud");
 function syncCockpitHudButton() {
   if (btnCockpitHud) btnCockpitHud.textContent = cockpitHudPref ? "Cockpit HUD: On" : "Cockpit HUD: Off";
@@ -4448,16 +4452,21 @@ const audioEngine = {
     this.loops.clear();  // context-bound loop source nodes — die with the ctx
     this.unlocked = false; // force unlock()/resume() on the rebuilt ctx
   },
+  // 2026-10-26: iOS can leave resume() pending forever on an "interrupted" ctx — every await on it
+  // is raced against a timeout so unlock()/verifyAlive() always settle (a hang here used to strand
+  // the orb rub silent until reboot: verifyAlive never reached its liveness check → no rebuild).
+  _resumeWithTimeout(ctx, ms = 600) {
+    let p;
+    try { p = Promise.resolve(ctx.resume()).catch(() => {}); } catch { p = Promise.resolve(); }
+    return Promise.race([p, new Promise((r) => setTimeout(r, ms))]);
+  },
+  _rebuildListeners: [],
+  onRebuild(cb) { this._rebuildListeners.push(cb); },
   async unlock() {
     const ctx = this.ensureContext();
     if (!ctx) return;
-    if (ctx.state !== "running") {
-      try {
-        await ctx.resume();
-      } catch {
-        // ignore
-      }
-    }
+    if (ctx.state !== "running") await this._resumeWithTimeout(ctx);
+    if (ctx !== this.ctx) return; // rebuilt meanwhile
     this.unlocked = ctx.state === "running";
     if (this.unlocked) this._everRan = true;
   },
@@ -4475,9 +4484,10 @@ const audioEngine = {
     const ctx = this.ctx;
     if (!ctx || !this._everRan) return true;
     if (ctx.state !== "running") {
-      try { await ctx.resume(); } catch { /* ignore */ }
+      await this._resumeWithTimeout(ctx);
       if (ctx.state !== "running") {
-        try { await ctx.suspend(); await ctx.resume(); } catch { /* ignore */ }
+        try { await Promise.race([ctx.suspend(), new Promise((r) => setTimeout(r, 300))]); } catch { /* ignore */ }
+        await this._resumeWithTimeout(ctx);
       }
     }
     const t0 = ctx.currentTime;
@@ -4512,8 +4522,16 @@ const audioEngine = {
     _voChannels.clear();
     this._needsRebuild = false;
     const ctx = this.ensureContext();
-    try { ctx?.resume().then(() => { this.unlocked = ctx.state === "running"; }).catch(() => {}); } catch { /* ignore */ }
     try { old?.close(); } catch { /* ignore */ }
+    for (const cb of this._rebuildListeners) { try { cb(ctx); } catch { /* ignore */ } }
+    // Not one-shot: if the fresh ctx still won't run (iOS session not back yet), re-arm so the NEXT
+    // gesture rebuilds again instead of leaving Web Audio dead until a reboot.
+    this._resumeWithTimeout(ctx).then(() => {
+      if (ctx !== this.ctx) return;
+      this.unlocked = ctx.state === "running";
+      if (this.unlocked) this._everRan = true;
+      else if (isIOSNative) this._needsRebuild = true;
+    });
     console.info("[audio] ctx rebuilt in gesture");
   },
   async loadSound(name, url) {
@@ -5453,13 +5471,20 @@ function addListeners() {
   document.addEventListener("touchstart", primeMediaOnGesture, { once: true, passive: true });
   document.addEventListener("keydown", primeMediaOnGesture, { once: true });
   // 2026-10-26: after an app switch, re-check the ctx is really producing sound (see verifyAlive).
-  let verifyAudioOnNextGesture = false;
+  // Runs in the CAPTURE phase so a rebuild lands before the target's own handler (the orb rub's
+  // pointerdown would otherwise start its drone on the dead ctx), and keeps checking on EVERY gesture
+  // while audio is unhealthy — one-shot recovery used to leave the rub silent until a reboot.
+  // touchend/click are included: some WebKit builds only honour those as an audio-unlock gesture.
+  let lastGestureVerifyAt = 0;
   const resumeAudioOnGesture = () => {
     if (isIOSNative && !audioEngine.ctx) return;
     if (audioEngine._needsRebuild) audioEngine.rebuildContext(); // must stay synchronous in the gesture
-    else audioEngine.resume();
-    if (verifyAudioOnNextGesture) {
-      verifyAudioOnNextGesture = false;
+    else if (audioEngine.ctx?.state !== "running") audioEngine.resume();
+    const unhealthy = audioEngine._verifyOnGesture || (audioEngine._everRan && !audioEngine.unlocked);
+    const now = performance.now();
+    if (unhealthy && now - lastGestureVerifyAt > 500) {
+      lastGestureVerifyAt = now;
+      audioEngine._verifyOnGesture = false;
       setTimeout(() => audioEngine.verifyAlive(), 200);
     }
     try {
@@ -5468,34 +5493,11 @@ function addListeners() {
       // ignore
     }
   };
-  document.addEventListener("pointerdown", resumeAudioOnGesture, { passive: true });
-  document.addEventListener("touchstart", resumeAudioOnGesture, { passive: true });
-  document.addEventListener("keydown", resumeAudioOnGesture);
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-      if (audioEngine?.ctx?.state === "suspended") {
-        audioEngine.ctx.resume().catch(() => {});
-      }
-      audioEngine.resume();
-      resumeBackgroundMusic();
-      try {
-        if ("speechSynthesis" in window) window.speechSynthesis.resume();
-      } catch {
-        // ignore
-      }
-      // iOS restores the audio session a beat after foreground — check once it's back, and again
-      // on the first tap (the tap can also rebuild a dead ctx, which only works inside a gesture).
-      verifyAudioOnNextGesture = true;
-      setTimeout(() => audioEngine.verifyAlive(), 400);
-    } else {
-      saveBackgroundMusicState();
-      audioEngine.stopAllLoops();
-    }
-  });
-  window.addEventListener("focus", () => {
-    if (audioEngine?.ctx?.state === "suspended") {
-      audioEngine.ctx.resume().catch(() => {});
-    }
+  for (const ev of ["pointerdown", "touchstart", "touchend", "click"]) {
+    document.addEventListener(ev, resumeAudioOnGesture, { capture: true, passive: true });
+  }
+  document.addEventListener("keydown", resumeAudioOnGesture, { capture: true });
+  const onAudioForeground = (withVerify) => {
     audioEngine.resume();
     resumeBackgroundMusic();
     try {
@@ -5503,7 +5505,24 @@ function addListeners() {
     } catch {
       // ignore
     }
+    if (!withVerify) return;
+    // iOS restores the audio session a beat after foreground — check once it's back, and again
+    // on the next taps (a tap can also rebuild a dead ctx, which only works inside a gesture).
+    audioEngine._verifyOnGesture = true;
+    setTimeout(() => audioEngine.verifyAlive(), 400);
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      onAudioForeground(true);
+    } else {
+      saveBackgroundMusicState();
+      audioEngine.stopAllLoops();
+      cancelOrbRub(); // the reality-lock <audio> (if any) deliberately keeps playing
+    }
   });
+  // focus also fires after interruptions that never hide the page (Control Center, Siri, call
+  // banner) — verify there too, or a frozen-clock ctx goes unnoticed.
+  window.addEventListener("focus", () => onAudioForeground(true));
 
   questionInput.addEventListener("input", () => {
     setIntentState();
@@ -5520,6 +5539,13 @@ function addListeners() {
 
   const onOrbTap = (event) => {
     if (event.cancelable) event.preventDefault();
+    if (orbRealityLock.isActive()) {
+      // Tap while reality-locked = come back. Doesn't count toward the reality-shift taps.
+      orbRealityLock.stoppedByTapAt = performance.now();
+      orbRealityLock.stop();
+      triggerHapticImpact(hapticImpactStyle.Medium);
+      return;
+    }
     audioEngine.unlock();
     const now = performance.now();
     // Keep only a tiny dedupe window so rapid intentional taps still sound on iOS.
@@ -6019,6 +6045,8 @@ function addListeners() {
 
   openVault.addEventListener("click", () => {
     setSettingsOpen(false);
+    cancelOrbRub();
+    orbRealityLock.stop();
     vault.hidden = false;
     renderVault();
   });
@@ -6209,6 +6237,8 @@ setNativeTextInteraction.current = false;
 
 function openGalaxyView() {
   setNativeTextInteraction(false); // no magnifier loupe over the game
+  cancelOrbRub();
+  orbRealityLock.stop(); // leaving the Oracle screen ends the reality lock
   void gameCenter.signIn(); // first Stroids open: Game Center "Welcome back" banner (or sign-in sheet once)
   setSettingsOpen(false);
   vault.hidden = true;
@@ -7251,22 +7281,28 @@ function applyTheme() {
 // 2026-07-05: plain presenter — pass custom text (e.g. the contact form's "Message sent.", whose
 // argument used to be silently ignored) or nothing for the default reality-shift line. The
 // Level-Select cheat unlock is decided in triggerChaosTheme; jackpot swaps in its sting.
-function showChaosToast(message = null, { jackpot = false } = {}) {
+function showChaosToast(message = null, { jackpot = false, silent = false, durationMs = 1900 } = {}) {
   if (!chaosToast) return;
   chaosToast.textContent = message || "✨ Oracle changed realities.";
   const intensity = clamp(1 + state.chaosShiftCount * 0.12, 1, 2.2);
   chaosToast.style.setProperty("--chaos-intensity", intensity.toFixed(2));
-  if (jackpot && typeof window.playGameSfx === "function") window.playGameSfx("slot_jackpot", 0.95);
+  if (silent) { /* hint toasts (orb lock) */ }
+  else if (jackpot && typeof window.playGameSfx === "function") window.playGameSfx("slot_jackpot", 0.95);
   else playChaosShiftSound();
   chaosToast.hidden = false;
+  chaosToast.style.animationDuration = `${durationMs}ms`; // the fade keyframes stretch with the hold
   chaosToast.classList.remove("show");
   void chaosToast.offsetWidth;
   chaosToast.classList.add("show");
   clearTimeout(chaosToastTimeout);
-  chaosToastTimeout = setTimeout(() => {
-    chaosToast.classList.remove("show");
-    chaosToast.hidden = true;
-  }, 1900);
+  chaosToastTimeout = setTimeout(hideChaosToast, durationMs);
+}
+
+function hideChaosToast() {
+  if (!chaosToast) return;
+  clearTimeout(chaosToastTimeout);
+  chaosToast.classList.remove("show");
+  chaosToast.hidden = true;
 }
 
 function playChaosShiftSound() {
@@ -7333,11 +7369,13 @@ let orbRubPulseHz = ORB_RUB_PULSE_EDGE;
 // engine's masterGain so it respects master volume / whisper.
 const orbRubDrone = {
   nodes: null,
-  start() {
-    if (this.nodes) return;
+  start({ instant = false } = {}) {
+    // Stale nodes from a ctx that was rebuilt (or a hold the app switch never released) → drop them.
+    if (this.nodes && this.nodes.ctx === audioEngine.ctx) return;
+    this.nodes = null;
     const ctx = audioEngine.ensureContext?.();
     if (!ctx || !audioEngine.masterGain) return;
-    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    if (ctx.state !== "running") audioEngine.resume(); // "interrupted" too, not just "suspended"
     const now = ctx.currentTime;
 
     const out = ctx.createGain();
@@ -7385,7 +7423,7 @@ const orbRubDrone = {
     osc3Gain.connect(trem);
 
     const target = state.whisper ? 0.24 : 0.48;
-    rubRamp(out.gain, ctx, target, 0.28); // tracked, so a quick release fades from the real level
+    rubRamp(out.gain, ctx, target, instant ? 0.02 : 0.28); // tracked, so a quick release fades from the real level
 
     [osc1, osc2, osc3, lfo].forEach((o) => o.start(now));
     this.nodes = { ctx, out, osc1, osc2, osc3, lfo };
@@ -7572,6 +7610,15 @@ const orbRub2Looper = {
   },
 };
 
+// A rebuilt AudioContext orphans every node above — forget them so the next hold builds fresh ones.
+audioEngine.onRebuild(() => {
+  orbRubDrone.nodes = null;
+  clearInterval(orbRub2Looper.timer);
+  clearTimeout(orbRub2Looper.stopTimer);
+  Object.assign(orbRub2Looper, { ctx: null, master: null, grains: [], nextAt: 0, timer: null, stopTimer: null, holding: false });
+  orbRub2Active = false;
+});
+
 let orbRub2Active = false;
 let orbRub2Pending = false; // buffer still decoding / ctx not running yet — fade in when ready
 function startOrbRub2Loop() {
@@ -7582,8 +7629,13 @@ function startOrbRub2Loop() {
   // the rub is still held. Never fall back to an HTML <audio> element (can't fade on iOS).
   if (orbRub2Pending) return;
   orbRub2Pending = true;
-  Promise.resolve(audioEngine.unlock?.())
-    .then(() => audioEngine.loadSound?.("orb_rub2", GAME_SFX.orb_rub2))
+  // Raced against a timeout: decode on a dead ctx can stay pending, and a stuck flag here used to
+  // block the texture for the rest of the session.
+  Promise.race([
+    Promise.resolve(audioEngine.unlock?.())
+      .then(() => audioEngine.loadSound?.("orb_rub2", GAME_SFX.orb_rub2)),
+    new Promise((r) => setTimeout(r, 2500)),
+  ])
     .catch(() => {})
     .finally(() => {
       orbRub2Pending = false;
@@ -7599,6 +7651,7 @@ function stopOrbRub2Loop() {
 // Start the drone + the synced hard-pulse haptic loop (both idempotent).
 function beginRubFeedback() {
   if (!orbRubbing) return; // 2026-07-01: never start rub audio unless a hold is genuinely in progress
+  if (orbRealityLock.lockedThisHold) return; // the rendered loop has taken over for this hold
   orbRubDrone.start();
   startOrbRub2Loop();
   if (!orbRubHapticTimer) scheduleRubHaptic();
@@ -7630,11 +7683,13 @@ function spawnRubMark(x, y) {
 
 function onOrbRubStart(event) {
   if (state.isRevealing || !orbRub) return;
+  if (performance.now() - orbRealityLock.stoppedByTapAt < 80) return; // that tap just ended the lock
   const p = orbRubPoint(event);
   orbRubbing = true;
   orbRubLastX = p.x;
   orbRubLastY = p.y;
   orbRubTravel = 0;
+  orbRealityLock.beginHold(p.x, p.y);
   // 2026-06-15: each rub gets a fresh random hue + linger time. The glow + trail marks read
   // these CSS vars (hue-rotates the base cyan/purple gradient; sets the mark fade duration),
   // so every rub feels different.
@@ -7661,6 +7716,8 @@ function onOrbRubMove(event) {
   if (event.cancelable) event.preventDefault();
   const p = orbRubPoint(event);
   placeOrbRubGlow(p.x, p.y);
+  orbRealityLock.trackMove(p.x, p.y);
+  if (orbRealityLock.lockedThisHold) return; // tempo is frozen into the loop now
   updateOrbRubPulse(p.centerRatio); // faster pulse toward the center
   const dist = Math.hypot(p.x - orbRubLastX, p.y - orbRubLastY);
   orbRubLastX = p.x;
@@ -7683,9 +7740,206 @@ function onOrbRubEnd(event) {
   orb.classList.remove("rubbing");
   clearTimeout(orbRubDroneTimer);
   stopRubFeedback();
+  orbRealityLock.endHold();
   if (event?.pointerId !== undefined && orb.releasePointerCapture) {
     try { orb.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
   }
+}
+
+// Hard-stop a hold in progress (app hidden, game opened, vault opened) — no pointerup will come.
+function cancelOrbRub() {
+  if (orbRubbing) onOrbRubEnd();
+  else { orbRealityLock.endHold(); stopRubFeedback(); }
+}
+
+// === Orb "leave reality" lock (2026-10-26 playtest) ===========================
+// Hold still on the orb for 10s → hint "to leave reality keep holding for 3 seconds"; 3 more still
+// seconds → the drone at the held tempo is rendered (OfflineAudioContext) into a seamless loop and
+// handed to a plain <audio loop> element. HTML audio (not Web Audio) is what keeps playing with the
+// app backgrounded (UIBackgroundModes audio + .playback session). Ends on the next orb tap or when
+// the player leaves the Oracle screen. Element volume is read-only on iOS, so levels are baked in.
+const ORB_LOCK_HINT_MS = 10000;
+const ORB_LOCK_HOLD_MS = 3000;
+const ORB_LOCK_STILL_PX = 14;
+const orbRealityLock = {
+  el: null,
+  url: null,
+  active: false,
+  rendering: false,
+  lockedThisHold: false,
+  hinted: false,
+  stillSince: 0,
+  anchorX: 0,
+  anchorY: 0,
+  timer: null,
+  stoppedByTapAt: -1e9,
+  isActive() { return this.active || this.rendering; },
+  beginHold(x, y) {
+    this.lockedThisHold = false;
+    this.resetStill(x, y);
+    clearInterval(this.timer);
+    this.timer = setInterval(() => this.tick(), 150);
+  },
+  resetStill(x, y) {
+    this.anchorX = x;
+    this.anchorY = y;
+    this.stillSince = performance.now();
+    if (this.hinted) { this.hinted = false; hideChaosToast(); }
+  },
+  trackMove(x, y) {
+    if (this.lockedThisHold) return;
+    if (Math.hypot(x - this.anchorX, y - this.anchorY) > ORB_LOCK_STILL_PX) this.resetStill(x, y);
+  },
+  endHold() {
+    clearInterval(this.timer);
+    this.timer = null;
+    if (this.hinted && !this.lockedThisHold) hideChaosToast();
+    this.hinted = false;
+    this.lockedThisHold = false;
+  },
+  tick() {
+    if (!orbRubbing || this.lockedThisHold || this.isActive()) return;
+    const still = performance.now() - this.stillSince;
+    if (!this.hinted && still >= ORB_LOCK_HINT_MS) {
+      this.hinted = true;
+      showChaosToast("To leave reality, keep holding for 3 seconds", { silent: true, durationMs: ORB_LOCK_HOLD_MS + 600 });
+      triggerHapticImpact(hapticImpactStyle.Light);
+    } else if (this.hinted && still >= ORB_LOCK_HINT_MS + ORB_LOCK_HOLD_MS) {
+      this.lock();
+    }
+  },
+  async lock() {
+    this.lockedThisHold = true;
+    this.rendering = true;
+    const hz = orbRubPulseHz;
+    triggerHapticImpact(hapticImpactStyle.Heavy);
+    let url = null;
+    try { url = await renderOrbLockLoop(hz); } catch (err) { console.warn("[orb-lock] render failed", err); }
+    this.rendering = false;
+    if (!url) { this.lockedThisHold = false; return; }
+    const el = this.el || (this.el = new Audio());
+    el.loop = true;
+    el.preload = "auto";
+    el.setAttribute("playsinline", "");
+    el.src = url;
+    if (this.url) URL.revokeObjectURL(this.url);
+    this.url = url;
+    this.active = true;
+    try { await el.play(); } catch (err) { console.warn("[orb-lock] play failed", err); }
+    stopRubFeedback(); // the live drone fades out under the loop
+    orb.classList.add("reality-locked");
+    showChaosToast("✨ You left reality. Tap the orb to return.", { silent: true, durationMs: 2600 });
+  },
+  stop() {
+    this.rendering = false;
+    if (!this.active) return;
+    this.active = false;
+    orb?.classList.remove("reality-locked");
+    const el = this.el;
+    if (el) { try { el.pause(); el.currentTime = 0; } catch { /* ignore */ } }
+    // Soften the cut: a short live-drone tail at the locked tempo when Web Audio is available.
+    if (audioEngine.ctx?.state === "running") {
+      orbRubDrone.start({ instant: true });
+      orbRubDrone.stop();
+    }
+  },
+};
+
+// Render ~4s of drone + rub texture that loops seamlessly at `hz`. The loop length is a whole number
+// of LFO cycles and every oscillator is snapped to whole cycles over it, so the drone is exactly
+// periodic; the (aperiodic) grain texture is crossfaded across the seam.
+async function renderOrbLockLoop(hz) {
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!OAC) return null;
+  const rate = 44100;
+  const cycles = Math.max(1, Math.round(4 * hz));
+  const L = cycles / hz;
+  const total = 3 * L;
+  const ctx = new OAC(1, Math.ceil(total * rate), rate);
+  const snap = (f) => Math.max(1, Math.round(f * L)) / L;
+  const out = ctx.createGain();
+  out.gain.value = state.whisper ? 0.24 : 0.48;
+  out.connect(ctx.destination);
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 480;
+  filter.Q.value = 7;
+  filter.connect(out);
+  const trem = ctx.createGain();
+  trem.gain.value = 0.55;
+  trem.connect(filter);
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = hz;
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 0.42;
+  lfo.connect(lfoGain);
+  lfoGain.connect(trem.gain);
+  const mk = (type, f, gain = 1) => {
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.value = snap(f);
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    o.connect(g);
+    g.connect(trem);
+    return o;
+  };
+  const oscs = [mk("sine", 60), mk("sine", 90 * Math.pow(2, -7 / 1200)), mk("triangle", 121, 0.16), lfo];
+  oscs.forEach((o) => o.start(0));
+  // Grain texture, same envelope as orbRub2Looper (buffer is shared; AudioBuffers aren't ctx-bound).
+  const buffer = audioEngine.buffers?.get?.("orb_rub2");
+  if (buffer) {
+    const master = ctx.createGain();
+    master.gain.value = orbRub2TargetVol();
+    master.connect(ctx.destination);
+    const bodyEnd = Math.min(ORB_RUB2_BODY_END, buffer.duration - 0.05);
+    const len = bodyEnd - ORB_RUB2_BODY_START;
+    const X = ORB_RUB2_XFADE;
+    for (let at = 0; at < total; at += len - X) {
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, at);
+      for (let i = 1; i <= 8; i += 1) g.gain.linearRampToValueAtTime(Math.sin((i / 8) * Math.PI / 2), at + (i / 8) * X);
+      const outAt = at + len - X;
+      g.gain.setValueAtTime(1, outAt);
+      for (let i = 1; i <= 8; i += 1) g.gain.linearRampToValueAtTime(Math.cos((i / 8) * Math.PI / 2), outAt + (i / 8) * X);
+      src.connect(g);
+      g.connect(master);
+      src.start(at, ORB_RUB2_BODY_START, len);
+    }
+  }
+  const rendered = await ctx.startRendering();
+  const r = rendered.getChannelData(0);
+  // Loop = r[L..2L), with its head crossfaded against r[2L..2L+X) so the wrap is continuous.
+  const n = Math.round(L * rate);
+  const xf = Math.min(Math.round(0.6 * rate), n >> 1);
+  const loop = new Float32Array(n);
+  for (let i = 0; i < n; i += 1) {
+    const a = r[n + i];
+    if (i < xf) { const w = i / xf; loop[i] = a * w + r[2 * n + i] * (1 - w); } else loop[i] = a;
+  }
+  // Bake master + user SFX level (HTML volume is ignored on iOS) and keep headroom.
+  let peak = 0;
+  for (let i = 0; i < n; i += 1) peak = Math.max(peak, Math.abs(loop[i]));
+  const gain = Math.min(0.75 * userSfxGain(), peak > 0 ? 0.92 / peak : 1);
+  return URL.createObjectURL(encodeWav16(loop, rate, gain));
+}
+
+function encodeWav16(samples, rate, gain = 1) {
+  const n = samples.length;
+  const buf = new ArrayBuffer(44 + n * 2);
+  const v = new DataView(buf);
+  const str = (o, t) => { for (let i = 0; i < t.length; i += 1) v.setUint8(o + i, t.charCodeAt(i)); };
+  str(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); str(8, "WAVE");
+  str(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, "data"); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i += 1) {
+    const x = Math.max(-1, Math.min(1, samples[i] * gain));
+    v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+  }
+  return new Blob([buf], { type: "audio/wav" });
 }
 
 function spawnRubSparkle(clientX, clientY) {
@@ -9199,53 +9453,243 @@ function initGalaxyCanvas() {
   plasmaModeBtn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
+    if (plasmaCage.placed) detonatePlacedNet(performance.now());
+  });
+  // 2026-10-26 (playtest): the pill did three jobs (charge readout, mode switch, DETONATE) from the
+  // bottom-right thumb zone. Split: this compact charge chip lives with the weapons at the top
+  // (conic charge ring + A/M badge; tap = toggle mode), and #plasmaModeBtn above is now DETONATE
+  // only — a big bottom-centre button that exists only while a manual net is placed. The canvas
+  // recharge ring (drawPlasmaCooldown / pixi drawPlasmaRecharge) is retired: one source of truth.
+  const plasmaChargeChip = document.createElement("button");
+  plasmaChargeChip.type = "button";
+  plasmaChargeChip.id = "plasmaChargeChip";
+  plasmaChargeChip.className = "plasmaChargeChip";
+  plasmaChargeChip.setAttribute("aria-label", "Plasma net mode: auto");
+  plasmaChargeChip.innerHTML = '<span class="pcc__ring" aria-hidden="true"></span><span class="pcc__core" aria-hidden="true"></span><span class="pcc__mode" aria-hidden="true">A</span>';
+  {
+    const inv = document.querySelector("#arcadeHud .hudInventoryGroup");
+    const before = document.getElementById("hudQuadBadge");
+    if (inv) inv.insertBefore(plasmaChargeChip, before && before.parentNode === inv ? before : null);
+    else document.body.appendChild(plasmaChargeChip);
+  }
+  plasmaChargeChip.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (plasmaCage.placed) { detonatePlacedNet(performance.now()); return; }
     plasmaCage.mode = plasmaCage.mode === "manual" ? "auto" : "manual";
     playGameSfx("blip1", 0.6, { rate: plasmaCage.mode === "manual" ? 1.2 : 0.9 });
+    triggerGameplayHapticImpact(hapticImpactStyle.Light);
     updatePlasmaModeBtn();
   });
-  // ── 2026-10-26: Cockpit HUD (Dev Mode trial of the Lab's "D · Hybrid", tools/reactbits-lab) ──
-  // Reskins + MOVES the real HUD elements (no duplicates, so every listener/updater keeps working):
-  // weapons, POLYSLOTS and the NET pill go into a bottom dashboard; Lives joins the Modes panel and
-  // the multiplier gets its own panel up top. Arcade levels only — Training/Practice keep their tuned
-  // layout. Synced every frame from updatePlasmaModeBtn (cheap: bails unless the state flips).
+  // ── 2026-10-26: Cockpit HUD — layout-driven (Dev Mode trial). The layout comes from cockpitLayout.js
+  // (window.POLY_COCKPIT_LAYOUT), written by the Lab's Cockpit Designer (tools/reactbits-lab), so the
+  // phone shows exactly what was designed there. MOVES the real HUD elements into #cockpitLayer (no
+  // duplicates, so every listener/updater keeps working) and positions each by anchor + offset; the
+  // decorative panels (top plates, dashboard) are built from the layout too. Arcade levels only —
+  // Training/Practice keep their tuned layout. Synced every frame from updatePlasmaModeBtn (cheap:
+  // bails unless the state flips).
+  const COCKPIT_PARTS = {
+    pause: "arcadeBack", devwin: "hudDevWin", lives: "hudLives", run: "hudGameTimer", level: "hudLevel",
+    score: "hudScore", mult: "hudMultiplier", bomb: "hudBombBtn", freeze: "hudFreezeBtn",
+    missile: "hudMissileBtn", slots: "hudSlotBtn", net: "plasmaChargeChip", quad: "hudQuadBadge",
+    pulse: "hudPulseBadge", comm: "commanderHUD",
+  };
   let cockpitApplied = false;
-  let cockpitDash = null;
-  let cockpitMultPanel = null;
+  let cockpitLayer = null;
+  let cockpitStyleEl = null;
   const cockpitMoved = []; // [el, originalParent, originalNextSibling]
   function cockpitMove(el, dest) {
     if (!el || !dest) return;
     cockpitMoved.push([el, el.parentNode, el.nextSibling]);
     dest.appendChild(el);
   }
+  function cockpitRgba(hex, a = 1) {
+    const h = String(hex || "#000000").replace("#", "");
+    const n = parseInt(h.length === 3 ? h.replace(/./g, "$&$&") : h.padEnd(6, "0").slice(0, 6), 16) || 0;
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+  }
+  function cockpitShapePath(p, inset = 0) {
+    const i = inset ? `${inset}px` : "0px";
+    if (p.shape === "chamfer") {
+      const c = `${Math.max(0, (p.cut ?? 10) - inset * 0.4)}px`;
+      return `polygon(calc(${i} + ${c}) ${i}, calc(100% - ${i} - ${c}) ${i}, calc(100% - ${i}) calc(${i} + ${c}), calc(100% - ${i}) calc(100% - ${i} - ${c}), calc(100% - ${i} - ${c}) calc(100% - ${i}), calc(${i} + ${c}) calc(100% - ${i}), ${i} calc(100% - ${i} - ${c}), ${i} calc(${i} + ${c}))`;
+    }
+    if (p.shape === "trapezoid") {
+      const t = p.inset ?? 6; // % — positive narrows the top edge, negative the bottom edge
+      const top = Math.max(0, t), bot = Math.max(0, -t);
+      return `polygon(calc(${top}% + ${i}) ${i}, calc(${100 - top}% - ${i}) ${i}, calc(${100 - bot}% - ${i}) calc(100% - ${i}), calc(${bot}% + ${i}) calc(100% - ${i}))`;
+    }
+    return "none";
+  }
+  // Anchor = [t|b][l|c|r|s]; x/y = px from that edge (c: centre offset, s: stretched with x inset).
+  function cockpitPlaceCss(p, { box = true, fixed = false } = {}) {
+    const a = /^[tb][lcrs]$/.test(p.anchor) ? p.anchor : "tl";
+    const v = a[0], hz = a[1];
+    const x = Number(p.x) || 0, y = Number(p.y) || 0;
+    const edge = v === "t" ? "top" : "bottom";
+    const other = v === "t" ? "bottom" : "top";
+    const safe = v === "t" ? "var(--sat)" : "var(--sab)";
+    const css = [`position:${fixed ? "fixed" : "absolute"}`, "margin:0"];
+    if (hz === "l") css.push(`left:${x}px`, "right:auto");
+    else if (hz === "r") css.push(`right:${x}px`, "left:auto");
+    else if (hz === "s") css.push(`left:${x}px`, `right:${x}px`, "width:auto");
+    else css.push(`left:calc(50% + ${x}px)`, "right:auto");
+    css.push(`${edge}:${p.bleed ? `${y}px` : `calc(${safe} + ${y}px)`}`, `${other}:auto`);
+    if (box) {
+      if (hz !== "s" && p.w) css.push(`width:${p.w}px`);
+      if (p.h) css.push(`height:${p.bleed ? `calc(${p.h}px + ${safe})` : `${p.h}px`}`);
+      if (p.w || p.h) css.push("min-width:0", "min-height:0", "max-width:none", "box-sizing:border-box");
+    }
+    const out = css.map((d) => `${d} !important`);
+    out.push(`translate:${hz === "c" ? "-50%" : "0"} 0`);
+    out.push(`scale:${Number(p.scale) || 1}`);
+    out.push(`transform-origin:${hz === "l" ? "left" : hz === "r" ? "right" : "center"} ${edge}`);
+    if (p.z != null) out.push(`z-index:${p.z}`);
+    return out;
+  }
+  function cockpitTypeCss(p) {
+    const css = [];
+    if (p.color) css.push(`color:${p.color}`);
+    if (p.font) css.push(`font-size:${p.font}px`);
+    if (p.weight) css.push(`font-weight:${p.weight}`);
+    if (p.family) css.push(`font-family:${p.family === "mono" ? "ui-monospace, SFMono-Regular, Menlo, monospace" : "-apple-system, system-ui, sans-serif"}`);
+    if (p.spacing != null) css.push(`letter-spacing:${p.spacing}em`);
+    if (p.textGlow) css.push(`text-shadow:0 0 ${p.textGlow}px ${cockpitRgba(p.color || "#7be2ff", 0.6)}`);
+    return css;
+  }
+  function cockpitSkinCss(p) {
+    const fill = `linear-gradient(180deg, ${cockpitRgba(p.fill, p.alpha ?? 1)}, ${cockpitRgba(p.fill2 || p.fill, p.alpha ?? 1)})`;
+    const sw = Number(p.strokeW) || 0;
+    const stroke = cockpitRgba(p.stroke, p.strokeAlpha ?? 1);
+    const glow = Number(p.glow) || 0;
+    if (p.shape === "chamfer") {
+      // clip-path eats outer shadows, so a chamfered part's stroke + glow are drawn inset.
+      const shadows = [sw ? `inset 0 0 0 ${sw}px ${stroke}` : "", glow ? `inset 0 0 ${glow}px ${cockpitRgba(p.stroke, 0.55)}` : ""].filter(Boolean);
+      return [`clip-path:${cockpitShapePath(p)}`, "border:0", "border-radius:0", `background:${fill}`, `box-shadow:${shadows.join(", ") || "none"}`];
+    }
+    return ["clip-path:none", `border-radius:${p.radius ?? 10}px`, `border:${sw}px solid ${stroke}`, `background:${fill}`, `box-shadow:${glow ? `0 0 ${glow}px ${cockpitRgba(p.stroke, 0.6)}` : "none"}`];
+  }
+  function buildCockpitCss(layout) {
+    const rules = [];
+    const sel = (key) => (key === "comm" ? "body.cockpit-free #commanderHUD" : `body.cockpit-free #cockpitLayer [data-cockpit="${key}"]`);
+    for (const [key, p] of Object.entries(layout.parts || {})) {
+      if (!COCKPIT_PARTS[key] || !p) continue;
+      const s = sel(key);
+      if (p.hidden) { rules.push(`${s}{display:none !important}`); continue; }
+      const isComm = key === "comm";
+      const decl = cockpitPlaceCss(isComm ? { ...p, w: 0, h: 0 } : p, { box: !isComm, fixed: isComm });
+      if (p.skin === "text" || p.skin === "custom") {
+        decl.push(...cockpitTypeCss(p));
+        if (p.skin === "custom") decl.push(...cockpitSkinCss(p), "padding:0");
+        else decl.push("background:none", "border:0", "box-shadow:none", "padding:0");
+        decl.push("display:flex", "flex-direction:column", "align-items:center", "justify-content:center", "text-align:center", "line-height:1.1", "white-space:nowrap");
+      }
+      rules.push(`${s}{${decl.join(";")}}`);
+      if (p.label) rules.push(`${s}::before{content:${JSON.stringify(String(p.label))};display:block;font-size:max(8px, 0.5em);letter-spacing:0.2em;opacity:0.6;margin-bottom:2px}`);
+      if (p.icon) rules.push(`${s} .hudBtnIcon{width:${p.icon}px;height:${p.icon}px}`);
+      if (p.countCorner) rules.push(`${s} .hudBtnCount{position:absolute;right:5px;bottom:3px;font-size:inherit}`);
+    }
+    for (const p of layout.panels || []) {
+      const id = String(p.id || "").replace(/[^\w-]/g, "");
+      if (!id) continue;
+      const s = `body.cockpit-free #cockpitLayer [data-cockpit="panel:${id}"]`;
+      if (p.hidden) { rules.push(`${s}{display:none !important}`); continue; }
+      const decl = cockpitPlaceCss(p);
+      if (p.glow) decl.push(`filter:drop-shadow(0 0 ${p.glow}px ${cockpitRgba(p.stroke, 0.7)})`);
+      rules.push(`${s}{${decl.join(";")}}`);
+      const fill = `linear-gradient(180deg, ${cockpitRgba(p.fill, p.alpha ?? 1)}, ${cockpitRgba(p.fill2 || p.fill, p.alpha ?? 1)})`;
+      const sw = Number(p.strokeW) || 0;
+      if (p.shape === "chamfer" || p.shape === "trapezoid") {
+        // stroke = the outer clipped shape; fill = the same shape inset by the stroke width
+        rules.push(`${s}>i{clip-path:${cockpitShapePath(p)};background:${sw ? cockpitRgba(p.stroke, p.strokeAlpha ?? 1) : "transparent"}}`);
+        rules.push(`${s}>i::before{clip-path:${cockpitShapePath(p, sw)};background:${fill}}`);
+      } else {
+        rules.push(`${s}>i{border-radius:${p.radius ?? 12}px;border:${sw}px solid ${cockpitRgba(p.stroke, p.strokeAlpha ?? 1)};background:${fill}}`);
+      }
+    }
+    return rules.join("\n");
+  }
+  function applyCockpitLayout(layout = window.POLY_COCKPIT_LAYOUT) {
+    if (!layout) return;
+    if (!cockpitStyleEl) {
+      cockpitStyleEl = document.createElement("style");
+      cockpitStyleEl.id = "cockpitLayoutStyle";
+      document.head.appendChild(cockpitStyleEl);
+    }
+    cockpitStyleEl.textContent = buildCockpitCss(layout);
+    if (!cockpitLayer) return;
+    for (const old of cockpitLayer.querySelectorAll(".cockpitPanel")) old.remove();
+    for (const p of layout.panels || []) {
+      const id = String(p.id || "").replace(/[^\w-]/g, "");
+      if (!id) continue;
+      const panel = document.createElement("div");
+      panel.className = "cockpitPanel";
+      panel.dataset.cockpit = `panel:${id}`;
+      panel.innerHTML = "<i></i>";
+      cockpitLayer.insertBefore(panel, cockpitLayer.firstChild);
+    }
+  }
   function syncCockpitHud() {
-    const on = cockpitHudPref && engineMode === "arcade" && arcadeActive && !stuntActive && !practiceEndless;
+    const on = !!window.POLY_COCKPIT_LAYOUT && cockpitHudPref && engineMode === "arcade" && arcadeActive && !stuntActive && !practiceEndless;
     if (on === cockpitApplied) return;
     cockpitApplied = on;
-    document.body.classList.toggle("hud-cockpit", on);
+    document.body.classList.toggle("cockpit-free", on);
     if (on) {
-      if (!cockpitDash) {
-        cockpitDash = document.createElement("div");
-        cockpitDash.id = "cockpitDash";
-        cockpitDash.className = "cockpitDash";
-        cockpitDash.innerHTML = '<div class="cockpitBays"></div>';
-        galaxyView.appendChild(cockpitDash);
-        cockpitMultPanel = document.createElement("div");
-        cockpitMultPanel.className = "cockpitMult";
+      if (!cockpitLayer) {
+        cockpitLayer = document.createElement("div");
+        cockpitLayer.id = "cockpitLayer";
+        galaxyView.appendChild(cockpitLayer);
       }
-      const bays = cockpitDash.firstChild;
-      for (const el of [hudBombBtn, hudFreezeBtn, hudMissileBtn, hudSlotBtn, plasmaModeBtn]) cockpitMove(el, bays);
-      cockpitMove(hudLives, document.querySelector("#arcadeHud .hudLeftGroup"));
-      arcadeHud?.appendChild(cockpitMultPanel);
-      cockpitMove(hudMultiplier, cockpitMultPanel);
+      applyCockpitLayout();
+      for (const [key, id] of Object.entries(COCKPIT_PARTS)) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        el.dataset.cockpit = key;
+        if (key !== "comm") cockpitMove(el, cockpitLayer);
+      }
     } else {
       while (cockpitMoved.length) {
         const [el, parent, next] = cockpitMoved.pop();
         parent?.insertBefore(el, next && next.parentNode === parent ? next : null);
       }
-      cockpitMultPanel?.remove();
     }
     computePlayfield();
+  }
+  // The cockpit owns whatever strips its parts/panels cover: anything centred in the top half pushes
+  // the playfield's top edge down, the rest push the bottom edge up (the comm box overlays play).
+  function cockpitPlayfieldEdges(viewRect) {
+    let top = 0, bottom = 0;
+    for (const el of cockpitLayer?.children || []) {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      if ((r.top + r.bottom) / 2 - viewRect.top < viewRect.height / 2) top = Math.max(top, r.bottom - viewRect.top);
+      else bottom = Math.max(bottom, viewRect.bottom - r.top);
+    }
+    return { top: Math.ceil(top), bottom: Math.ceil(bottom) };
+  }
+
+  // Desktop Lab bridge (tools/reactbits-lab "Cockpit Designer" iframes the game with ?cockpitLab=1).
+  if (COCKPIT_LAB) {
+    window.__cockpitLab = {
+      setLayout(layout) {
+        window.POLY_COCKPIT_LAYOUT = layout;
+        applyCockpitLayout(layout);
+        if (cockpitApplied) computePlayfield();
+      },
+      setSafeInsets(top, bottom) {
+        document.documentElement.style.setProperty("--sat", `${top}px`);
+        document.documentElement.style.setProperty("--sab", `${bottom}px`);
+        if (cockpitApplied) computePlayfield();
+      },
+      setPreviewAll(on) { document.body.classList.toggle("cockpit-preview", !!on); computePlayfield(); },
+      start(level = 1) {
+        if (galaxyView.hidden) openGalaxyView();
+        startArcadeAtLevel(level);
+      },
+      isActive: () => cockpitApplied,
+      playfield: () => ({ ...playfield }),
+    };
+    window.parent?.postMessage({ type: "cockpitLab:ready" }, "*");
   }
 
   let _plasmaModeBtnSig = "";
@@ -9260,10 +9704,10 @@ function initGalaxyCanvas() {
       if (_plasmaModeBtnSig !== "hide") {
         _plasmaModeBtnSig = "hide";
         plasmaModeBtn.style.display = "none";
+        plasmaChargeChip.style.display = "none";
       }
       return;
     }
-    plasmaModeBtn.style.display = "inline-flex";
     const manual = plasmaCage.mode === "manual";
     const placed = !!plasmaCage.placed;
     const charging = !placed && !plasmaCage.active && plasmaCage.cooldownUntil > now;
@@ -9273,54 +9717,33 @@ function initGalaxyCanvas() {
       ? 1
       : charging
         ? clamp((now - plasmaCage.cooldownStart) / cooldownTotal, 0, 1)
-        : (plasmaCage.active ? 0.22 : 0.92);
-    const fillAlpha = placed
-      ? 0.14
-      : charging
-        ? 0.24 + fill * 0.46
-        : (plasmaCage.active ? 0.16 : 0.72);
-    const coreScale = placed
-      ? 1.02
-      : charging
-        ? Math.max(0.52, 0.22 + fill * 0.86)
-        : (plasmaCage.active ? 0.14 : 1);
-    const coreOpacity = placed
-      ? 1
-      : charging
-        ? Math.max(0.45, 0.28 + fill * 0.64)
-        : (plasmaCage.active ? 0.18 : 0.98);
-    const particleOpacity = placed
-      ? 0.34
-      : charging
-        ? 0.08 + fill * 0.26
-        : (plasmaCage.active ? 0.04 : 0.24);
-    const coreLeft = placed || !charging
-      ? 86
-      : Math.max(16, Math.min(86, 16 + fill * 70));
+        : (plasmaCage.active ? 0.22 : 1);
     const sig = [state, manual ? "manual" : "auto", Math.round(fill * 100)].join("|");
-    if (sig !== _plasmaModeBtnSig) {
-      _plasmaModeBtnSig = sig;
+    if (sig === _plasmaModeBtnSig) return;
+    _plasmaModeBtnSig = sig;
+    plasmaChargeChip.style.display = "inline-flex";
+    plasmaModeBtn.style.display = placed ? "inline-flex" : "none";
+    if (placed) {
       const label = plasmaModeBtn.querySelector(".plasmaModeBtn__label");
-      if (label) label.textContent = placed ? "DETONATE" : manual ? "NET • MANUAL" : "NET • AUTO";
-      else plasmaModeBtn.textContent = placed ? "DETONATE" : manual ? "NET • MANUAL" : "NET • AUTO";
-      plasmaModeBtn.dataset.state = state;
-      plasmaModeBtn.dataset.mode = manual ? "manual" : "auto";
-      plasmaModeBtn.setAttribute(
-        "aria-label",
-        placed
-          ? "Detonate placed plasma net"
-          : manual
-            ? "Plasma net mode: manual"
-            : "Plasma net mode: auto",
-      );
+      if (label) label.textContent = "DETONATE";
+      plasmaModeBtn.dataset.state = "detonate";
+      plasmaModeBtn.dataset.mode = "manual";
+      plasmaModeBtn.setAttribute("aria-label", "Detonate placed plasma net");
+      plasmaModeBtn.style.setProperty("--plasma-fill", "100%");
+      plasmaModeBtn.style.setProperty("--plasma-fill-alpha", "0.14");
+      plasmaModeBtn.style.setProperty("--plasma-core-left", "86%");
+      plasmaModeBtn.style.setProperty("--plasma-core-scale", "1.02");
+      plasmaModeBtn.style.setProperty("--plasma-core-opacity", "1");
+      plasmaModeBtn.style.setProperty("--plasma-particle-opacity", "0.34");
     }
-    plasmaModeBtn.style.setProperty("--plasma-fill", `${(fill * 100).toFixed(1)}%`);
-    plasmaModeBtn.style.setProperty("--plasma-fill-alpha", fillAlpha.toFixed(3));
-    plasmaModeBtn.style.setProperty("--plasma-core-left", `${coreLeft.toFixed(1)}%`);
-    plasmaModeBtn.style.setProperty("--plasma-arc-rotate", `${Math.round(fill * 360)}deg`);
-    plasmaModeBtn.style.setProperty("--plasma-core-scale", coreScale.toFixed(3));
-    plasmaModeBtn.style.setProperty("--plasma-core-opacity", coreOpacity.toFixed(3));
-    plasmaModeBtn.style.setProperty("--plasma-particle-opacity", particleOpacity.toFixed(3));
+    plasmaChargeChip.dataset.state = state;
+    plasmaChargeChip.dataset.mode = manual ? "manual" : "auto";
+    plasmaChargeChip.querySelector(".pcc__mode").textContent = manual ? "M" : "A";
+    plasmaChargeChip.style.setProperty("--plasma-fill", `${(fill * 100).toFixed(1)}%`);
+    plasmaChargeChip.setAttribute(
+      "aria-label",
+      `Plasma net ${charging ? `charging ${Math.round(fill * 100)}%` : state === "ready" ? "ready" : state}, mode ${manual ? "manual" : "auto"} — tap to switch`,
+    );
   }
 
   [bgVideoA, bgVideoB].forEach((video) => {
@@ -9621,6 +10044,9 @@ function initGalaxyCanvas() {
   // cancelled if the loop is torn down mid-sequence (navigate away / new game) instead of firing
   // spawnExplosion/sfx against a dead state.
   let _winSeqTimers = [];
+  let _scorecardFinishNow = null;  // the open scorecard's "reveal everything now" (null when none)
+  let _winSeqOnComplete = null;    // YOU WIN hand-off, kept so an app switch mid-celebration can finish it
+  let _winSeqInterrupted = false;
   let engineMode = "menu"; // menu | practice | arcade
   let worldLockEnabled = false;
   let worldLockWidth = 0;
@@ -9686,6 +10112,7 @@ function initGalaxyCanvas() {
   let tutorialPaused = false;          // pause menu / app-switch
   let tutorialTimerRunning = false;    // intro: perimeter visibly counts down until timer powerup
   let tutorialTimerStartedAt = 0;
+  let _tutorialPausedAt = 0;
   // Stunt → Practice: endless arcade gameplay (no timer, no level-complete, score not submitted).
   const PRACTICE_ASTEROID_SPRITE_KEYS = ["roid01", "roid02", "roid03", "hotroid01"];
   const PRACTICE_ASTEROID_UNLOCK_MS = 25000;
@@ -11271,6 +11698,10 @@ function initGalaxyCanvas() {
     slotLever.mode = "rest"; slotLever.vel = 0;
     slotStartFrameLoop();
     if (slotMusicEl) { try { slotMusicEl.play().catch(() => {}); } catch { /* ignore */ } }
+    // 2026-10-26: reels still spinning → bring the spin loop back (pause killed it; was silent).
+    if (slotState === SLOT_STATE.SPINNING && !slotRampHandle) {
+      slotRampHandle = slotTrackLoop(audioEngine.playLoop("slot_machine-ramp-and-spin", { volume: 0.28 }));
+    }
     lvlTrace(`[slot] background resume state=${slotState}`);
   }
 
@@ -11650,12 +12081,12 @@ function initGalaxyCanvas() {
       when: () => !plasmaCage.active && plasmaCage.cooldownUntil <= performance.now() && !!tipStroidCluster(),
       target: () => null, snap: () => ({}), done: () => plasmaCage.active },
     { id: "netRecharge", line: "THE NET RECHARGES HERE. WAIT FOR IT TO FILL",
-      when: () => plasmaCage.cooldownUntil > performance.now() + 1500 && !!tipElTarget(plasmaModeBtn),
-      target: () => tipElTarget(plasmaModeBtn), snap: () => ({}), done: () => plasmaCage.cooldownUntil <= performance.now() },
+      when: () => plasmaCage.cooldownUntil > performance.now() + 1500 && !!tipElTarget(plasmaChargeChip),
+      target: () => tipElTarget(plasmaChargeChip), snap: () => ({}), done: () => plasmaCage.cooldownUntil <= performance.now() },
     { id: "netMode", anyLevel: true, line: "TAP TO SWITCH THE NET: AUTO FIRES ON RELEASE, MANUAL WAITS FOR YOU",
       when: () => plasmaCage.cooldownUntil <= performance.now() && !plasmaCage.active && !plasmaCage.placed
-        && !!tipElTarget(plasmaModeBtn),
-      target: () => tipElTarget(plasmaModeBtn), snap: () => ({ m: plasmaCage.mode }), done: (s) => plasmaCage.mode !== s.m },
+        && !!tipElTarget(plasmaChargeChip),
+      target: () => tipElTarget(plasmaChargeChip), snap: () => ({ m: plasmaCage.mode }), done: (s) => plasmaCage.mode !== s.m },
     { id: "netPlaced", anyLevel: true, line: "TAP THE NET (OR DETONATE) TO FIRE IT",
       when: () => !!plasmaCage.placed, target: () => tipPlacedNet(), snap: () => ({}), done: () => !plasmaCage.placed },
     { id: "toss", line: "HOLD A STROID, THEN SWIPE TO TOSS IT",
@@ -11809,6 +12240,9 @@ function initGalaxyCanvas() {
       restore();
       setTimeout(restore, 400);
       setTimeout(restore, 1200);
+      // Same health check as an app switch: confirm the clock runs, else rebuild on the next tap.
+      audioEngine._verifyOnGesture = true;
+      setTimeout(() => audioEngine.verifyAlive(), 1400);
     },
   });
 
@@ -11850,6 +12284,12 @@ function initGalaxyCanvas() {
     pulseCannonUntil = bump(pulseCannonUntil);
     missileReloadUntil = bump(missileReloadUntil);
     plasmaCage.cooldownUntil = bump(plasmaCage.cooldownUntil);
+    // 2026-10-26: also used by the app-switch freeze — the intro countdown and Practice cadences.
+    arcadePausedUntil = bump(arcadePausedUntil);
+    practiceStartedAt = bump(practiceStartedAt);
+    nextPracticeMineAt = bump(nextPracticeMineAt);
+    nextPracticePulseAt = bump(nextPracticePulseAt);
+    nextThemeCycleAt = bump(nextThemeCycleAt);
     if (gameTimer.running) gameTimer.startedAt = bump(gameTimer.startedAt); // RUN clock excludes slot time
     const bumpEntity = (o) => {
       if (!o) return;
@@ -13998,10 +14438,10 @@ function initGalaxyCanvas() {
     const hintHeight = hintRect ? Math.ceil(hintRect.height) : 0;
     const safe = getSafeInsets();
     const pad = 12;
-    const topPad = Math.max(hudBottom, topBarBottom) + safe.top + pad;
-    // 2026-10-26: the cockpit dashboard owns the bottom strip when it's on.
-    const dashH = cockpitApplied && cockpitDash ? cockpitDash.offsetHeight : 0;
-    const bottomPad = Math.max(hintHeight + safe.bottom + 44, dashH) + pad;
+    // 2026-10-26: the cockpit's top plates / dashboard own their strips when it's on.
+    const cockpit = cockpitApplied ? cockpitPlayfieldEdges(viewRect) : null;
+    const topPad = cockpit ? Math.max(cockpit.top, safe.top) + pad : Math.max(hudBottom, topBarBottom) + safe.top + pad;
+    const bottomPad = Math.max(hintHeight + safe.bottom + 44, cockpit ? cockpit.bottom : 0) + pad;
 
     playfield.x = pad;
     playfield.y = topPad;
@@ -14290,7 +14730,7 @@ function initGalaxyCanvas() {
   function playParticleCrackle() {
     try {
       const ctx = audioEngine.ensureContext?.() || audioEngine.ctx;
-      if (!ctx || ctx.state === "suspended") return;
+      if (!ctx || ctx.state !== "running") return;
       const buffer = audioEngine.buffers.get("particle_crackle1");
       if (!buffer) return;
       const maxOffset = Math.max(0, buffer.duration - 0.5);
@@ -16618,7 +17058,8 @@ function initGalaxyCanvas() {
   }
 
   function drawPlasmaCooldown(now) {
-    if (window.pixiRenderer) return;
+    // 2026-10-26: retired — the HUD charge chip (#plasmaChargeChip) is the recharge readout now.
+    if (!PLASMA_CANVAS_RING || window.pixiRenderer) return;
     if (!plasmaCtx || !plasmaCage || plasmaCage.active || plasmaCage.placed) return;
     const state = updatePlasmaHudState(plasmaCage, now);
     const x = sim.width - PLASMA_HUD_EDGE_OFFSET;
@@ -17585,6 +18026,7 @@ function initGalaxyCanvas() {
     function dismiss() {
       if (dismissed) return;
       dismissed = true;
+      if (_scorecardFinishNow === completeScorecardReveal) _scorecardFinishNow = null;
       scorecardIdleAt = 0;
       lvlTrace(`[lvltrans] scorecard dismiss elapsed=${(performance.now() - shownAt).toFixed(1)}ms`);
       // FIX 2026-06-09: restore music to its pre-scorecard level as gameplay resumes
@@ -17623,6 +18065,7 @@ function initGalaxyCanvas() {
     // Row-by-row tally reveal: dividers + rows appear one at a time, 200ms apart
     const revealEls = Array.from(panel.querySelectorAll(".lsr-div, .lsr-row"));
     writeLoopHandle = audioEngine.playLoop("write_on_text_loop", { volume: state.whisper ? 0.2 : 0.38 });
+    _scorecardFinishNow = completeScorecardReveal; // app switch mid-tally → finish it (see onGameHide)
     revealEls.forEach((el, i) => {
       tallyTimers.push(setTimeout(() => {
         if (dismissed) return;
@@ -17844,7 +18287,21 @@ function initGalaxyCanvas() {
 
   // Plays the ~3s game-completion celebration, then invokes onComplete() to transition to the
   // score/initials screen. Reuses spawnExplosion + cssShake + the arcade slam-text overlay.
+  // App switch mid-celebration: stopGalaxyLoop cancelled the hand-off timer — skip to the hand-off
+  // instead of stranding the player on the YOU WIN overlay with no button.
+  function finishInterruptedWinSeq() {
+    const done = _winSeqOnComplete;
+    _winSeqOnComplete = null;
+    if (arcadeOverlay) {
+      arcadeOverlay.classList.remove("show");
+      arcadeOverlay.setAttribute("aria-hidden", "true");
+    }
+    arcadeOverlayText?.classList.remove("show", "fadeOut", "winBig");
+    done?.();
+  }
+
   function playWinSequence(onComplete) {
+    _winSeqOnComplete = onComplete;
     // Duck the level-10 music to 0.4 for the sequence (kept playing for drama; stopped on handoff).
     if (audioEngine.musicGain && audioEngine.ctx) {
       const t = audioEngine.ctx.currentTime;
@@ -17917,6 +18374,8 @@ function initGalaxyCanvas() {
         if (arcadeOverlayText) {
           arcadeOverlayText.classList.remove("show", "fadeOut", "winBig");
         }
+        if (_winSeqOnComplete !== onComplete) return; // already handed off (app-switch path)
+        _winSeqOnComplete = null;
         onComplete();
       }, ARCADE_OVERLAY_FADE_MS);
     }, 4200));
@@ -19225,6 +19684,7 @@ function initGalaxyCanvas() {
   function pauseTutorial() {
     if (!stuntActive || tutorialPaused) return;
     tutorialPaused = true;
+    _tutorialPausedAt = performance.now();
     arcadePausedUntil = Infinity;          // freeze gameplay physics
     if (_spcTimer) { clearTimeout(_spcTimer); _spcTimer = null; }
     if (_spcAudioFxCleanup) { _spcAudioFxCleanup(); _spcAudioFxCleanup = null; }
@@ -19246,6 +19706,9 @@ function initGalaxyCanvas() {
   function resumeTutorial() {
     if (!tutorialPaused) return;
     tutorialPaused = false;
+    // 2026-10-26: the training countdown no longer drains while paused / backgrounded.
+    if (_tutorialPausedAt && tutorialTimerStartedAt) tutorialTimerStartedAt += performance.now() - _tutorialPausedAt;
+    _tutorialPausedAt = 0;
     hideArcadeOverlay();
     commBoxController.setHudDimmed?.(false); // restore the comm box after the pause overlay clears
     arcadePausedUntil = performance.now();
@@ -23482,6 +23945,7 @@ function initGalaxyCanvas() {
     // 2026-06-24: cancel any in-flight YOU-WIN celebration timers so they don't fire after teardown.
     _winSeqTimers.forEach(clearTimeout);
     _winSeqTimers = [];
+    _winSeqOnComplete = null; // (onGameHide snapshots it first so an app switch can still hand off)
     if (galaxyRaf) cancelAnimationFrame(galaxyRaf);
     galaxyRaf = 0;
     clearTimeout(sim.shootingTimer);
@@ -23539,85 +24003,140 @@ function initGalaxyCanvas() {
   if (window.visualViewport) {
     window.visualViewport.addEventListener("resize", delayedRelayout, { passive: true });
   }
-  // FIXED 2026-06-08: auto-pause on app switch; music to 10%; do not auto-resume
+  // 2026-10-26 (app-switch audit): leaving the app mid-level freezes the run and coming back shows
+  // TAP TO RESUME (it used to snap straight back to live play with most clocks having kept running).
+  // Every gameplay deadline is shifted by the whole frozen span — background time AND overlay time —
+  // via shiftGameplayClock, the same mechanism the mid-level Poly Slot uses. Fired by
+  // visibilitychange and by Capacitor appStateChange (iOS "inactive": Control Center, notification
+  // pull-down, call banner — which never hide the page); both are idempotent via _gameHidden.
   let _bgMusicGainBeforePause = MUSIC_MAX_GAIN;
-  let _wasLoopRunningOnHide = false;
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      // 2026-06-09: clear any in-progress plasma net (a mid-drag gesture left a stuck cage
-      // on screen on return) and remember whether the loop was actually running.
-      if (plasmaCage.active) releasePlasmaCage(performance.now());
-      setPlasmaOverlayVisible(false);
-      // Step 4: the slot owns this window (arcadeActive is false here, so the arcade restore below
-      // won't fire) — pause it explicitly. The unconditional music dim still runs alongside.
-      if (isSlotActive()) slotPauseForBackground();
-      _wasLoopRunningOnHide = galaxyRunning;
-      // 2026-06-09: freeze the level/landmine countdowns while backgrounded so they
-      // don't drain in real time and desync the game on return.
-      // (Skipped while the Poly Slot is open mid-level — resumeFromSlot shifts every gameplay clock
-      // by the whole time the cabinet was up, background time included.)
-      if (engineMode === "arcade" && arcadeActive && !isSlotActive()) {
-        const nowP = performance.now();
-        pausedLevelRemainingMs = Math.max(0, levelEndsAt - nowP);
-        pausedLandmineRemainingMs = getLandmineRemainingMs(nowP);
-      }
-      stopGalaxyLoop();
-      // Dim music to 10% so audio doesn't blare in background
-      _bgMusicGainBeforePause = audioEngine.musicGain?.gain?.value ?? MUSIC_MAX_GAIN;
-      if (audioEngine.musicGain && audioEngine.ctx) {
-        const now = audioEngine.ctx.currentTime;
-        audioEngine.musicGain.gain.cancelScheduledValues(now);
-        audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, now);
-        audioEngine.musicGain.gain.linearRampToValueAtTime(0.1, now + 0.25);
-      }
-      if (audioEngine.currentMusicHtml?.node) {
-        audioEngine.currentMusicHtml.node.volume = 0.1;
-      }
-    } else if (!galaxyView.hidden) {
-      setPlasmaOverlayVisible(false); // safety: never return with a stuck cage overlay
-      // Step 4: resume the slot to a sane, exitable shell (the arcade restore below stays skipped
-      // because arcadeActive is false during the slot). Music restore below runs unconditionally.
-      if (isSlotActive()) slotResumeFromBackground();
-      resizeGalaxyCanvas();
-      computePlayfield();
-      // Restore music volume
-      if (audioEngine.musicGain && audioEngine.ctx) {
-        const now = audioEngine.ctx.currentTime;
-        audioEngine.musicGain.gain.cancelScheduledValues(now);
-        audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, now);
-        audioEngine.musicGain.gain.linearRampToValueAtTime(_bgMusicGainBeforePause, now + 0.25);
-      }
-      if (audioEngine.currentMusicHtml?.node) {
-        audioEngine.currentMusicHtml.node.volume = _bgMusicGainBeforePause;
-      }
-      resumeBackgroundMusic();
-      // 2026-06-09: cleanly resume gameplay. stopGalaxyLoop() destroyed PIXI and froze the
-      // loop; resizeGalaxyCanvas() above re-inits PIXI. Restore timers, drop any leftover
-      // gesture, and restart the loop — but only if it was running and the user hadn't
-      // already paused to the menu (engineMode would be "menu" in that case).
-      if (engineMode === "arcade" && arcadeActive) {
-        const nowP = performance.now();
-        if (!isSlotActive()) {
-          levelEndsAt = nowP + pausedLevelRemainingMs;
-          restoreLandmineTimer(pausedLandmineRemainingMs, nowP);
-        }
-        stopPlasmaChargeSound();
-        resetPlasmaCageGesture();
-        plasmaCage.releaseFx = null;
-        cancelStroidToss();
-        galaxyGesture = null;
-        if (_wasLoopRunningOnHide && !galaxyRunning) startGalaxyLoop();
-        // 2026-06-09: stopGalaxyLoop() hid the canvas background and iOS may have paused the
-        // bg video — restart both AFTER the loop is running so the background reappears.
-        // (Not under a mid-level Poly Slot: the cabinet keeps the starfield hidden; slotTeardown restores it.)
-        if (!isSlotActive()) window.galaxyBackground?.show();
-        try {
-          const frontVid = bgCtl?.front;
-          if (frontVid && frontVid.paused) frontVid.play().catch(() => {});
-        } catch { /* bg video resume is best-effort */ }
-      }
+  let _bgMusicHtmlVolBeforePause = null;
+  let _gameHidden = false;
+  let _frozenAt = 0; // performance.now() when the live run froze (0 = not frozen)
+  let _resumeOverlay = null;
+  // Training has its own pause (pauseTutorial, auto on hide) — not frozen twice.
+  const liveRunFreezable = () => engineMode === "arcade" && arcadeActive && !stuntActive && !isSlotActive() && !retryPending;
+
+  function showAppResumeOverlay() {
+    if (!_resumeOverlay) {
+      _resumeOverlay = document.createElement("div");
+      _resumeOverlay.id = "appResumeOverlay";
+      _resumeOverlay.innerHTML = '<div class="aro-title">PAUSED</div><div class="aro-sub">TAP TO RESUME</div>';
+      _resumeOverlay.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        resumeFrozenRun();
+      }, { passive: false });
+      galaxyView.appendChild(_resumeOverlay);
     }
+    _resumeOverlay.hidden = false;
+  }
+
+  function resumeFrozenRun() {
+    if (_resumeOverlay) _resumeOverlay.hidden = true;
+    if (!_frozenAt) return;
+    shiftGameplayClock(performance.now() - _frozenAt);
+    _frozenAt = 0;
+    if (!liveRunFreezable()) return; // the player left the run (e.g. menu) meanwhile
+    galaxyGesture = null;
+    sim.last = 0;
+    if (!galaxyRunning) startGalaxyLoop();
+    window.galaxyBackground?.show();
+    try {
+      const frontVid = bgCtl?.front;
+      if (frontVid && frontVid.paused) frontVid.play().catch(() => {});
+    } catch { /* bg video resume is best-effort */ }
+    _mediaSession?.setPlaybackState?.({ playbackState: "playing" })?.catch?.(() => {});
+  }
+
+  function onGameHide() {
+    if (_gameHidden) return;
+    _gameHidden = true;
+    // 2026-06-09: clear any in-progress plasma net (a mid-drag gesture left a stuck cage on return).
+    if (plasmaCage.active) releasePlasmaCage(performance.now());
+    setPlasmaOverlayVisible(false);
+    if (pulseFiring) stopPulseFiring();
+    stopPlasmaChargeSound();
+    resetPlasmaCageGesture();
+    plasmaCage.releaseFx = null;
+    cancelStroidToss();
+    galaxyGesture = null;
+    // The slot owns this window — pause it explicitly (resumeFromSlot shifts the clocks itself).
+    if (isSlotActive()) slotPauseForBackground();
+    if (liveRunFreezable() && !_frozenAt) _frozenAt = performance.now();
+    // VO keeps playing in the background otherwise (Practice, scorecard, between levels).
+    commBoxController.stopVO();
+    const pendingWin = _winSeqOnComplete;
+    stopGalaxyLoop();
+    // stopGalaxyLoop clears the YOU WIN timers, including the hand-off — finish it on return.
+    if (pendingWin) { _winSeqOnComplete = pendingWin; _winSeqInterrupted = true; }
+    // Dim music to 10% so audio doesn't blare in background
+    _bgMusicGainBeforePause = audioEngine.musicGain?.gain?.value ?? MUSIC_MAX_GAIN;
+    if (audioEngine.musicGain && audioEngine.ctx) {
+      const now = audioEngine.ctx.currentTime;
+      audioEngine.musicGain.gain.cancelScheduledValues(now);
+      audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, now);
+      audioEngine.musicGain.gain.linearRampToValueAtTime(0.1, now + 0.25);
+    }
+    const htmlNode = audioEngine.currentMusicHtml?.node;
+    // Remember the element's own (ducked) level — it used to be "restored" to the Web Audio gain
+    // value, which dropped any active scorecard/pause/whisper duck.
+    _bgMusicHtmlVolBeforePause = htmlNode ? htmlNode.volume : null;
+    if (htmlNode) htmlNode.volume = 0.1;
+  }
+
+  function onGameShow() {
+    if (!_gameHidden) return;
+    _gameHidden = false;
+    // Music comes back on every screen (the Oracle/menu too, not just the game view).
+    if (audioEngine.musicGain && audioEngine.ctx) {
+      const now = audioEngine.ctx.currentTime;
+      audioEngine.musicGain.gain.cancelScheduledValues(now);
+      audioEngine.musicGain.gain.setValueAtTime(audioEngine.musicGain.gain.value, now);
+      audioEngine.musicGain.gain.linearRampToValueAtTime(_bgMusicGainBeforePause, now + 0.25);
+    }
+    const htmlNode = audioEngine.currentMusicHtml?.node;
+    if (htmlNode && _bgMusicHtmlVolBeforePause != null) htmlNode.volume = _bgMusicHtmlVolBeforePause;
+    _bgMusicHtmlVolBeforePause = null;
+    resumeBackgroundMusic();
+    if (galaxyView.hidden) return;
+    setPlasmaOverlayVisible(false); // safety: never return with a stuck cage overlay
+    if (isSlotActive()) slotResumeFromBackground();
+    resizeGalaxyCanvas(); // re-inits PIXI (stopGalaxyLoop destroyed it)
+    computePlayfield();
+    // Scorecard mid-tally: the hide's stopAllLoops killed its write-on loop and its tally timers ran
+    // on (Android) or stalled (iOS) — finish the reveal; the scorecard waits for a tap anyway.
+    _scorecardFinishNow?.();
+    if (_winSeqInterrupted) {
+      _winSeqInterrupted = false;
+      finishInterruptedWinSeq();
+      return;
+    }
+    if (_frozenAt && liveRunFreezable()) {
+      draw(performance.now()); // paint the frozen field under the overlay
+      showAppResumeOverlay();
+      return;
+    }
+    _frozenAt = 0;
+    // Menus / pause menu / training: bring the loop + starfield back (the menu canvas used to stay
+    // frozen with the starfield hidden until something else restarted it).
+    if (!isSlotActive() && (engineMode === "menu" || menuOverlayOpen)) {
+      if (!galaxyRunning) startGalaxyLoop();
+      window.galaxyBackground?.show();
+    }
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) onGameHide();
+    else onGameShow();
   });
+  try {
+    const CapApp = globalThis.Capacitor?.Plugins?.App;
+    CapApp?.addListener?.("appStateChange", ({ isActive }) => {
+      if (adService.isShowing?.()) return; // a full-screen ad takes the app inactive — not a switch
+      if (isActive) { if (!document.hidden) onGameShow(); } else onGameHide();
+    });
+  } catch { /* native-only */ }
 
   resizeGalaxyCanvas();
   computePlayfield();
@@ -23741,6 +24260,7 @@ function initGalaxyCanvas() {
         audioEngine.loadMany?.(gameplayPreloadSfxMap());
         resizeGalaxyCanvas();
         computePlayfield();
+        if (_frozenAt) return; // Practice froze on hide — TAP TO RESUME restarts the loop
         if (!galaxyRunning) startGalaxyLoop();
         window.galaxyBackground?.show();
         if (!tutorialPaused && _spcAudio) { try { _spcAudio.play().catch(() => {}); } catch {} }

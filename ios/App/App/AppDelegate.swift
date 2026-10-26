@@ -18,7 +18,27 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         } catch {
             print("AppDelegate: failed to set AVAudioSession category: \(error)")
         }
+        // 2026-10-26: after another app / a call / Siri takes the session, iOS doesn't hand it back on
+        // its own — Web Audio in the WKWebView then stays dead (orb rub silent until reboot).
+        // Re-activate when the interruption ends and whenever we become active again.
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAudioInterruption(_:)),
+                                               name: AVAudioSession.interruptionNotification, object: nil)
         return true
+    }
+
+    private func reactivateAudioSession() {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, options: .mixWithOthers)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("AppDelegate: failed to reactivate AVAudioSession: \(error)")
+        }
+    }
+
+    @objc private func handleAudioInterruption(_ note: Notification) {
+        guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        if type == .ended { reactivateAudioSession() }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
@@ -36,7 +56,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        reactivateAudioSession()
     }
 
     func applicationWillTerminate(_ application: UIApplication) {

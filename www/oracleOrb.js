@@ -216,8 +216,26 @@ function normalize(o) {
   };
 }
 
+// 2026-10-26 (app-switch audit): iOS can drop the WebGL context while backgrounded (GPU-process
+// reclaim) — the orb then stays blank forever. On loss, keep the context restorable; on restore,
+// rebuild the orb in place. Callers keep the same handle (set/destroy delegate to the live mount).
 function mount(container, options = {}) {
   if (!container) return null;
+  let opts = { ...options };
+  let inner = null;
+  const remount = () => {
+    inner?.destroy();
+    inner = mountOnce(container, opts, remount);
+  };
+  inner = mountOnce(container, opts, remount);
+  if (!inner) return null;
+  return {
+    set(next) { opts = { ...opts, ...next }; inner?.set(next); },
+    destroy() { inner?.destroy(); inner = null; },
+  };
+}
+
+function mountOnce(container, options, onRestored) {
   const canvas = document.createElement('canvas');
   canvas.className = 'oracle-orb-canvas';
   canvas.setAttribute('aria-hidden', 'true');
@@ -225,6 +243,9 @@ function mount(container, options = {}) {
   const settingsRef = { current: normalize({ ...DEFAULTS, ...options }) };
   const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false });
   if (!gl) { canvas.remove(); return null; }
+  let destroying = false;
+  canvas.addEventListener('webglcontextlost', event => { if (!destroying) event.preventDefault(); });
+  canvas.addEventListener('webglcontextrestored', () => { if (!destroying) setTimeout(onRestored, 0); });
     const program = link(gl);
     if (!program) { canvas.remove(); return null; }
     const u = program.uniforms;
@@ -484,6 +505,7 @@ function mount(container, options = {}) {
   return {
     set(next) { settingsRef.current = normalize({ ...settingsRef.current, ...next }); wake(); },
     destroy() {
+      destroying = true;
       cancelAnimationFrame(raf);
       resizeObserver.disconnect();
       intersection.disconnect();

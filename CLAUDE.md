@@ -57,6 +57,18 @@ Every item below must be resolved before App Store submission:
 - [x] Hide the BUILD stamp → ✅ 2026-07-06: gated behind `poly_oracle_show_build = "1"`
       (App Store users never see it; see note at top of this file)
 
+### v-next store update (remaster) — release blockers (added 2026-10-26)
+
+- [ ] Device-verify app-switch matrix in `docs/app-switch-audit.md` (iPhone + Retroid): Home,
+      app switcher, Control Center, notification shade, Siri/call, ad — mid-level, YOU WIN,
+      scorecard, slot spin, training, practice, Oracle orb rub
+- [ ] Device-verify orb rub audio survives app switching (no reboot) — native AVAudioSession
+      re-activation is in `ios/App/App/AppDelegate.swift` (needs an Xcode build, not just web sync)
+- [ ] Device-verify plasma split: top charge chip (tap = A/M) + DETONATE only while a net is placed
+- [ ] Real ad unit IDs (currently TEST units) + ASC leaderboard `polyverse_high_score`
+- [ ] Nice-to-have: orb "leave reality" lock (hold still 10s+3s) plays in background; decide
+      whether the cockpit HUD graduates from the Dev Mode toggle
+
 ### Levels 12-15 (second act)
 
 - [ ] Record `vo/gauntlet_intro.mp3` (level 15 commander intro — caption fallback in place)

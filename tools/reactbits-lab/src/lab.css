@@ -182,7 +182,7 @@ input[type="color"] { width: 34px; height: 24px; padding: 0; border: 1px solid v
 .hcC-slot img { height: 14px; }
 .hcC-slot b { font: 900 11px ui-monospace, Menlo, monospace; color: #ffe08a; }
 
-.labModes { display: flex; gap: 6px; margin-bottom: 10px; }
+.labModes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .labModes button { flex: 1; padding: 6px; border-radius: 8px; border: 1px solid var(--line); background: #0b1226; font-size: 12px; }
 .labModes button.on { border-color: #ffd36a; color: #ffd36a; }
 
@@ -200,3 +200,32 @@ input[type="color"] { width: 34px; height: 24px; padding: 0; border: 1px solid v
 .hcD-net i { width: 10px; height: 10px; border-radius: 50%; background: #00ffd1; box-shadow: 0 0 10px #00ffd1; }
 .hcD-net span { font: 900 10px ui-monospace, Menlo, monospace; letter-spacing: 0.2em; }
 .hcD-net b { font: 800 9px ui-monospace, Menlo, monospace; letter-spacing: 0.1em; color: rgba(0, 255, 209, 0.8); }
+
+/* ── Cockpit Designer ───────────────────────────────────────────────────────────────────────── */
+.cd { grid-template-columns: 240px 1fr 340px; }
+.cd .labBar { flex-wrap: wrap; gap: 10px; }
+.cdDim { color: var(--dim); font-size: 11px; }
+.cdHidden { opacity: 0.45; text-decoration: line-through; }
+.cdMini { float: right; padding: 1px 8px; border-radius: 6px; border: 1px solid var(--line); background: #0b1226; font-size: 10px; letter-spacing: 0.05em; color: var(--ink); }
+.cdBtn { padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line); background: #0b1226; font-size: 12px; }
+.cdBtn:disabled { opacity: 0.4; cursor: default; }
+.cdInline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); }
+.cdInline .pNum { width: 48px; }
+.cdPhone { border-radius: 36px; }
+.cdPhone iframe { position: absolute; top: 0; left: 0; border: 0; display: block; background: #050814; }
+.cdSafe { position: absolute; left: 0; right: 0; pointer-events: none; background: repeating-linear-gradient(45deg, rgba(255, 211, 106, 0.1) 0 6px, transparent 6px 12px); z-index: 5; }
+.cdSafe.top { top: 0; }
+.cdSafe.bottom { bottom: 0; }
+.cdOverlay { position: absolute; top: 0; left: 0; z-index: 6; cursor: default; }
+.cdOverlay.play { pointer-events: none; }
+.cdBox { position: absolute; outline: 1px dashed rgba(123, 226, 255, 0.45); cursor: move; touch-action: none; }
+.cdBox.panel { outline-color: rgba(255, 211, 106, 0.35); }
+.cdBox:hover { outline: 1px solid rgba(123, 226, 255, 0.9); background: rgba(123, 226, 255, 0.06); }
+.cdBox.on { outline: 2px solid #ffd36a; background: rgba(255, 211, 106, 0.06); }
+.cdTag { position: absolute; left: -2px; top: -18px; padding: 1px 6px; border-radius: 4px; background: #ffd36a; color: #1a1200; font: 700 10px ui-monospace, Menlo, monospace; white-space: nowrap; pointer-events: none; }
+.cdH { position: absolute; width: 10px; height: 10px; background: #ffd36a; border: 1px solid #1a1200; border-radius: 2px; }
+.cdH.e { right: -6px; top: calc(50% - 5px); cursor: ew-resize; }
+.cdH.s { bottom: -6px; left: calc(50% - 5px); cursor: ns-resize; }
+.cdH.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.cdField { position: absolute; outline: 1px dashed rgba(157, 255, 90, 0.8); background: rgba(157, 255, 90, 0.05); pointer-events: none; }
+.cdField::before { content: "PLAYFIELD"; position: absolute; left: 4px; top: 2px; font: 700 9px ui-monospace, Menlo, monospace; letter-spacing: 0.2em; color: rgba(157, 255, 90, 0.8); }

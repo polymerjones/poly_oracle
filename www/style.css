@@ -4079,84 +4079,140 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
 #levelScoreReport > .lsr-panel, .rbx-overlay > .lsr-panel { position: relative; z-index: 1; }
 #levelScoreReport, .rbx-overlay { overflow: hidden; }
 
-/* ── 2026-10-26: Cockpit HUD (Dev Mode trial of the Lab's "D · Hybrid" concept) ──────────────────
-   body.hud-cockpit is set by syncCockpitHud() during Arcade levels only. Top: C's chamfered holo
-   panels (Modes + Lives | LEVEL + Score | MULT). Bottom: A's illuminated dashboard holding the real
-   weapon buttons, the POLYSLOTS cabinet and the NET pill (moved there by JS). */
-body.hud-cockpit .arcadeHud {
-  background: none;
-  border-bottom: 0;
-  align-items: stretch;
-  gap: 6px;
-}
-body.hud-cockpit .arcadeHud .hudLeftGroup,
-body.hud-cockpit .arcadeHud .hudCenter,
-body.hud-cockpit .arcadeHud .cockpitMult {
-  padding: 7px 10px;
-  clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px), 0 10px);
-  background: linear-gradient(180deg, rgba(14, 30, 60, 0.9), rgba(6, 12, 26, 0.92));
-  box-shadow: inset 0 0 0 1px rgba(123, 226, 255, 0.4);
-}
-body.hud-cockpit .arcadeHud .hudLeftGroup { align-items: center; justify-content: center; gap: 4px; }
-body.hud-cockpit .arcadeHud .hudLeftGroup .hudBtn { min-height: 34px; padding: 6px 12px; }
-body.hud-cockpit .arcadeHud .hudLeftGroup .hudLives { font-size: 0.72rem; letter-spacing: 0.08em; color: #7be2ff; }
-body.hud-cockpit .arcadeHud .hudCenter { flex: 1 1 auto; align-content: center; gap: 1px; }
-body.hud-cockpit .arcadeHud .hudCenter .hudLevel { font: 800 10px/1.2 ui-monospace, Menlo, monospace; letter-spacing: 0.22em; color: #7be2ff; }
-body.hud-cockpit .arcadeHud .hudCenter .hudGameTimer { font-size: 9px; letter-spacing: 0.18em; opacity: 0.7; }
-body.hud-cockpit .arcadeHud .hudCenter #hudScore { font: 900 20px/1.1 ui-monospace, Menlo, monospace; text-shadow: 0 0 12px rgba(123, 226, 255, 0.55); }
-body.hud-cockpit .arcadeHud .cockpitMult { display: grid; align-content: center; justify-items: center; min-width: 58px; }
-body.hud-cockpit .arcadeHud .cockpitMult::before { content: "MULT"; font: 800 9px ui-monospace, Menlo, monospace; letter-spacing: 0.2em; color: rgba(230, 240, 255, 0.6); }
-body.hud-cockpit .arcadeHud .cockpitMult #hudMultiplier { font: 900 17px/1.1 ui-monospace, Menlo, monospace; color: #f6a7ff; }
-body.hud-cockpit .arcadeHud .hudInventoryGroup { margin-left: 0; align-self: center; }
-
-.cockpitDash { display: none; }
-body.hud-cockpit .galaxy-view.mode-arcade .cockpitDash {
+/* ── 2026-10-26: Cockpit HUD (Dev Mode trial) — layout-driven ─────────────────────────────────────
+   body.cockpit-free is set by syncCockpitHud() during Arcade levels only. The real HUD elements are
+   moved into #cockpitLayer and every position/size/skin rule is generated from cockpitLayout.js
+   (the Lab's Cockpit Designer) into <style id="cockpitLayoutStyle">. Only the scaffolding lives here. */
+#cockpitLayer { display: none; }
+body.cockpit-free .galaxy-view.mode-arcade #cockpitLayer {
   display: block;
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   z-index: 4;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  clip-path: polygon(6% 0, 94% 0, 100% 100%, 0 100%);
-  background: linear-gradient(180deg, rgba(20, 30, 58, 0.94), rgba(6, 10, 22, 0.98));
-  border-top: 2px solid rgba(123, 226, 255, 0.75);
-  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.08);
+  pointer-events: none;
 }
-.cockpitBays {
-  display: flex;
-  justify-content: center;
+body.cockpit-free #cockpitLayer > * { pointer-events: auto; }
+.cockpitPanel > i { position: absolute; inset: 0; display: block; }
+.cockpitPanel > i::before { content: ""; position: absolute; inset: 0; }
+/* the classic top bar stays in the DOM (hudTimer, the big centre countdown, lives inside it) */
+body.cockpit-free .arcadeHud { visibility: hidden; pointer-events: none; }
+body.cockpit-free .arcadeHud #hudTimer { visibility: visible; }
+/* Lab "show all states": reveal parts that are normally hidden until they're relevant */
+body.cockpit-free.cockpit-preview #cockpitLayer > [data-cockpit="quad"],
+body.cockpit-free.cockpit-preview #cockpitLayer > [data-cockpit="pulse"] { display: flex; }
+body.cockpit-free.cockpit-preview #cockpitLayer > [data-cockpit="slots"],
+body.cockpit-free.cockpit-preview #cockpitLayer > [data-cockpit="net"],
+body.cockpit-free.cockpit-preview #cockpitLayer > [data-cockpit="devwin"] { display: inline-flex !important; }
+
+/* ── 2026-10-26: plasma net split ────────────────────────────────────────────────────────────────
+   #plasmaChargeChip sits with the weapons (classic: 4th inventory column; cockpit: the top weapons
+   rail) — a conic charge ring + A/M badge, tap toggles the mode. #plasmaModeBtn (above) is now
+   DETONATE only and is displayed only while a manual net is placed. */
+/* Classic: the three weapons keep the top row (a 4th column collided with the centre stats on
+   phones); the chip takes row 2 under the missile, the quad/pulse badges flow below it. */
+.hudInventoryGroup .plasmaChargeChip { grid-column: 3; justify-self: center; }
+.plasmaChargeChip {
+  --pc: 0, 255, 230;
+  position: relative;
+  display: none;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px 10px;
-}
-body.hud-cockpit .cockpitBays .hudBombBtn,
-body.hud-cockpit .cockpitBays .hudFreezeBtn,
-body.hud-cockpit .cockpitBays .hudMissileBtn {
-  position: relative;
-  flex-direction: column;
-  gap: 0;
-  width: 54px;
-  height: 54px;
-  min-height: 0;
+  justify-content: center;
+  width: 44px;
+  height: 40px;
   padding: 0;
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(30, 40, 70, 0.95), rgba(10, 14, 28, 0.95));
+  border-radius: 999px;
+  border: 1.5px solid rgba(var(--pc), 0.7);
+  background: rgba(6, 20, 26, 0.86);
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
 }
-body.hud-cockpit .cockpitBays .hudBtnIcon { width: 30px; height: 30px; }
-body.hud-cockpit .cockpitBays .hudBtnCount { position: absolute; right: 5px; bottom: 2px; font-size: 11px; }
-body.hud-cockpit .cockpitBays #plasmaModeBtn {
-  position: relative;
-  right: auto;
-  bottom: auto;
-  z-index: auto;
-  min-width: 70px;
-  min-height: 54px;
-  padding: 6px 8px;
-  border-radius: 12px;
-  font-size: 9px;
-  white-space: normal;
+.plasmaChargeChip:active { transform: scale(0.94); }
+.plasmaChargeChip[data-mode="manual"] { --pc: 255, 205, 90; background: rgba(18, 16, 6, 0.88); }
+.plasmaChargeChip[data-state="ready"] { box-shadow: 0 0 10px rgba(var(--pc), 0.42); }
+.plasmaChargeChip[data-state="detonate"] { --pc: 255, 120, 80; box-shadow: 0 0 12px rgba(var(--pc), 0.55); }
+.plasmaChargeChip .pcc__ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: conic-gradient(rgba(var(--pc), 0.95) var(--plasma-fill, 0%), rgba(255, 255, 255, 0.13) 0);
+  -webkit-mask: radial-gradient(circle, transparent 8.5px, #000 9.5px);
+  mask: radial-gradient(circle, transparent 8.5px, #000 9.5px);
+  pointer-events: none;
+}
+.plasmaChargeChip .pcc__core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%) scale(0.55);
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0 20%, rgba(var(--pc), 0.95) 45%, rgba(var(--pc), 0) 72%);
+  opacity: 0.35;
+  transition: opacity 160ms ease, transform 160ms ease;
+  pointer-events: none;
+}
+.plasmaChargeChip[data-state="ready"] .pcc__core,
+.plasmaChargeChip[data-state="detonate"] .pcc__core {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+  animation: plasmaModeCorePulse 1.75s ease-in-out infinite;
+}
+.plasmaChargeChip .pcc__mode {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: rgb(var(--pc));
+  color: #041014;
+  font: 800 9px/15px ui-monospace, SFMono-Regular, Menlo, monospace;
   text-align: center;
+  box-shadow: 0 0 6px rgba(var(--pc), 0.6);
+  pointer-events: none;
 }
-/* the comm box sits above the dash like a cockpit monitor (inline bottom is set by JS → !important) */
-body.hud-cockpit #commanderHUD { bottom: calc(env(safe-area-inset-bottom, 0px) + 90px) !important; }
+/* DETONATE: bigger, unmistakable, and only on screen while a net is placed. */
+#plasmaModeBtn[data-state="detonate"] {
+  min-width: 156px;
+  min-height: 50px;
+  font-size: 13px;
+  bottom: max(10px, calc(env(safe-area-inset-bottom, 0px) - 4px));
+}
+
+/* 2026-10-26 (app-switch audit): returning to a frozen run. */
+#appResumeOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 9700;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(2, 6, 16, 0.58);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  color: #e6f6ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  touch-action: none;
+  cursor: pointer;
+}
+#appResumeOverlay[hidden] { display: none; }
+#appResumeOverlay .aro-title { font-size: 28px; font-weight: 900; letter-spacing: 0.24em; text-shadow: 0 0 14px rgba(123, 226, 255, 0.6); }
+#appResumeOverlay .aro-sub { font-size: 13px; font-weight: 700; letter-spacing: 0.2em; color: #7be2ff; animation: aroBlink 1.4s ease-in-out infinite; }
+@keyframes aroBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* 2026-10-26: orb "leave reality" lock — the loop keeps playing; the orb breathes to show it. */
+.orb.reality-locked { animation: orbFloat 6.3s ease-in-out infinite, orbRealityLocked 2.6s ease-in-out infinite; }
+@keyframes orbRealityLocked {
+  0%, 100% { filter: drop-shadow(0 0 10px rgba(196, 127, 255, 0.45)); }
+  50% { filter: drop-shadow(0 0 26px rgba(123, 226, 255, 0.85)); }
+}

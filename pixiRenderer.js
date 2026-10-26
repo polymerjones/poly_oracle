@@ -943,7 +943,8 @@ const pixiRenderer = (() => {
       }
     }
 
-    drawPlasmaRecharge(plasmaCage, now);
+    // 2026-10-26: recharge ring retired — the DOM HUD charge chip (#plasmaChargeChip) replaces it.
+    // drawPlasmaRecharge(plasmaCage, now);
     // 2026-07-03: MANUAL placed net — persistent charged net + capture rings on caught stroids, so it
     // clearly reads as "armed, tap to detonate". Drawn before the active-net early-return below.
     if (plasmaCage?.placed) {

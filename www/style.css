@@ -3563,6 +3563,10 @@ body.fx-holo-cards .lsr-panel {
   position: relative;
   overflow: hidden;
 }
+/* 2026-10-26: overflow:hidden drops a flex item's automatic min-height to 0, so the menu card shrank
+   to the screen and CLIPPED its bottom (Dev Mode, ← Oracle) instead of letting .galaxyModeSelect
+   scroll. Never shrink it. */
+.galaxyModeCard { flex-shrink: 0; }
 body.fx-holo-cards .galaxyModeCard::before,
 body.fx-holo-cards .lsr-panel::before {
   content: "";

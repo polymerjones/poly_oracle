@@ -513,7 +513,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 19:11";
+const BUILD_TS = "2026-10-26 11:16";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1349,6 +1349,7 @@ function setDevModeOn(on) {
   document.body.classList.toggle("dev-mode", devModeOn);
   if (btnDevMode) btnDevMode.textContent = devModeOn ? "Dev Mode: On" : "Dev Mode: Off";
   if (btnFxLab) btnFxLab.style.display = devModeOn && btnDevMode?.style.display !== "none" ? "" : "none";
+  if (btnCockpitHud) btnCockpitHud.style.display = btnFxLab?.style.display ?? "none";
   applyTrials(); // Dev Mode on → lab picks go live; off → back to the shipped defaults
 }
 
@@ -1574,6 +1575,8 @@ function wireDevModeEntry() {
   });
   btnDevMode.addEventListener("click", () => setDevModeOn(!devModeOn));
   btnFxLab?.addEventListener("click", openFxLab);
+  syncCockpitHudButton();
+  btnCockpitHud?.addEventListener("click", () => setCockpitHudPref(!cockpitHudPref));
   btnSettings?.addEventListener("click", openStroidsSettings);
   hudDevWin?.addEventListener("click", () => galaxyCanvasController?.devInstantWin?.());
 }
@@ -2161,6 +2164,19 @@ const DEV_MODE_TAP_WINDOW_MS = 1500;
 const STORAGE_DEV_ASSISTED_RUN = "poly_oracle_dev_assisted_run";
 let devModeRevealed = false;
 let devModeOn = false;
+// 2026-10-26: Cockpit HUD trial (Lab concept "D · Hybrid") — toggled from Dev Mode, persisted so it
+// survives relaunches (Dev Mode itself is session-only). Release players can't reach the toggle.
+const STORAGE_HUD_COCKPIT = "poly_oracle_hud_cockpit";
+let cockpitHudPref = (() => { try { return localStorage.getItem(STORAGE_HUD_COCKPIT) === "1"; } catch { return false; } })();
+const btnCockpitHud = document.getElementById("btnCockpitHud");
+function syncCockpitHudButton() {
+  if (btnCockpitHud) btnCockpitHud.textContent = cockpitHudPref ? "Cockpit HUD: On" : "Cockpit HUD: Off";
+}
+function setCockpitHudPref(on) {
+  cockpitHudPref = !!on;
+  try { localStorage.setItem(STORAGE_HUD_COCKPIT, cockpitHudPref ? "1" : "0"); } catch { /* private mode */ }
+  syncCockpitHudButton();
+}
 
 // ── FX LAB trials (2026-10-25, Monkey Trubble pattern) ─────────────────────────────────────────
 // TRIAL_DEFAULTS is what players get. In Dev Mode the FX Lab's chip picks (localStorage) apply live
@@ -4443,9 +4459,62 @@ const audioEngine = {
       }
     }
     this.unlocked = ctx.state === "running";
+    if (this.unlocked) this._everRan = true;
   },
   resume() {
     return this.unlock();
+  },
+  // 2026-10-26 (playtest): app switch mid-level → music back (HTML <audio> on iOS) but SFX silent:
+  // iOS can leave the Web Audio ctx "suspended"/"interrupted", or "running" with a frozen clock.
+  // verifyAlive() kicks it (resume, then suspend→resume) and checks currentTime actually advances;
+  // if it's still dead, _needsRebuild makes the next user gesture call rebuildContext() — a fresh
+  // ctx can only start inside a gesture on iOS (why the retired teardown() lost audio at level start).
+  _everRan: false,
+  _needsRebuild: false,
+  async verifyAlive() {
+    const ctx = this.ctx;
+    if (!ctx || !this._everRan) return true;
+    if (ctx.state !== "running") {
+      try { await ctx.resume(); } catch { /* ignore */ }
+      if (ctx.state !== "running") {
+        try { await ctx.suspend(); await ctx.resume(); } catch { /* ignore */ }
+      }
+    }
+    const t0 = ctx.currentTime;
+    await new Promise((r) => setTimeout(r, 150));
+    if (ctx !== this.ctx) return true; // rebuilt meanwhile
+    const alive = ctx.state === "running" && ctx.currentTime > t0;
+    this.unlocked = alive;
+    this._needsRebuild = !alive && isIOSNative;
+    if (!alive) console.info(`[audio] ctx dead after foreground (state=${ctx.state}) — rebuild on next tap`);
+    return alive;
+  },
+  // Call ONLY synchronously inside a user gesture. Decoded AudioBuffers aren't tied to a ctx, so
+  // `buffers` survives; context-bound nodes (voices, loops, buses, music filters) are dropped, and the
+  // VO channel elements are forgotten so acquireVoElement() makes fresh ones wired to the new ctx
+  // (an element bound by createMediaElementSource can never be re-bound).
+  rebuildContext() {
+    const old = this.ctx;
+    try { this.stopAllLoops(); } catch { /* ignore */ }
+    this.ctx = null;
+    this.masterGain = null;
+    this.sfxBus = null;
+    this.musicBus = null;
+    this.musicGain = null;
+    this._freezeFilter = null;
+    this._freezeFilter2 = null;
+    this._pulseFilter = null;
+    this._musicGainBeforePulse = null;
+    this._musicGainBeforeFreeze = null;
+    this.currentMusic = null; // Web Audio music only (iOS music is HTML <audio>, untouched)
+    this.voices.clear();
+    this.loops.clear();
+    _voChannels.clear();
+    this._needsRebuild = false;
+    const ctx = this.ensureContext();
+    try { ctx?.resume().then(() => { this.unlocked = ctx.state === "running"; }).catch(() => {}); } catch { /* ignore */ }
+    try { old?.close(); } catch { /* ignore */ }
+    console.info("[audio] ctx rebuilt in gesture");
   },
   async loadSound(name, url) {
     if (this.buffers.has(name)) return this.buffers.get(name);
@@ -5362,6 +5431,17 @@ function addListeners() {
   questionInput.addEventListener("focus", setVh);
   questionInput.addEventListener("blur", setVh);
 
+  // 2026-10-26: iOS native boots with WKWebView text interaction OFF (no magnifier loupe over the
+  // game — MainViewController.swift), which also makes inputs untypeable. Turn it on when an
+  // input/textarea is touched or focused (touch fires before the focus gesture). It is NOT turned
+  // off on blur: flipping it as Reveal was tapped clipped the reveal intro SFX every time. It goes
+  // back off when the game opens (openGalaxyView) — the loupe only matters over gameplay.
+  const isTextField = (el) => !!el?.closest?.("input, textarea");
+  const enableForTextField = (e) => { if (isTextField(e.target)) setNativeTextInteraction(true); };
+  document.addEventListener("touchstart", enableForTextField, { capture: true, passive: true });
+  document.addEventListener("pointerdown", enableForTextField, { capture: true, passive: true });
+  document.addEventListener("focusin", enableForTextField);
+
   const primeMediaOnGesture = () => {
     if (mediaPrimed) return;
     mediaPrimed = true;
@@ -5372,9 +5452,16 @@ function addListeners() {
   document.addEventListener("pointerdown", primeMediaOnGesture, { once: true });
   document.addEventListener("touchstart", primeMediaOnGesture, { once: true, passive: true });
   document.addEventListener("keydown", primeMediaOnGesture, { once: true });
+  // 2026-10-26: after an app switch, re-check the ctx is really producing sound (see verifyAlive).
+  let verifyAudioOnNextGesture = false;
   const resumeAudioOnGesture = () => {
     if (isIOSNative && !audioEngine.ctx) return;
-    audioEngine.resume();
+    if (audioEngine._needsRebuild) audioEngine.rebuildContext(); // must stay synchronous in the gesture
+    else audioEngine.resume();
+    if (verifyAudioOnNextGesture) {
+      verifyAudioOnNextGesture = false;
+      setTimeout(() => audioEngine.verifyAlive(), 200);
+    }
     try {
       if ("speechSynthesis" in window) window.speechSynthesis.resume();
     } catch {
@@ -5396,6 +5483,10 @@ function addListeners() {
       } catch {
         // ignore
       }
+      // iOS restores the audio session a beat after foreground — check once it's back, and again
+      // on the first tap (the tap can also rebuild a dead ctx, which only works inside a gesture).
+      verifyAudioOnNextGesture = true;
+      setTimeout(() => audioEngine.verifyAlive(), 400);
     } else {
       saveBackgroundMusicState();
       audioEngine.stopAllLoops();
@@ -5639,6 +5730,10 @@ function addListeners() {
   }
   if (hudSlotBtn) {
     hudSlotBtn.addEventListener("click", () => {
+      // 2026-10-26: one-shot lever pull on the mini cabinet
+      hudSlotBtn.classList.remove("hsPull");
+      void hudSlotBtn.offsetWidth;
+      hudSlotBtn.classList.add("hsPull");
       galaxyCanvasController?.openSlotMidLevel?.();
     });
   }
@@ -6103,7 +6198,17 @@ function flashScreen(color = "#ffffff", ms = 250, peak = 0.9) {
   canvasFlash.decayPerMs = safePeak / safeMs;
 }
 
+// 2026-10-26: native-side toggle for WKWebView text interaction (iOS only; no-op on web/Android).
+// Only posts on an actual change — each flip reconfigures the web view and can glitch audio.
+function setNativeTextInteraction(on) {
+  if (setNativeTextInteraction.current === on) return;
+  setNativeTextInteraction.current = on;
+  try { window.webkit?.messageHandlers?.textInteraction?.postMessage(on); } catch { /* web/Android */ }
+}
+setNativeTextInteraction.current = false;
+
 function openGalaxyView() {
+  setNativeTextInteraction(false); // no magnifier loupe over the game
   void gameCenter.signIn(); // first Stroids open: Game Center "Welcome back" banner (or sign-in sheet once)
   setSettingsOpen(false);
   vault.hidden = true;
@@ -7280,8 +7385,7 @@ const orbRubDrone = {
     osc3Gain.connect(trem);
 
     const target = state.whisper ? 0.24 : 0.48;
-    out.gain.setValueAtTime(0, now);
-    out.gain.linearRampToValueAtTime(target, now + 0.28);
+    rubRamp(out.gain, ctx, target, 0.28); // tracked, so a quick release fades from the real level
 
     [osc1, osc2, osc3, lfo].forEach((o) => o.start(now));
     this.nodes = { ctx, out, osc1, osc2, osc3, lfo };
@@ -7298,13 +7402,12 @@ const orbRubDrone = {
     if (!n) return;
     this.nodes = null;
     const { ctx, out } = n;
-    const now = ctx.currentTime;
-    out.gain.cancelScheduledValues(now);
-    out.gain.setValueAtTime(out.gain.value, now);
-    out.gain.linearRampToValueAtTime(0, now + 0.42);
-    const stopAt = now + 0.48;
+    // 2026-10-26: exponential tail from the tracked current level (was a 0.42s linear ramp from
+    // param.value, which WebKit misreports mid-ramp → snap). Oscillators outlive the tail.
+    rubRamp(out.gain, ctx, 0, 1.3, { exp: true });
+    const stopAt = ctx.currentTime + 1.6;
     [n.osc1, n.osc2, n.osc3, n.lfo].forEach((o) => { try { o.stop(stopAt); } catch { /* ignore */ } });
-    setTimeout(() => { try { out.disconnect(); } catch { /* ignore */ } }, 500);
+    setTimeout(() => { try { out.disconnect(); } catch { /* ignore */ } }, 1700);
   },
 };
 
@@ -7338,126 +7441,159 @@ function scheduleRubHaptic() {
   }, Math.max(120, 1000 / orbRubPulseHz));
 }
 
-// 2026-06-15: a second looping layer (orb_rub2.mp3) sits on top of the synth drone for a
-// richer rub texture. Plain looping <audio> (matches revealAudio); volume respects whisper.
-// Halved from the first cut (was 0.45/0.18) and long-ramped in/out so it never cuts off.
-// Each NEW rub restarts the clip from the top (a paused <audio> resumes mid-clip otherwise);
-// the seek is done while silenced so the restart isn't audible. `orbRub2Active` keeps the
-// continuous-rub case (beginRubFeedback fires repeatedly on drag) from re-seeking → stutter.
-let orbRub2Audio = null;
-let orbRub2FadeTimer = null;
-let orbRub2Active = false;
-let orbRub2WebAudio = null;
-const orbRub2TargetVol = () => (state.whisper ? 0.068 : 0.162); // 2026-07-01: +35% per playtest (was 0.05/0.12), still under the main rub drone
-const ORB_RUB2_FADE_IN_MS = 750;
-const ORB_RUB2_FADE_OUT_MS = 1200;
+// 2026-10-26: orb rub sound must NEVER cut off abruptly (long-standing playtest note). Three causes:
+// (1) orb_rub2.mp3 is a one-shot swell (quiet head/tail + 82ms trailing silence), so loop=true
+// dipped/gapped every ~5.9s mid-rub; (2) the iOS HTML-<audio> fallback can't fade (.volume is
+// read-only on iOS), so its "fade-out" ended in a hard pause(); (3) stop paths read
+// AudioParam.value mid-ramp, which WebKit doesn't report, so a quick release snapped the gain.
+// Now: Web Audio only, a crossfading grain looper over the clip's sustained body, and every ramp
+// starts from a tracked (computed) current value.
 
-// Ramp orbRub2 volume toward `target` over `ms` (setInterval — <audio>.volume has no ramp).
-function fadeOrbRub2(target, ms, onDone) {
-  if (!orbRub2Audio) return;
-  if (orbRub2FadeTimer) { clearInterval(orbRub2FadeTimer); orbRub2FadeTimer = null; }
-  const stepMs = 30;
-  const start = orbRub2Audio.volume;
-  const steps = Math.max(1, Math.round(ms / stepMs));
-  let i = 0;
-  orbRub2FadeTimer = setInterval(() => {
-    i += 1;
-    const t = Math.min(1, i / steps);
-    if (orbRub2Audio) orbRub2Audio.volume = clamp(start + (target - start) * t, 0, 1);
-    if (t >= 1) {
-      clearInterval(orbRub2FadeTimer);
-      orbRub2FadeTimer = null;
-      onDone?.();
-    }
-  }, stepMs);
+// Ramp an AudioParam from its true current level. WebKit's param.value ignores automation, so we
+// record each ramp on the param and interpolate ourselves before cancelling.
+function rubParamNow(param, t) {
+  const r = param._rubRamp;
+  if (!r) return param.value;
+  if (t >= r.t1) return r.v1;
+  if (r.tau) return r.v1 + (r.v0 - r.v1) * Math.exp(-(t - r.t0) / r.tau);
+  return r.v0 + (r.v1 - r.v0) * Math.max(0, (t - r.t0) / Math.max(1e-4, r.t1 - r.t0));
 }
-
-function stopOrbRub2WebAudioNow(handle = orbRub2WebAudio) {
-  if (!handle) return;
-  if (handle.stopTimer) clearTimeout(handle.stopTimer);
-  try { handle.source.stop(); } catch { /* ignore */ }
-  try { handle.source.disconnect(); } catch { /* ignore */ }
-  try { handle.gain.disconnect(); } catch { /* ignore */ }
-  if (orbRub2WebAudio === handle) orbRub2WebAudio = null;
-}
-
-function startOrbRub2WebAudio() {
-  const ctx = audioEngine.ensureContext?.();
-  const buffer = audioEngine.buffers?.get?.("orb_rub2");
-  if (!ctx || !audioEngine.masterGain || !audioEngine.unlocked || !buffer) return false;
-  if (orbRub2WebAudio) {
-    const handle = orbRub2WebAudio;
-    if (handle.stopTimer) {
-      clearTimeout(handle.stopTimer);
-      handle.stopTimer = null;
-    }
-    const now = handle.ctx.currentTime;
-    handle.gain.gain.cancelScheduledValues(now);
-    handle.gain.gain.setValueAtTime(handle.gain.gain.value, now);
-    handle.gain.gain.linearRampToValueAtTime(orbRub2TargetVol(), now + ORB_RUB2_FADE_IN_MS / 1000);
-    return true;
+function rubRamp(param, ctx, target, seconds, { exp = false } = {}) {
+  const t = ctx.currentTime;
+  const v0 = rubParamNow(param, t);
+  param.cancelScheduledValues(t);
+  param.setValueAtTime(v0, t);
+  if (exp) {
+    const tau = seconds / 4; // ~98% there by `seconds`
+    param.setTargetAtTime(target, t, tau);
+    param._rubRamp = { t0: t, t1: t + seconds * 2, v0, v1: target, tau };
+  } else {
+    param.linearRampToValueAtTime(target, t + seconds);
+    param._rubRamp = { t0: t, t1: t + seconds, v0, v1: target };
   }
-
-  const now = ctx.currentTime;
-  const source = ctx.createBufferSource();
-  const gain = ctx.createGain();
-  source.buffer = buffer;
-  source.loop = true;
-  gain.gain.value = 0;
-  source.connect(gain);
-  gain.connect(audioEngine.sfxBus || audioEngine.masterGain);
-  source.start(now);
-  gain.gain.cancelScheduledValues(now);
-  gain.gain.setValueAtTime(0, now);
-  gain.gain.linearRampToValueAtTime(orbRub2TargetVol(), now + ORB_RUB2_FADE_IN_MS / 1000);
-  const handle = { ctx, source, gain, stopTimer: null };
-  source.onended = () => {
-    if (orbRub2WebAudio === handle) orbRub2WebAudio = null;
-  };
-  orbRub2WebAudio = handle;
-  return true;
 }
 
+// Seamless rub texture: overlapping one-shot grains of the clip's sustained body, each faded in
+// and out (equal-power) and started XFADE before the previous one ends, so the level never dips.
+// All grains feed one master gain; start/stop only ramp that master.
+// The clip is a crescendo (RMS ~10 → 50 → 9); looping its fuller middle keeps the level even.
+const ORB_RUB2_BODY_START = 0.8;  // s — skip the clip's quiet swell-in
+const ORB_RUB2_BODY_END = 4.4;    // s — and its swell-out + trailing silence
+const ORB_RUB2_XFADE = 1.1;       // s — grain crossfade
+const ORB_RUB2_FADE_IN = 0.75;
+const ORB_RUB2_FADE_OUT = 1.2;
+const orbRub2TargetVol = () => (state.whisper ? 0.068 : 0.162); // 2026-07-01 levels, unchanged
+const orbRub2Looper = {
+  ctx: null,
+  master: null,
+  grains: [],
+  nextAt: 0,
+  timer: null,
+  stopTimer: null,
+  holding: false,
+  scheduleGrain(at) {
+    const buffer = audioEngine.buffers?.get?.("orb_rub2");
+    if (!buffer || !this.ctx) return false;
+    const { ctx } = this;
+    const bodyEnd = Math.min(ORB_RUB2_BODY_END, buffer.duration - 0.05);
+    const len = bodyEnd - ORB_RUB2_BODY_START;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const g = ctx.createGain();
+    // Equal-power in/out (sine/cosine) traced with short linear segments — setValueCurveAtTime
+    // throws on overlapping events in some engines; plain ramps never do.
+    const SEG = 8;
+    g.gain.setValueAtTime(0, at);
+    for (let i = 1; i <= SEG; i += 1) {
+      g.gain.linearRampToValueAtTime(Math.sin((i / SEG) * Math.PI / 2), at + (i / SEG) * ORB_RUB2_XFADE);
+    }
+    const outAt = at + len - ORB_RUB2_XFADE;
+    g.gain.setValueAtTime(1, outAt);
+    for (let i = 1; i <= SEG; i += 1) {
+      g.gain.linearRampToValueAtTime(Math.cos((i / SEG) * Math.PI / 2), outAt + (i / SEG) * ORB_RUB2_XFADE);
+    }
+    src.connect(g);
+    g.connect(this.master);
+    src.start(at, ORB_RUB2_BODY_START, len);
+    const grain = { src, g, endAt: at + len };
+    src.onended = () => {
+      try { g.disconnect(); } catch { /* ignore */ }
+      this.grains = this.grains.filter((x) => x !== grain);
+    };
+    this.grains.push(grain);
+    this.nextAt = at + len - ORB_RUB2_XFADE;
+    return true;
+  },
+  // Keep two grains queued ahead of the clock while the rub (or its fade-out) is running.
+  pump() {
+    if (!this.ctx) return;
+    const horizon = this.ctx.currentTime + 2 * (ORB_RUB2_BODY_END - ORB_RUB2_BODY_START - ORB_RUB2_XFADE);
+    let guard = 0;
+    while (this.nextAt < horizon && guard < 3) {
+      if (!this.scheduleGrain(Math.max(this.nextAt, this.ctx.currentTime + 0.02))) break;
+      guard += 1;
+    }
+  },
+  start() {
+    const ctx = audioEngine.ensureContext?.();
+    if (!ctx || !audioEngine.masterGain || ctx.state !== "running") return false;
+    if (!audioEngine.buffers?.get?.("orb_rub2")) return false;
+    this.holding = true;
+    if (this.stopTimer) { clearTimeout(this.stopTimer); this.stopTimer = null; }
+    if (this.ctx !== ctx || !this.master) {
+      this.ctx = ctx;
+      this.master = ctx.createGain();
+      this.master.gain.value = 0;
+      this.master.connect(audioEngine.sfxBus || audioEngine.masterGain);
+      this.grains = [];
+      this.nextAt = 0;
+    }
+    if (!this.grains.length) this.nextAt = ctx.currentTime + 0.02;
+    this.pump();
+    if (!this.timer) this.timer = setInterval(() => this.pump(), 250);
+    rubRamp(this.master.gain, ctx, orbRub2TargetVol(), ORB_RUB2_FADE_IN); // from wherever it is now
+    return true;
+  },
+  stop() {
+    if (!this.holding || !this.ctx || !this.master) return;
+    this.holding = false;
+    rubRamp(this.master.gain, this.ctx, 0, ORB_RUB2_FADE_OUT);
+    // Grains keep playing (silently, under the fade) until the fade is done, then they're torn down.
+    this.stopTimer = setTimeout(() => {
+      this.stopTimer = null;
+      if (this.holding) return;
+      clearInterval(this.timer);
+      this.timer = null;
+      const t = this.ctx.currentTime;
+      for (const gr of this.grains) { try { gr.src.stop(t + 0.05); } catch { /* ignore */ } }
+      this.grains = [];
+      this.nextAt = 0;
+    }, ORB_RUB2_FADE_OUT * 1000 + 120);
+  },
+};
+
+let orbRub2Active = false;
+let orbRub2Pending = false; // buffer still decoding / ctx not running yet — fade in when ready
 function startOrbRub2Loop() {
-  try {
-    audioEngine.loadSound?.("orb_rub2", GAME_SFX.orb_rub2).catch?.(() => {});
-    if (!orbRub2Audio) {
-      orbRub2Audio = new Audio("gamesfx/orb_rub2.mp3");
-      orbRub2Audio.loop = true;
-      orbRub2Audio.volume = 0; // 2026-07-01: start silent so a first-load play() can't emit an un-ramped blip before the fade engages
-    }
-    if (orbRub2Active) return; // already running this rub — let the loop continue, don't re-seek
-    orbRub2Active = true;
-    if (orbRub2FadeTimer) { clearInterval(orbRub2FadeTimer); orbRub2FadeTimer = null; }
-    if (startOrbRub2WebAudio()) {
-      try { orbRub2Audio.pause(); } catch { /* ignore */ }
-      return;
-    }
-    orbRub2Audio.volume = 0;             // silence first so the restart-from-top seek is inaudible
-    try { orbRub2Audio.currentTime = 0; } catch { /* ignore */ }
-    if (orbRub2Audio.paused) orbRub2Audio.play().catch(() => {});
-    fadeOrbRub2(orbRub2TargetVol(), ORB_RUB2_FADE_IN_MS); // long fade in
-  } catch { /* ignore */ }
+  if (orbRub2Active) return; // already running this rub — let it continue
+  orbRub2Active = true;
+  if (orbRub2Looper.start()) return;
+  // Not ready yet: the drone plays alone; bring the texture in (faded) if it becomes ready while
+  // the rub is still held. Never fall back to an HTML <audio> element (can't fade on iOS).
+  if (orbRub2Pending) return;
+  orbRub2Pending = true;
+  Promise.resolve(audioEngine.unlock?.())
+    .then(() => audioEngine.loadSound?.("orb_rub2", GAME_SFX.orb_rub2))
+    .catch(() => {})
+    .finally(() => {
+      orbRub2Pending = false;
+      if (orbRub2Active && orbRubbing) orbRub2Looper.start();
+    });
 }
 function stopOrbRub2Loop() {
-  if (!orbRub2Audio || !orbRub2Active) return;
+  if (!orbRub2Active) return;
   orbRub2Active = false;
-  if (orbRub2WebAudio) {
-    const handle = orbRub2WebAudio;
-    const { ctx, gain } = handle;
-    const now = ctx.currentTime;
-    gain.gain.cancelScheduledValues(now);
-    gain.gain.setValueAtTime(gain.gain.value, now);
-    gain.gain.linearRampToValueAtTime(0, now + ORB_RUB2_FADE_OUT_MS / 1000);
-    handle.stopTimer = setTimeout(() => {
-      if (!orbRub2Active && orbRub2WebAudio === handle) stopOrbRub2WebAudioNow(handle);
-    }, ORB_RUB2_FADE_OUT_MS + 80);
-    return;
-  }
-  fadeOrbRub2(0, ORB_RUB2_FADE_OUT_MS, () => {
-    // Only pause if another rub didn't start during the fade-out (which flips Active back on).
-    if (!orbRub2Active) { try { orbRub2Audio.pause(); } catch { /* ignore */ } }
-  });
+  orbRub2Looper.stop();
 }
 
 // Start the drone + the synced hard-pulse haptic loop (both idempotent).
@@ -8818,6 +8954,19 @@ function setLevelBackgroundDefocus(on) {
   // resume is implicit: the next level's setGalaxyBackgroundKey re-plays the front video.
 }
 
+// 2026-10-26: resolve once a playing video has painted a frame (or after maxMs) — the level-start
+// warp holds until then so the player never sees the bare starfield.
+function waitFirstVideoFrame(video, maxMs = 900) {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, maxMs);
+    const done = () => { clearTimeout(t); resolve(); };
+    if (typeof video?.requestVideoFrameCallback === "function") video.requestVideoFrameCallback(done);
+    else if (video && !video.paused && video.readyState >= 3) done();
+    else video?.addEventListener("playing", done, { once: true });
+  });
+}
+
+// Resolves when the requested background is on screen (bg video playing + first frame painted).
 async function setGalaxyBackgroundKey(key, opts = {}) {
   if (DISABLE_VIDEO_BG) return;
   initGalaxyBackgroundStack();
@@ -8827,7 +8976,7 @@ async function setGalaxyBackgroundKey(key, opts = {}) {
   const fadeMs = opts.fadeMs ?? 450;
   const fadeInSeconds = opts.fadeInSeconds ?? 20;
   const immediate = opts.immediate ?? false;
-  const entryOpacity = immediate ? 1 : 0.34;
+  const entryOpacity = immediate ? 1 : 0.55; // 2026-10-26: was 0.34 — reads at once as the warp fades
 
   if (bgCtl.currentKey === key && bgCtl.front) {
     try {
@@ -8865,6 +9014,8 @@ async function setGalaxyBackgroundKey(key, opts = {}) {
   } catch {
     // ignore autoplay block
   }
+  await waitFirstVideoFrame(back);
+  if (token !== bgCtl.token) return;
 
   if (!front || !bgCtl.currentKey) {
     back.style.transition = `opacity ${fadeMs}ms ease`;
@@ -9053,9 +9204,54 @@ function initGalaxyCanvas() {
     playGameSfx("blip1", 0.6, { rate: plasmaCage.mode === "manual" ? 1.2 : 0.9 });
     updatePlasmaModeBtn();
   });
+  // ── 2026-10-26: Cockpit HUD (Dev Mode trial of the Lab's "D · Hybrid", tools/reactbits-lab) ──
+  // Reskins + MOVES the real HUD elements (no duplicates, so every listener/updater keeps working):
+  // weapons, POLYSLOTS and the NET pill go into a bottom dashboard; Lives joins the Modes panel and
+  // the multiplier gets its own panel up top. Arcade levels only — Training/Practice keep their tuned
+  // layout. Synced every frame from updatePlasmaModeBtn (cheap: bails unless the state flips).
+  let cockpitApplied = false;
+  let cockpitDash = null;
+  let cockpitMultPanel = null;
+  const cockpitMoved = []; // [el, originalParent, originalNextSibling]
+  function cockpitMove(el, dest) {
+    if (!el || !dest) return;
+    cockpitMoved.push([el, el.parentNode, el.nextSibling]);
+    dest.appendChild(el);
+  }
+  function syncCockpitHud() {
+    const on = cockpitHudPref && engineMode === "arcade" && arcadeActive && !stuntActive && !practiceEndless;
+    if (on === cockpitApplied) return;
+    cockpitApplied = on;
+    document.body.classList.toggle("hud-cockpit", on);
+    if (on) {
+      if (!cockpitDash) {
+        cockpitDash = document.createElement("div");
+        cockpitDash.id = "cockpitDash";
+        cockpitDash.className = "cockpitDash";
+        cockpitDash.innerHTML = '<div class="cockpitBays"></div>';
+        galaxyView.appendChild(cockpitDash);
+        cockpitMultPanel = document.createElement("div");
+        cockpitMultPanel.className = "cockpitMult";
+      }
+      const bays = cockpitDash.firstChild;
+      for (const el of [hudBombBtn, hudFreezeBtn, hudMissileBtn, hudSlotBtn, plasmaModeBtn]) cockpitMove(el, bays);
+      cockpitMove(hudLives, document.querySelector("#arcadeHud .hudLeftGroup"));
+      arcadeHud?.appendChild(cockpitMultPanel);
+      cockpitMove(hudMultiplier, cockpitMultPanel);
+    } else {
+      while (cockpitMoved.length) {
+        const [el, parent, next] = cockpitMoved.pop();
+        parent?.insertBefore(el, next && next.parentNode === parent ? next : null);
+      }
+      cockpitMultPanel?.remove();
+    }
+    computePlayfield();
+  }
+
   let _plasmaModeBtnSig = "";
   function updatePlasmaModeBtn(now = performance.now()) {
     if (!plasmaModeBtn) return;
+    syncCockpitHud();
     // 2026-07-05: hidden during Stunt training — the pill overlapped the SPC caption text on
     // iPhone (playtest screenshots) and no tutorial step uses it (net is taught by gesture).
     // Note stunt sets arcadeActive=true, so training must be excluded explicitly.
@@ -10706,7 +10902,7 @@ function initGalaxyCanvas() {
       .ps-tokenoffer button{font-family:inherit;letter-spacing:.1em;white-space:nowrap;border-radius:9px;padding:10px 12px;cursor:pointer;}
       .ps-offer-watch{font-size:clamp(.74rem,2.8vw,.95rem);color:#08121e;background:linear-gradient(180deg,#ffd76a,#ffb238);border:1px solid #ffe19a;box-shadow:0 0 14px rgba(255,190,70,.45);}
       .ps-offer-watch:disabled{opacity:.6;}
-      .ps-offer-continue{font-size:clamp(.74rem,2.6vw,.9rem);color:#00FFD1;background:rgba(8,18,32,.92);border:1px solid rgba(0,255,209,.42);}
+      .ps-offer-continue{font-size:clamp(.74rem,2.6vw,.9rem);color:#00FFD1;background:rgba(0,60,52,.85);border:1px solid rgba(0,255,209,.75);box-shadow:0 0 14px rgba(0,255,209,.35);}
       .cabinet-loading .ps-tokenoffer{opacity:0;}
       .ps-continue-inner{position:absolute;top:73.5%;left:50%;transform:translateX(-50%);font-size:clamp(.88rem,3.2vw,1.05rem);letter-spacing:.14em;color:#00FFD1;text-align:center;text-shadow:0 0 16px rgba(0,255,209,.6);border:1px solid rgba(0,255,209,.42);border-radius:10px;padding:12px 18px;min-width:62%;animation:psBlink 1.2s steps(2,jump-none) infinite;}
     `;
@@ -10747,8 +10943,8 @@ function initGalaxyCanvas() {
         </div>
         <button class="ps-skip" id="psSkip" type="button">SKIP ▸</button>
         <div class="ps-tokenoffer" id="psTokenOffer">
-          <button class="ps-offer-watch" type="button"></button>
           <button class="ps-offer-continue" type="button">CONTINUE ▸</button>
+          <button class="ps-offer-watch" type="button"></button>
         </div>
         <div class="ps-continue" id="psContinue"><div class="ps-continue-inner" id="psContinueInner">TAP TO CONTINUE</div></div>
       </div>
@@ -11091,12 +11287,29 @@ function initGalaxyCanvas() {
   }
 
   // ── 2026-10-25 (GAME-02/03): every-other-level reward box ───────────────────────────────────
-  // Shown after clearing L2, L4, L6… in Arcade. Never opens by itself: taps 1–2 rattle it, tap 3
-  // opens it. Contents: 1 item roll + 1 per combo this level (max +3), plus 1 slot token. Items are
+  // Shown after clearing L2, L4, L6… in Arcade. Never opens by itself: the chest whizzes in on a
+  // teal spark swirl, taps 1–5 shake it harder each time, tap 6 flashes the screen and plays the
+  // open frames (assets/ui/chest) into the nuclear confetti (2026-10-26, Paul). Contents: 1 item roll + 1 per combo this level (max +3), plus 1 slot token. Items are
   // bomb/freeze/missile, skipping full (or cheat-unlimited) ones; anything that can't fit becomes a
   // token. COLLECT ×2 (rewarded ad, native only) grants the same list twice. One grant per box.
   const REWARD_BOX_MAX_COMBO_ROLLS = 3;
-  const REWARD_BOX_TAPS_TO_OPEN = 3;
+  const REWARD_BOX_TAPS_TO_OPEN = 6;
+  const CHEST_FRAMES = ["shut", "open1", "open2", "open3", "open4", "open5", "open6"]
+    .map((f) => `assets/ui/chest/chest_${f}.webp`);
+  const CHEST_OPEN_FRAME_MS = 85;
+  let _chestFrameImgs = null;
+  // Decode every frame up front so the open sequence never flashes an undecoded (blank) frame.
+  function warmChestFrames() {
+    if (!_chestFrameImgs) {
+      _chestFrameImgs = CHEST_FRAMES.map((src) => {
+        const img = new Image();
+        img.src = src;
+        img.decode?.().catch(() => {});
+        return img;
+      });
+    }
+    return _chestFrameImgs[0].decode ? _chestFrameImgs[0].decode().catch(() => {}) : Promise.resolve();
+  }
   const TOKEN_AD_REWARD = 3;
   const REWARD_ITEM_INFO = {
     bomb: { label: "Bomb", art: "powerups/powerup_bomb.png" },
@@ -11119,14 +11332,18 @@ function initGalaxyCanvas() {
       .rbx-overlay{position:fixed;inset:0;z-index:9500;display:flex;align-items:center;justify-content:center;pointer-events:auto;background:radial-gradient(circle at 50% 42%,rgba(6,16,30,.93),rgba(1,4,10,.97));}
       .rbx-panel{display:grid;justify-items:center;gap:14px;text-align:center;}
       .rbx-sub{font-size:.85rem;letter-spacing:.08em;color:#bfe;opacity:.85;max-width:300px;}
-      .rbx-box{position:relative;width:132px;height:112px;border:0;background:none;padding:0;cursor:pointer;-webkit-tap-highlight-color:transparent;}
-      .rbx-body{position:absolute;left:8px;right:8px;bottom:0;height:72px;border-radius:10px;background:linear-gradient(180deg,#123a4a,#06202b);border:2px solid rgba(0,255,209,.7);box-shadow:0 0 22px rgba(0,255,209,.35),inset 0 0 18px rgba(0,255,209,.18);}
-      .rbx-body::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:18px;transform:translateX(-50%);background:linear-gradient(180deg,#ffd76a,#c8961c);}
-      .rbx-lid{position:absolute;left:0;right:0;top:12px;height:30px;border-radius:9px;background:linear-gradient(180deg,#1b5266,#0b3242);border:2px solid rgba(0,255,209,.8);transform-origin:12% 100%;transition:transform 380ms cubic-bezier(.2,1.4,.4,1);}
-      .rbx-lid::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:18px;transform:translateX(-50%);background:linear-gradient(180deg,#ffe28a,#d9a62a);}
-      .rbx-box.rbx-rattle{animation:rbxRattle 320ms ease-in-out;}
-      .rbx-box.rbx-open .rbx-lid{transform:translateY(-22px) rotate(-24deg);}
-      @keyframes rbxRattle{0%,100%{transform:rotate(0)}20%{transform:rotate(-7deg)}40%{transform:rotate(6deg)}60%{transform:rotate(-4deg)}80%{transform:rotate(3deg)}}
+      .rbx-box{position:relative;width:min(64vw,260px);aspect-ratio:1;border:0;background:none;padding:0;cursor:pointer;-webkit-tap-highlight-color:transparent;--amp:0deg;--dx:0px;--glow:0;}
+      .rbx-chest{width:100%;height:100%;object-fit:contain;pointer-events:none;-webkit-user-drag:none;filter:drop-shadow(0 0 calc(10px + var(--glow) * 26px) rgba(0,255,209,calc(.3 + var(--glow) * .55)));}
+      .rbx-box.rbx-arrive{animation:rbxArrive 720ms cubic-bezier(.18,1.25,.4,1) both;}
+      @keyframes rbxArrive{0%{transform:translateY(46vh) scale(.12) rotate(-300deg);opacity:0}55%{opacity:1}78%{transform:translateY(-10px) scale(1.12) rotate(8deg)}100%{transform:none}}
+      .rbx-box.rbx-shake{animation:rbxShake var(--dur,320ms) ease-in-out;}
+      @keyframes rbxShake{0%,100%{transform:none}15%{transform:translateX(calc(var(--dx) * -1)) rotate(calc(var(--amp) * -1))}30%{transform:translateX(var(--dx)) rotate(var(--amp)) scale(1.03)}45%{transform:translateX(calc(var(--dx) * -.8)) rotate(calc(var(--amp) * -.8))}60%{transform:translateX(calc(var(--dx) * .6)) rotate(calc(var(--amp) * .6)) scale(1.02)}80%{transform:translateX(calc(var(--dx) * -.3)) rotate(calc(var(--amp) * -.3))}}
+      .rbx-box.rbx-open{animation:rbxPop 420ms cubic-bezier(.2,1.5,.4,1);}
+      @keyframes rbxPop{0%{transform:scale(.92)}45%{transform:scale(1.14)}100%{transform:none}}
+      .rbx-flash{position:fixed;inset:0;z-index:20900;pointer-events:none;background:radial-gradient(circle at 50% 45%,rgba(230,255,250,.95),rgba(0,255,209,.55) 45%,rgba(0,255,209,0) 80%);animation:rbxFlash 520ms ease-out forwards;}
+      @keyframes rbxFlash{0%{opacity:var(--peak,1)}100%{opacity:0}}
+      .rbx-hint.rbx-hint-pop{animation:rbxHintPop 260ms cubic-bezier(.2,1.6,.4,1);}
+      @keyframes rbxHintPop{0%{transform:scale(1)}40%{transform:scale(1.18)}100%{transform:scale(1)}}
       .rbx-hint{font-size:.8rem;letter-spacing:.2em;color:#00FFD1;}
       .rbx-items{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;min-height:0;}
       .rbx-item{display:grid;justify-items:center;gap:4px;font-size:.72rem;letter-spacing:.06em;color:#dff;animation:lsrRowIn 260ms ease both;}
@@ -11208,13 +11425,13 @@ function initGalaxyCanvas() {
     updateHudMissileInventory();
   }
 
-  function showRewardBox(clearedLevel, onDone) {
-    rewardBoxesOpened.add(clearedLevel);
-    const { items, bonusRolls } = rollRewardBox();
+  function showRewardBox(clearedLevel, onDone, { previewItems = null } = {}) {
+    if (!previewItems) rewardBoxesOpened.add(clearedLevel);
+    const { items, bonusRolls } = previewItems ? { items: previewItems, bonusRolls: 0 } : rollRewardBox();
     const { panel, close } = openBreakOverlay("rewardBoxOverlay", "REWARD BOX");
     panel.insertAdjacentHTML("beforeend", `
-      <button class="rbx-box" type="button" aria-label="Open the reward box"><span class="rbx-lid"></span><span class="rbx-body"></span></button>
-      <div class="rbx-hint">TAP ${REWARD_BOX_TAPS_TO_OPEN}× TO OPEN</div>
+      <button class="rbx-box" type="button" aria-label="Open the reward chest" style="visibility:hidden"><img class="rbx-chest" alt="" src="${CHEST_FRAMES[0]}"></button>
+      <div class="rbx-hint" style="visibility:hidden">TAP TO OPEN</div>
       <div class="rbx-items" hidden></div>
       <div class="rbx-combo" hidden></div>
       <div class="rbx-actions" hidden></div>
@@ -11232,25 +11449,78 @@ function initGalaxyCanvas() {
     function finish(times) {
       if (granted) return;
       granted = true;
-      for (let i = 0; i < times; i += 1) grantRewardItems(items);
+      if (!previewItems) for (let i = 0; i < times; i += 1) grantRewardItems(items);
       playGameSfx("level_up", 0.8);
       close(onDone);
     }
 
-    box.addEventListener("click", () => {
-      if (taps >= REWARD_BOX_TAPS_TO_OPEN) return;
-      taps += 1;
-      if (taps < REWARD_BOX_TAPS_TO_OPEN) {
-        box.classList.remove("rbx-rattle");
-        void box.offsetWidth; // restart the one-shot rattle on quick re-taps
-        box.classList.add("rbx-rattle");
-        playGameSfx("blip1", 0.7);
+    const chestImg = panel.querySelector(".rbx-chest");
+    const chestCenter = () => {
+      const r = box.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height * 0.55 };
+    };
+    const screenFlash = (peak) => {
+      const f = document.createElement("div");
+      f.className = "rbx-flash";
+      f.style.setProperty("--peak", String(peak));
+      document.body.appendChild(f);
+      setTimeout(() => f.remove(), 560);
+    };
+    // Arrival: wait for the shut frame to decode (max 400ms), then whiz in on an inward teal swirl
+    // and pop a small outward burst as it lands.
+    let arrived = false;
+    Promise.race([warmChestFrames(), delay(400)]).then(() => {
+      if (!box.isConnected) return;
+      box.style.visibility = "";
+      box.classList.add("rbx-arrive");
+      const c = chestCenter();
+      window.polyFx?.playTealBurst?.({ ...c, inward: true, power: 0.7, durationMs: 620 });
+      playGameSfx("warp", 0.7);
+      setTimeout(() => {
+        if (!box.isConnected) return;
+        arrived = true;
+        box.classList.remove("rbx-arrive");
+        hint.style.visibility = "";
+        window.polyFx?.playTealBurst?.({ ...chestCenter(), power: 0.35, durationMs: 520 });
         triggerHapticImpact(hapticImpactStyle.Light);
+      }, 720);
+    });
+
+    box.addEventListener("click", () => {
+      if (!arrived || taps >= REWARD_BOX_TAPS_TO_OPEN) return;
+      taps += 1;
+      const k = taps / REWARD_BOX_TAPS_TO_OPEN; // 0..1 — every tap shakes harder than the last
+      box.style.setProperty("--glow", k.toFixed(2));
+      if (taps < REWARD_BOX_TAPS_TO_OPEN) {
+        hint.textContent = "KEEP TAPPING!";
+        hint.classList.remove("rbx-hint-pop");
+        void hint.offsetWidth;
+        hint.classList.add("rbx-hint-pop");
+        box.style.setProperty("--amp", `${(3 + taps * 3.2).toFixed(1)}deg`);
+        box.style.setProperty("--dx", `${(2 + taps * 3.5).toFixed(1)}px`);
+        box.style.setProperty("--dur", `${280 + taps * 45}ms`);
+        box.classList.remove("rbx-shake");
+        void box.offsetWidth; // restart the one-shot shake on quick re-taps
+        box.classList.add("rbx-shake");
+        window.polyFx?.playTealBurst?.({ ...chestCenter(), power: k, durationMs: 420 + taps * 50 });
+        playGameSfx("blip1", 0.6 + k * 0.3, { rate: 0.85 + taps * 0.09 });
+        triggerHapticImpact(taps >= 4 ? hapticImpactStyle.Heavy : taps >= 2 ? hapticImpactStyle.Medium : hapticImpactStyle.Light);
+        if (taps >= 4) screenFlash(0.18 + (taps - 4) * 0.12);
         return;
       }
-      box.classList.remove("rbx-rattle");
+      // Open: screen flash → frame sequence open1 (burst) … open6 (idle) → nuclear confetti.
+      box.classList.remove("rbx-shake");
       box.classList.add("rbx-open");
       hint.hidden = true;
+      screenFlash(1);
+      const c = chestCenter();
+      CHEST_FRAMES.slice(1).forEach((src, i) => {
+        setTimeout(() => { if (box.isConnected) chestImg.src = src; }, i * CHEST_OPEN_FRAME_MS);
+      });
+      window.polyFx?.playTealBurst?.({ ...c, power: 1, durationMs: 900 });
+      window.polyFx?.playNuclearConfetti?.({ x: c.x, y: c.y - 20 });
+      triggerHapticImpact(hapticImpactStyle.Heavy);
+      playGameSfx("bling", 0.9);
       playGameSfx("pickup_weapon", 0.9);
       triggerHapticNotification(hapticNotificationType.Success);
       itemsEl.hidden = false;
@@ -11258,7 +11528,7 @@ function initGalaxyCanvas() {
         const info = REWARD_ITEM_INFO[kind];
         const el = document.createElement("div");
         el.className = "rbx-item";
-        el.style.animationDelay = `${i * 120}ms`;
+        el.style.animationDelay = `${450 + i * 120}ms`; // after the open burst
         el.innerHTML = `<img alt=""><span></span>`;
         el.querySelector("img").src = info.art;
         el.querySelector("span").textContent = info.label;
@@ -11290,6 +11560,224 @@ function initGalaxyCanvas() {
         actions.appendChild(dbl);
       }
     });
+  }
+
+  // ── 2026-10-26 (Paul): first-time TIPS on the opening levels, like Monkey Trubble ─────────────
+  // A silent bubble + pulsing teal ring + bobbing pointer on the thing a tip is about, the first
+  // time that thing is useful. Each tip shows ONCE EVER (learned the moment it shows; ids kept in
+  // localStorage). One at a time: a tip steps aside when its action happens or after TIP_MS, and the
+  // next waits TIP_GAP_MS. Tips wait TIP_START_MS into a level (past the level banner) and only run
+  // on Arcade levels 1–TIP_MAX_LEVEL (anyLevel tips run on every level). The net tip plays the
+  // training's transparent net demo clip.
+  // Dev: localStorage.removeItem("poly_oracle_tips_seen") shows them all again.
+  const STORAGE_TIPS = "poly_oracle_tips_seen";
+  const TIP_MS = 6500, TIP_GAP_MS = 3500, TIP_START_MS = 3200, TIP_MAX_LEVEL = 3, TIP_POLL_MS = 200;
+  function tipsLearned() {
+    try { return new Set(JSON.parse(localStorage.getItem(STORAGE_TIPS) || "[]")); } catch { return new Set(); }
+  }
+  function learnTip(id) {
+    const seen = tipsLearned();
+    seen.add(id);
+    try { localStorage.setItem(STORAGE_TIPS, JSON.stringify([...seen])); } catch { /* private mode */ }
+  }
+  function tipCanvasPoint(x, y, r = 0) {
+    const rect = galaxyPlayCanvas.getBoundingClientRect();
+    return { x: rect.left + x, y: rect.top + y, r };
+  }
+  function tipElTarget(el) {
+    if (!el || el.hidden || el.style.display === "none") return null;
+    const rect = el.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, r: Math.max(rect.width, rect.height) / 2 + 6 };
+  }
+  // The on-screen Stroid nearest the middle of the field (tips point at a real one).
+  function tipStroid() {
+    let best = null, bestD = Infinity;
+    for (const a of sim.asteroids) {
+      if (!a || a.tossed || a.x < 30 || a.y < 60 || a.x > sim.width - 30 || a.y > sim.height - 90) continue;
+      const d = Math.hypot(a.x - sim.width / 2, a.y - sim.height * 0.45);
+      if (d < bestD) { bestD = d; best = a; }
+    }
+    return best;
+  }
+  // A placed (Manual mode) net → its centre.
+  function tipPlacedNet() {
+    const n = plasmaCage.placed;
+    return n ? tipCanvasPoint(n.x + n.w / 2, n.y + n.h / 2, Math.max(n.w, n.h) / 2 + 6) : null;
+  }
+  // Two Stroids close enough to net together → their midpoint.
+  function tipStroidCluster() {
+    const list = sim.asteroids.filter((a) => a && !a.tossed);
+    for (let i = 0; i < list.length; i += 1) {
+      for (let j = i + 1; j < list.length; j += 1) {
+        const a = list[i], b = list[j];
+        if (Math.hypot(a.x - b.x, a.y - b.y) < Math.min(sim.width, sim.height) * 0.4) {
+          return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, r: Math.hypot(a.x - b.x, a.y - b.y) / 2 + Math.max(a.r, b.r) };
+        }
+      }
+    }
+    return null;
+  }
+  // when(): is this the moment? target(snap): {x,y,r} on screen, or null for a centred bubble.
+  // done(snap): the action happened since the tip appeared (snap = state captured at show time).
+  const lockedStroid = (s) => {
+    if (!s.a || !sim.asteroids.includes(s.a) || s.a.tossed) s.a = tipStroid(); // stay on one rock
+    return s.a && tipCanvasPoint(s.a.x, s.a.y, s.a.r + 10);
+  };
+  const TIPS = [
+    { id: "fire", line: "TAP A STROID TO BLAST IT",
+      when: () => !!tipStroid(), target: lockedStroid,
+      snap: () => ({ n: sim.asteroids.length }), done: (s) => _tipCanvasTapped || sim.asteroids.length < s.n },
+    { id: "powerup", line: "TAP THE POWER-UP TO GRAB IT",
+      when: () => powerups.length > 0, target: (s) => powerups.includes(s.p) && tipCanvasPoint(s.p.x, s.p.y, 34),
+      snap: () => ({ p: powerups[0] }), done: (s) => !powerups.includes(s.p) },
+    { id: "bomb", line: "TAP BOMB, THEN TAP WHERE TO DROP IT",
+      when: () => playerBombInventory > 0 && !!tipElTarget(hudBombBtn), target: () => tipElTarget(hudBombBtn),
+      snap: () => ({ n: playerBombInventory }), done: (s) => bombAimMode || playerBombInventory < s.n },
+    { id: "missile", line: "TAP MISSILE, THEN TAP A TARGET",
+      when: () => playerMissileInventory > 0 && !!tipElTarget(hudMissileBtn), target: () => tipElTarget(hudMissileBtn),
+      snap: () => ({ n: playerMissileInventory }), done: (s) => missileAimMode || playerMissileInventory < s.n },
+    { id: "freeze", line: "TAP FREEZE TO STOP EVERY STROID",
+      when: () => playerFreezeInventory > 0 && !!tipElTarget(hudFreezeBtn), target: () => tipElTarget(hudFreezeBtn),
+      snap: () => ({ n: playerFreezeInventory }), done: (s) => playerFreezeInventory < s.n },
+    { id: "pulse", line: "PULSE CANNON! EVERY SHOT IS A BIG BLAST",
+      when: () => pulseCannonUntil > performance.now() && !!tipElTarget(hudPulseBadge), target: () => tipElTarget(hudPulseBadge),
+      snap: () => ({}), done: () => pulseCannonUntil <= performance.now() },
+    { id: "slot", line: "TOKENS! TAP THE SLOT TO SPIN FOR GEAR",
+      when: () => slotTokens > 0 && !!tipElTarget(hudSlotBtn), target: () => tipElTarget(hudSlotBtn),
+      snap: () => ({}), done: () => isSlotActive() },
+    { id: "net", line: "DRAG A LOOP AROUND STROIDS TO NET THEM", demo: true,
+      when: () => !plasmaCage.active && plasmaCage.cooldownUntil <= performance.now() && !!tipStroidCluster(),
+      target: () => null, snap: () => ({}), done: () => plasmaCage.active },
+    { id: "netRecharge", line: "THE NET RECHARGES HERE. WAIT FOR IT TO FILL",
+      when: () => plasmaCage.cooldownUntil > performance.now() + 1500 && !!tipElTarget(plasmaModeBtn),
+      target: () => tipElTarget(plasmaModeBtn), snap: () => ({}), done: () => plasmaCage.cooldownUntil <= performance.now() },
+    { id: "netMode", anyLevel: true, line: "TAP TO SWITCH THE NET: AUTO FIRES ON RELEASE, MANUAL WAITS FOR YOU",
+      when: () => plasmaCage.cooldownUntil <= performance.now() && !plasmaCage.active && !plasmaCage.placed
+        && !!tipElTarget(plasmaModeBtn),
+      target: () => tipElTarget(plasmaModeBtn), snap: () => ({ m: plasmaCage.mode }), done: (s) => plasmaCage.mode !== s.m },
+    { id: "netPlaced", anyLevel: true, line: "TAP THE NET (OR DETONATE) TO FIRE IT",
+      when: () => !!plasmaCage.placed, target: () => tipPlacedNet(), snap: () => ({}), done: () => !plasmaCage.placed },
+    { id: "toss", line: "HOLD A STROID, THEN SWIPE TO TOSS IT",
+      when: () => tipsLearned().has("fire") && !!tipStroid(), target: lockedStroid,
+      snap: () => ({}), done: () => !!sim.tossedAsteroid || sim.asteroids.some((a) => a.tossed) },
+  ];
+  let _tipTimer = 0;
+  let _tipReadyAt = 0;      // no tip before this (level banner / gap after the last tip)
+  let _tipShown = null;     // { tip, at, snap }
+  let _tipCanvasTapped = false;
+  let _tipEls = null;
+  function ensureTipEls() {
+    if (_tipEls) return _tipEls;
+    const s = document.createElement("style");
+    s.textContent = `
+      .tipRing{position:fixed;z-index:9600;pointer-events:none;border-radius:50%;border:3px solid #00FFD1;box-shadow:0 0 18px rgba(0,255,209,.7),inset 0 0 12px rgba(0,255,209,.35);transform:translate(-50%,-50%);animation:tipRing 1.1s ease-in-out infinite;}
+      @keyframes tipRing{0%,100%{opacity:.95;scale:1}50%{opacity:.55;scale:1.12}}
+      .tipPointer{position:fixed;z-index:9601;pointer-events:none;width:0;height:0;border-left:13px solid transparent;border-right:13px solid transparent;border-top:20px solid #00FFD1;filter:drop-shadow(0 0 8px rgba(0,255,209,.8));transform:translate(-50%,-100%);animation:tipBob .7s ease-in-out infinite alternate;}
+      .tipPointer.up{border-top:0;border-bottom:20px solid #00FFD1;transform:translate(-50%,0);}
+      @keyframes tipBob{to{translate:0 -7px}}
+      .tipPointer.up{animation-name:tipBobUp}
+      @keyframes tipBobUp{to{translate:0 7px}}
+      .tipBubble{position:fixed;z-index:9602;pointer-events:none;max-width:min(78vw,300px);box-sizing:border-box;padding:10px 14px;border-radius:12px;border:1px solid rgba(0,255,209,.75);background:rgba(4,24,30,.9);box-shadow:0 0 16px rgba(0,255,209,.35);color:#e9fffb;font:700 13px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;text-align:center;transform:translateX(-50%);opacity:0;transition:opacity .25s ease;}
+      .tipBubble.show{opacity:1;}
+      .tipBubble b{display:block;font-size:10px;letter-spacing:.24em;color:#00FFD1;margin-bottom:3px;}
+      @media (prefers-reduced-motion: reduce){.tipRing,.tipPointer{animation:none}}
+    `;
+    document.head.appendChild(s);
+    const ring = document.createElement("div"); ring.className = "tipRing";
+    const pointer = document.createElement("div"); pointer.className = "tipPointer";
+    const bubble = document.createElement("div"); bubble.className = "tipBubble";
+    bubble.innerHTML = "<b>TIP</b><span></span>";
+    for (const el of [ring, pointer, bubble]) { el.hidden = true; el.setAttribute("aria-hidden", "true"); document.body.appendChild(el); }
+    // Any tap on the playfield counts as "tried it" for the fire tip.
+    galaxyPlayCanvas.addEventListener("pointerdown", () => { _tipCanvasTapped = true; }, { passive: true });
+    _tipEls = { ring, pointer, bubble };
+    return _tipEls;
+  }
+  function placeTip(tip, snap) {
+    const { ring, pointer, bubble } = ensureTipEls();
+    const t = tip.target(snap);
+    const vw = window.innerWidth, vh = window.innerHeight;
+    bubble.hidden = false;
+    const bh = bubble.offsetHeight || 60;
+    if (!t) {
+      ring.hidden = pointer.hidden = true;
+      // Centred above the net demo clip (which rests just above the comms HUD).
+      const demoTop = tip.demo && _demoOverlayEl ? _demoOverlayEl.getBoundingClientRect().top : vh * 0.62;
+      bubble.style.left = `${vw / 2}px`;
+      bubble.style.top = `${Math.max(70, demoTop - bh - 14)}px`;
+      return;
+    }
+    const r = Math.max(22, t.r);
+    ring.hidden = false;
+    ring.style.left = `${t.x}px`; ring.style.top = `${t.y}px`;
+    ring.style.width = ring.style.height = `${r * 2}px`;
+    // Bubble goes on the roomier side (above unless the target is in the top 40%).
+    const below = t.y < vh * 0.4;
+    pointer.hidden = false;
+    pointer.classList.toggle("up", below);
+    pointer.style.left = `${t.x}px`;
+    pointer.style.top = below ? `${t.y + r + 4}px` : `${t.y - r - 4}px`;
+    const half = (bubble.offsetWidth || 260) / 2;
+    bubble.style.left = `${Math.min(vw - 16 - half, Math.max(16 + half, t.x))}px`;
+    bubble.style.top = below ? `${t.y + r + 28}px` : `${Math.max(8, t.y - r - 28 - bh)}px`;
+  }
+  function hideTip() {
+    if (_tipShown?.tip.demo) hidePlasmaDemoOverlay();
+    _tipShown = null;
+    if (!_tipEls) return;
+    _tipEls.bubble.classList.remove("show");
+    _tipEls.ring.hidden = _tipEls.pointer.hidden = true;
+    setTimeout(() => { if (!_tipShown && _tipEls) _tipEls.bubble.hidden = true; }, 260);
+  }
+  function stopTips() {
+    if (_tipTimer) clearInterval(_tipTimer);
+    _tipTimer = 0;
+    hideTip();
+  }
+  function tipsPaused() {
+    return !arcadeActive || stuntActive || practiceEndless || engineMode !== "arcade" || !galaxyRunning
+      || isSlotActive() || scorecardIdleAt > 0 || document.hidden || performance.now() >= levelEndsAt;
+  }
+  function tipTick() {
+    const now = performance.now();
+    if (!arcadeActive || stuntActive || engineMode !== "arcade") { stopTips(); return; }
+    if (_tipShown) {
+      const { tip, at, snap } = _tipShown;
+      let doneNow = false;
+      try { doneNow = tip.done(snap); } catch { doneNow = true; }
+      if (tipsPaused() || doneNow || now - at > TIP_MS) {
+        hideTip();
+        _tipReadyAt = now + TIP_GAP_MS;
+        return;
+      }
+      placeTip(tip, snap); // follow a moving Stroid / power-up
+      return;
+    }
+    if (tipsPaused() || now < _tipReadyAt) return;
+    const seen = tipsLearned();
+    const level = ARCADE_LEVELS[currentLevelIndex]?.level || 1;
+    const remaining = TIPS.filter((t) => !seen.has(t.id) && (t.anyLevel || level <= TIP_MAX_LEVEL));
+    if (!remaining.length) { stopTips(); return; }
+    const tip = remaining.find((t) => { try { return t.when(); } catch { return false; } });
+    if (!tip) return;
+    learnTip(tip.id);
+    _tipCanvasTapped = false;
+    _tipShown = { tip, at: now, snap: tip.snap() };
+    const { bubble } = ensureTipEls();
+    bubble.querySelector("span").textContent = tip.line;
+    if (tip.demo) showPlasmaDemoOverlay();
+    placeTip(tip, _tipShown.snap);
+    requestAnimationFrame(() => bubble.classList.add("show"));
+  }
+  function startTipsForLevel(cfg) {
+    stopTips();
+    if (!cfg || stuntActive) return;
+    // Opening levels run every tip; later levels only the anyLevel ones (e.g. the net mode tips).
+    const seen = tipsLearned();
+    if (!TIPS.some((t) => !seen.has(t.id) && (t.anyLevel || cfg.level <= TIP_MAX_LEVEL))) return;
+    _tipReadyAt = performance.now() + TIP_START_MS;
+    _tipTimer = setInterval(tipTick, TIP_POLL_MS);
   }
 
   // Silence the game while a full-screen ad (or ad pod) plays. Suspend the AudioContext and pause
@@ -13139,6 +13627,7 @@ function initGalaxyCanvas() {
     if (btnScores) btnScores.style.display = showRoot ? "" : "none";
     if (btnDevMode) btnDevMode.style.display = showRoot && devModeRevealed ? "" : "none";
     if (btnFxLab) btnFxLab.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
+    if (btnCockpitHud) btnCockpitHud.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
     if (btnCheatCodes) btnCheatCodes.style.display = showRoot ? "" : "none";
     if (btnSettings) btnSettings.style.display = showRoot ? "" : "none";
     if (cheatCodesPanel) {
@@ -13478,7 +13967,7 @@ function initGalaxyCanvas() {
 
   function setGalaxyBackgroundForLevel(levelNum) {
     const key = bgKeyForLevel(levelNum);
-    setGalaxyBackgroundKey(key, { fadeMs: 450, fadeInSeconds: 20 });
+    const shown = setGalaxyBackgroundKey(key, { fadeMs: 450, fadeInSeconds: 20 });
     const nextKey = bgKeyForLevel(levelNum + 1);
     // 2026-06-26 (permanent, SKIP_BOSS_LOOKAHEAD): the L9→L10 boss-video preload spins up an extra
     // hardware video decoder (27s 720p, preload=auto) on top of the live bg + oracle videos — the
@@ -13487,6 +13976,7 @@ function initGalaxyCanvas() {
     if (nextKey && nextKey !== key && !(SKIP_BOSS_LOOKAHEAD && nextKey === "L10")) {
       preloadGalaxyBackgroundKey(nextKey);
     }
+    return shown; // resolves when the level's bg is on screen (see setGalaxyBackgroundKey)
   }
 
   function applyLevelTheme(levelNum) {
@@ -13509,7 +13999,9 @@ function initGalaxyCanvas() {
     const safe = getSafeInsets();
     const pad = 12;
     const topPad = Math.max(hudBottom, topBarBottom) + safe.top + pad;
-    const bottomPad = hintHeight + safe.bottom + 44 + pad;
+    // 2026-10-26: the cockpit dashboard owns the bottom strip when it's on.
+    const dashH = cockpitApplied && cockpitDash ? cockpitDash.offsetHeight : 0;
+    const bottomPad = Math.max(hintHeight + safe.bottom + 44, dashH) + pad;
 
     playfield.x = pad;
     playfield.y = topPad;
@@ -17580,6 +18072,7 @@ function initGalaxyCanvas() {
     currentLevelIndex = safeIdx;
     const cfg = ARCADE_LEVELS[safeIdx];
     const now = performance.now();
+    startTipsForLevel(cfg); // 2026-10-26: first-time tips on the opening levels
     arcadeScoreAtLevelStart = arcadeScore;
     slotTokensAtLevelStart = slotTokens; // 2026-07-02: baseline for the lost-life token rollback (see Retry)
     setSavedArcadeLevel(cfg.level);
@@ -17634,7 +18127,7 @@ function initGalaxyCanvas() {
     _musicRampFired = false;
     resetArcadeTimerVisuals();
     syncArcadeEntryLabel();
-    fdPhase("bg", () => setGalaxyBackgroundForLevel(cfg.level));
+    const bgShown = fdPhase("bg", () => setGalaxyBackgroundForLevel(cfg.level));
     window.galaxyBackground?.show();
     fdPhase("theme", () => {
       window.galaxyBackground?.setTheme(cfg.level);
@@ -17645,7 +18138,9 @@ function initGalaxyCanvas() {
     }
     lvlTrace(`[lvltrans] after triggerWarp invoked=${currentLevelIndex > 0}`);
     // 2026-10-25: FX Lab trials — level-start warp effect + level-start sound (both off by default).
-    playLevelWarpTrial({ color: _levelPrimaryColor }); // tunnel takes the level's theme colour
+    // 2026-10-26: the warp holds until the level's bg video is on screen (covers the bare starfield)
+    // and then fades out into the level.
+    playLevelWarpTrial({ color: _levelPrimaryColor, holdUntil: bgShown }); // tunnel takes the level's theme colour
     {
       const startSfx = trial("sfxLevelStart");
       if (startSfx && startSfx !== "none") playGameSfx(startSfx, 0.9, { important: true });
@@ -23160,6 +23655,11 @@ function initGalaxyCanvas() {
     devInstantWin() {
       devInstantWin();
     },
+    // 2026-10-26: preview the reward chest (console / FX checks). Collecting grants nothing.
+    devPreviewRewardChest() {
+      const { items } = rollRewardBox();
+      showRewardBox(-1, () => {}, { previewItems: items });
+    },
     startArcadeNew() {
       startArcadeNew();
     },
@@ -23224,6 +23724,13 @@ function initGalaxyCanvas() {
     // Part 6: app-switch back into a training/practice session. The audio context gets suspended
     // on background, killing SFX — re-prime it here and resume any SPC line paused on hide.
     onAppForeground() {
+      // 2026-10-26: the audio re-prime runs in every mode — mid-level Arcade lost its SFX on app
+      // switch because only Training/Practice got it. The canvas/loop/SPC restore stays gated.
+      setTimeout(() => {
+        if (stuntActive || practiceEndless) return; // handled (with the rest) below
+        audioEngine.unlock?.();
+        if (engineMode === "arcade" && arcadeActive) audioEngine.loadMany?.(gameplayPreloadSfxMap());
+      }, 300);
       if (!stuntActive && !practiceEndless) return;
       // 2026-06-16: iOS releases the audio session during a speak-to-text / dictation pass and
       // doesn't restore it instantly on foreground. Wait 300ms so the session is fully back before

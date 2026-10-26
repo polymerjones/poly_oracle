@@ -2171,27 +2171,81 @@ select:focus-visible {
 /* Poly Slot (opens the slot cabinet mid-level; count = banked tokens). Purple twin of the
    weapon chips; dim when empty, lit when tokens are banked. */
 .hudSlotBtn {
-  /* 2026-10-25: the real POLYSLOTS neon wordmark (cropped from slotart/cabinet.png) on a mini
-     cabinet plate — reads as "the slot machine", never as a weapon chip. */
+  /* 2026-10-26 (Paul): shaped like the slot machine itself — a mini cabinet (POLYSLOTS marquee,
+     three reels, tray glow) with a lever on the side and the token count beside it. */
+  position: relative;
   display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 34px;
-  border-radius: 7px;
-  padding: 3px 7px 3px 4px;
-  border: 1.5px solid rgba(0, 220, 255, 0.75);
-  background: linear-gradient(180deg, #1c1e26, #0d0e14);
-  box-shadow: 0 0 8px rgba(0, 200, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  align-items: flex-end;
+  gap: 9px;
+  padding: 0 2px 0 0;
+  border: 0;
+  background: none;
   opacity: 1; /* always lit while openable (inventory-style), even at 0 tokens */
-  transition: opacity 160ms ease, box-shadow 160ms ease;
+  transition: opacity 160ms ease, filter 160ms ease;
+  -webkit-tap-highlight-color: transparent;
 }
-.hudSlotLogo {
-  height: 22px;
-  width: auto;
+.hsCab {
+  position: relative;
+  display: grid;
+  grid-template-rows: 9px 1fr 4px;
+  gap: 2px;
+  width: 40px;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 3px 3px 3px;
+  border-radius: 10px 10px 4px 4px;
+  border: 1.5px solid rgba(0, 220, 255, 0.75);
+  background: linear-gradient(180deg, #2b2e3a 0%, #15171f 55%, #0b0c12 100%);
+  box-shadow: 0 0 8px rgba(0, 200, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transition: box-shadow 160ms ease;
+}
+.hsMarquee {
+  width: 100%;
+  height: 9px;
+  object-fit: contain;
   display: block;
   pointer-events: none;
   -webkit-user-drag: none;
 }
+.hsReels {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border-radius: 3px;
+  background: #04060b;
+  border: 1px solid rgba(0, 220, 255, 0.35);
+  box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.9);
+}
+.hsReels img { width: 10px; height: 10px; object-fit: contain; pointer-events: none; -webkit-user-drag: none; }
+.hsTray {
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(0, 200, 255, 0.2), #39c6ff, rgba(0, 200, 255, 0.2));
+  box-shadow: 0 0 5px rgba(57, 198, 255, 0.8);
+}
+.hsLever {
+  position: absolute;
+  left: 39px;
+  top: 8px;
+  width: 4px;
+  height: 18px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #6d7280, #c9ced8, #6d7280);
+  transform-origin: 50% 100%;
+}
+.hsLever i {
+  position: absolute;
+  left: 50%;
+  top: -6px;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ff9a9a, #e01c1c 55%, #7a0000);
+  box-shadow: 0 0 5px rgba(255, 40, 40, 0.6);
+}
+.hudSlotBtn.hsPull .hsLever { animation: hsPull 360ms cubic-bezier(.3, 1.4, .5, 1); }
+@keyframes hsPull { 0% { transform: none; } 40% { transform: scaleY(-0.55); } 100% { transform: none; } }
 .hudSlotCount {
   font: 800 0.8rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #ffe08a;
@@ -2200,14 +2254,14 @@ select:focus-visible {
   background: rgba(255, 210, 100, 0.12);
   border: 1px solid rgba(255, 210, 100, 0.45);
 }
-.hudSlotBtn.has-tokens {
-  box-shadow: 0 0 14px rgba(0, 220, 255, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+.hudSlotBtn.has-tokens .hsCab {
+  box-shadow: 0 0 14px rgba(0, 220, 255, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 .hudSlotBtn:disabled {
   cursor: default;
   opacity: 0.4;
 }
-.hudSlotBtn.slot-attention {
+.hudSlotBtn.slot-attention .hsCab {
   animation: slotAttention 0.9s ease-in-out 6;
 }
 @keyframes slotAttention {
@@ -3353,7 +3407,10 @@ body.dev-mode .hudDevWin { display: inline-block; }
 
 /* 2026-10-25 (ADS-01): Cheat Codes sub-menu rows. Watch buttons are deliberately not .modeBtn so
    the menu's press-pause click replay (galaxyModeSelect handler) doesn't apply to them. */
-.cheatCodesList { display: grid; gap: 8px; max-height: min(52vh, 460px); overflow-y: auto; }
+/* 2026-10-26: Back sits in the header so it's always on screen (it fell below the fold on phones) */
+.cheatHeader { display: flex; align-items: center; gap: 12px; }
+.cheatHeader .modeBackBtn { flex: none; padding: 0 16px; }
+.cheatCodesList { display: grid; gap: 8px; max-height: min(44vh, 400px); overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .cheatRow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, 0.04); text-align: left; }
 .cheatInfo { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .cheatName { font-weight: 700; font-size: 0.92rem; color: #e6eeff; }
@@ -3983,9 +4040,7 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
 .polyHero { box-shadow: 0 10px 26px rgba(120, 140, 255, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.55), inset 0 -4px 8px rgba(40, 20, 110, 0.35); }
 @media (prefers-reduced-motion: reduce) { .modeBtn.polyTile::before, .menuOracleBadge { animation: none; } }
 
-/* HUD: the POLYSLOTS badge was wide enough to push the weapon chips over Lives/Score (playtest) */
-.hudSlotLogo { height: 15px; }
-.hudSlotBtn { min-height: 30px; padding: 2px 5px 2px 3px; gap: 3px; }
+/* HUD: keep the slot button narrow so the weapon chips never crowd Lives/Score (playtest) */
 .hudSlotCount { font-size: 0.72rem; padding: 2px 4px; }
 
 /* 2026-10-25: the Stroids banner is the game entry now — pinned near the top in a slimmer form so the
@@ -4019,3 +4074,85 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
 }
 #levelScoreReport > .lsr-panel, .rbx-overlay > .lsr-panel { position: relative; z-index: 1; }
 #levelScoreReport, .rbx-overlay { overflow: hidden; }
+
+/* ── 2026-10-26: Cockpit HUD (Dev Mode trial of the Lab's "D · Hybrid" concept) ──────────────────
+   body.hud-cockpit is set by syncCockpitHud() during Arcade levels only. Top: C's chamfered holo
+   panels (Modes + Lives | LEVEL + Score | MULT). Bottom: A's illuminated dashboard holding the real
+   weapon buttons, the POLYSLOTS cabinet and the NET pill (moved there by JS). */
+body.hud-cockpit .arcadeHud {
+  background: none;
+  border-bottom: 0;
+  align-items: stretch;
+  gap: 6px;
+}
+body.hud-cockpit .arcadeHud .hudLeftGroup,
+body.hud-cockpit .arcadeHud .hudCenter,
+body.hud-cockpit .arcadeHud .cockpitMult {
+  padding: 7px 10px;
+  clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px), 0 10px);
+  background: linear-gradient(180deg, rgba(14, 30, 60, 0.9), rgba(6, 12, 26, 0.92));
+  box-shadow: inset 0 0 0 1px rgba(123, 226, 255, 0.4);
+}
+body.hud-cockpit .arcadeHud .hudLeftGroup { align-items: center; justify-content: center; gap: 4px; }
+body.hud-cockpit .arcadeHud .hudLeftGroup .hudBtn { min-height: 34px; padding: 6px 12px; }
+body.hud-cockpit .arcadeHud .hudLeftGroup .hudLives { font-size: 0.72rem; letter-spacing: 0.08em; color: #7be2ff; }
+body.hud-cockpit .arcadeHud .hudCenter { flex: 1 1 auto; align-content: center; gap: 1px; }
+body.hud-cockpit .arcadeHud .hudCenter .hudLevel { font: 800 10px/1.2 ui-monospace, Menlo, monospace; letter-spacing: 0.22em; color: #7be2ff; }
+body.hud-cockpit .arcadeHud .hudCenter .hudGameTimer { font-size: 9px; letter-spacing: 0.18em; opacity: 0.7; }
+body.hud-cockpit .arcadeHud .hudCenter #hudScore { font: 900 20px/1.1 ui-monospace, Menlo, monospace; text-shadow: 0 0 12px rgba(123, 226, 255, 0.55); }
+body.hud-cockpit .arcadeHud .cockpitMult { display: grid; align-content: center; justify-items: center; min-width: 58px; }
+body.hud-cockpit .arcadeHud .cockpitMult::before { content: "MULT"; font: 800 9px ui-monospace, Menlo, monospace; letter-spacing: 0.2em; color: rgba(230, 240, 255, 0.6); }
+body.hud-cockpit .arcadeHud .cockpitMult #hudMultiplier { font: 900 17px/1.1 ui-monospace, Menlo, monospace; color: #f6a7ff; }
+body.hud-cockpit .arcadeHud .hudInventoryGroup { margin-left: 0; align-self: center; }
+
+.cockpitDash { display: none; }
+body.hud-cockpit .galaxy-view.mode-arcade .cockpitDash {
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  clip-path: polygon(6% 0, 94% 0, 100% 100%, 0 100%);
+  background: linear-gradient(180deg, rgba(20, 30, 58, 0.94), rgba(6, 10, 22, 0.98));
+  border-top: 2px solid rgba(123, 226, 255, 0.75);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.08);
+}
+.cockpitBays {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 10px;
+}
+body.hud-cockpit .cockpitBays .hudBombBtn,
+body.hud-cockpit .cockpitBays .hudFreezeBtn,
+body.hud-cockpit .cockpitBays .hudMissileBtn {
+  position: relative;
+  flex-direction: column;
+  gap: 0;
+  width: 54px;
+  height: 54px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(30, 40, 70, 0.95), rgba(10, 14, 28, 0.95));
+}
+body.hud-cockpit .cockpitBays .hudBtnIcon { width: 30px; height: 30px; }
+body.hud-cockpit .cockpitBays .hudBtnCount { position: absolute; right: 5px; bottom: 2px; font-size: 11px; }
+body.hud-cockpit .cockpitBays #plasmaModeBtn {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  min-width: 70px;
+  min-height: 54px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  font-size: 9px;
+  white-space: normal;
+  text-align: center;
+}
+/* the comm box sits above the dash like a cockpit monitor (inline bottom is set by JS → !important) */
+body.hud-cockpit #commanderHUD { bottom: calc(env(safe-area-inset-bottom, 0px) + 90px) !important; }

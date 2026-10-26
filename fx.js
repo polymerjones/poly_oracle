@@ -45,6 +45,40 @@
     });
   }
 
+  // 2026-10-26: open-ended run for the level warp — fade in, HOLD until `holdUntil` resolves (the
+  // level's bg video is on screen) and at least minMs has passed (or maxMs, whichever first), then
+  // fade out over outMs. step(fade 0..1, dtSec, elapsedMs).
+  function runHeld({ holdUntil, inMs = 180, minMs = 1600, maxMs = 4500, outMs = 900 }, step, cleanup) {
+    let released = false;
+    Promise.resolve(holdUntil).then(() => { released = true; }, () => { released = true; });
+    return new Promise((resolve) => {
+      const t0 = performance.now();
+      let last = t0;
+      let raf = 0;
+      let outAt = 0;
+      let fadeAtOut = 1;
+      let fade = 0;
+      const tick = (now) => {
+        if (document.hidden) { finish(); return; }
+        const el = Math.max(0, now - t0);
+        const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
+        last = now;
+        if (!outAt && ((released && el >= minMs) || el >= maxMs)) { outAt = now; fadeAtOut = fade; }
+        if (outAt) fade = fadeAtOut * Math.max(0, 1 - (now - outAt) / outMs);
+        else fade = Math.min(1, el / inMs);
+        step(fade, dt, el);
+        if (outAt && now - outAt >= outMs) finish();
+        else raf = requestAnimationFrame(tick);
+      };
+      const finish = () => {
+        cancelAnimationFrame(raf);
+        try { cleanup(); } catch { /* ignore */ }
+        resolve();
+      };
+      raf = requestAnimationFrame(tick);
+    });
+  }
+
   // ── Level warp: TUNNEL (WebGL hyperspace light tunnel) ───────────────────────────────────────
   const TUNNEL_FRAG = `
     precision mediump float;
@@ -65,17 +99,17 @@
       col += mix(uTint, vec3(1.0), 0.6) * core;
       gl_FragColor = vec4(col * uFade, clamp((streak + rings + core) * uFade, 0.0, 1.0));
     }`;
-  function playTunnel({ durationMs = 1200, tint = [0.0, 1.0, 0.82], zIndex = 25 } = {}) {
+  function playTunnel({ durationMs = 1200, tint = [0.0, 1.0, 0.82], zIndex = 25, holdUntil = null, ...hold } = {}) {
     if (reduceMotion()) return Promise.resolve();
     const { c } = mountCanvas(zIndex);
     const gl = c.getContext("webgl", { premultipliedAlpha: false, antialias: false, alpha: true });
-    if (!gl) { c.remove(); return playStreaks({ durationMs, zIndex }); }
+    if (!gl) { c.remove(); return playStreaks({ durationMs, zIndex, holdUntil, ...hold }); }
     const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
     const prog = gl.createProgram();
     gl.attachShader(prog, sh(gl.VERTEX_SHADER, "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}"));
     gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, TUNNEL_FRAG));
     gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { c.remove(); return playStreaks({ durationMs, zIndex }); }
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { c.remove(); return playStreaks({ durationMs, zIndex, holdUntil, ...hold }); }
     gl.useProgram(prog);
     const buf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
@@ -92,34 +126,46 @@
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
     let time = 0;
-    return runFor(durationMs, (t, dt) => {
-      time += dt;
-      const fade = t < 0.15 ? t / 0.15 : t > 0.7 ? (1 - t) / 0.3 : 1;
+    const draw = (fade) => {
       gl.viewport(0, 0, c.width, c.height);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.uniform1f(uTime, time);
       gl.uniform1f(uFade, fade);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-    }, () => {
+    };
+    const dispose = () => {
       gl.getExtension("WEBGL_lose_context")?.loseContext();
       c.remove();
-    });
+    };
+    if (holdUntil) {
+      // Held warp: full-speed burst, easing to a slower cruise while it waits for the level's bg.
+      return runHeld({ holdUntil, ...hold }, (fade, dt, el) => {
+        time += dt * (el < 900 ? 1 : Math.max(0.45, 1 - (el - 900) / 1500));
+        draw(fade);
+      }, dispose);
+    }
+    return runFor(durationMs, (t, dt) => {
+      time += dt;
+      draw(t < 0.15 ? t / 0.15 : t > 0.7 ? (1 - t) / 0.3 : 1);
+    }, dispose);
   }
 
   // ── Level warp: STREAKS (canvas 2D star-streak burst; cheaper fallback) ──────────────────────
-  function playStreaks({ durationMs = 1100, color = "180,255,240", zIndex = 25 } = {}) {
+  function playStreaks({ durationMs = 1100, color = "180,255,240", zIndex = 25, holdUntil = null, ...hold } = {}) {
     if (reduceMotion()) return Promise.resolve();
     const { c, dpr } = mountCanvas(zIndex);
     const x = c.getContext("2d");
     const W = c.width, H = c.height, cx = W / 2, cy = H * 0.45;
-    const stars = Array.from({ length: 140 }, () => ({ a: Math.random() * Math.PI * 2, d: Math.random() * 40 * dpr, v: (300 + Math.random() * 900) * dpr }));
-    return runFor(durationMs, (t, dt) => {
-      const fade = t < 0.12 ? t / 0.12 : t > 0.65 ? (1 - t) / 0.35 : 1;
+    const newStar = () => ({ a: Math.random() * Math.PI * 2, d: Math.random() * 40 * dpr, v: (300 + Math.random() * 900) * dpr });
+    const stars = Array.from({ length: 140 }, newStar);
+    const maxD = Math.hypot(W, H);
+    const frame = (fade, dt) => {
       x.clearRect(0, 0, W, H);
       x.lineCap = "round";
       x.beginPath();
       for (const s of stars) {
+        if (holdUntil && s.d > maxD) Object.assign(s, newStar()); // held: keep streaks coming
         s.v *= 1 + dt * 2.2;
         s.d += s.v * dt;
         const len = Math.min(220 * dpr, s.v * 0.08);
@@ -130,7 +176,9 @@
       x.strokeStyle = `rgba(${color},${(0.85 * fade).toFixed(3)})`;
       x.lineWidth = 1.6 * dpr;
       x.stroke();
-    }, () => c.remove());
+    };
+    if (holdUntil) return runHeld({ holdUntil, ...hold }, (fade, dt) => frame(fade, dt), () => c.remove());
+    return runFor(durationMs, (t, dt) => frame(t < 0.12 ? t / 0.12 : t > 0.65 ? (1 - t) / 0.35 : 1, dt), () => c.remove());
   }
 
   // ── Cheat unlock: NUCLEAR HOLOGRAM SPACE CONFETTI ────────────────────────────────────────────
@@ -212,6 +260,76 @@
     }, () => c.remove());
   }
 
+  // ── Teal spark burst (2026-10-26, reward chest) ──────────────────────────────────────────────
+  // Additive teal/cyan streaks drawn along their velocity so they read as "whiz" lines. power 0..1
+  // scales count, speed and the flash ring. inward:true spirals the sparks IN to (x,y) instead —
+  // the chest's arrival swirl.
+  function playTealBurst({ x: ox, y: oy, power = 0.5, inward = false, durationMs = 700, zIndex = 21000 } = {}) {
+    if (reduceMotion()) return Promise.resolve();
+    const { c, dpr } = mountCanvas(zIndex);
+    const g = c.getContext("2d");
+    const W = c.width, H = c.height;
+    const sx = (ox ?? window.innerWidth / 2) * dpr, sy = (oy ?? window.innerHeight * 0.45) * dpr;
+    const p01 = Math.max(0, Math.min(1, power));
+    const N = Math.round((isNative() ? 18 : 26) + p01 * (isNative() ? 42 : 64));
+    const parts = [];
+    for (let i = 0; i < N; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const sp = (220 + Math.random() * 520) * (0.6 + p01 * 0.9) * dpr;
+      const r0 = inward ? (140 + Math.random() * 160) * dpr : 0;
+      parts.push({
+        ang, sp, r: r0, r0, spin: (Math.random() < 0.5 ? -1 : 1) * (1.6 + Math.random() * 2.2),
+        x: sx + Math.cos(ang) * r0, y: sy + Math.sin(ang) * r0,
+        w: (1.4 + Math.random() * 2.2) * dpr,
+        tone: Math.random(), delay: inward ? Math.random() * 0.25 : 0,
+      });
+    }
+    return runFor(durationMs, (t) => {
+      g.clearRect(0, 0, W, H);
+      g.globalCompositeOperation = "lighter";
+      g.lineCap = "round";
+      // flash ring on outward bursts, bigger with power
+      if (!inward && t < 0.45) {
+        const k = t / 0.45;
+        g.strokeStyle = `rgba(0,255,209,${((1 - k) * (0.35 + p01 * 0.5)).toFixed(3)})`;
+        g.lineWidth = (3 + p01 * 5) * dpr;
+        g.beginPath();
+        g.arc(sx, sy, (30 + k * (90 + p01 * 160)) * dpr, 0, Math.PI * 2);
+        g.stroke();
+      }
+      for (const p of parts) {
+        let px, py, tx, ty, a;
+        if (inward) {
+          const k = Math.max(0, Math.min(1, (t - p.delay) / (1 - p.delay)));
+          const e = k * k * (3 - 2 * k);
+          const r = p.r0 * (1 - e);
+          const ang = p.ang + p.spin * e;
+          px = sx + Math.cos(ang) * r; py = sy + Math.sin(ang) * r;
+          const r2 = p.r0 * (1 - Math.max(0, e - 0.08));
+          const ang2 = p.ang + p.spin * Math.max(0, e - 0.08);
+          tx = sx + Math.cos(ang2) * r2; ty = sy + Math.sin(ang2) * r2;
+          a = k <= 0 ? 0 : Math.min(1, k * 4) * (1 - Math.max(0, (k - 0.85) / 0.15));
+        } else {
+          const e = 1 - (1 - t) * (1 - t); // ease-out travel
+          const d = p.sp * (durationMs / 1000) * 0.55 * e;
+          px = sx + Math.cos(p.ang) * d; py = sy + Math.sin(p.ang) * d + 60 * dpr * t * t;
+          const tail = (18 + p01 * 26) * dpr * (1 - t);
+          tx = px - Math.cos(p.ang) * tail; ty = py - Math.sin(p.ang) * tail;
+          a = 1 - t;
+        }
+        if (a <= 0) continue;
+        g.strokeStyle = p.tone > 0.8 ? `rgba(235,255,250,${a.toFixed(3)})`
+          : p.tone > 0.4 ? `rgba(0,255,209,${a.toFixed(3)})` : `rgba(90,220,255,${a.toFixed(3)})`;
+        g.lineWidth = p.w;
+        g.beginPath();
+        g.moveTo(tx, ty);
+        g.lineTo(px, py);
+        g.stroke();
+      }
+      g.globalCompositeOperation = "source-over";
+    }, () => c.remove());
+  }
+
   // ── Decrypted text reveal (scramble → settle), for titles ────────────────────────────────────
   const SCRAMBLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&@$";
   function decryptText(el, { durationMs = 700 } = {}) {
@@ -239,5 +357,5 @@
 
   // zIndex 25 = just above #galaxyView (fixed, z 20) so a level-start warp shows over the playfield;
   // the FX Lab passes a higher zIndex to preview above its own panel.
-  window.polyFx = { playTunnel, playStreaks, playNuclearConfetti, decryptText };
+  window.polyFx = { playTunnel, playStreaks, playNuclearConfetti, playTealBurst, decryptText };
 })();

@@ -298,9 +298,12 @@
             <button id="btnStuntBack" class="modeBackBtn" type="button">← Back</button>
           </div>
           <div id="cheatCodesPanel" class="arcadeMenuPanel" hidden aria-hidden="true">
-            <div class="arcadeMenuTitle">Cheat Codes</div>
+            <!-- 2026-10-26: Back lives in the header — below the list it fell off-screen on phones -->
+            <div class="cheatHeader">
+              <button id="btnCheatsBack" class="modeBackBtn" type="button">← Back</button>
+              <div class="arcadeMenuTitle">Cheat Codes</div>
+            </div>
             <div id="cheatCodesList" class="cheatCodesList"></div>
-            <button id="btnCheatsBack" class="modeBackBtn" type="button">← Back</button>
           </div>
           <div id="debugLevelPanel" class="debugLevelPanel" hidden aria-hidden="true">
             <label class="debugLevelLabel" for="debugLevelSelect">Debug Level Select</label>
@@ -331,6 +334,8 @@
           <!-- 2026-10-25 (DEV-01): hidden until the Stroids logo is tapped 3× — see wireDevModeEntry() -->
           <button id="btnDevMode" class="modeBtn devModeBtn" type="button" style="display:none">Dev Mode: Off</button>
           <button id="btnFxLab" class="modeBtn devModeBtn" type="button" style="display:none">FX Lab</button>
+          <!-- 2026-10-26: Dev Mode trial of the Lab's "D · Hybrid" cockpit HUD on the real game -->
+          <button id="btnCockpitHud" class="modeBtn devModeBtn" type="button" style="display:none">Cockpit HUD: Off</button>
           <button id="btnGalaxyBack" class="modeBackBtn" type="button">← Oracle</button>
         </div>
       </div>
@@ -349,7 +354,8 @@
       <div id="arcadeHud" class="arcadeHud" aria-hidden="true">
         <div class="hudLeftGroup">
           <button id="arcadeBack" class="hudBtn" type="button">← Modes</button>
-          <button id="hudSlotBtn" class="hudSlotBtn" type="button" aria-label="Open POLYSLOTS" style="display:none"><img class="hudSlotLogo" src="slotart/hud_polyslots.png" alt="" aria-hidden="true"><span class="hudSlotCount" id="hudSlotCount">×0</span></button>
+          <!-- 2026-10-26: a mini slot machine (marquee, three reels, lever), not a wordmark plate -->
+          <button id="hudSlotBtn" class="hudSlotBtn" type="button" aria-label="Open POLYSLOTS" style="display:none"><span class="hsCab" aria-hidden="true"><img class="hsMarquee" src="slotart/hud_polyslots.png" alt=""><span class="hsReels"><img src="slotart/goldbar.png" alt=""><img src="slotart/jackpot.png" alt=""><img src="slotart/nuke.png" alt=""></span><span class="hsTray"></span></span><span class="hsLever" aria-hidden="true"><i></i></span><span class="hudSlotCount" id="hudSlotCount">×0</span></button>
         </div>
         <button id="hudDevWin" class="hudBtn hudDevWin" type="button" aria-label="Dev: win level">DEV WIN</button>
         <div class="hudCenter">

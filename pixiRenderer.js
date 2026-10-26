@@ -1533,6 +1533,35 @@ const pixiRenderer = (() => {
       ghost.tint = t < 0.15 ? 0xeafffb : 0x5cffe0; // white-hot flash, then plasma teal
       ghost.alpha = 1 - t * t;
       ghost.blendMode = PIXI.BLEND_MODES.ADD;
+      // 2026-10-25 (playtest: "sparks or something besides it fading out"): a quick shock flash and a
+      // burst of plasma sparks flying off the rock. Directions/speeds are seeded per ghost (stable
+      // across frames) — no particle-system allocation, so the kill FX can't be dropped by the caps.
+      if (t < 0.3) {
+        const flash = layerSprite(dissolveLayer, n++, overlayTex.softGlow);
+        flash.position.set(x, y);
+        flash.width = flash.height = d.r * (2.2 + t * 9);
+        flash.tint = 0xeafffb;
+        flash.alpha = (1 - t / 0.3) * 0.9;
+        flash.blendMode = PIXI.BLEND_MODES.ADD;
+      }
+      const sparks = d.r > 24 ? 12 : 8;
+      const seed = (d.t0 * 0.618) % 1;
+      for (let k = 0; k < sparks; k += 1) {
+        const h = (seed + k * 0.37) % 1;
+        const ang = (k / sparks) * Math.PI * 2 + h * 1.2;
+        const spd = 260 + d.r * (4 + h * 6); // px per second — fast enough to read as sparks, not stars
+        const ease = 1 - (1 - t) * (1 - t); // decelerate
+        const dist = d.r * 0.6 + spd * (durMs / 1000) * ease * 0.6;
+        const sp = layerSprite(dissolveLayer, n++, overlayTex.softGlow);
+        sp.position.set(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist);
+        sp.rotation = ang; // streak along its flight path
+        const thick = (5 + h * 4) * (1 - t * 0.5);
+        sp.height = thick;
+        sp.width = thick * (4.5 - t * 3); // long streak early, shrinks to a point
+        sp.tint = k % 3 === 0 ? 0xffffff : 0x5cffe0;
+        sp.alpha = Math.min(1, (1 - t) * 1.6);
+        sp.blendMode = PIXI.BLEND_MODES.ADD;
+      }
     }
     hideLayerFrom(dissolveLayer, n);
   }

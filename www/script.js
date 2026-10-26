@@ -513,7 +513,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-25 18:48";
+const BUILD_TS = "2026-10-25 18:56";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1501,6 +1501,22 @@ function mountOracleOrb() {
   const host = document.getElementById("oracleOrbFx");
   if (!host || !window.oracleOrb || prefersReducedMotion) return;
   window.oracleOrb.mount(host, { ...ORACLE_ORB_SETTINGS, dpr: isCapacitorNative ? 1 : undefined });
+}
+
+// 2026-10-25 (Paul): the same Orb glowing behind the between-level cards (scorecard / reward box),
+// which otherwise sit over a frozen black-and-white starfield. Mounted only while a card is open.
+function attachBreakOrb(overlay) {
+  if (!overlay || overlay._orb || !window.oracleOrb || prefersReducedMotion) return;
+  const host = document.createElement("div");
+  host.className = "break-orb-fx";
+  host.setAttribute("aria-hidden", "true");
+  overlay.prepend(host);
+  overlay._orb = window.oracleOrb.mount(host, { ...ORACLE_ORB_SETTINGS, glow: 2.4, bleed: 2.4, dpr: isCapacitorNative ? 1 : undefined });
+}
+function detachBreakOrb(overlay) {
+  if (!overlay?._orb) return;
+  try { overlay._orb.destroy(); } catch { /* already gone */ }
+  overlay._orb = null;
 }
 
 function wirePolyverseBranding() {
@@ -9527,8 +9543,8 @@ function initGalaxyCanvas() {
   const pulseDissolves = []; // Pulse Cannon plasma ghosts — see addPulseDissolve
   const laserShotFx = []; // FX Lab beam/bolt shots — see drawLaserShotFx
   let laserGunSide = 0;   // alternates the left/right cockpit gun
-  const PULSE_DISSOLVE_MS = 340;
-  const PULSE_DISSOLVE_MAX = 24;
+  const PULSE_DISSOLVE_MS = 460; // room for the kill sparks to fly (was 340)
+  const PULSE_DISSOLVE_MAX = 36; // a full plasma net can dissolve a dozen-plus rocks at once
   let landmineSpawnedThisLevel = false;
   let playerBombInventory = 0;
   // 2026-06-26: POLYSLOTS economy — goldbar pickups silently bank tokens during a level;
@@ -11106,6 +11122,7 @@ function initGalaxyCanvas() {
     // Swallow taps so a stray fire-tap can't reach the canvas underneath.
     overlay.addEventListener("pointerdown", (e) => e.stopPropagation(), { passive: false });
     (galaxyView || document.body).appendChild(overlay);
+    attachBreakOrb(overlay);
     scorecardIdleAt = performance.now();
     let closed = false;
     function close(onDone) {
@@ -11114,7 +11131,7 @@ function initGalaxyCanvas() {
       scorecardIdleAt = 0;
       overlay.style.transition = "opacity 180ms ease";
       overlay.style.opacity = "0";
-      setTimeout(() => { overlay.remove(); onDone?.(); }, 190);
+      setTimeout(() => { detachBreakOrb(overlay); overlay.remove(); onDone?.(); }, 190);
     }
     return { overlay, panel, close };
   }
@@ -15607,7 +15624,9 @@ function initGalaxyCanvas() {
       }
     }
     for (let i = toDestroy.length - 1; i >= 0; i -= 1) {
-      vaporizeAsteroidByIndex(toDestroy[i], true, true); // suppressBoom + no freeze combo credit for plasma kills
+      // suppressBoom + no freeze combo credit; 2026-10-25: dissolve = plasma ghost + sparks (big nets
+      // used to lose most of their kill FX to the iOS particle cap, so rocks just vanished)
+      vaporizeAsteroidByIndex(toDestroy[i], true, true, true);
     }
     plasmaKillPositions.forEach((pos) => {
       for (let p = 0; p < 12; p += 1) {
@@ -16928,7 +16947,10 @@ function initGalaxyCanvas() {
 
   function showLevelScoreReport({ levelNum, levelTimeMs, timeBonus, accuracy, accuracyBonus, comboBonus = 0, ufosKilled, scoreBefore, scoreAfter, onDismiss }) {
     ensureLsrStyles();
-    document.getElementById("levelScoreReport")?.remove();
+    {
+      const prev = document.getElementById("levelScoreReport");
+      if (prev) { detachBreakOrb(prev); prev.remove(); }
+    }
 
     const overlay = document.createElement("div");
     overlay.id = "levelScoreReport";
@@ -16954,6 +16976,7 @@ function initGalaxyCanvas() {
     `;
     overlay.appendChild(panel);
     (galaxyView || document.body).appendChild(overlay);
+    attachBreakOrb(overlay); // Orb glow behind the scorecard (between levels)
     lvlTrace(`[lvltrans] scorecard overlay appeared level=${levelNum}`);
 
     // FIX 2026-06-09: make sure a UFO doesn't linger behind the scorecard
@@ -17044,7 +17067,7 @@ function initGalaxyCanvas() {
       if (countupRaf) { cancelAnimationFrame(countupRaf); countupRaf = 0; }
       overlay.style.transition = "opacity 180ms ease";
       overlay.style.opacity = "0";
-      setTimeout(() => { overlay.remove(); onDismiss?.(); }, 190);
+      setTimeout(() => { detachBreakOrb(overlay); overlay.remove(); onDismiss?.(); }, 190);
     }
 
     overlay.addEventListener("pointerdown", (e) => {

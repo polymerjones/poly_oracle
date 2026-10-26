@@ -3985,3 +3985,35 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
 .hudSlotLogo { height: 15px; }
 .hudSlotBtn { min-height: 30px; padding: 2px 5px 2px 3px; gap: 3px; }
 .hudSlotCount { font-size: 0.72rem; padding: 2px 4px; }
+
+/* 2026-10-25: the Stroids banner is the game entry now — pinned near the top in a slimmer form so the
+   Oracle card gets the rest of the screen; the old header asteroid button is hidden (the tile clicks
+   it programmatically, so it stays in the DOM). */
+#oracleView { grid-template-rows: auto 1fr; align-content: stretch; gap: 10px; padding-top: 4px; }
+#oracleView > .stage { align-self: center; } /* the Oracle card centres in everything under the banner */
+.orb-shell { margin-top: 34px; margin-bottom: 22px; } /* room for the Orb ring's glow above/below the ball */
+#openGalaxy { display: none !important; }
+.play-stroids-tile { padding: 8px 14px 8px 8px; border-radius: 18px; gap: 10px; }
+.pst-logo { width: 30%; max-width: 140px; }
+.pst-text { gap: 4px; }
+.pst-kicker { font-size: 0.6rem; }
+.pst-title { font-size: clamp(0.82rem, 3.4vw, 1rem); }
+.pst-play { padding: 6px 14px; font-size: 0.78rem; }
+.play-stroids-tile.first-run .pst-hint { bottom: 4px; }
+.orb-shell .orb, .oracle-orb-fx { --oracle-orb-size: clamp(190px, 58vw, 340px); }
+.orb-shell .orb { width: var(--oracle-orb-size); }
+.oracle-orb-fx { width: calc(var(--oracle-orb-size) * 1.4); }
+
+/* 2026-10-25: Orb behind the between-level cards (attachBreakOrb). The card sits above it. */
+.break-orb-fx {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(150vw, 900px);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 0;
+}
+#levelScoreReport > .lsr-panel, .rbx-overlay > .lsr-panel { position: relative; z-index: 1; }
+#levelScoreReport, .rbx-overlay { overflow: hidden; }

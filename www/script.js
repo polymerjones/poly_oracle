@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-26 20:21";
+const BUILD_TS = "2026-10-26 20:22";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -10006,7 +10006,9 @@ function initGalaxyCanvas() {
     }
   }
   function syncCockpitHud() {
-    const on = !!window.POLY_COCKPIT_LAYOUT && cockpitHudPref && engineMode === "arcade" && arcadeActive && !stuntActive && !practiceEndless;
+    // 2026-10-26: NOT gated on arcadeActive — that drops between levels (scorecard/warp), which
+    // flashed the classic HUD mid-transition. engineMode stays "arcade" until the run exits to menu.
+    const on = !!window.POLY_COCKPIT_LAYOUT && cockpitHudPref && engineMode === "arcade" && !stuntActive && !practiceEndless;
     if (on === cockpitApplied) return;
     cockpitApplied = on;
     document.body.classList.toggle("cockpit-free", on);

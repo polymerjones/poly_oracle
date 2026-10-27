@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-27 10:52";
+const BUILD_TS = "2026-10-27 11:02";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -10183,6 +10183,8 @@ function initGalaxyCanvas() {
   function updatePlasmaModeBtn(now = performance.now()) {
     if (!plasmaModeBtn) return;
     syncCockpitHud();
+    // 2026-10-27 (Paul): in Training the top-left button quits the tutorial (progress lost) — say so.
+    setTextIfChanged(arcadeBack, stuntActive ? "\u2190 Exit" : "\u2190 Modes");
     // 2026-07-05: hidden during Stunt training — the pill overlapped the SPC caption text on
     // iPhone (playtest screenshots) and no tutorial step uses it (net is taught by gesture).
     // Note stunt sets arcadeActive=true, so training must be excluded explicitly.
@@ -21213,7 +21215,7 @@ function initGalaxyCanvas() {
       if (!this.el) {
         this.el = document.createElement("div");
         this.el.id = "tutPerfChip";
-        this.el.style.cssText = "position:fixed;left:6px;top:calc(env(safe-area-inset-top,0px) + 112px);z-index:9800;"
+        this.el.style.cssText = "position:fixed;left:6px;top:calc(env(safe-area-inset-top,0px) + 150px);z-index:9800;"
           + "font:600 10px ui-monospace,Menlo,monospace;color:#9effc8;background:rgba(0,0,0,.72);border:1px solid #2f6;"
           + "border-radius:6px;padding:4px 6px;white-space:pre;pointer-events:auto;max-width:96vw;max-height:70vh;overflow:auto;";
         this.el.addEventListener("pointerdown", (e) => { e.stopPropagation(); this.el.dataset.full = this.el.dataset.full ? "" : "1"; this.render(true); });

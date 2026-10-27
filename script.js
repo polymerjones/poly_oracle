@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-26 16:44";
+const BUILD_TS = "2026-10-26 17:08";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1572,6 +1572,7 @@ function wireDevModeEntry() {
     taps = [];
     devModeRevealed = true;
     btnDevMode.style.display = "";
+    document.getElementById("galaxyModeSelect")?.classList.add("hub-dev");
     triggerHapticNotification(hapticNotificationType.Success);
   });
   btnDevMode.addEventListener("click", () => setDevModeOn(!devModeOn));
@@ -2207,6 +2208,22 @@ const TRIAL_ROWS = [
   ["sfxCheat", "sound", "CHEAT UNLOCK STING", [["none", "NONE"], ["slot_jackpot", "JACKPOT"], ["slot_bigwin", "BIG WIN"], ["life_gain", "POP + SPARKLE"], ["level_up", "LEVEL UP"]]],
   ["sfxLevelStart", "sound", "LEVEL START", [["none", "NONE"], ["warp", "SUB SWOOSH"], ["lastlevelstart", "BOSS START"], ["reveal_flash", "REVEAL FLASH"], ["newreveal005", "REVEAL 5"]]],
 ];
+// 2026-10-26: HUB CARD ART — per-card art picks for the POLYVERSE card ring. "ship" = the card's own
+// assets/ui/hub/<file>.webp; any other value is a crop in assets/ui/hub/picks/ (tools/build-hub-card-picks.js).
+// Baking a pick = copy picks/<id>.webp over hub/<file>.webp.
+const HUB_CARDS = [ // [trial key, button id, label, shipped file]
+  ["artArcade", "btnArcade", "ARCADE", "arcade"], ["artStunt", "btnArcadeStunt", "STUNT MODE", "stunt"],
+  ["artScores", "btnScores", "SCOREBOARD", "scores"], ["artCheats", "btnCheatCodes", "CHEAT CODES", "cheats"],
+  ["artSettings", "btnSettings", "SETTINGS", "settings"], ["artNews", "btnHubNews", "WHAT'S NEW", "news"],
+];
+const HUB_CARD_PICKS = [
+  "cmdr_default", "cmdr_smirk", "cmdr_laugh", "cmdr_laugh2", "cmdr_angry", "cmdr_shocked", "cmdr_thinking", "cmdr_lookleft",
+  "cmdr_lookright", "cmdr_eyesdown", "cmdr_exhausted", "cmdr_lightdmg", "cmdr_heavydmg", "cmdr_coffee", "cmdr_duckface", "cmdr_tongue",
+  "spc_smile_wide", "spc_smile", "spc_smirk", "spc_warm", "spc_soft", "spc_gentle", "spc_neutral", "spc_alert", "spc_laugh",
+  "spc_praise", "spc_smile_open", "spc_happy", "spc_friendly", "spc_shades", "spc_blink",
+];
+for (const [key] of HUB_CARDS) TRIAL_DEFAULTS[key] = "ship";
+const hubCardArtSrc = (file, v) => (!v || v === "ship" ? `assets/ui/hub/${file}.webp` : `assets/ui/hub/picks/${v}.webp`);
 let trials = { ...TRIAL_DEFAULTS };
 try { trials = { ...TRIAL_DEFAULTS, ...JSON.parse(localStorage.getItem(TRIALS_KEY) || "{}") }; } catch { /* defaults */ }
 function trial(k) {
@@ -2224,6 +2241,11 @@ function applyTrials() {
   b.classList.toggle("fx-title-glitch", trial("titles") === "glitch");
   b.classList.toggle("fx-holo-cards", trial("cards") === "holo");
   b.classList.toggle("fx-star-buttons", trial("buttons") === "star");
+  for (const [key, id, , file] of HUB_CARDS) {
+    const img = document.querySelector(`#${id} .polyCardArt`);
+    const src = hubCardArtSrc(file, trial(key));
+    if (img && img.getAttribute("src") !== src) img.setAttribute("src", src);
+  }
   document.querySelectorAll(".fxLabChips[data-trial]").forEach((row) => {
     for (const btn of row.querySelectorAll("button[data-value]")) {
       btn.setAttribute("aria-checked", String(trials[row.dataset.trial] === btn.dataset.value));
@@ -2325,6 +2347,11 @@ function openFxLab() {
       <p class="fxLabNote">Tap a chip to try it — it goes live immediately while Dev Mode is on (sounds play when tapped). \u2605 = what players get (the shipped default).</p>
       ${sec("look", "LOOK", "#ff9a3c", "Titles/cards/buttons show on the menus behind this panel. Laser + warp show in a level.")}
       ${sec("sound", "SOUND (TAP TO HEAR)", "#5fd3ff")}
+      <div class="fxLabSec" style="--sec:#9dff5a"><h4>HUB CARD ART (POLYVERSE RING)</h4>${HUB_CARDS.map(([key, , label, file]) => `
+        <div class="fxLabRow"><small>${label}</small><div class="fxLabChips fxLabArt" data-trial="${key}">
+          ${["ship", ...HUB_CARD_PICKS].map((v) => `<button type="button" role="radio" data-value="${v}" aria-label="${v === "ship" ? "shipped art" : v}"><img src="${hubCardArtSrc(file, v)}" alt="" loading="lazy" draggable="false">${v === "ship" ? "<b>\u2605</b>" : ""}</button>`).join("")}
+        </div></div>`).join("")}
+        <p class="fxLabNote">Swipe each strip; the pick shows on the ring right away. \u2605 = the card's shipped art.</p></div>
       <button class="fxLabCopy" type="button">COPY PICKS</button>
       <p class="fxLabNote fxLabPicks"></p>`;
     document.body.appendChild(_fxLab);
@@ -8467,7 +8494,11 @@ function drawWrappedText(ctx, text, centerX, startY, maxWidth, lineHeight) {
 // State lives inside: init() runs mid-module, so top-level consts declared down here would be in TDZ.
 function wirePolyRing() {
   const POLY_RING_KEY = "poly_hub_ring_front";
-  const polyRing = { cards: [], step: 0, r: 0, angle: 0, vel: 0, target: 0, drag: null, raf: 0, last: 0, front: -1, tickAt: 0, swallowClick: false };
+  const polyRing = { cards: [], step: 0, r: 0, angle: 0, vel: 0, target: 0, drag: null, coasting: false, raf: 0, last: 0, front: -1, tickAt: 0, swallowClick: false };
+  // 2026-10-26 (playtest: "too sensitive, can spin it crazy fast"): the finger moves the ring at
+  // DRAG_GAIN of surface speed, a flick is capped at MAX_VEL (deg/s), then it coasts on exponential
+  // FRICTION (max coast ≈ MAX_VEL / FRICTION ≈ 1.5 cards) and a soft spring settles it below SETTLE_VEL.
+  const DRAG_GAIN = 0.75, MAX_VEL = 300, FRICTION = 3.2, SETTLE_VEL = 70, SPRING_K = 60;
   const ring = document.getElementById("polyRing");
   const cam = ring?.querySelector(".polyRingCam");
   if (!ring || !cam) return;
@@ -8518,8 +8549,16 @@ function wirePolyRing() {
     const dt = Math.min(0.033, (now - (polyRing.last || now)) / 1000);
     polyRing.last = now;
     if (!ring.getClientRects().length) { polyRing.raf = polyRing.last = 0; polyRing.drag = null; return; } // hub hidden: stop
-    if (!polyRing.drag) {
-      const k = 110, d = 2 * Math.sqrt(k);
+    if (polyRing.coasting) {
+      polyRing.vel *= Math.exp(-FRICTION * dt);
+      polyRing.angle += polyRing.vel * dt;
+      if (Math.abs(polyRing.vel) < SETTLE_VEL) {
+        // snap where the rest of the coast would have ended, so the hand-off to the spring is seamless
+        polyRing.coasting = false;
+        polyRing.target = Math.round((polyRing.angle + polyRing.vel / FRICTION) / polyRing.step) * polyRing.step;
+      }
+    } else if (!polyRing.drag) {
+      const k = SPRING_K, d = 2 * Math.sqrt(k);
       polyRing.vel += ((polyRing.target - polyRing.angle) * k - polyRing.vel * d) * dt;
       polyRing.angle += polyRing.vel * dt;
       if (Math.abs(polyRing.target - polyRing.angle) < 0.02 && Math.abs(polyRing.vel) < 0.1) {
@@ -8532,13 +8571,14 @@ function wirePolyRing() {
     polyRing.raf = requestAnimationFrame(tick);
   };
   const wake = () => { if (!polyRing.raf) polyRing.raf = requestAnimationFrame(tick); };
-  const turnTo = (i) => { polyRing.target = polyRing.angle + wrapDeg(i * polyRing.step - polyRing.angle); wake(); };
+  const turnTo = (i) => { polyRing.coasting = false; polyRing.target = polyRing.angle + wrapDeg(i * polyRing.step - polyRing.angle); wake(); };
   const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-  const perPx = () => 180 / (Math.PI * polyRing.r);
+  const perPx = () => DRAG_GAIN * 180 / (Math.PI * polyRing.r);
   ring.addEventListener("pointerdown", (e) => {
     polyRing.swallowClick = false;
     polyRing.drag = { x: e.clientX, a0: polyRing.angle, lastX: e.clientX, lastT: e.timeStamp, moved: false, id: e.pointerId };
     polyRing.vel = 0;
+    polyRing.coasting = false;
     wake();
   });
   ring.addEventListener("pointermove", (e) => {
@@ -8562,8 +8602,9 @@ function wirePolyRing() {
     if (!g.moved) { wake(); return; } // a tap: the click handler below decides
     polyRing.swallowClick = true; // the click that follows a drag must not open a card
     if (e.timeStamp - g.lastT > 90 || reduceMotion?.matches) polyRing.vel = 0;
-    const coast = polyRing.angle + polyRing.vel * 0.32;
-    polyRing.target = Math.round(coast / polyRing.step) * polyRing.step;
+    polyRing.vel = Math.max(-MAX_VEL, Math.min(MAX_VEL, polyRing.vel));
+    polyRing.coasting = Math.abs(polyRing.vel) >= SETTLE_VEL;
+    if (!polyRing.coasting) polyRing.target = Math.round(polyRing.angle / polyRing.step) * polyRing.step;
     wake();
   };
   ring.addEventListener("pointerup", end);
@@ -14187,6 +14228,11 @@ function initGalaxyCanvas() {
     // their own titles, so the hub title hides there too.
     const polyHub = document.getElementById("polyHub");
     if (polyHub) polyHub.hidden = !showRoot;
+    // 2026-10-26: classes, not :has() — a :has() over the hub re-styled the whole menu on every
+    // ring frame (the ring writes inline styles). style.css keys the no-scroll fit off these.
+    const modeSelectEl = document.getElementById("galaxyModeSelect");
+    modeSelectEl?.classList.toggle("hub-root", showRoot);
+    modeSelectEl?.classList.toggle("hub-dev", showRoot && devModeRevealed);
     if (galaxyModeTitleEl) galaxyModeTitleEl.hidden = !showRoot;
     if (showRoot) syncPlayHero();
     // 2026-06-24: suppress comms while the level-select grid is up; kill any in-flight/queued VO

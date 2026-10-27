@@ -48,6 +48,28 @@ function cockpitDesigner() {
           }
         });
       });
+      // Hub Cards "BAKE INTO GAME": {card: pickId} → copy assets/ui/hub/picks/<pickId>.webp over assets/ui/hub/<card>.webp
+      server.middlewares.use("/__hubcards/bake", (req, res) => {
+        let body = "";
+        req.on("data", (c) => { body += c; });
+        req.on("end", () => {
+          res.setHeader("Content-Type", "application/json");
+          try {
+            const cards = new Set(["arcade", "stunt", "scores", "cheats", "settings", "news"]);
+            const hub = path.join(REPO, "assets/ui/hub");
+            const baked = [];
+            for (const [card, pick] of Object.entries(JSON.parse(body || "{}"))) {
+              if (!cards.has(card) || !/^[a-z0-9_]+$/.test(pick)) throw new Error(`bad pick ${card}=${pick}`);
+              fs.copyFileSync(path.join(hub, "picks", `${pick}.webp`), path.join(hub, `${card}.webp`));
+              baked.push(`${card}=${pick}`);
+            }
+            res.end(JSON.stringify({ ok: true, baked }));
+          } catch (err) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ ok: false, error: String(err) }));
+          }
+        });
+      });
       server.middlewares.use("/game", (req, res, next) => {
         const rel = decodeURIComponent((req.url || "/").split("?")[0]).replace(/^\/+/, "") || "index.html";
         const file = [path.join(REPO, rel), path.join(REPO, "www", rel)].find((f) => f.startsWith(REPO) && fs.existsSync(f) && fs.statSync(f).isFile());

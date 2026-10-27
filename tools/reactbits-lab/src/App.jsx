@@ -5,6 +5,7 @@ import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState } from 
 import manifest from "./rb/manifest.json";
 import HudConcepts, { HUD_CONCEPTS } from "./HudConcepts.jsx";
 import CockpitDesigner from "./CockpitDesigner.jsx";
+import HubCards from "./HubCards.jsx";
 
 const HUD_NOTES = {
   D: "Hybrid of A + C: C's chamfered top panels (pause/lives · level + score · multiplier — no time bar, the perimeter border stays the clock) and A's dashboard slimmed to ~86px holding the weapons, POLYSLOTS and the NET/AUTO plasma control. Comm box sits above the dash like a cockpit monitor. Tap weapons to arm, tap NET to toggle.",
@@ -169,7 +170,7 @@ function PropRow({ k, v, def, onChange }) {
 
 export default function App() {
   const [selected, setSelected] = useState(manifest[0]?.name);
-  const [mode, setModeState] = useState(() => load("polyLab.mode", "effects")); // effects | hud | designer
+  const [mode, setModeState] = useState(() => load("polyLab.mode", "effects")); // effects | hud | designer | hubcards
   const setMode = (m) => { setModeState(m); try { localStorage.setItem("polyLab.mode", JSON.stringify(m)); } catch { /* ignore */ } };
   const [hud, setHud] = useState("D");
   const [scene, setScene] = useState("hub");
@@ -218,9 +219,11 @@ export default function App() {
       <button className={mode === "effects" ? "on" : ""} onClick={() => setMode("effects")}>Effects</button>
       <button className={mode === "hud" ? "on" : ""} onClick={() => setMode("hud")}>HUD concepts</button>
       <button className={mode === "designer" ? "on" : ""} onClick={() => setMode("designer")}>Cockpit Designer</button>
+      <button className={mode === "hubcards" ? "on" : ""} onClick={() => setMode("hubcards")}>Hub Cards</button>
     </div>
   );
   if (mode === "designer") return <CockpitDesigner modeSwitch={modeSwitch} />;
+  if (mode === "hubcards") return <HubCards modeSwitch={modeSwitch} />;
 
   const groups = {};
   manifest.filter((m) => !filter || m.name.toLowerCase().includes(filter.toLowerCase()) || m.description.toLowerCase().includes(filter.toLowerCase()))

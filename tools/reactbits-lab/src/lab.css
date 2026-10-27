@@ -229,3 +229,15 @@ input[type="color"] { width: 34px; height: 24px; padding: 0; border: 1px solid v
 .cdH.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
 .cdField { position: absolute; outline: 1px dashed rgba(157, 255, 90, 0.8); background: rgba(157, 255, 90, 0.05); pointer-events: none; }
 .cdField::before { content: "PLAYFIELD"; position: absolute; left: 4px; top: 2px; font: 700 9px ui-monospace, Menlo, monospace; letter-spacing: 0.2em; color: rgba(157, 255, 90, 0.8); }
+
+/* Hub Cards (2026-10-26) */
+.hc { grid-template-columns: 240px 1fr 380px; }
+.hcCardItem { display: flex; align-items: center; gap: 8px; }
+.hcCardItem img { width: 26px; height: 36px; object-fit: cover; border-radius: 4px; flex: none; }
+.hcGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+.hcThumb { position: relative; padding: 0; aspect-ratio: 240 / 330; border-radius: 8px; overflow: hidden; border: 2px solid var(--line); background: #070b18; cursor: pointer; }
+.hcThumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.hcThumb:hover { border-color: rgba(123, 226, 255, 0.7); }
+.hcThumb.on { border-color: #9dff5a; box-shadow: 0 0 10px rgba(157, 255, 90, 0.5); }
+.hcThumb b { position: absolute; top: 2px; left: 5px; color: #ffd36a; text-shadow: 0 1px 2px #000; }
+.hcBake { margin-top: 8px; }

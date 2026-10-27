@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-26 19:51";
+const BUILD_TS = "2026-10-26 20:04";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -9878,6 +9878,36 @@ function initGalaxyCanvas() {
         rules.push(`${s}:disabled .hudBtnIcon{opacity:0.45;filter:grayscale(0.7)}`);
         continue;
       }
+      if (p.skin === "arcade") {
+        // 2026-10-26 (Paul: "arcade buttons, not floating emojis"): a cabinet button bolted into the
+        // console — metal bezel (the button) → recessed well lit in the weapon colour (::before) →
+        // icon clipped to the dome → glass highlight (::after) → count chip on the corner. Lit only
+        // while it can fire; empty = dark socket. animation/transform here also stop the classic
+        // HUD's state animations (freezeArmedPulse etc.) leaking through.
+        const c = p.stroke || "#7be2ff";
+        const rgb = cockpitRgba(c, 1).slice(5, -4);
+        const icon = p.icon || Math.round((p.w || 54) * 0.7);
+        decl.push("display:grid", "place-items:center", "padding:0", "border:0", "border-radius:50%", "overflow:visible",
+          "opacity:1", "animation:none", "transform:none", "transition:transform 90ms ease", `--c:${c}`, `--cr:${rgb}`,
+          "background:conic-gradient(from 210deg, #4b5263, #cfd6e2, #555d6e, #9aa3b3, #3f4655, #b9c1cf, #4b5263)",
+          "box-shadow:0 3px 6px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(0,0,0,0.6)");
+        rules.push(`${s}{${decl.join(";")}}`);
+        rules.push(`${s}:active:not(:disabled){transform:scale(0.92)}`);
+        rules.push(`${s}::before{content:"";position:absolute;inset:3px;border-radius:50%;z-index:0;background:radial-gradient(circle at 50% 40%, rgba(var(--cr),0.32), #070b14 72%);box-shadow:inset 0 0 0 2px rgba(var(--cr),0.95), inset 0 5px 10px rgba(0,0,0,0.85), 0 0 12px rgba(var(--cr),0.6)}`);
+        rules.push(`${s}::after{content:"";position:absolute;inset:5px 9px auto;height:42%;border-radius:50% 50% 45% 45%;z-index:2;pointer-events:none;background:linear-gradient(180deg, rgba(255,255,255,0.32), rgba(255,255,255,0))}`);
+        rules.push(`${s} .hudBtnIcon{position:relative;z-index:1;width:${icon}px;height:${icon}px;object-fit:contain;border-radius:50%;filter:drop-shadow(0 0 4px rgba(var(--cr),0.8))}`);
+        rules.push(`${s} .hudBtnCount{display:block;position:absolute;z-index:3;right:-6px;bottom:-5px;min-width:14px;padding:3px 5px;border-radius:8px;text-align:center;`
+          + `font:900 11px/1 ui-monospace, Menlo, monospace;color:#fff;background:#0a0f1a;border:1.5px solid rgba(var(--cr),0.95);box-shadow:0 0 6px rgba(var(--cr),0.6);text-shadow:none}`);
+        rules.push(`${s}.hud-word .hudBtnCount{color:var(--c)}`);
+        rules.push(`${s}:disabled::before{background:radial-gradient(circle at 50% 40%, #121826, #05080f 72%);box-shadow:inset 0 0 0 2px rgba(var(--cr),0.22), inset 0 5px 10px rgba(0,0,0,0.85)}`);
+        rules.push(`${s}:disabled .hudBtnIcon{opacity:0.25;filter:grayscale(1)}`);
+        rules.push(`${s}:disabled .hudBtnCount{display:none}`);
+        rules.push(`${s}.hudFreezeBtn--active::before,${s}.freeze-paused::before{animation:cockpitBtnPulse 0.7s ease-in-out infinite}`);
+        rules.push(`${s}.freeze-paused::before{animation-duration:1.4s}`);
+        rules.push(`${s} .hudMissileReload{left:14px;bottom:8px;max-width:calc(100% - 28px);z-index:3;border-radius:2px}`);
+        rules.push(`${s}:not(.reloading) .hudMissileReload{display:none}`);
+        continue;
+      }
       if (p.skin === "text" || p.skin === "custom") {
         decl.push(...cockpitTypeCss(p));
         if (p.skin === "custom") decl.push(...cockpitSkinCss(p), "padding:0");
@@ -9905,8 +9935,19 @@ function initGalaxyCanvas() {
         const rim = cockpitRgba(p.stroke, p.strokeAlpha ?? 1);
         rules.push(`${s}>i{border-radius:0 0 50% 50% / 0 0 ${curve}px ${curve}px;border:0;border-bottom:${sw || 2}px solid ${rim};background:${fill};box-shadow:0 4px 14px -4px ${cockpitRgba(p.stroke, 0.7)}, inset 0 -6px 12px -8px ${rim}}`);
         rules.push(`${s}>i::before,${s}>i::after{content:"";position:absolute;top:0;bottom:${Math.round(curve * 0.55)}px;width:2px;background:linear-gradient(180deg, transparent, ${cockpitRgba(p.stroke, 0.4)});inset:auto}`);
-        rules.push(`${s}>i::before{left:29%;top:0;height:calc(100% - ${Math.round(curve * 0.4)}px);transform:skewX(8deg)}`);
-        rules.push(`${s}>i::after{right:29%;top:0;height:calc(100% - ${Math.round(curve * 0.4)}px);transform:skewX(-8deg)}`);
+        const strut = p.strut ?? 29; // % in from each side — clear of the score
+        rules.push(`${s}>i::before{left:${strut}%;top:0;height:calc(100% - ${Math.round(curve * 0.4)}px);transform:skewX(8deg)}`);
+        rules.push(`${s}>i::after{right:${strut}%;top:0;height:calc(100% - ${Math.round(curve * 0.4)}px);transform:skewX(-8deg)}`);
+        continue;
+      }
+      if (p.shape === "console") {
+        // 2026-10-26: the gunmetal plate the arcade buttons are mounted in, tucked under the canopy rim
+        // (canopy paints on top) so the two read as one piece of hardware.
+        const rim = cockpitRgba(p.stroke, p.strokeAlpha ?? 0.85);
+        const r = p.radius ?? 28;
+        rules.push(`${s}>i{border-radius:0 0 ${r}px ${r}px;border:${sw || 2}px solid ${rim};border-top:0;`
+          + `background:radial-gradient(circle at 1px 1px, rgba(255,255,255,0.05) 1px, transparent 1.5px) 0 0 / 6px 6px, ${fill};`
+          + `box-shadow:0 6px 16px -6px ${cockpitRgba(p.stroke, 0.75)}, inset 0 -8px 14px -10px ${rim}, inset 0 10px 18px -10px rgba(0,0,0,0.9)}`);
         continue;
       }
       if (p.shape === "rail") {
@@ -9969,6 +10010,8 @@ function initGalaxyCanvas() {
         parent?.insertBefore(el, next && next.parentNode === parent ? next : null);
       }
     }
+    renderScore();
+    renderLives();
     computePlayfield();
   }
   // The cockpit owns whatever strips its parts/panels cover: anything centred in the top half pushes
@@ -12385,7 +12428,9 @@ function initGalaxyCanvas() {
     if (!el || el.hidden || el.style.display === "none") return null;
     const rect = el.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, r: Math.max(rect.width, rect.height) / 2 + 6 };
+    // w/h: HUD controls get a ring that hugs their shape (a tall switch made a huge clipped circle).
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, r: Math.max(rect.width, rect.height) / 2 + 6,
+      w: rect.width + 12, h: rect.height + 12, radius: Math.min(rect.width, rect.height) / 2 > 30 ? 16 : "50%" };
   }
   // The on-screen Stroid nearest the middle of the field (tips point at a real one).
   function tipStroid() {
@@ -12500,7 +12545,7 @@ function initGalaxyCanvas() {
       @keyframes tipBob{to{translate:0 -7px}}
       .tipPointer.up{animation-name:tipBobUp}
       @keyframes tipBobUp{to{translate:0 7px}}
-      .tipBubble{position:fixed;z-index:9602;pointer-events:none;max-width:min(78vw,300px);box-sizing:border-box;padding:10px 14px;border-radius:12px;border:1px solid rgba(0,255,209,.75);background:rgba(4,24,30,.9);box-shadow:0 0 16px rgba(0,255,209,.35);color:#e9fffb;font:700 13px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;text-align:center;transform:translateX(-50%);opacity:0;transition:opacity .25s ease;}
+      .tipBubble{position:fixed;z-index:9602;pointer-events:none;width:max-content;max-width:min(78vw,300px);box-sizing:border-box;padding:10px 14px;border-radius:12px;border:1px solid rgba(0,255,209,.75);background:rgba(4,24,30,.9);box-shadow:0 0 16px rgba(0,255,209,.35);color:#e9fffb;font:700 13px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.03em;text-align:center;transform:translateX(-50%);opacity:0;transition:opacity .25s ease;}
       .tipBubble.show{opacity:1;}
       .tipBubble b{display:block;font-size:10px;letter-spacing:.24em;color:#00FFD1;margin-bottom:3px;}
       .tipFlick{position:fixed;z-index:9601;pointer-events:none;width:0;height:0;}
@@ -12539,10 +12584,17 @@ function initGalaxyCanvas() {
       bubble.style.top = `${Math.max(70, demoTop - bh - 14)}px`;
       return;
     }
-    const r = Math.max(22, t.r);
     ring.hidden = false;
     ring.style.left = `${t.x}px`; ring.style.top = `${t.y}px`;
-    ring.style.width = ring.style.height = `${r * 2}px`;
+    if (t.w) {
+      ring.style.width = `${t.w}px`; ring.style.height = `${t.h}px`;
+      ring.style.borderRadius = typeof t.radius === "number" ? `${t.radius}px` : t.radius;
+    } else {
+      const d = Math.max(22, t.r) * 2;
+      ring.style.width = ring.style.height = `${d}px`;
+      ring.style.borderRadius = "50%";
+    }
+    const r = t.h ? t.h / 2 : Math.max(22, t.r);
     // Bubble goes on the roomier side (above unless the target is in the top 40%).
     const below = t.y < vh * 0.4;
     pointer.hidden = false;
@@ -13318,13 +13370,14 @@ function initGalaxyCanvas() {
 
   function renderLives() {
     if (!hudLives) return;
-    setTextIfChanged(hudLives, `Lives: ${arcadeLives}`);
+    // 2026-10-26: the cockpit HUD labels its readouts itself (canopy typography), no "Lives:" prose.
+    setTextIfChanged(hudLives, document.body.classList.contains("cockpit-free") ? `LIVES ${arcadeLives}` : `Lives: ${arcadeLives}`);
   }
 
   function renderScore() {
     setTextIfChanged(slotEls.scoreVal, String(arcadeScore));
     if (!hudScore) return;
-    setTextIfChanged(hudScore, `Score: ${arcadeScore}`);
+    setTextIfChanged(hudScore, document.body.classList.contains("cockpit-free") ? String(arcadeScore) : `Score: ${arcadeScore}`);
     const beatsFirst = Number.isFinite(leaderboardThresholds.firstScore)
       && arcadeScore > leaderboardThresholds.firstScore;
     const beatsThird = Number.isFinite(leaderboardThresholds.thirdScore)

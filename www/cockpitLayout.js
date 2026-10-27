@@ -5,9 +5,11 @@
 // 2026-10-26: concept G (Paul's pick) — A's canopy glass up top, weapons on a glowing belt under it
 // (skin "belt": haloed icon + ammo pips), POLYSLOTS at the right end. The previous "D · Hybrid"
 // layout is in git history (8dbd19b).
+// 2026-10-26 (later): belt → "arcade" — round cabinet buttons (bezel, lit well, count chip) in one
+// tight cluster, mounted in a console plate tucked under the canopy rim. Belt layout = 2a2bfee.
 window.POLY_COCKPIT_LAYOUT = {
   "version": 1,
-  "style": "belt",
+  "style": "arcade",
   "parts": {
     "pause": {"anchor": "tl", "x": 14, "y": 8, "w": 78, "h": 30, "skin": "custom", "shape": "round", "radius": 9, "fill": "#1e2846", "fill2": "#0c1222", "alpha": 0.95, "stroke": "#7be2ff", "strokeAlpha": 0.6, "strokeW": 1, "glow": 0, "color": "#7be2ff", "font": 11, "weight": 800, "family": "sans", "spacing": 0},
     "lives": {"anchor": "tl", "x": 14, "y": 42, "w": 70, "h": 14, "skin": "text", "color": "#7be2ff", "font": 11, "weight": 700, "family": "mono", "spacing": 0.08},
@@ -18,14 +20,14 @@ window.POLY_COCKPIT_LAYOUT = {
     "devwin": {"anchor": "tl", "x": 14, "y": 150, "skin": "native", "scale": 0.85},
     "quad": {"anchor": "tr", "x": 12, "y": 150, "skin": "native", "scale": 0.9},
     "pulse": {"anchor": "tr", "x": 104, "y": 150, "skin": "native", "scale": 0.9},
-    "bomb": {"anchor": "tc", "x": -138, "y": 78, "w": 84, "h": 66, "skin": "belt", "stroke": "#ff8c5a", "icon": 46, "pip": 6},
-    "freeze": {"anchor": "tc", "x": -46, "y": 78, "w": 84, "h": 66, "skin": "belt", "stroke": "#88ddff", "icon": 46, "pip": 9},
-    "missile": {"anchor": "tc", "x": 46, "y": 78, "w": 84, "h": 66, "skin": "belt", "stroke": "#ffd700", "icon": 46, "pip": 9},
-    "slots": {"anchor": "tc", "x": 138, "y": 84, "skin": "native", "scale": 0.9},
+    "bomb": {"anchor": "tc", "x": -104, "y": 78, "w": 54, "h": 54, "skin": "arcade", "stroke": "#ff8c5a"},
+    "freeze": {"anchor": "tc", "x": -42, "y": 78, "w": 54, "h": 54, "skin": "arcade", "stroke": "#88ddff"},
+    "missile": {"anchor": "tc", "x": 20, "y": 78, "w": 54, "h": 54, "skin": "arcade", "stroke": "#ffd700"},
+    "slots": {"anchor": "tc", "x": 86, "y": 78, "skin": "native", "scale": 1.2},
     "comm": {"anchor": "bl", "x": 16, "y": 16, "skin": "native", "scale": 1}
   },
   "panels": [
-    {"id": "canopy", "anchor": "ts", "x": 0, "y": 0, "h": 64, "bleed": true, "shape": "canopy", "curve": 30, "fill": "#0a1630", "fill2": "#060c1c", "alpha": 0.82, "stroke": "#7be2ff", "strokeAlpha": 0.85, "strokeW": 2, "z": 0},
-    {"id": "belt", "anchor": "ts", "x": 26, "y": 126, "h": 2, "shape": "rail", "stroke": "#7be2ff", "strokeAlpha": 0.85, "z": 0}
+    {"id": "canopy", "anchor": "ts", "x": 0, "y": 0, "h": 72, "bleed": true, "shape": "canopy", "curve": 18, "fill": "#0a1630", "fill2": "#060c1c", "alpha": 0.82, "stroke": "#7be2ff", "strokeAlpha": 0.85, "strokeW": 2, "strut": 20, "z": 0},
+    {"id": "console", "anchor": "tc", "x": -4, "y": 56, "w": 284, "h": 84, "shape": "console", "radius": 30, "fill": "#1a2233", "fill2": "#0b1020", "alpha": 0.94, "stroke": "#7be2ff", "strokeAlpha": 0.7, "strokeW": 2, "z": 0}
   ]
 };

@@ -253,6 +253,7 @@ const pixiRenderer = (() => {
       warpRingContainer = new PIXI.Container();
       lightningRingContainer = new PIXI.Container();
       asteroidContainer = new PIXI.Container();
+      asteroidContainer.sortableChildren = true; // 2026-10-26: near stroids (higher z) draw over far ones
       ufoContainer = new PIXI.Container();
       particleContainer = new PIXI.ParticleContainer(400, {
         position: true,
@@ -389,6 +390,14 @@ const pixiRenderer = (() => {
       sprite.width = a.r * 2;
       sprite.height = a.r * 2;
       sprite.visible = true;
+      // 2026-10-26: depth cues (script.js applyStroidDepth) — z sort, far = cooler/dimmer, fly-in fades up.
+      const z = a.z || 0;
+      if (sprite.zIndex !== z) sprite.zIndex = z;
+      const far = z < 0 ? Math.min(1, -z) * 0.4 : 0;
+      const tint = far ? ((255 - 128 * far) << 16) | ((255 - 112 * far) << 8) | (255 - 87 * far) : 0xffffff;
+      if (sprite.tint !== tint) sprite.tint = tint;
+      const alpha = z < -1 ? Math.max(0, 1 + (z + 1) / 3) : 1;
+      if (sprite.alpha !== alpha) sprite.alpha = alpha;
 
       if (a._ufoBlasted) {
         const now = performance.now();

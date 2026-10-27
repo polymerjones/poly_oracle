@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-26 20:15";
+const BUILD_TS = "2026-10-26 20:21";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1372,6 +1372,7 @@ function setDevModeOn(on) {
   if (btnDevMode) btnDevMode.textContent = devModeOn ? "Dev Mode: On" : "Dev Mode: Off";
   if (btnFxLab) btnFxLab.style.display = devModeOn && btnDevMode?.style.display !== "none" ? "" : "none";
   if (btnCockpitHud) btnCockpitHud.style.display = btnFxLab?.style.display ?? "none";
+  if (btnStroidDepth) btnStroidDepth.style.display = btnFxLab?.style.display ?? "none";
   if (btnResetTips) btnResetTips.style.display = btnFxLab?.style.display ?? "none";
   applyTrials(); // Dev Mode on → lab picks go live; off → back to the shipped defaults
 }
@@ -1601,6 +1602,8 @@ function wireDevModeEntry() {
   btnFxLab?.addEventListener("click", openFxLab);
   syncCockpitHudButton();
   btnCockpitHud?.addEventListener("click", () => setCockpitHudPref(!cockpitHudPref));
+  syncStroidDepthButton();
+  btnStroidDepth?.addEventListener("click", () => setStroidDepthPref(!stroidDepthPref));
   btnResetTips?.addEventListener("click", () => {
     resetAllTips();
     btnResetTips.textContent = "Tips Reset ✓";
@@ -2218,6 +2221,20 @@ const btnCockpitHud = document.getElementById("btnCockpitHud");
 const btnResetTips = document.getElementById("btnResetTips"); // 2026-10-26: Dev Mode → show every tip again
 function syncCockpitHudButton() {
   if (btnCockpitHud) btnCockpitHud.textContent = cockpitHudPref ? "Cockpit HUD: On" : "Cockpit HUD: Off";
+}
+// 2026-10-26 (Paul: "stroids drifting in Z space"): Arcade stroids breathe toward/away from the
+// camera and fly in from deep space on spawn (see applyStroidDepth). On by default; Dev Mode toggle
+// to A/B it on the phone, persisted like the cockpit pref.
+const STORAGE_STROID_DEPTH = "poly_oracle_stroid_depth";
+let stroidDepthPref = (() => { try { return localStorage.getItem(STORAGE_STROID_DEPTH) !== "0"; } catch { return true; } })();
+const btnStroidDepth = document.getElementById("btnStroidDepth");
+function syncStroidDepthButton() {
+  if (btnStroidDepth) btnStroidDepth.textContent = stroidDepthPref ? "Stroid Depth: On" : "Stroid Depth: Off";
+}
+function setStroidDepthPref(on) {
+  stroidDepthPref = !!on;
+  try { localStorage.setItem(STORAGE_STROID_DEPTH, stroidDepthPref ? "1" : "0"); } catch { /* private mode */ }
+  syncStroidDepthButton();
 }
 function setCockpitHudPref(on) {
   cockpitHudPref = !!on;
@@ -9906,7 +9923,7 @@ function initGalaxyCanvas() {
         rules.push(`${s}.freeze-paused::before{animation-duration:1.4s}`);
         rules.push(`${s} .hudMissileReload{left:14px;bottom:8px;max-width:calc(100% - 28px);z-index:3;border-radius:2px}`);
         rules.push(`${s}:not(.reloading) .hudMissileReload{display:none}`);
-        rules.push(`${s}.hud-armed{transform:scale(1.1);animation:cockpitBtnArmed 0.5s ease-in-out infinite}`);
+        rules.push(`${s}.hud-armed{--cr:255,64,48;transform:scale(1.1);animation:cockpitBtnArmed 0.5s ease-in-out infinite}`);
         rules.push(`${s}.hud-armed::before{background:radial-gradient(circle at 50% 40%, rgba(var(--cr),0.75), rgba(var(--cr),0.18) 75%);box-shadow:inset 0 0 0 3px #fff, 0 0 18px rgb(var(--cr))}`);
         continue;
       }
@@ -10752,6 +10769,7 @@ function initGalaxyCanvas() {
     // menu/normal exit can't forget; unlisted reasons preserve the bank (see SLOT_TOKEN_DISCARD_REASONS).
     if (SLOT_TOKEN_DISCARD_REASONS.has(reason)) slotTokens = 0;
     slotState = SLOT_STATE.DISPOSED;
+    if (wasActive) updatePlasmaModeBtn();
     if (wasActive) lvlTrace(`[slot] teardown reason=${reason}`); // quiet when there was nothing live
   }
 
@@ -11831,6 +11849,7 @@ function initGalaxyCanvas() {
   function enterSlot({ onExit, midLevel = false } = {}) {
     if (isSlotActive()) return;
     slotState = SLOT_STATE.ENTERING;
+    updatePlasmaModeBtn(); // 2026-10-26: the NET switch hung around over the slot (level loop is paused)
     slotOnExit = typeof onExit === "function" ? onExit : null;
     slotMidLevel = !!midLevel;
     slotContinueShown = false;
@@ -14547,6 +14566,7 @@ function initGalaxyCanvas() {
     if (btnDevMode) btnDevMode.style.display = showRoot && devModeRevealed ? "" : "none";
     if (btnFxLab) btnFxLab.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
     if (btnCockpitHud) btnCockpitHud.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
+    if (btnStroidDepth) btnStroidDepth.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
     if (btnResetTips) btnResetTips.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
     if (btnCheatCodes) btnCheatCodes.style.display = showRoot ? "" : "none";
     if (btnSettings) btnSettings.style.display = showRoot ? "" : "none";
@@ -15290,6 +15310,28 @@ function initGalaxyCanvas() {
     sim.shockwaves.push(s);
   }
 
+  // 2026-10-26: Z drift — a slow sine toward/away from the camera (±16% size) plus a ~650ms fly-in
+  // from deep space on warp spawns (echoes the level-end warp). z < 0 = far: the PIXI renderer
+  // sorts by z and tints far rocks cooler/dimmer. Freeze slows it to a quarter, like a held breath.
+  // Debris, tossed rocks and rocks without r0 keep their size.
+  function applyStroidDepth(a, dt, frozen, now) {
+    if (!a.r0 || a.ambient || a.tossed) return;
+    a.zClock += dt * (frozen ? 0.25 : 1);
+    let z = Math.sin(a.zClock * a.zRate + a.zPhase) * a.zAmp;
+    let s = 1 + 0.16 * z;
+    if (a.zEnterAt) {
+      const t = (now - a.zEnterAt) / 650;
+      if (t >= 1 || t < 0) a.zEnterAt = 0;
+      else {
+        const e = 1 - (1 - t) ** 3;
+        s = 0.2 + (s - 0.2) * e;
+        z = -4 + (z + 4) * e;
+      }
+    }
+    a.z = z;
+    a.r = a.r0 * s;
+  }
+
   function spawnAsteroid(x, y, kind = 3, warp = true, spriteKeyOverride = null) {
     if (sim.asteroids.length >= sim.maxAsteroids) return null;
     const a = getAsteroid();
@@ -15314,6 +15356,15 @@ function initGalaxyCanvas() {
     // spawner sets .ambient = true on its returned piece (see the debris block in update()).
     a.ambient = false;
     a._pulseHitAt = 0; // 2026-07-01: clear stale pulse-shard highlight from a pooled/reused asteroid
+    // 2026-10-26: depth drift (applyStroidDepth). r0 is the true size; a.r is the depth-scaled
+    // size every system reads, so the hitbox always matches what's drawn.
+    a.r0 = r;
+    a.z = 0;
+    a.zClock = 0;
+    a.zPhase = Math.random() * Math.PI * 2;
+    a.zRate = (Math.PI * 2) / (7000 + Math.random() * 6000);
+    a.zAmp = 0.5 + Math.random() * 0.5;
+    a.zEnterAt = warp ? performance.now() : 0;
     const levelNum = engineMode === "arcade" ? (ARCADE_LEVELS[currentLevelIndex]?.level || 1) : 1;
     a.spriteKey = spriteKeyOverride || getAsteroidSpriteKeyForLevel(levelNum);
     a.rot = Math.random() * Math.PI * 2;
@@ -15917,7 +15968,8 @@ function initGalaxyCanvas() {
       const dx = a.x - x;
       const dy = a.y - y;
       const d = Math.sqrt(dx * dx + dy * dy);
-      if (d <= a.r + 10 && d < bestDist) {
+      // 2026-10-26: a depth-shrunk (far) stroid stays tappable at ≥90% of its true size.
+      if (d <= Math.max(a.r, (a.r0 || a.r) * 0.9) + 10 && d < bestDist) {
         best = i;
         bestDist = d;
       }
@@ -22090,6 +22142,7 @@ function initGalaxyCanvas() {
       // 2026-06-10: snowflake freeze — entity positions hold but rotation keeps running.
       // Firing, the level timer, and powerup expiry are deliberately not frozen.
       const simFrozen = _freezeActive;
+      const depthOn = stroidDepthPref && engineMode === "arcade" && !stuntActive;
       for (let i = 0; i < sim.asteroids.length; i += 1) {
         const a = sim.asteroids[i];
         // 2026-06-11: a tossed (flaming) stroid is NEVER held — held and tossed are mutually
@@ -22107,6 +22160,8 @@ function initGalaxyCanvas() {
           a._stroidHeld = false;
         }
         a.rot += a.spin * (dt / 16);
+        if (depthOn) applyStroidDepth(a, dt, simFrozen, now);
+        else if (a.r0 && a.r !== a.r0) { a.r = a.r0; a.z = 0; a.zEnterAt = 0; }
         // 2026-06-11: a tossed stroid keeps flying during a freeze (player action) — you can
         // hurl one through the frozen field and shatter it. Only idle drift is frozen.
         // 2026-06-13: a cold-drift toss (no flick) released during this same freeze also keeps

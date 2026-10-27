@@ -70,6 +70,32 @@ function cockpitDesigner() {
           }
         });
       });
+      // Reward Box "BAKE INTO GAME": {moment: [layers]} → rewardBoxSfx.js at the repo root
+      server.middlewares.use("/__rewardbox/save", (req, res) => {
+        let body = "";
+        req.on("data", (c) => { body += c; });
+        req.on("end", () => {
+          res.setHeader("Content-Type", "application/json");
+          try {
+            const cfg = JSON.parse(body || "{}");
+            const file = path.join(REPO, "rewardBoxSfx.js");
+            const src = fs.readFileSync(file, "utf8");
+            const header = src.slice(0, src.indexOf("window.POLY_REWARD_BOX_SFX"));
+            const lines = ["arrive", "tap", "open", "collect"].map((m) => {
+              const layers = (Array.isArray(cfg[m]) ? cfg[m] : []).map((l) => {
+                if (!/^[A-Za-z0-9_]+$/.test(l.key || "")) throw new Error(`bad key ${l.key}`);
+                return JSON.stringify(l).replace(/,"/g, ', "').replace(/":/g, '": ');
+              });
+              return `  "${m}": [${layers.join(", ")}]`;
+            });
+            fs.writeFileSync(file, `${header}window.POLY_REWARD_BOX_SFX = {\n${lines.join(",\n")}\n};\n`);
+            res.end(JSON.stringify({ ok: true }));
+          } catch (err) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ ok: false, error: String(err) }));
+          }
+        });
+      });
       server.middlewares.use("/game", (req, res, next) => {
         const rel = decodeURIComponent((req.url || "/").split("?")[0]).replace(/^\/+/, "") || "index.html";
         const file = [path.join(REPO, rel), path.join(REPO, "www", rel)].find((f) => f.startsWith(REPO) && fs.existsSync(f) && fs.statSync(f).isFile());

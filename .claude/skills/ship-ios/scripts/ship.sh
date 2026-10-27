@@ -48,7 +48,7 @@ fi
 git commit -F - <<EOF
 $MSG
 
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 echo "✓ committed $(git rev-parse --short HEAD)"
 

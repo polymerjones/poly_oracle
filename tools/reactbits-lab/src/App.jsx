@@ -6,8 +6,12 @@ import manifest from "./rb/manifest.json";
 import HudConcepts, { HUD_CONCEPTS } from "./HudConcepts.jsx";
 import CockpitDesigner from "./CockpitDesigner.jsx";
 import HubCards from "./HubCards.jsx";
+import RewardBox from "./RewardBox.jsx";
 
 const HUD_NOTES = {
+  E: "A's canopy (Paul liked the look) with the weapons moved UP TOP: big hex pods hanging off the canopy rim on struts. The art is oversized and breaks out of its hex; the count is a chunky arcade digit plate. Bottom of the screen stays clear for play + the comm box.",
+  F: "A's canopy with the weapons mounted on the canopy struts as round turret gauges — freeze/bomb left, missile/POLYSLOTS right. The glowing ring around each icon fills with how many you hold out of the max (bomb 9, freeze/missile 3).",
+  G: "A's canopy with no weapon boxes at all: big floating icons with neon halos on a glowing rail under the canopy rim. Ammo is segmented pips like an arcade lives bar instead of a number.",
   D: "Hybrid of A + C: C's chamfered top panels (pause/lives · level + score · multiplier — no time bar, the perimeter border stays the clock) and A's dashboard slimmed to ~86px holding the weapons, POLYSLOTS and the NET/AUTO plasma control. Comm box sits above the dash like a cockpit monitor. Tap weapons to arm, tap NET to toggle.",
   A: "Cockpit glass canopy up top (pause + ship lives on the left strut, big score readout, multiplier gauge right). Weapons move to an illuminated dashboard console along the bottom — thumb-reachable.",
   B: "Minimal fighter-jet visor: corner brackets, mono readouts (level/time top-left, score + life pips + multiplier top-right). Weapons sit on a right-edge rail. Keeps the most playfield clear.",
@@ -172,7 +176,7 @@ export default function App() {
   const [selected, setSelected] = useState(manifest[0]?.name);
   const [mode, setModeState] = useState(() => load("polyLab.mode", "effects")); // effects | hud | designer | hubcards
   const setMode = (m) => { setModeState(m); try { localStorage.setItem("polyLab.mode", JSON.stringify(m)); } catch { /* ignore */ } };
-  const [hud, setHud] = useState("D");
+  const [hud, setHud] = useState("E");
   const [scene, setScene] = useState("hub");
   const [filter, setFilter] = useState("");
   const [favs, setFavs] = useState(() => load(FAV_KEY, []));
@@ -220,10 +224,12 @@ export default function App() {
       <button className={mode === "hud" ? "on" : ""} onClick={() => setMode("hud")}>HUD concepts</button>
       <button className={mode === "designer" ? "on" : ""} onClick={() => setMode("designer")}>Cockpit Designer</button>
       <button className={mode === "hubcards" ? "on" : ""} onClick={() => setMode("hubcards")}>Hub Cards</button>
+      <button className={mode === "rewardbox" ? "on" : ""} onClick={() => setMode("rewardbox")}>Reward Box</button>
     </div>
   );
   if (mode === "designer") return <CockpitDesigner modeSwitch={modeSwitch} />;
   if (mode === "hubcards") return <HubCards modeSwitch={modeSwitch} />;
+  if (mode === "rewardbox") return <RewardBox modeSwitch={modeSwitch} />;
 
   const groups = {};
   manifest.filter((m) => !filter || m.name.toLowerCase().includes(filter.toLowerCase()) || m.description.toLowerCase().includes(filter.toLowerCase()))

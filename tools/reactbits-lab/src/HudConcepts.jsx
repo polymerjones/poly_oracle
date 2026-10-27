@@ -108,10 +108,90 @@ function Hybrid({ armed, setArmed }) {
   );
 }
 
-export const HUD_CONCEPTS = [["D", "D · Hybrid (A + C)"], ["A", "A · Canopy"], ["B", "B · Visor"], ["C", "C · Command Deck"]];
+// 2026-10-26 (Paul: "I DO like A's look but weapons at the bottom is not good in my playing
+// experience" + the weapon boxes look too "UI button-y", not arcade shooter). E/F/G keep A's canopy
+// and put the weapons UP TOP as big graphic pieces instead of rounded-rect keys.
+function CanopyTop() {
+  return (
+    <>
+      <svg className="hcA-canopy" viewBox="0 0 430 150" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M0 0 H430 V92 Q215 150 0 92 Z" fill="rgba(6,14,34,0.72)" />
+        <path d="M0 92 Q215 150 430 92" fill="none" stroke="rgba(123,226,255,0.8)" strokeWidth="2" />
+        <path d="M0 98 Q215 158 430 98" fill="none" stroke="rgba(123,226,255,0.25)" strokeWidth="1" />
+        <path d="M120 0 L138 112 M310 0 L292 112" stroke="rgba(123,226,255,0.35)" strokeWidth="2" />
+      </svg>
+      <div className="hcA-left"><button className="hcPause">❚❚</button><div className="hcLives">{[0, 1, 2].map((i) => <span key={i} className={i < 2 ? "on" : ""}>▲</span>)}</div></div>
+      <div className="hcA-center"><small>LEVEL 3 · 00:42</small><b>12,480</b></div>
+      <div className="hcA-right"><svg viewBox="0 0 60 36"><path d="M6 32 A24 24 0 0 1 54 32" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="5" /><path d="M6 32 A24 24 0 0 1 44 12" fill="none" stroke="#f6a7ff" strokeWidth="5" strokeLinecap="round" /></svg><b>×2.8</b></div>
+    </>
+  );
+}
+
+// E — HANGING PODS: hex weapon pods hang off the canopy rim on short struts; the art is huge and
+// breaks out of its hex, count is a chunky arcade digit plate under it.
+function Pods({ armed, setArmed }) {
+  return (
+    <div className="hcA hcE">
+      <CanopyTop />
+      <div className="hcE-row">
+        {WEAPONS.map(([k, n, c]) => (
+          <button key={k} className={`hcE-pod${armed === k ? " armed" : ""}`} style={{ "--c": c }} onClick={() => setArmed(armed === k ? "" : k)}>
+            <i className="hcE-strut" /><span className="hcE-hex" /><img src={ICON[k]} alt="" /><b>{n}</b>
+          </button>
+        ))}
+        <button className="hcE-pod hcE-slots" style={{ "--c": "#00dcff" }}><i className="hcE-strut" /><span className="hcE-hex" /><img src="/art/hud_polyslots.png" alt="" /><b>×3</b></button>
+      </div>
+    </div>
+  );
+}
+
+// F — STRUT TURRETS: weapons mount on the canopy's left/right struts as big round turret gauges —
+// the icon sits in a glowing ring whose arc shows how many you hold (out of the max).
+const MAX = { bomb: 9, freeze: 3, missile: 3 };
+function Turrets({ armed, setArmed }) {
+  const ring = (n, max) => `conic-gradient(var(--c) ${(n / max) * 360}deg, rgba(255,255,255,0.1) 0)`;
+  return (
+    <div className="hcA hcF">
+      <CanopyTop />
+      <div className="hcF-side left">
+        {WEAPONS.slice(0, 2).map(([k, n, c]) => (
+          <button key={k} className={`hcF-tur${armed === k ? " armed" : ""}`} style={{ "--c": c, "--ring": ring(n, MAX[k]) }} onClick={() => setArmed(armed === k ? "" : k)}><img src={ICON[k]} alt="" /><b>{n}</b></button>
+        ))}
+      </div>
+      <div className="hcF-side right">
+        {WEAPONS.slice(2).map(([k, n, c]) => (
+          <button key={k} className={`hcF-tur${armed === k ? " armed" : ""}`} style={{ "--c": c, "--ring": ring(n, MAX[k]) }} onClick={() => setArmed(armed === k ? "" : k)}><img src={ICON[k]} alt="" /><b>{n}</b></button>
+        ))}
+        <button className="hcF-tur hcF-slots" style={{ "--c": "#00dcff", "--ring": ring(3, 9) }}><img src="/art/hud_polyslots.png" alt="" /><b>×3</b></button>
+      </div>
+    </div>
+  );
+}
+
+// G — AMMO BELT: no boxes at all. Big floating icons with a neon halo sit on a glowing rail just
+// under the canopy rim; ammo shows as segmented pips (like an arcade lives bar), not a number.
+function Belt({ armed, setArmed }) {
+  return (
+    <div className="hcA hcG">
+      <CanopyTop />
+      <div className="hcG-rail" />
+      <div className="hcG-row">
+        {WEAPONS.map(([k, n, c]) => (
+          <button key={k} className={`hcG-w${armed === k ? " armed" : ""}`} style={{ "--c": c }} onClick={() => setArmed(armed === k ? "" : k)}>
+            <img src={ICON[k]} alt="" />
+            <span className="hcG-pips">{Array.from({ length: MAX[k] }, (_, i) => <i key={i} className={i < n ? "on" : ""} />)}</span>
+          </button>
+        ))}
+        <button className="hcG-w hcG-slots" style={{ "--c": "#00dcff" }}><img src="/art/hud_polyslots.png" alt="" /><span className="hcG-tok">×3</span></button>
+      </div>
+    </div>
+  );
+}
+
+export const HUD_CONCEPTS = [["E", "E · Canopy + hanging pods"], ["F", "F · Canopy + strut turrets"], ["G", "G · Canopy + ammo belt"], ["D", "D · Hybrid (A + C)"], ["A", "A · Canopy"], ["B", "B · Visor"], ["C", "C · Command Deck"]];
 export default function HudConcepts({ which }) {
   const [armed, setArmed] = useState("");
-  const C = which === "B" ? Visor : which === "C" ? Deck : which === "D" ? Hybrid : Canopy;
+  const C = { B: Visor, C: Deck, D: Hybrid, E: Pods, F: Turrets, G: Belt }[which] || Canopy;
   return (
     <div className="hc">
       <Field commBottom={which === "D" ? 100 : 120} />

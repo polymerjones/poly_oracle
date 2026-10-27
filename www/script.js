@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-26 17:08";
+const BUILD_TS = "2026-10-26 19:20";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -925,6 +925,10 @@ function isRedTheme(hex) {
 // 2026-06-15 (Part 6): per-level explosion spark palettes (levels 11-15). Stored as the
 // "rgba(r,g,b," prefix that sparkColorForSprite() returns — the caller appends the alpha.
 const LEVEL_SPARK_COLORS = {
+  // 2026-10-26 (Paul): the purple-border levels get the second act's per-level sparks too, in purple,
+  // to match their purple-skinned stroids.
+  2:  ["rgba(200,120,255,", "rgba(153,0,255,",   "rgba(255,0,204,"],   // nebula violet / magenta
+  4:  ["rgba(170,90,255,",  "rgba(110,40,220,",  "rgba(236,214,248,"], // void purple / lilac
   11: ["rgba(255,255,255,", "rgba(170,170,170,", "rgba(204,204,204,"], // white / grey
   12: ["rgba(0,255,255,",   "rgba(255,0,204,",   "rgba(153,0,255,"],   // cyan / magenta / purple
   13: ["rgba(255,0,0,",     "rgba(136,0,0,",     "rgba(204,0,0,"],     // red only
@@ -1058,13 +1062,17 @@ const ARCADE_LEVELS = [
   // 2026-06-15: early levels bumped denser (were 2/3/7/9 to-clear) so the opening doesn't read
   // empty. L1/L2 have no trickle (spawnEveryMs 0), so totalToClear MUST equal startSpawn there.
   { level: 1, label: "First Flight", time: 48, totalToClear: 4, startSpawn: 4, spawnEveryMs: 0, maxOnScreen: 12 },
-  { level: 2, label: "SHAKE DOWN", time: 50, totalToClear: 6, startSpawn: 6, spawnEveryMs: 0, maxOnScreen: 12 },
+  // 2026-10-26 (Paul): L2/L4 have purple borders — the brown roid02 art clashed, so both use the
+  // code-baked purple/grey skin (same as L12) and purple sparks (LEVEL_SPARK_COLORS).
+  { level: 2, label: "SHAKE DOWN", time: 50, totalToClear: 6, startSpawn: 6, spawnEveryMs: 0, maxOnScreen: 12,
+    spriteKey: "roidpurplegrey" },
   { level: 3, label: "Blue Moon", time: 52, totalToClear: 10, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12,
     spriteKey: "roidbluemoon" }, // 2026-06-24: code-baked midnight-blue/grey/white skin (Blue Moon)
   { level: 4, label: "DEBRIS RUN", time: 54, totalToClear: 12, startSpawn: 6, spawnEveryMs: 2000, maxOnScreen: 12,
     // 2026-06-23: ambient silver debris trickles in throughout — bonus targets/hazards that do NOT
     // count toward the clear quota (spawned with .ambient = true; see the debris block in update()).
-    debrisField: { intervalMs: 1500, maxDebris: 6 } },
+    debrisField: { intervalMs: 1500, maxDebris: 6 },
+    spriteKey: "roidpurplegrey" },
   { level: 5, label: "Emotions Heavy", time: 56, totalToClear: 13, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12,
     // 2026-06-23: missile unlocks at L5 — drop one near the end (~10s before the timer expires).
     guaranteedSpawn: [{ type: "bomb", atMs: 8000 }, { type: "bomb", atMs: 18000 }, { type: "missile", atMs: 46000 }] },
@@ -2412,6 +2420,7 @@ const CHEAT_CATALOG = [
   { id: "bombs", name: "Unlimited Bombs", desc: "Bombs never run out (up to 9 on the field). 24 hours." },
   { id: "quad", name: "Unlimited Quad Shot", desc: "Quad Shot on every level. 24 hours." },
   { id: "loadout", name: "Stocked Loadout", desc: "Every level starts with 9 bombs and 3 freezes. 24 hours." },
+  { id: "plasma", name: "Instant Plasma", desc: "The plasma net recharges instantly — fire net after net. 24 hours." },
   { id: "lives", name: "Extra Lives", desc: `+${CHEAT_EXTRA_LIVES} lives at the start of every game. 24 hours.` },
 ];
 let activeRunCheats = readCheatJson(STORAGE_RUN_CHEATS);
@@ -8494,7 +8503,7 @@ function drawWrappedText(ctx, text, centerX, startY, maxWidth, lineHeight) {
 // State lives inside: init() runs mid-module, so top-level consts declared down here would be in TDZ.
 function wirePolyRing() {
   const POLY_RING_KEY = "poly_hub_ring_front";
-  const polyRing = { cards: [], step: 0, r: 0, angle: 0, vel: 0, target: 0, drag: null, coasting: false, raf: 0, last: 0, front: -1, tickAt: 0, swallowClick: false };
+  const polyRing = { cards: [], step: 0, r: 0, angle: 0, vel: 0, target: 0, drag: null, coasting: false, raf: 0, last: 0, front: -1, tickAt: 0, swallowClick: false, armed: -1 };
   // 2026-10-26 (playtest: "too sensitive, can spin it crazy fast"): the finger moves the ring at
   // DRAG_GAIN of surface speed, a flick is capped at MAX_VEL (deg/s), then it coasts on exponential
   // FRICTION (max coast ≈ MAX_VEL / FRICTION ≈ 1.5 cards) and a soft spring settles it below SETTLE_VEL.
@@ -8529,6 +8538,9 @@ function wirePolyRing() {
       if (c._fade !== fade) { c._fade = fade; c.style.opacity = fade; }
     });
     const front = ((Math.round(angle / step) % n) + n) % n;
+    // A selected card stays selected while the ring turns TO it; turning anywhere else clears it.
+    const heading = ((Math.round(polyRing.target / step) % n) + n) % n;
+    if (polyRing.armed >= 0 && polyRing.armed !== front && (polyRing.drag?.moved || heading !== polyRing.armed)) disarm();
     if (front === polyRing.front) return;
     cards[polyRing.front]?.classList.remove("on");
     cards[front].classList.add("on");
@@ -8571,11 +8583,30 @@ function wirePolyRing() {
     polyRing.raf = requestAnimationFrame(tick);
   };
   const wake = () => { if (!polyRing.raf) polyRing.raf = requestAnimationFrame(tick); };
+  // 2026-10-26 (Paul): a card opens on the SECOND tap. Tap 1 selects it (turning the ring to it if
+  // it's a side card): the card lights up and the name line says TAP AGAIN. Turning away clears it.
+  function disarm() {
+    if (polyRing.armed < 0) return;
+    cards[polyRing.armed]?.classList.remove("armed");
+    polyRing.armed = -1;
+    nameEl?.classList.remove("armed");
+  }
+  function arm(i) {
+    disarm();
+    polyRing.armed = i;
+    cards[i].classList.add("armed");
+    nameEl?.classList.add("armed");
+    audioEngine.play("menu_hit", { volume: 0.3 });
+    triggerHapticImpact(hapticImpactStyle.Light);
+  }
+  // A dialog over the hub (What's New etc.) must not let a stray touch turn the ring behind it.
+  const overlayOpen = () => !!document.querySelector(".whatsNewOverlay.show");
   const turnTo = (i) => { polyRing.coasting = false; polyRing.target = polyRing.angle + wrapDeg(i * polyRing.step - polyRing.angle); wake(); };
   const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
   const perPx = () => DRAG_GAIN * 180 / (Math.PI * polyRing.r);
   ring.addEventListener("pointerdown", (e) => {
     polyRing.swallowClick = false;
+    if (overlayOpen()) return;
     polyRing.drag = { x: e.clientX, a0: polyRing.angle, lastX: e.clientX, lastT: e.timeStamp, moved: false, id: e.pointerId };
     polyRing.vel = 0;
     polyRing.coasting = false;
@@ -8615,12 +8646,19 @@ function wirePolyRing() {
     const card = e.target?.closest?.(".polyTile");
     if (!card || !ring.contains(card)) return;
     const i = +card.dataset.ringIndex;
-    if (polyRing.swallowClick || i !== polyRing.front) {
+    if (card._menuNavReplay) return; // the menu's delayed nav replay of an already-armed tap
+    const settled = !polyRing.raf || Math.abs(polyRing.target - polyRing.angle) < 1;
+    if (polyRing.swallowClick || overlayOpen() || i !== polyRing.front || polyRing.armed !== i || !settled) {
       e.stopImmediatePropagation();
       e.preventDefault();
-      if (!polyRing.swallowClick) turnTo(i);
+      if (!polyRing.swallowClick && !overlayOpen()) {
+        if (i !== polyRing.front) turnTo(i);
+        arm(i);
+      }
       polyRing.swallowClick = false;
+      return;
     }
+    disarm(); // second tap: open it (the menu flash + nav run as before)
   }, true);
   let saved = 0;
   try { saved = Math.max(0, Math.min(n - 1, parseInt(localStorage.getItem(POLY_RING_KEY), 10) || 0)); } catch { /* storage optional */ }
@@ -9654,7 +9692,29 @@ function initGalaxyCanvas() {
     playGameSfx("blip1", 0.6, { rate: plasmaCage.mode === "manual" ? 1.2 : 0.9 });
     triggerGameplayHapticImpact(hapticImpactStyle.Light);
     updatePlasmaModeBtn();
+    showNetModeDemoOnce();
   });
+  // 2026-10-26 (Paul): the FIRST time a player flips AUTO/MAN, float the drag-a-net demo clip so the
+  // switch reads as "this changes the plasma net". Once ever; it steps aside when they start a net.
+  const NET_MODE_DEMO_KEY = "poly_oracle_net_mode_demo_seen";
+  let _netModeDemoTimer = 0;
+  function showNetModeDemoOnce() {
+    if (stuntActive) return;
+    try {
+      if (localStorage.getItem(NET_MODE_DEMO_KEY)) return;
+      localStorage.setItem(NET_MODE_DEMO_KEY, "1");
+    } catch { return; }
+    if (_tipShown?.tip.demo) return; // the net tip is already playing it
+    showPlasmaDemoOverlay();
+    const until = performance.now() + 5000;
+    clearInterval(_netModeDemoTimer);
+    _netModeDemoTimer = setInterval(() => {
+      if (plasmaCage.active || performance.now() > until || !arcadeActive || _tipShown?.tip.demo) {
+        clearInterval(_netModeDemoTimer);
+        if (!_tipShown?.tip.demo) hidePlasmaDemoOverlay();
+      }
+    }, 150);
+  }
   // ── 2026-10-26: Cockpit HUD — layout-driven (Dev Mode trial). The layout comes from cockpitLayout.js
   // (window.POLY_COCKPIT_LAYOUT), written by the Lab's Cockpit Designer (tools/reactbits-lab), so the
   // phone shows exactly what was designed there. MOVES the real HUD elements into #cockpitLayer (no
@@ -9864,6 +9924,20 @@ function initGalaxyCanvas() {
       playfield: () => ({ ...playfield }),
     };
     window.parent?.postMessage({ type: "cockpitLab:ready" }, "*");
+  }
+
+  // Desktop Lab "Reward Box" tab (tools/reactbits-lab iframes the game with ?rewardLab=1): live SFX
+  // config + chest preview. Collecting a preview grants nothing.
+  if (/[?&]rewardLab=1\b/.test(location.search)) {
+    window.__rewardBoxLab = {
+      sfxFiles: () => ({ ...GAME_SFX }),
+      setSfx(cfg) { window.POLY_REWARD_BOX_SFX = cfg; },
+      preview() {
+        document.getElementById("rewardBoxOverlay")?.remove();
+        showRewardBox(-1, () => {}, { previewItems: rollRewardBox().items });
+      },
+    };
+    window.parent?.postMessage({ type: "rewardLab:ready" }, "*");
   }
 
   let _plasmaModeBtnSig = "";
@@ -11905,6 +11979,24 @@ function initGalaxyCanvas() {
   const CHEST_FRAMES = ["shut", "open1", "open2", "open3", "open4", "open5", "open6"]
     .map((f) => `assets/ui/chest/chest_${f}.webp`);
   const CHEST_OPEN_FRAME_MS = 85;
+  // 2026-10-26: chest sounds are data (rewardBoxSfx.js, baked from the Lab's Reward Box tab).
+  const REWARD_BOX_SFX_DEFAULT = {
+    arrive: [{ key: "warp", vol: 0.7 }],
+    tap: [{ key: "blip1", vol: 0.6, volRamp: 0.3, rate: 0.85, rateRamp: 0.09 }],
+    open: [{ key: "bling", vol: 0.9 }, { key: "pickup_weapon", vol: 0.9 }],
+    collect: [{ key: "level_up", vol: 0.8 }],
+  };
+  function rewardBoxSfx(moment, taps = 0) {
+    const cfg = window.POLY_REWARD_BOX_SFX || REWARD_BOX_SFX_DEFAULT;
+    const layers = Array.isArray(cfg[moment]) ? cfg[moment] : REWARD_BOX_SFX_DEFAULT[moment] || [];
+    const k = taps / REWARD_BOX_TAPS_TO_OPEN;
+    for (const l of layers) {
+      if (!l?.key || !GAME_SFX[l.key]) continue;
+      const vol = (Number(l.vol) || 0) + (Number(l.volRamp) || 0) * k;
+      const rate = (l.rate == null ? 1 : Number(l.rate)) + (Number(l.rateRamp) || 0) * taps;
+      playGameSfx(l.key, vol, Math.abs(rate - 1) > 0.001 ? { rate } : {});
+    }
+  }
   let _chestFrameImgs = null;
   // Decode every frame up front so the open sequence never flashes an undecoded (blank) frame.
   function warmChestFrames() {
@@ -11959,6 +12051,8 @@ function initGalaxyCanvas() {
       .rbx-combo{font-size:.8rem;letter-spacing:.1em;color:#ffcc66;}
       .rbx-actions{display:grid;gap:10px;width:100%;}
       .rbx-btn{font:inherit;font-size:.9rem;letter-spacing:.14em;padding:12px 18px;border-radius:10px;border:1px solid rgba(0,255,209,.55);background:rgba(0,255,209,.1);color:#00FFD1;cursor:pointer;}
+      .rbx-btn.rbx-collect{background:#00FFD1;border-color:#00FFD1;color:#04121c;font-weight:800;font-size:1rem;padding:14px 18px;box-shadow:0 0 20px rgba(0,255,209,.5);}
+      .rbx-btn.rbx-collect:active{transform:scale(.97);background:#5fffe3;}
       .rbx-btn.rbx-ad{border-color:rgba(255,204,102,.65);background:rgba(255,204,102,.1);color:#ffcc66;}
       .rbx-btn[disabled]{opacity:.45;}
       .rbx-msg{font-size:.75rem;color:#ffb3a0;}
@@ -11982,7 +12076,8 @@ function initGalaxyCanvas() {
     overlay.appendChild(panel);
     // Swallow taps so a stray fire-tap can't reach the canvas underneath.
     overlay.addEventListener("pointerdown", (e) => e.stopPropagation(), { passive: false });
-    (galaxyView || document.body).appendChild(overlay);
+    // A Lab / menu preview can run while the galaxy view is hidden — show it over the page then.
+    (galaxyView && !galaxyView.hidden ? galaxyView : document.body).appendChild(overlay);
     attachBreakOrb(overlay);
     scorecardIdleAt = performance.now();
     let closed = false;
@@ -12058,7 +12153,7 @@ function initGalaxyCanvas() {
       if (granted) return;
       granted = true;
       if (!previewItems) for (let i = 0; i < times; i += 1) grantRewardItems(items);
-      playGameSfx("level_up", 0.8);
+      rewardBoxSfx("collect");
       close(onDone);
     }
 
@@ -12083,7 +12178,7 @@ function initGalaxyCanvas() {
       box.classList.add("rbx-arrive");
       const c = chestCenter();
       window.polyFx?.playTealBurst?.({ ...c, inward: true, power: 0.7, durationMs: 620 });
-      playGameSfx("warp", 0.7);
+      rewardBoxSfx("arrive");
       setTimeout(() => {
         if (!box.isConnected) return;
         arrived = true;
@@ -12111,7 +12206,7 @@ function initGalaxyCanvas() {
         void box.offsetWidth; // restart the one-shot shake on quick re-taps
         box.classList.add("rbx-shake");
         window.polyFx?.playTealBurst?.({ ...chestCenter(), power: k, durationMs: 420 + taps * 50 });
-        playGameSfx("blip1", 0.6 + k * 0.3, { rate: 0.85 + taps * 0.09 });
+        rewardBoxSfx("tap", taps);
         triggerHapticImpact(taps >= 4 ? hapticImpactStyle.Heavy : taps >= 2 ? hapticImpactStyle.Medium : hapticImpactStyle.Light);
         if (taps >= 4) screenFlash(0.18 + (taps - 4) * 0.12);
         return;
@@ -12128,8 +12223,7 @@ function initGalaxyCanvas() {
       window.polyFx?.playTealBurst?.({ ...c, power: 1, durationMs: 900 });
       window.polyFx?.playNuclearConfetti?.({ x: c.x, y: c.y - 20 });
       triggerHapticImpact(hapticImpactStyle.Heavy);
-      playGameSfx("bling", 0.9);
-      playGameSfx("pickup_weapon", 0.9);
+      rewardBoxSfx("open", taps);
       triggerHapticNotification(hapticNotificationType.Success);
       itemsEl.hidden = false;
       items.forEach((kind, i) => {
@@ -12208,6 +12302,25 @@ function initGalaxyCanvas() {
     }
     return best;
   }
+  // 2026-10-26: toss tip — only BIG Stroids (kind >= 2) can be grabbed, so the tip waits for a
+  // field that's mostly big rocks and rings one of those (the old toss tip often ringed a small one).
+  function tipBigStroid() {
+    let best = null, bestD = Infinity;
+    for (const a of sim.asteroids) {
+      if (!a || a.tossed || a.kind < 2 || a.x < 40 || a.y < 80 || a.x > sim.width - 40 || a.y > sim.height - 110) continue;
+      const d = Math.hypot(a.x - sim.width / 2, a.y - sim.height * 0.45);
+      if (d < bestD) { bestD = d; best = a; }
+    }
+    return best;
+  }
+  function bigStroidsDominate() {
+    const live = sim.asteroids.filter((a) => a && !a.tossed);
+    const big = live.filter((a) => a.kind >= 2).length;
+    return big >= 1 && big * 2 >= live.length;
+  }
+  function trainingDone() {
+    try { return localStorage.getItem(STUNT_TRAINING_DONE_KEY) === "1" || localStorage.getItem(STUNT_TRAINING_DONE_KEY) === "true"; } catch { return false; }
+  }
   // A placed (Manual mode) net → its centre.
   function tipPlacedNet() {
     const n = plasmaCage.placed;
@@ -12230,6 +12343,10 @@ function initGalaxyCanvas() {
   // done(snap): the action happened since the tip appeared (snap = state captured at show time).
   const lockedStroid = (s) => {
     if (!s.a || !sim.asteroids.includes(s.a) || s.a.tossed) s.a = tipStroid(); // stay on one rock
+    return s.a && tipCanvasPoint(s.a.x, s.a.y, s.a.r + 10);
+  };
+  const lockedBigStroid = (s) => {
+    if (!s.a || !sim.asteroids.includes(s.a) || s.a.tossed) s.a = tipBigStroid();
     return s.a && tipCanvasPoint(s.a.x, s.a.y, s.a.r + 10);
   };
   const TIPS = [
@@ -12264,6 +12381,11 @@ function initGalaxyCanvas() {
       when: () => plasmaCage.cooldownUntil <= performance.now() && !plasmaCage.active && !plasmaCage.placed
         && !!tipElTarget(plasmaChargeChip),
       target: () => tipElTarget(plasmaChargeChip), snap: () => ({ m: plasmaCage.mode }), done: (s) => plasmaCage.mode !== s.m },
+    // Skipped by cadets who finished Training (they learned the toss there).
+    { id: "toss2", anyLevel: true, gesture: "flick", line: "BIG STROID! PRESS & HOLD IT, THEN FLICK TO TOSS IT",
+      when: () => tipsLearned().has("fire") && !trainingDone() && bigStroidsDominate() && !!tipBigStroid(),
+      target: lockedBigStroid,
+      snap: () => ({}), done: () => !!stroidToss.asteroid || sim.asteroids.some((a) => a.tossed) },
     { id: "netPlaced", anyLevel: true, line: "TAP THE NET (OR DETONATE) TO FIRE IT",
       when: () => !!plasmaCage.placed, target: () => tipPlacedNet(), snap: () => ({}), done: () => !plasmaCage.placed },
   ];
@@ -12286,22 +12408,31 @@ function initGalaxyCanvas() {
       .tipBubble{position:fixed;z-index:9602;pointer-events:none;max-width:min(78vw,300px);box-sizing:border-box;padding:10px 14px;border-radius:12px;border:1px solid rgba(0,255,209,.75);background:rgba(4,24,30,.9);box-shadow:0 0 16px rgba(0,255,209,.35);color:#e9fffb;font:700 13px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;text-align:center;transform:translateX(-50%);opacity:0;transition:opacity .25s ease;}
       .tipBubble.show{opacity:1;}
       .tipBubble b{display:block;font-size:10px;letter-spacing:.24em;color:#00FFD1;margin-bottom:3px;}
-      @media (prefers-reduced-motion: reduce){.tipRing,.tipPointer{animation:none}}
+      .tipFlick{position:fixed;z-index:9601;pointer-events:none;width:0;height:0;}
+      .tipFlick i{position:absolute;left:-13px;top:-13px;width:26px;height:26px;border-radius:50%;background:rgba(240,255,252,.95);box-shadow:0 0 14px #00FFD1,0 0 0 5px rgba(0,255,209,.3);animation:tipFlick 1.9s ease-in-out infinite;}
+      .tipFlick b{position:absolute;left:0;top:-2px;height:4px;width:120px;border-radius:2px;transform-origin:0 50%;transform:rotate(-52deg);background:linear-gradient(90deg,rgba(0,255,209,.9),rgba(0,255,209,0));animation:tipFlickTrail 1.9s ease-in-out infinite;}
+      @keyframes tipFlick{0%{opacity:0;transform:scale(1.5)}10%{opacity:1;transform:scale(1)}18%,52%{opacity:1;transform:scale(.72)}68%{opacity:1;transform:translate(62px,-80px) scale(.8)}80%,100%{opacity:0;transform:translate(96px,-124px) scale(.6)}}
+      @keyframes tipFlickTrail{0%,54%{opacity:0;clip-path:inset(0 100% 0 0)}66%{opacity:1;clip-path:inset(0 30% 0 0)}82%,100%{opacity:0;clip-path:inset(0 0 0 0)}}
+      @media (prefers-reduced-motion: reduce){.tipRing,.tipPointer,.tipFlick i,.tipFlick b{animation:none}}
     `;
     document.head.appendChild(s);
     const ring = document.createElement("div"); ring.className = "tipRing";
     const pointer = document.createElement("div"); pointer.className = "tipPointer";
     const bubble = document.createElement("div"); bubble.className = "tipBubble";
     bubble.innerHTML = "<b>TIP</b><span></span>";
-    for (const el of [ring, pointer, bubble]) { el.hidden = true; el.setAttribute("aria-hidden", "true"); document.body.appendChild(el); }
+    // Press-hold-flick gesture demo for the toss tip: a fingertip dot that presses, holds, flicks off.
+    const flick = document.createElement("div"); flick.className = "tipFlick"; flick.innerHTML = "<b></b><i></i>";
+    for (const el of [ring, pointer, bubble, flick]) { el.hidden = true; el.setAttribute("aria-hidden", "true"); document.body.appendChild(el); }
     // Any tap on the playfield counts as "tried it" for the fire tip.
     galaxyPlayCanvas.addEventListener("pointerdown", () => { _tipCanvasTapped = true; }, { passive: true });
-    _tipEls = { ring, pointer, bubble };
+    _tipEls = { ring, pointer, bubble, flick };
     return _tipEls;
   }
   function placeTip(tip, snap) {
-    const { ring, pointer, bubble } = ensureTipEls();
+    const { ring, pointer, bubble, flick } = ensureTipEls();
     const t = tip.target(snap);
+    flick.hidden = !(t && tip.gesture === "flick");
+    if (!flick.hidden) { flick.style.left = `${t.x}px`; flick.style.top = `${t.y}px`; }
     const vw = window.innerWidth, vh = window.innerHeight;
     bubble.hidden = false;
     const bh = bubble.offsetHeight || 60;
@@ -12332,7 +12463,7 @@ function initGalaxyCanvas() {
     _tipShown = null;
     if (!_tipEls) return;
     _tipEls.bubble.classList.remove("show");
-    _tipEls.ring.hidden = _tipEls.pointer.hidden = true;
+    _tipEls.ring.hidden = _tipEls.pointer.hidden = _tipEls.flick.hidden = true;
     setTimeout(() => { if (!_tipShown && _tipEls) _tipEls.bubble.hidden = true; }, 260);
   }
   function stopTips() {
@@ -14546,7 +14677,7 @@ function initGalaxyCanvas() {
     // code-generated neon skin with its colors already baked in, so it stays untinted too.
     // 2026-06-24: L3 (Blue Moon) and L8 (ice, after 18s) now use code-baked color skins as well, so
     // they also skip the 2D multiply tint that would otherwise muddy those baked colors.
-    if (level === 3 || level === 6 || level === 8 || level === 9 || level === 12 || level === 14) return null;
+    if (level === 3 || level === 4 || level === 6 || level === 8 || level === 9 || level === 12 || level === 14) return null;
     if (level <= 4)  return "rgba(200,80,40,0.18)";
     if (level <= 6)  return "rgba(0,180,160,0.18)";
     if (level <= 8)  return "rgba(140,60,200,0.18)";
@@ -16265,7 +16396,7 @@ function initGalaxyCanvas() {
     if (suppressIncidentalVO()) return true;
     const src = commBoxController.spcBonusVoSrc(filename);
     if (!src) return false;
-    commBoxController.queueVO({ audioSrc: src, _spc: true, priority: opts.priority });
+    commBoxController.queueVO({ audioSrc: src, _spc: true, priority: opts.priority, playGuard: opts.playGuard });
     return true;
   }
   function queueSpcPraiseVO() {
@@ -16570,7 +16701,13 @@ function initGalaxyCanvas() {
   }
   // 2026-07-05: Training recharges the net 2× faster so the plasma steps keep moving; the real
   // game (and Practice) keep the full 5s reload. Composes with the Manual-mode ×2 at the call site.
+  // 2026-10-26: the "plasma" cheat (Cheat Codes menu) = near-instant recharge on Arcade runs.
+  const CHEAT_PLASMA_COOLDOWN_MS = 200;
+  function plasmaCheatOn() {
+    return !!activeRunCheats.plasma && engineMode === "arcade" && !stuntActive && !practiceEndless;
+  }
   function plasmaCageCooldownMs() {
+    if (plasmaCheatOn()) return CHEAT_PLASMA_COOLDOWN_MS;
     return stuntActive ? PLASMA_CAGE_COOLDOWN_MS / 2 : PLASMA_CAGE_COOLDOWN_MS;
   }
   function isPlasmaCageReady(now = performance.now()) {
@@ -16698,6 +16835,8 @@ function initGalaxyCanvas() {
     if (plasmaCage.cooldownUntil <= 0) return;
     if (now < plasmaCage.cooldownUntil) return;
     if (plasmaCage.rechargeSoundPlayed) return;
+    // Instant-plasma cheat: no "recharged" cock/VO after every single net.
+    if (plasmaCheatOn()) { plasmaCage.rechargeSoundPlayed = true; return; }
     if (now - plasmaCage.lastRechargeVoAt < 2000) return;
     if (retryPending || !arcadeActive) return;
     plasmaCage.rechargeSoundPlayed = true;
@@ -16721,14 +16860,18 @@ function initGalaxyCanvas() {
           setTimeout(fireRechargeComm, 800);
           return;
         }
+        // 2026-10-26 (L4 playtest): the line can wait in the VO queue behind other comms; if a new
+        // net fires meanwhile it announced "recharged" mid-cooldown. Re-check at play time.
+        const stillCharged = () => arcadeActive && !plasmaCage.active && performance.now() >= plasmaCage.cooldownUntil;
         // SPC levels: her own "Plasma recharged — make a plasma net!" line. (2026-06-24)
-        if (queueSpcBonusVO("SPC_plasma_recharged_make_a_plasma_net.mp3")) return;
+        if (queueSpcBonusVO("SPC_plasma_recharged_make_a_plasma_net.mp3", { playGuard: stillCharged })) return;
         commBoxController.queueVO({
           audioSrc: commBoxController.commVoSrc(
             commBoxController.pickFromPool("plasmarecharged", commBoxController.POOL_PLASMA_RECHARGED),
           ),
           duration: 2500,
           event: "plasma_recharged",
+          playGuard: stillCharged,
         });
       }
       setTimeout(fireRechargeComm, 400);
@@ -16835,7 +16978,7 @@ function initGalaxyCanvas() {
     // 2026-07-03: MANUAL mode recharges 2× slower (10s). A placed whole-screen net that grabs and
     // detonates everything is powerful, so it costs a longer reload; AUTO fire stays 5s. Clock starts
     // on detonate, so Manual reads as "one big play, then a 10s reload".
-    const cooldownMs = plasmaCage.mode === "manual" ? plasmaCageCooldownMs() * 2 : plasmaCageCooldownMs();
+    const cooldownMs = plasmaCage.mode === "manual" && !plasmaCheatOn() ? plasmaCageCooldownMs() * 2 : plasmaCageCooldownMs();
     plasmaCage.cooldownStart = now;
     plasmaCage.cooldownUntil = now + cooldownMs;
     plasmaCage.rechargeSoundPlayed = false;
@@ -18125,6 +18268,8 @@ function initGalaxyCanvas() {
     overlay.appendChild(panel);
     (galaxyView || document.body).appendChild(overlay);
     attachBreakOrb(overlay); // Orb glow behind the scorecard (between levels)
+    // One-shot spark swirl as the card lands, so the break opens on motion while the Orb warms up.
+    window.polyFx?.playTealBurst?.({ x: window.innerWidth / 2, y: window.innerHeight * 0.42, power: 0.6, durationMs: 700 });
     lvlTrace(`[lvltrans] scorecard overlay appeared level=${levelNum}`);
 
     // FIX 2026-06-09: make sure a UFO doesn't linger behind the scorecard

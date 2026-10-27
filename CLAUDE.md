@@ -68,9 +68,12 @@ Every item below must be resolved before App Store submission:
 - [x] Real ad unit IDs → ✅ 2026-10-27: production app + rewarded IDs (iOS + Android), Google's
       SKAdNetwork list in Info.plist; dev devices (`poly_oracle_show_build`/`poly_oracle_test_ads` = "1")
       stay on test units. app-ads.txt live on polyoracle.app + paulfishermedia.com
-- [ ] ASC leaderboard `polyverse_high_score`
-- [ ] Nice-to-have: orb "leave reality" lock (hold still 10s+3s) plays in background; decide
-      whether the cockpit HUD graduates from the Dev Mode toggle
+- [x] ASC leaderboard `polyverse_high_score` → ✅ created 2026-10-27 (attach to the 4.1 version's Game Center section once the build is processed)
+- [ ] Nice-to-have: orb "leave reality" lock (hold still 10s+3s) plays in background
+- [x] Cockpit HUD → ✅ DECIDED 2026-10-27: graduates — default for everyone in 4.1 (Dev "off" = classic).
+      iPad scales cockpit + menus (cockpitTabletScale / --ck); needs a real-iPad check
+- [ ] App Store screenshots: Lab → Store Shots tab (tools/capture-store-shots.cjs → store-assets/raw,
+      export → store-assets/appstore/<profile>/NN.png). iPhone 6.9" exported; iPad 13" pending
 
 ### Levels 12-15 (second act)
 

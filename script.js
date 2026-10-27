@@ -527,7 +527,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-27 16:04";
+const BUILD_TS = "2026-10-27 16:49";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2240,7 +2240,9 @@ function resetAllTips() {
 }
 // ?cockpitLab=1 = the desktop Lab's Cockpit Designer iframe: cockpit forced on (not persisted) + a bridge.
 const COCKPIT_LAB = /[?&]cockpitLab=1\b/.test(location.search);
-let cockpitHudPref = COCKPIT_LAB || (() => { try { return localStorage.getItem(STORAGE_HUD_COCKPIT) === "1"; } catch { return false; } })();
+// 2026-10-27 (Paul): the cockpit HUD graduates — it's the default for everyone in 4.1. Only an
+// explicit Dev Mode "off" ("0") brings the classic HUD back.
+let cockpitHudPref = COCKPIT_LAB || (() => { try { return localStorage.getItem(STORAGE_HUD_COCKPIT) !== "0"; } catch { return true; } })();
 const btnCockpitHud = document.getElementById("btnCockpitHud");
 const btnResetTips = document.getElementById("btnResetTips"); // 2026-10-26: Dev Mode → show every tip again
 function syncCockpitHudButton() {
@@ -9922,10 +9924,19 @@ function initGalaxyCanvas() {
     return "none";
   }
   // Anchor = [t|b][l|c|r|s]; x/y = px from that edge (c: centre offset, s: stretched with x inset).
+  // 2026-10-27: iPad. cockpitLayout.js is authored in phone points, so on a tablet every part came out
+  // phone-sized in a sea of empty playfield. Big screens scale each part (and its edge offsets) by k
+  // around its own anchor; full-width "s" bars get taller instead of wider. Phones stay at k = 1.
+  function cockpitTabletScale() {
+    const w = window.innerWidth, h = window.innerHeight;
+    return w >= 700 && h >= 900 ? Math.min(1.6, Math.round((w / 430) * 100) / 100) : 1;
+  }
+  let cockpitK = 1;
   function cockpitPlaceCss(p, { box = true, fixed = false } = {}) {
     const a = /^[tb][lcrs]$/.test(p.anchor) ? p.anchor : "tl";
     const v = a[0], hz = a[1];
-    const x = Number(p.x) || 0, y = Number(p.y) || 0;
+    const k = cockpitK;
+    const x = (Number(p.x) || 0) * k, y = (Number(p.y) || 0) * k;
     const edge = v === "t" ? "top" : "bottom";
     const other = v === "t" ? "bottom" : "top";
     const safe = v === "t" ? "var(--sat)" : "var(--sab)";
@@ -9937,12 +9948,13 @@ function initGalaxyCanvas() {
     css.push(`${edge}:${p.bleed ? `${y}px` : `calc(${safe} + ${y}px)`}`, `${other}:auto`);
     if (box) {
       if (hz !== "s" && p.w) css.push(`width:${p.w}px`);
-      if (p.h) css.push(`height:${p.bleed ? `calc(${p.h}px + ${safe})` : `${p.h}px`}`);
+      const ph = hz === "s" ? p.h * k : p.h;
+      if (p.h) css.push(`height:${p.bleed ? `calc(${ph}px + ${safe})` : `${ph}px`}`);
       if (p.w || p.h) css.push("min-width:0", "min-height:0", "max-width:none", "box-sizing:border-box");
     }
     const out = css.map((d) => `${d} !important`);
     out.push(`translate:${hz === "c" ? "-50%" : "0"} 0`);
-    out.push(`scale:${Number(p.scale) || 1}`);
+    out.push(`scale:${(Number(p.scale) || 1) * (hz === "s" ? 1 : k)}`);
     out.push(`transform-origin:${hz === "l" ? "left" : hz === "r" ? "right" : "center"} ${edge}`);
     if (p.z != null) out.push(`z-index:${p.z}`);
     return out;
@@ -10087,6 +10099,8 @@ function initGalaxyCanvas() {
   }
   function applyCockpitLayout(layout = window.POLY_COCKPIT_LAYOUT) {
     if (!layout) return;
+    cockpitK = cockpitTabletScale();
+    document.documentElement.style.setProperty("--ck", String(cockpitK));
     if (!cockpitStyleEl) {
       cockpitStyleEl = document.createElement("style");
       cockpitStyleEl.id = "cockpitLayoutStyle";
@@ -10106,6 +10120,9 @@ function initGalaxyCanvas() {
       cockpitLayer.insertBefore(panel, cockpitLayer.firstChild);
     }
   }
+  window.addEventListener("resize", () => {
+    if (cockpitApplied && cockpitTabletScale() !== cockpitK) { applyCockpitLayout(); computePlayfield(); }
+  });
   function syncCockpitHud() {
     // 2026-10-26: NOT gated on arcadeActive — that drops between levels (scorecard/warp), which
     // flashed the classic HUD mid-transition. engineMode stays "arcade" until the run exits to menu.
@@ -10172,6 +10189,13 @@ function initGalaxyCanvas() {
       },
       isActive: () => cockpitApplied,
       playfield: () => ({ ...playfield }),
+      // 2026-10-27: store-screenshot staging (tools: headless capture) — grant/spawn powerups, drop a
+      // bomb, read rock positions. Lab-only (?cockpitLab=1), never reachable in a normal session.
+      give(type) { collectPowerup({ type, x: playfield.x + playfield.w / 2, y: playfield.y + playfield.h / 2 }); },
+      spawn(type, x, y) { spawnPowerupAt(type, { x, y }); },
+      bombAt(x, y) { placeBombFromInventory(x, y); },
+      missileAt(x, y) { fireMissile(x, y); },
+      rocks: () => sim.asteroids.filter((a) => a && !a.tossed).map((a) => ({ x: a.x, y: a.y, r: a.r })),
     };
     window.parent?.postMessage({ type: "cockpitLab:ready" }, "*");
   }
@@ -10205,7 +10229,10 @@ function initGalaxyCanvas() {
     // machine and the scorecard (try: both are declared further down initGalaxyCanvas).
     let overlayUp = false;
     try { overlayUp = isSlotActive() || scorecardIdleAt > 0; } catch { /* not initialised yet */ }
-    const show = (arcadeActive || practiceEndless) && !stuntActive && !overlayUp;
+    // 2026-10-27 (Paul, "persistent issue"): pausing a live game into the menu keeps arcadeActive
+    // true (that's what makes Resume work), so the switch rode along onto the Arcade menu. The menu
+    // flips engineMode to "menu" — gate on that too.
+    const show = (arcadeActive || practiceEndless) && engineMode !== "menu" && !stuntActive && !overlayUp;
     if (!show) {
       if (_plasmaModeBtnSig !== "hide") {
         _plasmaModeBtnSig = "hide";
@@ -21667,6 +21694,7 @@ function initGalaxyCanvas() {
     // first call took the HTML fallback while the buffer loaded, then this one restarted it from 0
     // via the WebAudio path (~1s in). Removed; the else branch is the single source of truth.
     setGalaxyViewMode("menu");
+    updatePlasmaModeBtn(); // hide the NET switch / DETONATE now — the level loop that refreshes them is paused
     // 2026-06-22: replay the STROIDS logo warp-in on a FRESH menu entry only — not when pausing a
     // live arcade game into the menu. The warp's per-frame raster pass (54 sliced draws + ghosts)
     // fought the still-running game loop on device, presenting as a brief freeze.

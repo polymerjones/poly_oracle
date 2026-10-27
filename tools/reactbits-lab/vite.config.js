@@ -99,6 +99,60 @@ function cockpitDesigner() {
           }
         });
       });
+      // Store Shots (2026-10-27): raw captures in store-assets/raw/<profile>/, picks + captions in
+      // tools/store-shots.json, finished PNGs (rendered in the browser) → store-assets/appstore/<profile>/NN.png
+      const SHOTS_CFG = path.join(REPO, "tools/store-shots.json");
+      const SHOT_PROFILES = new Set(["iphone69", "ipad13"]);
+      const readBody = (req) => new Promise((resolve, reject) => {
+        const chunks = [];
+        req.on("data", (c) => chunks.push(c));
+        req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+        req.on("error", reject);
+      });
+      const sendJson = (res, obj, code = 200) => { res.statusCode = code; res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify(obj)); };
+      server.middlewares.use("/__storeshots/list", (req, res) => {
+        const raw = {};
+        for (const p of SHOT_PROFILES) {
+          const dir = path.join(REPO, "store-assets/raw", p);
+          raw[p] = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".png")).sort()
+            .map((f) => ({ file: f, mtime: fs.statSync(path.join(dir, f)).mtimeMs })) : [];
+        }
+        let config = null;
+        try { config = JSON.parse(fs.readFileSync(SHOTS_CFG, "utf8")); } catch { /* first run */ }
+        sendJson(res, { raw, config });
+      });
+      server.middlewares.use("/__storeshots/save", async (req, res) => {
+        try {
+          const cfg = JSON.parse(await readBody(req));
+          fs.writeFileSync(SHOTS_CFG, `${JSON.stringify(cfg, null, 2)}\n`);
+          sendJson(res, { ok: true });
+        } catch (err) { sendJson(res, { ok: false, error: String(err) }, 500); }
+      });
+      server.middlewares.use("/__storeshots/export", async (req, res) => {
+        try {
+          const { profile, index, png, clear } = JSON.parse(await readBody(req));
+          if (!SHOT_PROFILES.has(profile)) throw new Error(`bad profile ${profile}`);
+          const dir = path.join(REPO, "store-assets/appstore", profile);
+          if (clear) fs.rmSync(dir, { recursive: true, force: true });
+          fs.mkdirSync(dir, { recursive: true });
+          const name = `${String(Number(index)).padStart(2, "0")}.png`;
+          fs.writeFileSync(path.join(dir, name), Buffer.from(String(png).replace(/^data:image\/png;base64,/, ""), "base64"));
+          sendJson(res, { ok: true, file: path.relative(REPO, path.join(dir, name)) });
+        } catch (err) { sendJson(res, { ok: false, error: String(err) }, 500); }
+      });
+      server.middlewares.use("/__storeshots/capture", async (req, res) => {
+        try {
+          const { profile, scenes = "" } = JSON.parse(await readBody(req));
+          if (!SHOT_PROFILES.has(profile)) throw new Error(`bad profile ${profile}`);
+          if (scenes && !/^[a-z0-9_,]+$/.test(scenes)) throw new Error("bad scene list");
+          const { execFile } = await import("node:child_process");
+          const port = server.config.server.port || 5180;
+          const argv = [path.join(REPO, "tools/capture-store-shots.cjs"), profile, ...(scenes ? [scenes] : []), "--base", `http://localhost:${port}/game/`];
+          execFile(process.execPath, argv, { cwd: REPO, timeout: 15 * 60 * 1000 }, (err, stdout, stderr) => {
+            sendJson(res, { ok: !err, log: `${stdout}${stderr}`.slice(-4000), error: err ? String(err) : undefined }, err ? 500 : 200);
+          });
+        } catch (err) { sendJson(res, { ok: false, error: String(err) }, 500); }
+      });
       server.middlewares.use("/game", (req, res, next) => {
         const rel = decodeURIComponent((req.url || "/").split("?")[0]).replace(/^\/+/, "") || "index.html";
         const file = [path.join(REPO, rel), path.join(REPO, "www", rel)].find((f) => f.startsWith(REPO) && fs.existsSync(f) && fs.statSync(f).isFile());

@@ -7,6 +7,7 @@ import HudConcepts, { HUD_CONCEPTS } from "./HudConcepts.jsx";
 import CockpitDesigner from "./CockpitDesigner.jsx";
 import HubCards from "./HubCards.jsx";
 import RewardBox from "./RewardBox.jsx";
+import StoreShots from "./StoreShots.jsx";
 
 const HUD_NOTES = {
   E: "A's canopy (Paul liked the look) with the weapons moved UP TOP: big hex pods hanging off the canopy rim on struts. The art is oversized and breaks out of its hex; the count is a chunky arcade digit plate. Bottom of the screen stays clear for play + the comm box.",
@@ -225,11 +226,13 @@ export default function App() {
       <button className={mode === "designer" ? "on" : ""} onClick={() => setMode("designer")}>Cockpit Designer</button>
       <button className={mode === "hubcards" ? "on" : ""} onClick={() => setMode("hubcards")}>Hub Cards</button>
       <button className={mode === "rewardbox" ? "on" : ""} onClick={() => setMode("rewardbox")}>Sounds</button>
+      <button className={mode === "storeshots" ? "on" : ""} onClick={() => setMode("storeshots")}>Store Shots</button>
     </div>
   );
   if (mode === "designer") return <CockpitDesigner modeSwitch={modeSwitch} />;
   if (mode === "hubcards") return <HubCards modeSwitch={modeSwitch} />;
   if (mode === "rewardbox") return <RewardBox modeSwitch={modeSwitch} />;
+  if (mode === "storeshots") return <StoreShots modeSwitch={modeSwitch} />;
 
   const groups = {};
   manifest.filter((m) => !filter || m.name.toLowerCase().includes(filter.toLowerCase()) || m.description.toLowerCase().includes(filter.toLowerCase()))

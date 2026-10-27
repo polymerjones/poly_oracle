@@ -12,5 +12,5 @@ window.POLY_REWARD_BOX_SFX = {
 window.POLY_HUB_SFX = {
   "tick": [{"key": "blip", "vol": 0.05, "rate": 1.55}],
   "select": [{"key": "smallblast", "vol": 0.15}],
-  "open": [{"key": "menu_hit", "vol": 0.7}]
+  "open": [{"key": "menu_hit", "vol": 0.45}]
 };

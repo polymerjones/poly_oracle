@@ -34,11 +34,10 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
-        <!-- AdMob app ID: Google's SAMPLE ID (test ads only). Replace with Poly Oracle's Android
-             AdMob app ID before release. -->
+        <!-- AdMob app ID: Poly Oracle (Android), created 2026-10-27. -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713"/>
+            android:value="ca-app-pub-2053987639996867~9011196482"/>
     </application>
 
     <!-- Permissions -->

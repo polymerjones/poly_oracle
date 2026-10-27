@@ -160,10 +160,23 @@ document.addEventListener("DOMContentLoaded", hideAndroidStatusBar);
 // the plugin's Rewarded event only: Dismissed without Rewarded grants nothing. iOS sends
 // non-personalized requests (no ATT prompt, by design). Swap ADS_USE_TEST_UNITS off and fill in
 // the production unit IDs (and Info.plist / AndroidManifest app IDs) before release.
-const ADS_USE_TEST_UNITS = true;
+// 2026-10-27: production units created in AdMob (pub-2053987639996867, one rewarded unit per platform).
+// Dev devices stay on Google's test units so our own taps never hit live ads (invalid-traffic risk):
+// any device with the BUILD-stamp flag, or poly_oracle_test_ads = "1". "0" forces live ads.
+const ADS_USE_TEST_UNITS = (() => {
+  try {
+    const pref = localStorage.getItem("poly_oracle_test_ads");
+    if (pref === "0" || pref === "1") return pref === "1";
+    return localStorage.getItem("poly_oracle_show_build") === "1";
+  } catch { return false; }
+})();
+const ADS_REWARDED_UNIT_PROD = {
+  ios: "ca-app-pub-2053987639996867/5772990750",
+  android: "ca-app-pub-2053987639996867/5639139717",
+};
 const ADS_REWARDED_UNIT = {
-  ios: ADS_USE_TEST_UNITS ? "ca-app-pub-3940256099942544/1712485313" : "",
-  android: ADS_USE_TEST_UNITS ? "ca-app-pub-3940256099942544/5224354917" : "",
+  ios: ADS_USE_TEST_UNITS ? "ca-app-pub-3940256099942544/1712485313" : ADS_REWARDED_UNIT_PROD.ios,
+  android: ADS_USE_TEST_UNITS ? "ca-app-pub-3940256099942544/5224354917" : ADS_REWARDED_UNIT_PROD.android,
 };
 const ADS_RETRY_AFTER_FAIL_MS = 30000;
 // A late Rewarded event can trail Dismissed by a beat; wait this long before settling a show.
@@ -514,7 +527,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-27 11:02";
+const BUILD_TS = "2026-10-27 16:04";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";

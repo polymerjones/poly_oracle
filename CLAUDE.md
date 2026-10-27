@@ -65,7 +65,10 @@ Every item below must be resolved before App Store submission:
 - [ ] Device-verify orb rub audio survives app switching (no reboot) — native AVAudioSession
       re-activation is in `ios/App/App/AppDelegate.swift` (needs an Xcode build, not just web sync)
 - [ ] Device-verify plasma split: top charge chip (tap = A/M) + DETONATE only while a net is placed
-- [ ] Real ad unit IDs (currently TEST units) + ASC leaderboard `polyverse_high_score`
+- [x] Real ad unit IDs → ✅ 2026-10-27: production app + rewarded IDs (iOS + Android), Google's
+      SKAdNetwork list in Info.plist; dev devices (`poly_oracle_show_build`/`poly_oracle_test_ads` = "1")
+      stay on test units. app-ads.txt live on polyoracle.app + paulfishermedia.com
+- [ ] ASC leaderboard `polyverse_high_score`
 - [ ] Nice-to-have: orb "leave reality" lock (hold still 10s+3s) plays in background; decide
       whether the cockpit HUD graduates from the Dev Mode toggle
 

@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-27 10:19";
+const BUILD_TS = "2026-10-27 10:50";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -10093,7 +10093,10 @@ function initGalaxyCanvas() {
   function syncCockpitHud() {
     // 2026-10-26: NOT gated on arcadeActive — that drops between levels (scorecard/warp), which
     // flashed the classic HUD mid-transition. engineMode stays "arcade" until the run exits to menu.
-    const on = !!window.POLY_COCKPIT_LAYOUT && cockpitHudPref && engineMode === "arcade" && !stuntActive && !practiceEndless;
+    // 2026-10-27 (Paul): Training + Practice use the cockpit too — the classic HUD there overlapped
+    // (inventory buttons over Lives/Score) and the full-width comm box ran under the NET switch. The
+    // tutorial's HUD pointers aim at the live button rects, so they follow the cockpit layout.
+    const on = !!window.POLY_COCKPIT_LAYOUT && cockpitHudPref && engineMode === "arcade";
     if (on === cockpitApplied) return;
     cockpitApplied = on;
     document.body.classList.toggle("cockpit-free", on);
@@ -13496,6 +13499,8 @@ function initGalaxyCanvas() {
     if (!hudLives) return;
     // 2026-10-26: the cockpit HUD labels its readouts itself (canopy typography), no "Lives:" prose.
     setTextIfChanged(hudLives, document.body.classList.contains("cockpit-free") ? `LIVES ${arcadeLives}` : `Lives: ${arcadeLives}`);
+    // 2026-10-27: Training/Practice have no lives — "LIVES 0" there read as a bug.
+    setStyleIfChanged(hudLives, "visibility", stuntActive || practiceEndless ? "hidden" : "");
   }
 
   function renderScore() {
@@ -15103,10 +15108,20 @@ function initGalaxyCanvas() {
     const maxX = playfield.x + playfield.w - margin;
     const minY = playfield.y + margin;
     const maxY = playfield.y + playfield.h - margin;
-    return {
-      x: minX + Math.random() * Math.max(1, maxX - minX),
-      y: minY + Math.random() * Math.max(1, maxY - minY),
-    };
+    // 2026-10-27 (Training playtest): powerups landed under the comm box / NET switch (bottom
+    // corners, outside the cockpit layer so the playfield doesn't exclude them). Re-roll off them.
+    const view = galaxyView.getBoundingClientRect();
+    const blockers = [];
+    for (const el of [document.getElementById("commanderHUD"), plasmaChargeChip]) {
+      const b = el && el.offsetParent !== null ? el.getBoundingClientRect() : null;
+      if (b && b.width && b.height) blockers.push({ l: b.left - view.left - r, t: b.top - view.top - r, rr: b.right - view.left + r, bb: b.bottom - view.top + r });
+    }
+    let pt = null;
+    for (let i = 0; i < 8; i += 1) {
+      pt = { x: minX + Math.random() * Math.max(1, maxX - minX), y: minY + Math.random() * Math.max(1, maxY - minY) };
+      if (!blockers.some((k) => pt.x > k.l && pt.x < k.rr && pt.y > k.t && pt.y < k.bb)) break;
+    }
+    return pt;
   }
 
   function clampSpeed(entity) {
@@ -19621,6 +19636,7 @@ function initGalaxyCanvas() {
     // prime) so the first Stroid kill / first portrait swap / first plasma demo don't hitch.
     await warmTrainingAssets();
     hideArcadeOverlay();
+    tutPerf.start(); // Dev Mode only
     tapBlasts = [];
     // fresh, pressure-free state
     arcadeScore = 0;
@@ -20191,7 +20207,9 @@ function initGalaxyCanvas() {
     if (!hudEl || !_taskInstrEl) return;
     const r = hudEl.getBoundingClientRect();
     if (!r.width) return;
-    _taskInstrEl.style.top = `${r.top - 8}px`;
+    // 2026-10-27: the callsign ("SPC") sits above the box's rect — clear it too (cockpit playtest overlap).
+    const cs = document.getElementById("commanderCallsign")?.getBoundingClientRect();
+    _taskInstrEl.style.top = `${Math.min(r.top, cs && cs.height ? cs.top : r.top) - 8}px`;
     _positionDemoOverlay(); // keep the demo clip stacked above the banner when both are up
   }
   function showTaskInstruction(text) {
@@ -21166,16 +21184,99 @@ function initGalaxyCanvas() {
     } catch (e) {
       if (e === TUT_ABORT || token !== _tutRunToken) return; // expected on exit
       console.warn("[tutorial] phase error", e);
+      if (tutPerf.on) tutPerf.errors.push(`phase ${TUTORIAL_PHASES[tutorialPhase]?.id}: ${String(e?.message || e).slice(0, 70)}`);
     }
     if (token !== _tutRunToken) return;
     endTutorial();
   }
+
+  // 2026-10-27: Dev Mode frame recorder + audio readout for Training. Instruments can't attach to the
+  // iOS 27 phone from Xcode 26, so the game measures itself: every frame delta is bucketed by tutorial
+  // phase (then "practice"), hitches >100ms and errors are logged, and a table shows when the tutorial
+  // hands off (tap the live chip any time to toggle it). Dev Mode only — players never run this.
+  const tutPerf = {
+    on: false, raf: 0, last: 0, t0: 0, buckets: new Map(), order: [], hitches: [], errors: [],
+    el: null, liveAt: 0, cur: "", audioT: 0, audioCtxT: 0, audioAdv: "?",
+    bucket(name) {
+      let b = this.buckets.get(name);
+      if (!b) { b = { n: 0, sum: 0, o33: 0, o50: 0, max: 0 }; this.buckets.set(name, b); this.order.push(name); }
+      return b;
+    },
+    start() {
+      if (!devModeOn) return;
+      this.stop();
+      this.on = true; this.last = 0; this.t0 = performance.now();
+      this.buckets.clear(); this.order.length = 0; this.hitches.length = 0; this.errors.length = 0;
+      if (!this.el) {
+        this.el = document.createElement("div");
+        this.el.id = "tutPerfChip";
+        this.el.style.cssText = "position:fixed;left:6px;top:calc(env(safe-area-inset-top,0px) + 112px);z-index:9800;"
+          + "font:600 10px ui-monospace,Menlo,monospace;color:#9effc8;background:rgba(0,0,0,.72);border:1px solid #2f6;"
+          + "border-radius:6px;padding:4px 6px;white-space:pre;pointer-events:auto;max-width:96vw;max-height:70vh;overflow:auto;";
+        this.el.addEventListener("pointerdown", (e) => { e.stopPropagation(); this.el.dataset.full = this.el.dataset.full ? "" : "1"; this.render(true); });
+        document.body.appendChild(this.el);
+      }
+      this.el.style.display = "";
+      this.el.dataset.full = "";
+      const tick = (t) => {
+        if (!this.on) return;
+        if (this.last) {
+          const d = t - this.last;
+          const name = tutorialPhase >= 0 ? (TUTORIAL_PHASES[tutorialPhase]?.id || `p${tutorialPhase}`) : (practiceEndless ? "practice" : "other");
+          this.cur = name;
+          const b = this.bucket(name);
+          b.n += 1; b.sum += d; if (d > 33.4) b.o33 += 1; if (d > 50) b.o50 += 1; if (d > b.max) b.max = d;
+          if (d > 100 && this.hitches.length < 40) this.hitches.push(`${((t - this.t0) / 1000).toFixed(1)}s ${name} ${Math.round(d)}ms`);
+        }
+        this.last = t;
+        if (t - this.liveAt > 500) { this.liveAt = t; this.render(false); }
+        this.raf = requestAnimationFrame(tick);
+      };
+      this.raf = requestAnimationFrame(tick);
+    },
+    audioLine() {
+      const ctx = audioEngine.ctx;
+      const now = performance.now();
+      if (ctx && now - this.audioT > 1000) {
+        this.audioAdv = this.audioT ? (ctx.currentTime > this.audioCtxT + 0.5 ? "adv" : "STUCK") : "?";
+        this.audioT = now; this.audioCtxT = ctx.currentTime;
+      }
+      return `audio ${ctx ? ctx.state : "none"} ${ctx ? ctx.sampleRate : "-"}Hz ${this.audioAdv} unl:${audioEngine.unlocked ? 1 : 0} buf:${audioEngine.buffers?.size ?? "-"}`;
+    },
+    render(force) {
+      if (!this.el || (!force && this.el.dataset.full)) return;
+      const row = (name) => {
+        const b = this.buckets.get(name);
+        const fps = b.sum ? (1000 * b.n / b.sum).toFixed(0) : "-";
+        return `${name.padEnd(9).slice(0, 9)} ${String(fps).padStart(3)}fps >33:${String(b.o33).padStart(3)} >50:${String(b.o50).padStart(3)} max:${Math.round(b.max)}`;
+      };
+      if (this.el.dataset.full) {
+        this.el.textContent = [`TRAINING PERF  ${((performance.now() - this.t0) / 1000).toFixed(0)}s  (tap to hide)`,
+          ...this.order.map(row), this.audioLine(),
+          this.hitches.length ? "hitches >100ms:" : "no hitches >100ms", ...this.hitches,
+          ...(this.errors.length ? ["ERRORS:", ...this.errors] : ["no errors"])].join("\n");
+      } else {
+        const b = this.buckets.get(this.cur);
+        this.el.textContent = `${this.cur || "-"} ${b && b.sum ? (1000 * b.n / b.sum).toFixed(0) : "-"}fps ${this.hitches.length}h ${this.errors.length}e | ${this.audioLine()}`;
+      }
+    },
+    showReport() { if (this.el) { this.el.dataset.full = "1"; this.render(true); } },
+    stop() {
+      this.on = false;
+      if (this.raf) cancelAnimationFrame(this.raf);
+      this.raf = 0;
+      if (this.el) this.el.style.display = "none";
+    },
+  };
+  window.addEventListener("error", (e) => { if (tutPerf.on) tutPerf.errors.push(String(e.message || e).slice(0, 90)); });
+  window.addEventListener("unhandledrejection", (e) => { if (tutPerf.on) tutPerf.errors.push(`rej: ${String(e.reason?.message || e.reason).slice(0, 85)}`); });
 
   function endTutorial() {
     try { localStorage.setItem(STUNT_TRAINING_DONE_KEY, "1"); } catch {}
     tutorialPhase = -1;
     hideHudPointer();
     startStuntPractice({ fromTutorial: true }); // seamless hand-off — no transition, keep music/bg/SPC
+    tutPerf.showReport(); // Dev Mode: per-phase frame table (keeps recording into "practice")
   }
 
   // stuntNotify: lightweight event counter fed from the existing action sites. No-op outside
@@ -21277,6 +21378,7 @@ function initGalaxyCanvas() {
   }
 
   function exitStuntMode() {
+    tutPerf.stop();
     cleanupTutorial();
     // 2026-07-05: drop SFX voice-cap tracking across the mode switch — if an interruption kept
     // any onended from firing, stale entries would starve those sounds (see enforcePolyphony).
@@ -21292,6 +21394,7 @@ function initGalaxyCanvas() {
   // Part 8: leave an endless Practice session via the Modes button — no score submission, lands
   // back on the Stunt Mode sub-menu (Training / Practice) rather than the arcade menu.
   function exitStuntPractice() {
+    tutPerf.stop();
     practiceEndless = false;
     commBoxController.clearPortraitOverride(); // SPC sat on the portrait through Practice — restore CMDR now
     commBoxController.setExclusiveSpeaker(false); // re-enable CMDR VO outside Practice

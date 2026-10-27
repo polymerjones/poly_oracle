@@ -23,6 +23,13 @@ class MainViewController: CAPBridgeViewController {
         return config
     }
 
+    /// 2026-10-27: no three-finger undo/redo/copy gestures (and their "Undo" bar) — a fast multi-finger
+    /// tap on the end-of-level scorecard popped the iOS Undo HUD. UIKit consults the responder chain,
+    /// so returning .none here covers the web view's content view too.
+    override var editingInteractionConfiguration: UIEditingInteractionConfiguration {
+        return .none
+    }
+
     fileprivate func setTextInteraction(_ on: Bool) {
         if #available(iOS 14.5, *) {
             webView?.configuration.preferences.isTextInteractionEnabled = on

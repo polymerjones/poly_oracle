@@ -18,6 +18,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         } catch {
             print("AppDelegate: failed to set AVAudioSession category: \(error)")
         }
+        // 2026-10-27: no shake-to-undo "Undo" alert over the game.
+        application.applicationSupportsShakeToEdit = false
         // 2026-10-26: after another app / a call / Siri takes the session, iOS doesn't hand it back on
         // its own — Web Audio in the WKWebView then stays dead (orb rub silent until reboot).
         // Re-activate when the interruption ends and whenever we become active again.

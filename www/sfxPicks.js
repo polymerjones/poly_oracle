@@ -5,7 +5,7 @@
 // rateRamp × tap so every tap rises. An empty list = silent moment.
 window.POLY_REWARD_BOX_SFX = {
   "arrive": [{"key": "bigbang", "vol": 0.7}],
-  "tap": [{"key": "crush", "vol": 0.6, "volRamp": 0.3, "rate": 0.55, "rateRamp": 0.09}],
+  "tap": [{"key": "crush", "vol": 1.0, "volRamp": 0.4, "rate": 0.55, "rateRamp": 0.09}],
   "open": [{"key": "item_pickup2", "vol": 0}, {"key": "pickup_weapon", "vol": 0.9}, {"key": "slot_life", "vol": 1.3, "rate": 0.55}],
   "collect": [{"key": "level_up", "vol": 0.8}]
 };

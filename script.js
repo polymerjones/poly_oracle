@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-26 20:23";
+const BUILD_TS = "2026-10-27 10:19";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -967,8 +967,11 @@ const MUSIC = {
   TUTORIAL: "assets/music/Stroids_tutorial_instrumental.mp3",
   ARCADE_MENU: "assets/music/STROIDS_THEME.mp3",
   L3_4:    "assets/music/Stroids_phonk_loop.mp3",
-  L5_6:    "assets/music/Stroids_BASS_Phonk.mp3",
-  L7_8:    "assets/music/Stroids_Phonk_2.mp3",
+  // 2026-10-27 (Paul: early levels all sounded the same — L3-8 were three phonk tracks in a row):
+  // E1L4-7 is revived for L5-6 between the phonk tracks; L7 / L8 each get their own phonk.
+  L5_6:    "assets/music/E1L4-7.mp3",
+  L7:      "assets/music/Stroids_BASS_Phonk.mp3",
+  L8:      "assets/music/Stroids_Phonk_2.mp3",
   L9:      "assets/music/Stroids_metal_Loop.mp3",
   L11_SWARM: "assets/music/L11_Swarm.mp3",       // levels 11+
   L12_BOOM:     "assets/music/L12_BoomCadet.mp3", // level 12 — chain reaction
@@ -997,7 +1000,8 @@ function getMusicForLevel(level) {
   if (level <= 2)     return MUSIC.L1_3;
   if (level <= 4)     return MUSIC.L3_4;
   if (level <= 6)     return MUSIC.L5_6;
-  if (level <= 8)     return MUSIC.L7_8;
+  if (level === 7)    return MUSIC.L7;
+  if (level === 8)    return MUSIC.L8;
   if (level === 9)    return MUSIC.L9;
   if (level === 10)   return MUSIC.L10;
   if (level === 11)   return MUSIC.L11_SWARM;
@@ -1061,17 +1065,24 @@ const SFX = {
 const ARCADE_LEVELS = [
   // 2026-06-15: early levels bumped denser (were 2/3/7/9 to-clear) so the opening doesn't read
   // empty. L1/L2 have no trickle (spawnEveryMs 0), so totalToClear MUST equal startSpawn there.
-  { level: 1, label: "First Flight", time: 48, totalToClear: 4, startSpawn: 4, spawnEveryMs: 0, maxOnScreen: 12 },
+  // 2026-10-27 (Paul: "early levels are kind of boring" → more bombs and missiles): L1-4 get early
+  // guaranteed bomb/missile drops (L1/L2 can clear in ~10-15s, so theirs come fast), and L1/L2 are a
+  // touch denser (were 4/6) so a bomb has something to hit.
+  { level: 1, label: "First Flight", time: 48, totalToClear: 6, startSpawn: 6, spawnEveryMs: 0, maxOnScreen: 12,
+    guaranteedSpawn: [{ type: "bomb", atMs: 3000 }, { type: "missile", atMs: 7000 }] },
   // 2026-10-26 (Paul): L2/L4 have purple borders — the brown roid02 art clashed, so both use the
   // code-baked purple/grey skin (same as L12) and purple sparks (LEVEL_SPARK_COLORS).
-  { level: 2, label: "SHAKE DOWN", time: 50, totalToClear: 6, startSpawn: 6, spawnEveryMs: 0, maxOnScreen: 12,
+  { level: 2, label: "SHAKE DOWN", time: 50, totalToClear: 8, startSpawn: 8, spawnEveryMs: 0, maxOnScreen: 12,
+    guaranteedSpawn: [{ type: "bomb", atMs: 3000 }, { type: "missile", atMs: 8000 }, { type: "bomb", atMs: 14000 }],
     spriteKey: "roidpurplegrey" },
   { level: 3, label: "Blue Moon", time: 52, totalToClear: 10, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12,
+    guaranteedSpawn: [{ type: "bomb", atMs: 5000 }, { type: "missile", atMs: 15000 }, { type: "bomb", atMs: 28000 }],
     spriteKey: "roidbluemoon" }, // 2026-06-24: code-baked midnight-blue/grey/white skin (Blue Moon)
   { level: 4, label: "DEBRIS RUN", time: 54, totalToClear: 12, startSpawn: 6, spawnEveryMs: 2000, maxOnScreen: 12,
     // 2026-06-23: ambient silver debris trickles in throughout — bonus targets/hazards that do NOT
     // count toward the clear quota (spawned with .ambient = true; see the debris block in update()).
     debrisField: { intervalMs: 1500, maxDebris: 6 },
+    guaranteedSpawn: [{ type: "missile", atMs: 6000 }, { type: "bomb", atMs: 14000 }, { type: "bomb", atMs: 30000 }],
     spriteKey: "roidpurplegrey" },
   { level: 5, label: "Emotions Heavy", time: 56, totalToClear: 13, startSpawn: 5, spawnEveryMs: 2000, maxOnScreen: 12,
     // 2026-06-23: missile unlocks at L5 — drop one near the end (~10s before the timer expires).
@@ -3650,8 +3661,17 @@ const commBoxController = (() => {
     });
   }
 
+  // 2026-10-27: while the slot cabinet is up, a delayed line (e.g. the level-intro "LET'S BLAST
+  // THESE 'STROIDS!") called show() and floated the box over the cabinet. enterSlot suppresses,
+  // slotTeardown lifts it.
+  let _suppressed = false;
+  function setSuppressed(on) {
+    _suppressed = !!on;
+    if (_suppressed) hide();
+  }
+
   function show() {
-    if (!hud) return;
+    if (!hud || _suppressed) return;
     hud.style.display = "block";
     hudVisible = true;
     // 2026-06-18: while SPC owns the portrait, don't restore the CMDR frame here. currentFrame is
@@ -4016,6 +4036,7 @@ const commBoxController = (() => {
     init,
     show,
     hide,
+    setSuppressed,
     stopVO,
     triggerVO,
     queueVO,
@@ -4173,9 +4194,9 @@ function createFuzzyText(canvas, opts = {}) {
   let textH = 0;
   let marginX = 0;
 
-  function setupCanvases() {
+  function setupCanvases(fitPx = 0) {
     if (!offCtx) return;
-    const fontPx = Math.max(28, Number(cfg.fontSize) || 64);
+    const fontPx = fitPx || Math.max(28, Number(cfg.fontSize) || 64);
     offCtx.font = `${cfg.fontWeight} ${fontPx}px ${cfg.fontFamily}`;
     offCtx.textBaseline = "alphabetic";
 
@@ -4216,6 +4237,12 @@ function createFuzzyText(canvas, opts = {}) {
 
     marginX = cfg.fuzzRange + 20;
     const cssW = offscreen.width + marginX * 2;
+    // 2026-10-27: Android has no Arial Black/Impact — the fallback face is wider and "You Died.
+    // Progress Lost." ran off the right edge. Shrink the font once to fit the viewport.
+    const maxW = Math.floor((window.innerWidth || 390) * 0.96);
+    if (!fitPx && cssW > maxW) {
+      return setupCanvases(Math.max(16, Math.floor(fontPx * (maxW - marginX * 2) / offscreen.width)));
+    }
     const cssH = textH;
     canvas.width = Math.floor(cssW * dpr);
     canvas.height = Math.floor(cssH * dpr);
@@ -7842,9 +7869,12 @@ function cancelOrbRub() {
 
 // === Orb "leave reality" lock (2026-10-26 playtest) ===========================
 // Hold still on the orb for 10s → hint "to leave reality keep holding for 3 seconds"; 3 more still
-// seconds → the drone at the held tempo is rendered (OfflineAudioContext) into a seamless loop and
-// handed to a plain <audio loop> element. HTML audio (not Web Audio) is what keeps playing with the
-// app backgrounded (UIBackgroundModes audio + .playback session). Ends on the next orb tap or when
+// seconds → the drone at the held tempo is rendered (OfflineAudioContext) into a seamless loop.
+// Foreground: a looping AudioBufferSourceNode (sample-accurate wrap). Background: a plain <audio loop>
+// element, since HTML audio is what keeps playing with the app backgrounded (UIBackgroundModes audio +
+// .playback session). 2026-10-27: the element alone left an audible cut at every ~4s wrap (WebKit's
+// HTML loop isn't gapless), so it now runs muted alongside and only takes over while the app is
+// hidden, with ~60s of repeats baked in so a background wrap is rare. Ends on the next orb tap or when
 // the player leaves the Oracle screen. Element volume is read-only on iOS, so levels are baked in.
 const ORB_LOCK_HINT_MS = 10000;
 const ORB_LOCK_HOLD_MS = 3000;
@@ -7852,6 +7882,8 @@ const ORB_LOCK_STILL_PX = 14;
 const orbRealityLock = {
   el: null,
   url: null,
+  buffer: null,
+  src: null,
   active: false,
   rendering: false,
   lockedThisHold: false,
@@ -7901,10 +7933,11 @@ const orbRealityLock = {
     this.rendering = true;
     const hz = orbRubPulseHz;
     triggerHapticImpact(hapticImpactStyle.Heavy);
-    let url = null;
-    try { url = await renderOrbLockLoop(hz); } catch (err) { console.warn("[orb-lock] render failed", err); }
+    let loop = null;
+    try { loop = await renderOrbLockLoop(hz); } catch (err) { console.warn("[orb-lock] render failed", err); }
     this.rendering = false;
-    if (!url) { this.lockedThisHold = false; return; }
+    if (!loop) { this.lockedThisHold = false; return; }
+    const url = URL.createObjectURL(encodeWav16(loop.samples, loop.rate, 1, Math.ceil(60 / loop.seconds)));
     const el = this.el || (this.el = new Audio());
     el.loop = true;
     el.preload = "auto";
@@ -7912,19 +7945,60 @@ const orbRealityLock = {
     el.src = url;
     if (this.url) URL.revokeObjectURL(this.url);
     this.url = url;
+    this.buffer = null;
+    const ctx = audioEngine.ctx;
+    if (ctx) {
+      try {
+        this.buffer = ctx.createBuffer(1, loop.samples.length, loop.rate);
+        this.buffer.copyToChannel(loop.samples, 0);
+      } catch { this.buffer = null; }
+    }
     this.active = true;
+    el.muted = this.startWebLoop();
     try { await el.play(); } catch (err) { console.warn("[orb-lock] play failed", err); }
     stopRubFeedback(); // the live drone fades out under the loop
     orb.classList.add("reality-locked");
     showChaosToast("✨ You left reality. Tap the orb to return.", { silent: true, durationMs: 2600 });
+  },
+  // Gapless foreground playback; returns false (element stays audible) when Web Audio can't take it.
+  startWebLoop() {
+    this.stopWebLoop();
+    const ctx = audioEngine.ctx;
+    if (!this.buffer || ctx?.state !== "running") return false;
+    try {
+      const src = ctx.createBufferSource();
+      src.buffer = this.buffer;
+      src.loop = true;
+      src.connect(ctx.destination); // levels are baked into the samples, same as the element
+      src.start();
+      this.src = src;
+      return true;
+    } catch { return false; }
+  },
+  stopWebLoop() {
+    const src = this.src;
+    this.src = null;
+    if (src) { try { src.stop(); src.disconnect(); } catch { /* already stopped */ } }
+  },
+  // App switch: the element (which keeps playing in the background) takes over, and hands back on return.
+  onHide() {
+    if (!this.active) return;
+    this.stopWebLoop();
+    if (this.el) this.el.muted = false;
+  },
+  onShow() {
+    if (!this.active || !this.el) return;
+    this.el.muted = this.startWebLoop();
   },
   stop() {
     this.rendering = false;
     if (!this.active) return;
     this.active = false;
     orb?.classList.remove("reality-locked");
+    this.stopWebLoop();
+    this.buffer = null;
     const el = this.el;
-    if (el) { try { el.pause(); el.currentTime = 0; } catch { /* ignore */ } }
+    if (el) { try { el.pause(); el.currentTime = 0; el.muted = false; } catch { /* ignore */ } }
     // Soften the cut: a short live-drone tail at the locked tempo when Web Audio is available.
     if (audioEngine.ctx?.state === "running") {
       orbRubDrone.start({ instant: true });
@@ -8011,11 +8085,14 @@ async function renderOrbLockLoop(hz) {
   let peak = 0;
   for (let i = 0; i < n; i += 1) peak = Math.max(peak, Math.abs(loop[i]));
   const gain = Math.min(0.75 * userSfxGain(), peak > 0 ? 0.92 / peak : 1);
-  return URL.createObjectURL(encodeWav16(loop, rate, gain));
+  for (let i = 0; i < n; i += 1) loop[i] *= gain;
+  return { samples: loop, rate, seconds: n / rate };
 }
 
-function encodeWav16(samples, rate, gain = 1) {
-  const n = samples.length;
+// `repeats` writes the samples back-to-back that many times (a longer file = fewer HTML-loop wraps).
+function encodeWav16(samples, rate, gain = 1, repeats = 1) {
+  const len = samples.length;
+  const n = len * Math.max(1, repeats);
   const buf = new ArrayBuffer(44 + n * 2);
   const v = new DataView(buf);
   const str = (o, t) => { for (let i = 0; i < t.length; i += 1) v.setUint8(o + i, t.charCodeAt(i)); };
@@ -8024,11 +8101,16 @@ function encodeWav16(samples, rate, gain = 1) {
   v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
   str(36, "data"); v.setUint32(40, n * 2, true);
   for (let i = 0; i < n; i += 1) {
-    const x = Math.max(-1, Math.min(1, samples[i] * gain));
+    const x = Math.max(-1, Math.min(1, samples[i % len] * gain));
     v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true);
   }
   return new Blob([buf], { type: "audio/wav" });
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) orbRealityLock.onHide();
+  else orbRealityLock.onShow();
+});
 
 function spawnRubSparkle(clientX, clientY) {
   if (!sparkles || sparkles.childElementCount > 120) return;
@@ -9263,7 +9345,10 @@ function primeBackgroundMedia() {
     if (!video) return;
     if (DISABLE_VIDEO_BG && (video === bgVideoA || video === bgVideoB)) return;
     video.play().then(() => {
-      if (video !== oracleBgVideo || galaxyView.hidden) video.pause();
+      // 2026-10-27: was `|| galaxyView.hidden` (inverted) — a first gesture made inside the game left
+      // the hidden oracle bg decoding under gameplay (Android CDP A/B: -5-7 FPS, 4% frames >33ms).
+      // The oracle bg keeps playing only while the Oracle screen is up.
+      if (video !== oracleBgVideo || !galaxyView.hidden) video.pause();
     }).catch(() => {});
   });
 }
@@ -10751,6 +10836,7 @@ function initGalaxyCanvas() {
       slotOverlay = null;
     }
     galaxyView?.classList.remove("slot-active");
+    commBoxController.setSuppressed(false);
     // 2026-10-25: restore the starfield enterSlot() paused — the Modes menu relies on it without
     // re-showing it (startLevel/stopGalaxyLoop re-show/hide it on the other exits anyway).
     if (slotHidGalaxyBg) { slotHidGalaxyBg = false; window.galaxyBackground?.show(); }
@@ -11076,6 +11162,14 @@ function initGalaxyCanvas() {
     slotReels.forEach((r, i) => slotTrackTimeout(() => slotCommandStop(r, r.target), SLOT_SPIN_TIME_MS + i * SLOT_REEL_STAGGER_MS));
     // Cheap on-frame feedback so the glow + shake land with the spin-start.
     slotLeverFlash(); // 2026-07-01: localized glow instead of the full-screen cssFlash (see slotLeverFlash)
+    // 2026-10-27: subtle scale pop on the pull. WAAPI (no class toggle → no forced reflow on the
+    // pull frame) and transform-only, so the compositor scales the cabinet without repainting it.
+    try {
+      slotEls.root?.querySelector(".ps-panel")?.animate(
+        [{ transform: "scale(1)" }, { transform: "scale(1.025)", offset: 0.3 }, { transform: "scale(1)" }],
+        { duration: 320, easing: "cubic-bezier(.2,.8,.3,1)" },
+      );
+    } catch { /* no WAAPI — skip the pop */ }
     cssShake(isIOSNative ? 0.45 : 0.75);
     setSlotHint("");
     slotEls.skip?.classList.remove("show");
@@ -11628,16 +11722,19 @@ function initGalaxyCanvas() {
         radial-gradient(circle at 78% 26%,rgba(92,205,255,.18),transparent 15%),
         radial-gradient(circle at 42% 72%,rgba(246,105,255,.20),transparent 22%),
         repeating-radial-gradient(circle at 50% 50%,rgba(255,255,255,.13) 0 1px,transparent 1px 13px);
-        filter:blur(.2px);opacity:.72;animation:psGalaxyDrift 18s linear infinite;}
+        opacity:.72;will-change:transform;animation:psGalaxyDrift 60s linear infinite;}
       #polyslots::after{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:
         radial-gradient(circle at 22% 34%,rgba(255,255,255,.74) 0 1px,transparent 1.5px),
         radial-gradient(circle at 64% 18%,rgba(202,224,255,.84) 0 1px,transparent 1.5px),
         radial-gradient(circle at 83% 62%,rgba(255,255,255,.55) 0 1px,transparent 1.5px),
         radial-gradient(circle at 36% 84%,rgba(176,248,255,.62) 0 1px,transparent 1.5px);
         background-size:220px 180px,260px 210px,310px 240px,190px 160px;mix-blend-mode:screen;opacity:.72;animation:psStarDrift 24s linear infinite;}
-      @keyframes psGalaxyDrift{from{transform:translate3d(0,0,0) rotate(0deg)}to{transform:translate3d(-2%,1%,0) rotate(1turn)}}
+      /* 2026-10-27 (Paul: "subtle bg spin"): transform-only (the old blur filter is gone) so the compositor
+         just rotates the rasterized layer — no repaints — and it now runs on iOS too. The star layer
+         (::after) animates background-position = a repaint every frame, so it stays off on iOS. */
+      @keyframes psGalaxyDrift{from{transform:translate3d(0,0,0) rotate(0deg)}to{transform:translate3d(0,0,0) rotate(1turn)}}
       @keyframes psStarDrift{from{background-position:0 0,0 0,0 0,0 0}to{background-position:220px 180px,-260px 210px,310px -240px,-190px -160px}}
-      #polyslots.ios-lite::before,#polyslots.ios-lite::after{animation:none;}
+      #polyslots.ios-lite::after{animation:none;}
       #polyslots.ps-flash{animation:psOverlayFlash 360ms ease-out both;}
       @keyframes psOverlayFlash{0%{filter:brightness(2.1)}100%{filter:brightness(1)}}
       /* Cabinet skin: the whole machine is one art PNG; live bits are absolutely placed (ported 1:1
@@ -11861,7 +11958,11 @@ function initGalaxyCanvas() {
     ensureSlotStyles();
     ensureSlotSprites();
     void ensureSlotCabinetArt();
-    commBoxController.hide();
+    commBoxController.setSuppressed(true);
+    // A combo banner mid-animation froze on its body-level canvas (z 9500) over the cabinet — the
+    // paused level loop is what clears it. Same wipe showModeSelect does.
+    comboBanners.length = 0;
+    if (comboBannerCtx) { comboBannerCtx.clearRect(0, 0, sim.width, sim.height); _comboBannerDirty = false; }
     slotOverlay = buildSlotOverlay();
     slotOverlay.classList.add("cabinet-loading");
     slotOverlay.classList.add("ps-flash");
@@ -12144,7 +12245,7 @@ function initGalaxyCanvas() {
       if (!l?.key || !GAME_SFX[l.key]) continue;
       const vol = (Number(l.vol) || 0) + (Number(l.volRamp) || 0) * k;
       const rate = (l.rate == null ? 1 : Number(l.rate)) + (Number(l.rateRamp) || 0) * taps;
-      playGameSfx(l.key, vol, Math.abs(rate - 1) > 0.001 ? { rate } : {});
+      playGameSfx(l.key, vol, Math.abs(rate - 1) > 0.001 ? { rate, allowBoost: true } : { allowBoost: true });
     }
   }
   let _chestFrameImgs = null;
@@ -14961,7 +15062,8 @@ function initGalaxyCanvas() {
     const right = playfield.x + playfield.w;
     const bottom = playfield.y + playfield.h;
     const inset = 4;
-    if (edge === 0) return { x: left + Math.random() * playfield.w, y: top + inset };
+    // Top edge spawns a stroid-radius down so it doesn't start under the HUD (2026-10-27 deflector).
+    if (edge === 0) return { x: left + Math.random() * playfield.w, y: top + 28 };
     if (edge === 1) return { x: right - inset, y: top + Math.random() * playfield.h };
     if (edge === 2) return { x: left + Math.random() * playfield.w, y: bottom - inset };
     return { x: left + inset, y: top + Math.random() * playfield.h };
@@ -15080,7 +15182,8 @@ function initGalaxyCanvas() {
         explosion_big: 1.12,
       }[name] || 1)
       : 1;
-    const finalVolume = clamp(volume * (state.whisper ? 0.55 : 1) * iosBoost, 0, 1);
+    // opts.allowBoost: Lab-baked sound picks are authored 0..1.5 (Web Audio gain; HTML audio clamps to 1).
+    const finalVolume = clamp(volume * (state.whisper ? 0.55 : 1) * iosBoost, 0, opts.allowBoost ? 1.5 : 1);
     // 2026-06-09: `important` one-shots (e.g. the plasma net blast) bypass the per-frame
     // budget — otherwise the asteroid-vaporize booms fired in the same frame exhaust the
     // 2-sounds/16ms cap and the plasma blast gets silently dropped on the native app.
@@ -22172,6 +22275,16 @@ function initGalaxyCanvas() {
         if (simFrozen && !a.tossed && !(a._coldTossSession === _freezeSessionId)) continue;
         a.x += a.vx * (dt / 1000);
         a.y += a.vy * (dt / 1000);
+        // 2026-10-27: top-edge deflector — a rising stroid bounces off the HUD line instead of
+        // drifting under the buttons (players hit HUD buttons trying to blast it). Tosses still wrap.
+        if (engineMode === "arcade" && !a.tossed && a.vy < 0 && a.y - a.r < playfield.y) {
+          a.y = playfield.y + a.r;
+          a.vy = Math.abs(a.vy);
+          if (!(now - (a._deflectFxAt || 0) < 250)) {
+            a._deflectFxAt = now;
+            spawnComboParticles(a.x, playfield.y, ["#7be2ff", "#bff4ff"]);
+          }
+        }
         if (engineMode === "practice") wrapEntityToCanvas(a);
         else wrapEntity(a);
         // 2026-06-12: a tossed stroid keeps its launch velocity untouched — no clampSpeed, no
@@ -23874,11 +23987,14 @@ function initGalaxyCanvas() {
     if (_freezeBankMs <= 0 && !_freezeActive) {
       _freezeBankMs = 0;
       _freezeActive = false;
+      updateHudFreezeInventory();
       return;
     }
     _freezeBankMs = 0;
     _freezeActive = false;
     freezePauseFx(manual);
+    // 2026-10-27: the frame loop's bank-drained auto-end never refreshed the badge — it sat on "ON".
+    updateHudFreezeInventory();
   }
 
   // 2026-06-21: player-tapped HUD ❄ button — freeze is a PAUSABLE TIMER, not a toggle.

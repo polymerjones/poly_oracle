@@ -4229,6 +4229,11 @@ body.cockpit-free .arcadeHud #hudTimer { visibility: visible; }
   0%, 100% { box-shadow: inset 0 0 0 2px rgba(var(--cr), 0.95), inset 0 5px 10px rgba(0, 0, 0, 0.85), 0 0 10px rgba(var(--cr), 0.55); }
   50% { box-shadow: inset 0 0 0 3px rgb(var(--cr)), inset 0 0 16px rgba(var(--cr), 0.6), 0 0 22px rgba(var(--cr), 0.95); }
 }
+/* armed (bomb/missile aim mode): the button lifts, lights white-hot and throws a sonar ring */
+@keyframes cockpitBtnArmed {
+  0% { box-shadow: 0 3px 6px rgba(0, 0, 0, 0.7), 0 0 0 0 rgba(var(--cr), 0.9); }
+  100% { box-shadow: 0 3px 6px rgba(0, 0, 0, 0.7), 0 0 0 10px rgba(var(--cr), 0); }
+}
 /* the POLYSLOTS token chip matches the weapon buttons' count chips */
 body.cockpit-free #cockpitLayer .hudSlotCount {
   position: absolute; /* corner chip, like the weapon buttons (the button is scaled 1.2, hence 9px) */

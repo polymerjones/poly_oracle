@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-26 20:14";
+const BUILD_TS = "2026-10-26 20:15";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -9906,6 +9906,8 @@ function initGalaxyCanvas() {
         rules.push(`${s}.freeze-paused::before{animation-duration:1.4s}`);
         rules.push(`${s} .hudMissileReload{left:14px;bottom:8px;max-width:calc(100% - 28px);z-index:3;border-radius:2px}`);
         rules.push(`${s}:not(.reloading) .hudMissileReload{display:none}`);
+        rules.push(`${s}.hud-armed{transform:scale(1.1);animation:cockpitBtnArmed 0.5s ease-in-out infinite}`);
+        rules.push(`${s}.hud-armed::before{background:radial-gradient(circle at 50% 40%, rgba(var(--cr),0.75), rgba(var(--cr),0.18) 75%);box-shadow:inset 0 0 0 3px #fff, 0 0 18px rgb(var(--cr))}`);
         continue;
       }
       if (p.skin === "text" || p.skin === "custom") {
@@ -13466,6 +13468,10 @@ function initGalaxyCanvas() {
       "missile-ready",
       has && !reloading && !activeMissile && !missileAimMode,
     );
+    // 2026-10-26 (Paul: "couldn't tell if missile was armed"): aim mode lights the cockpit button.
+    // Bomb rides along here because this runs every arcade frame.
+    hudMissileBtn.classList.toggle("hud-armed", missileAimMode);
+    hudBombBtn?.classList.toggle("hud-armed", bombAimMode);
     if (hudMissileReload) {
       const prog = reloading
         ? clamp(1 - (missileReloadUntil - nowM) / MISSILE_RELOAD_MS, 0, 1)

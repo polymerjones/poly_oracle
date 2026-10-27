@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-26 20:22";
+const BUILD_TS = "2026-10-26 20:23";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -15313,7 +15313,7 @@ function initGalaxyCanvas() {
   }
 
   // 2026-10-26: Z drift — a slow sine toward/away from the camera (±16% size) plus a ~650ms fly-in
-  // from deep space on warp spawns (echoes the level-end warp). z < 0 = far: the PIXI renderer
+  // from nearby (60% size) on warp spawns (echoes the level-end warp). z < 0 = far: the PIXI renderer
   // sorts by z and tints far rocks cooler/dimmer. Freeze slows it to a quarter, like a held breath.
   // Debris, tossed rocks and rocks without r0 keep their size.
   function applyStroidDepth(a, dt, frozen, now) {
@@ -15326,8 +15326,9 @@ function initGalaxyCanvas() {
       if (t >= 1 || t < 0) a.zEnterAt = 0;
       else {
         const e = 1 - (1 - t) ** 3;
-        s = 0.2 + (s - 0.2) * e;
-        z = -4 + (z + 4) * e;
+        // Paul: start closer (bigger) — arrive from nearby at 60% size, mostly visible, not deep space.
+        s = 0.6 + (s - 0.6) * e;
+        z = -2 + (z + 2) * e;
       }
     }
     a.z = z;

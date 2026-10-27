@@ -4249,6 +4249,8 @@ body.cockpit-free #cockpitLayer .hudSlotCount {
 }
 /* the comm ticker stops short of the bottom-right NET switch instead of running under it */
 body.cockpit-free #commanderTicker { width: min(340px, calc(100vw - 256px)); }
+/* 2026-10-27: the centered cutscene (setCommCenter) docks the ticker under the portrait — keep its normal width. */
+body.cockpit-free #commanderHUD.comm-centered #commanderTicker { width: min(340px, calc(100vw - 160px)); }
 body.cockpit-free #commanderTickerText { font-size: clamp(18px, 5vw, 26px); }
 /* Lab "show all states": reveal parts that are normally hidden until they're relevant */
 body.cockpit-free.cockpit-preview #cockpitLayer > [data-cockpit="quad"],

@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-27 10:50";
+const BUILD_TS = "2026-10-27 10:52";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -3351,6 +3351,9 @@ const commBoxController = (() => {
   function setCommCenter(on) {
     if (!hud) return;
     hud.style.transition = "left .55s ease, top .55s ease, bottom .55s ease, transform .55s ease";
+    // 2026-10-27: the cockpit pins the comm part's left/top/bottom with !important; the centered cutscene
+    // opts out via this class (its translate(-50%,-50%) was applied to the pinned corner → half off-screen).
+    hud.classList.toggle("comm-centered", !!on);
     if (on) {
       hud.style.left = "50%";
       hud.style.bottom = "auto";
@@ -9955,7 +9958,7 @@ function initGalaxyCanvas() {
   }
   function buildCockpitCss(layout) {
     const rules = [];
-    const sel = (key) => (key === "comm" ? "body.cockpit-free #commanderHUD" : `body.cockpit-free #cockpitLayer [data-cockpit="${key}"]`);
+    const sel = (key) => (key === "comm" ? "body.cockpit-free #commanderHUD:not(.comm-centered)" : `body.cockpit-free #cockpitLayer [data-cockpit="${key}"]`);
     for (const [key, p] of Object.entries(layout.parts || {})) {
       if (!COCKPIT_PARTS[key] || !p) continue;
       const s = sel(key);

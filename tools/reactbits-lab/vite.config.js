@@ -70,25 +70,28 @@ function cockpitDesigner() {
           }
         });
       });
-      // Reward Box "BAKE INTO GAME": {moment: [layers]} → rewardBoxSfx.js at the repo root
-      server.middlewares.use("/__rewardbox/save", (req, res) => {
+      // Sounds "BAKE INTO GAME": {chest: {moment: [layers]}, hub: {...}} → sfxPicks.js at the repo root
+      server.middlewares.use("/__sfxpicks/save", (req, res) => {
         let body = "";
         req.on("data", (c) => { body += c; });
         req.on("end", () => {
           res.setHeader("Content-Type", "application/json");
           try {
-            const cfg = JSON.parse(body || "{}");
-            const file = path.join(REPO, "rewardBoxSfx.js");
+            const { chest = {}, hub = {} } = JSON.parse(body || "{}");
+            const file = path.join(REPO, "sfxPicks.js");
             const src = fs.readFileSync(file, "utf8");
             const header = src.slice(0, src.indexOf("window.POLY_REWARD_BOX_SFX"));
-            const lines = ["arrive", "tap", "open", "collect"].map((m) => {
-              const layers = (Array.isArray(cfg[m]) ? cfg[m] : []).map((l) => {
-                if (!/^[A-Za-z0-9_]+$/.test(l.key || "")) throw new Error(`bad key ${l.key}`);
-                return JSON.stringify(l).replace(/,"/g, ', "').replace(/":/g, '": ');
+            const block = (name, cfg, moments) => {
+              const lines = moments.map((m) => {
+                const layers = (Array.isArray(cfg[m]) ? cfg[m] : []).map((l) => {
+                  if (!/^[A-Za-z0-9_]+$/.test(l.key || "")) throw new Error(`bad key ${l.key}`);
+                  return JSON.stringify(l).replace(/,"/g, ', "').replace(/":/g, '": ');
+                });
+                return `  "${m}": [${layers.join(", ")}]`;
               });
-              return `  "${m}": [${layers.join(", ")}]`;
-            });
-            fs.writeFileSync(file, `${header}window.POLY_REWARD_BOX_SFX = {\n${lines.join(",\n")}\n};\n`);
+              return `window.${name} = {\n${lines.join(",\n")}\n};\n`;
+            };
+            fs.writeFileSync(file, header + block("POLY_REWARD_BOX_SFX", chest, ["arrive", "tap", "open", "collect"]) + block("POLY_HUB_SFX", hub, ["tick", "select", "open"]));
             res.end(JSON.stringify({ ok: true }));
           } catch (err) {
             res.statusCode = 500;

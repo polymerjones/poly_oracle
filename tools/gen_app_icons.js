@@ -1,5 +1,5 @@
 // Regenerate every app icon from one square master (2026-10-26, icon v5).
-//   node tools/gen_app_icons.js [master.png]   (default: poly_oracle_app_iconv5.png)
+//   node tools/gen_app_icons.js [master.png]   (default: poly_oracle_app_iconv5b.png — the alt Paul picked)
 // Writes: iOS AppIcon (1024, no alpha), web favicons / apple-touch / android-chrome (also the
 // lock-screen Now Playing art), assets/icon-1024.png, the in-app Oracle badge, the Lab copy, and
 // Android legacy / round / adaptive (foreground + background) mipmaps. Then run `npm run prepare:web`.
@@ -11,7 +11,7 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
-const SRC = path.resolve(ROOT, process.argv[2] || "poly_oracle_app_iconv5.png");
+const SRC = path.resolve(ROOT, process.argv[2] || "poly_oracle_app_iconv5b.png");
 const RES = path.join(ROOT, "android/app/src/main/res");
 const DENSITIES = [["mdpi", 48, 108], ["hdpi", 72, 162], ["xhdpi", 96, 216], ["xxhdpi", 144, 324], ["xxxhdpi", 192, 432]];
 const ORB_CROP = 0.52; // centre crop (fraction of the side) that holds just the orb

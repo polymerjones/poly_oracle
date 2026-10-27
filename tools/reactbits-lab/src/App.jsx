@@ -224,7 +224,7 @@ export default function App() {
       <button className={mode === "hud" ? "on" : ""} onClick={() => setMode("hud")}>HUD concepts</button>
       <button className={mode === "designer" ? "on" : ""} onClick={() => setMode("designer")}>Cockpit Designer</button>
       <button className={mode === "hubcards" ? "on" : ""} onClick={() => setMode("hubcards")}>Hub Cards</button>
-      <button className={mode === "rewardbox" ? "on" : ""} onClick={() => setMode("rewardbox")}>Reward Box</button>
+      <button className={mode === "rewardbox" ? "on" : ""} onClick={() => setMode("rewardbox")}>Sounds</button>
     </div>
   );
   if (mode === "designer") return <CockpitDesigner modeSwitch={modeSwitch} />;

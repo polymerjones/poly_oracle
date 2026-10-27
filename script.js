@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-26 19:28";
+const BUILD_TS = "2026-10-26 19:51";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1372,6 +1372,7 @@ function setDevModeOn(on) {
   if (btnDevMode) btnDevMode.textContent = devModeOn ? "Dev Mode: On" : "Dev Mode: Off";
   if (btnFxLab) btnFxLab.style.display = devModeOn && btnDevMode?.style.display !== "none" ? "" : "none";
   if (btnCockpitHud) btnCockpitHud.style.display = btnFxLab?.style.display ?? "none";
+  if (btnResetTips) btnResetTips.style.display = btnFxLab?.style.display ?? "none";
   applyTrials(); // Dev Mode on → lab picks go live; off → back to the shipped defaults
 }
 
@@ -1600,6 +1601,11 @@ function wireDevModeEntry() {
   btnFxLab?.addEventListener("click", openFxLab);
   syncCockpitHudButton();
   btnCockpitHud?.addEventListener("click", () => setCockpitHudPref(!cockpitHudPref));
+  btnResetTips?.addEventListener("click", () => {
+    resetAllTips();
+    btnResetTips.textContent = "Tips Reset ✓";
+    setTimeout(() => { btnResetTips.textContent = "Reset Tips"; }, 1500);
+  });
   btnSettings?.addEventListener("click", openStroidsSettings);
   hudDevWin?.addEventListener("click", () => galaxyCanvasController?.devInstantWin?.());
 }
@@ -2191,10 +2197,25 @@ let devModeOn = false;
 // 2026-10-26: Cockpit HUD trial (Lab concept "D · Hybrid") — toggled from Dev Mode, persisted so it
 // survives relaunches (Dev Mode itself is session-only). Release players can't reach the toggle.
 const STORAGE_HUD_COCKPIT = "poly_oracle_hud_cockpit";
+// 2026-10-26: in-level tips (see TIPS in initGalaxyCanvas). Learned = the player did the thing;
+// shown-this-session keeps an unlearned tip to once per app launch. Dev Mode → Reset Tips clears both.
+const STORAGE_TIPS_LEARNED = "poly_oracle_tips_learned";   // { [id]: learnedAt }
+const STORAGE_TIPS_LAST_PLAY = "poly_oracle_tips_last_play"; // ms — 7 days away → every tip returns
+const TIPS_RETURN_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+const tipsShownThisSession = new Set();
+function resetAllTips() {
+  tipsShownThisSession.clear();
+  try {
+    localStorage.removeItem(STORAGE_TIPS_LEARNED);
+    localStorage.removeItem("poly_oracle_tips_seen"); // pre-2026-10-26 once-ever list
+    localStorage.removeItem("poly_oracle_net_mode_demo_seen");
+  } catch { /* private mode */ }
+}
 // ?cockpitLab=1 = the desktop Lab's Cockpit Designer iframe: cockpit forced on (not persisted) + a bridge.
 const COCKPIT_LAB = /[?&]cockpitLab=1\b/.test(location.search);
 let cockpitHudPref = COCKPIT_LAB || (() => { try { return localStorage.getItem(STORAGE_HUD_COCKPIT) === "1"; } catch { return false; } })();
 const btnCockpitHud = document.getElementById("btnCockpitHud");
+const btnResetTips = document.getElementById("btnResetTips"); // 2026-10-26: Dev Mode → show every tip again
 function syncCockpitHudButton() {
   if (btnCockpitHud) btnCockpitHud.textContent = cockpitHudPref ? "Cockpit HUD: On" : "Cockpit HUD: Off";
 }
@@ -5868,7 +5889,7 @@ function addListeners() {
   document.getElementById("btnPlayHero")?.addEventListener("click", (e) => {
     const hero = e.currentTarget;
     if (hero.classList.contains("launch")) return;
-    audioEngine.play("menu_hit", { volume: 0.9 });
+    playHubSfx("open");
     hero.classList.add("launch"); // whiz-zoom, then go
     setTimeout(() => {
       hero.classList.remove("launch");
@@ -5931,7 +5952,7 @@ function addListeners() {
       // 2026-07-01: forward select stays on the menu_hit blip at 0.9 (~1.5x) since it carries an
       // SPC voice callout underneath. Back now reuses the (softened) level-complete chime.
       if (isBack) window.playGameSfx?.("level_up", 0.5);
-      else audioEngine.play("menu_hit", { volume: 0.9 });
+      else playHubSfx("open");
       if (!isBack) {
         playMenuVo(btn.id);
         btn.classList.remove("modeBtn--select");
@@ -8514,6 +8535,20 @@ function drawWrappedText(ctx, text, centerX, startY, maxWidth, lineHeight) {
 // card to the front. Tapping a side card turns the ring to it; tapping the front card is a normal
 // .modeBtn click (press flash, menu VO, nav). The RAF loop stops at rest and never runs while hidden.
 // State lives inside: init() runs mid-module, so top-level consts declared down here would be in TDZ.
+// 2026-10-26: hub carousel / menu tap sounds are data (sfxPicks.js POLY_HUB_SFX, from the Lab's Sounds
+// tab): tick = a card passes the front while turning, select = tap 1 on a card, open = a forward
+// menu tap (tap 2 on a card, and every other forward .modeBtn).
+const HUB_SFX_DEFAULT = {
+  tick: [{ key: "menu_hit", vol: 0.14 }], select: [{ key: "menu_hit", vol: 0.3 }], open: [{ key: "menu_hit", vol: 0.9 }],
+};
+function playHubSfx(moment) {
+  const cfg = window.POLY_HUB_SFX || HUB_SFX_DEFAULT;
+  const layers = Array.isArray(cfg[moment]) ? cfg[moment] : HUB_SFX_DEFAULT[moment] || [];
+  for (const l of layers) {
+    if (!l?.key || !GAME_SFX[l.key]) continue;
+    audioEngine.play(l.key, { volume: Number(l.vol) || 0, rate: l.rate == null ? 1 : Number(l.rate) });
+  }
+}
 function wirePolyRing() {
   const POLY_RING_KEY = "poly_hub_ring_front";
   const polyRing = { cards: [], step: 0, r: 0, angle: 0, vel: 0, target: 0, drag: null, coasting: false, raf: 0, last: 0, front: -1, tickAt: 0, swallowClick: false, armed: -1 };
@@ -8566,7 +8601,7 @@ function wirePolyRing() {
     const now = performance.now();
     if (!quiet && now - polyRing.tickAt > 45) {
       polyRing.tickAt = now;
-      audioEngine.play("menu_hit", { volume: 0.14 });
+      playHubSfx("tick");
       triggerHapticImpact(hapticImpactStyle.Light);
     }
   };
@@ -8609,7 +8644,7 @@ function wirePolyRing() {
     polyRing.armed = i;
     cards[i].classList.add("armed");
     nameEl?.classList.add("armed");
-    audioEngine.play("menu_hit", { volume: 0.3 });
+    playHubSfx("select");
     triggerHapticImpact(hapticImpactStyle.Light);
   }
   // A dialog over the hub (What's New etc.) must not let a stray touch turn the ring behind it.
@@ -9979,6 +10014,8 @@ function initGalaxyCanvas() {
     window.__rewardBoxLab = {
       sfxFiles: () => ({ ...GAME_SFX }),
       setSfx(cfg) { window.POLY_REWARD_BOX_SFX = cfg; },
+      setHubSfx(cfg) { window.POLY_HUB_SFX = cfg; },
+      hubSfx: () => window.POLY_HUB_SFX || HUB_SFX_DEFAULT,
       preview() {
         document.getElementById("rewardBoxOverlay")?.remove();
         showRewardBox(-1, () => {}, { previewItems: rollRewardBox().items });
@@ -12026,7 +12063,7 @@ function initGalaxyCanvas() {
   const CHEST_FRAMES = ["shut", "open1", "open2", "open3", "open4", "open5", "open6"]
     .map((f) => `assets/ui/chest/chest_${f}.webp`);
   const CHEST_OPEN_FRAME_MS = 85;
-  // 2026-10-26: chest sounds are data (rewardBoxSfx.js, baked from the Lab's Reward Box tab).
+  // 2026-10-26: chest sounds are data (sfxPicks.js, baked from the Lab's Sounds tab).
   const REWARD_BOX_SFX_DEFAULT = {
     arrive: [{ key: "warp", vol: 0.7 }],
     tap: [{ key: "blip1", vol: 0.6, volRamp: 0.3, rate: 0.85, rateRamp: 0.09 }],
@@ -12311,23 +12348,34 @@ function initGalaxyCanvas() {
     });
   }
 
-  // ── 2026-10-26 (Paul): first-time TIPS on the opening levels, like Monkey Trubble ─────────────
-  // A silent bubble + pulsing teal ring + bobbing pointer on the thing a tip is about, the first
-  // time that thing is useful. Each tip shows ONCE EVER (learned the moment it shows; ids kept in
-  // localStorage). One at a time: a tip steps aside when its action happens or after TIP_MS, and the
-  // next waits TIP_GAP_MS. Tips wait TIP_START_MS into a level (past the level banner) and only run
-  // on Arcade levels 1–TIP_MAX_LEVEL (anyLevel tips run on every level). The net tip plays the
-  // training's transparent net demo clip.
-  // Dev: localStorage.removeItem("poly_oracle_tips_seen") shows them all again.
-  const STORAGE_TIPS = "poly_oracle_tips_seen";
+  // ── 2026-10-26 (Paul): TIPS on the opening levels, like Monkey Trubble ──────────────────────
+  // A silent bubble + pulsing teal ring + bobbing pointer on the thing a tip is about, when that
+  // thing is useful. A tip is LEARNED only when the player actually does it (its done() fires while
+  // it's up); until then it comes back once per app session. After 7 days away from the game every
+  // tip returns (STORAGE_TIPS_LAST_PLAY). One at a time: a tip steps aside when its action happens or
+  // after TIP_MS, and the next waits TIP_GAP_MS. Tips wait TIP_START_MS into a level (past the level
+  // banner) and only run on Arcade levels 1–TIP_MAX_LEVEL (anyLevel tips run on every level). The net
+  // tip plays the training's transparent net demo clip. Dev Mode → Reset Tips shows them all again.
   const TIP_MS = 6500, TIP_GAP_MS = 3500, TIP_START_MS = 3200, TIP_MAX_LEVEL = 3, TIP_POLL_MS = 200;
   function tipsLearned() {
-    try { return new Set(JSON.parse(localStorage.getItem(STORAGE_TIPS) || "[]")); } catch { return new Set(); }
+    try { return new Set(Object.keys(JSON.parse(localStorage.getItem(STORAGE_TIPS_LEARNED) || "{}"))); } catch { return new Set(); }
   }
   function learnTip(id) {
-    const seen = tipsLearned();
-    seen.add(id);
-    try { localStorage.setItem(STORAGE_TIPS, JSON.stringify([...seen])); } catch { /* private mode */ }
+    try {
+      const all = JSON.parse(localStorage.getItem(STORAGE_TIPS_LEARNED) || "{}");
+      all[id] = Date.now();
+      localStorage.setItem(STORAGE_TIPS_LEARNED, JSON.stringify(all));
+    } catch { /* private mode */ }
+  }
+  function tipEligible(t, learned, level) {
+    return !learned.has(t.id) && !tipsShownThisSession.has(t.id) && (t.anyLevel || level <= TIP_MAX_LEVEL);
+  }
+  function noteTipsPlayed() {
+    try {
+      const last = Number(localStorage.getItem(STORAGE_TIPS_LAST_PLAY)) || 0;
+      if (last && Date.now() - last > TIPS_RETURN_AFTER_MS) localStorage.removeItem(STORAGE_TIPS_LEARNED);
+      localStorage.setItem(STORAGE_TIPS_LAST_PLAY, String(Date.now()));
+    } catch { /* private mode */ }
   }
   function tipCanvasPoint(x, y, r = 0) {
     const rect = galaxyPlayCanvas.getBoundingClientRect();
@@ -12530,6 +12578,7 @@ function initGalaxyCanvas() {
       let doneNow = false;
       try { doneNow = tip.done(snap); } catch { doneNow = true; }
       if (tipsPaused() || doneNow || now - at > TIP_MS) {
+        if (doneNow) learnTip(tip.id); // learned only by doing it
         hideTip();
         _tipReadyAt = now + TIP_GAP_MS;
         return;
@@ -12538,13 +12587,13 @@ function initGalaxyCanvas() {
       return;
     }
     if (tipsPaused() || now < _tipReadyAt) return;
-    const seen = tipsLearned();
+    const learned = tipsLearned();
     const level = ARCADE_LEVELS[currentLevelIndex]?.level || 1;
-    const remaining = TIPS.filter((t) => !seen.has(t.id) && (t.anyLevel || level <= TIP_MAX_LEVEL));
+    const remaining = TIPS.filter((t) => tipEligible(t, learned, level));
     if (!remaining.length) { stopTips(); return; }
     const tip = remaining.find((t) => { try { return t.when(); } catch { return false; } });
     if (!tip) return;
-    learnTip(tip.id);
+    tipsShownThisSession.add(tip.id);
     _tipCanvasTapped = false;
     _tipShown = { tip, at: now, snap: tip.snap() };
     const { bubble } = ensureTipEls();
@@ -12557,8 +12606,9 @@ function initGalaxyCanvas() {
     stopTips();
     if (!cfg || stuntActive) return;
     // Opening levels run every tip; later levels only the anyLevel ones (e.g. the net mode tips).
-    const seen = tipsLearned();
-    if (!TIPS.some((t) => !seen.has(t.id) && (t.anyLevel || cfg.level <= TIP_MAX_LEVEL))) return;
+    noteTipsPlayed();
+    const learned = tipsLearned();
+    if (!TIPS.some((t) => tipEligible(t, learned, cfg.level))) return;
     _tipReadyAt = performance.now() + TIP_START_MS;
     _tipTimer = setInterval(tipTick, TIP_POLL_MS);
   }
@@ -14438,6 +14488,7 @@ function initGalaxyCanvas() {
     if (btnDevMode) btnDevMode.style.display = showRoot && devModeRevealed ? "" : "none";
     if (btnFxLab) btnFxLab.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
     if (btnCockpitHud) btnCockpitHud.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
+    if (btnResetTips) btnResetTips.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
     if (btnCheatCodes) btnCheatCodes.style.display = showRoot ? "" : "none";
     if (btnSettings) btnSettings.style.display = showRoot ? "" : "none";
     if (cheatCodesPanel) {
@@ -18419,9 +18470,18 @@ function initGalaxyCanvas() {
       tallyTimers.forEach(t => clearTimeout(t));
       tallyTimers.length = 0;
       if (countupRaf) { cancelAnimationFrame(countupRaf); countupRaf = 0; }
-      overlay.style.transition = "opacity 180ms ease";
+      // 2026-10-26 (Paul: "still see the empty black bg after levels"): the starfield sat frozen
+      // (paused under the card) and nearly black for ~0.5s, then the next level's colours hard-cut
+      // in. Wake it now and start dissolving into the next level's theme, and fade the card out
+      // slower over it so the levels blend. onDismiss timing is unchanged.
+      setLevelBackgroundDefocus(false); // the grey/blur/55% "defocus" under the card read as a black screen
+      window.galaxyBackground?.show();
+      window.galaxyBackground?.setTheme(levelNum + 1, true);
+      overlay.style.pointerEvents = "none";
+      overlay.style.transition = "opacity 520ms ease";
       overlay.style.opacity = "0";
-      setTimeout(() => { detachBreakOrb(overlay); overlay.remove(); onDismiss?.(); }, 190);
+      setTimeout(() => onDismiss?.(), 190);
+      setTimeout(() => { detachBreakOrb(overlay); overlay.remove(); }, 540);
     }
 
     overlay.addEventListener("pointerdown", (e) => {
@@ -18973,7 +19033,8 @@ function initGalaxyCanvas() {
     const bgShown = fdPhase("bg", () => setGalaxyBackgroundForLevel(cfg.level));
     window.galaxyBackground?.show();
     fdPhase("theme", () => {
-      window.galaxyBackground?.setTheme(cfg.level);
+      // dissolve between levels (the scorecard dismiss already started it); hard-set on a run's first level
+      window.galaxyBackground?.setTheme(cfg.level, currentLevelIndex > 0);
       window.galaxyBackground?.setLevel(cfg.level);
     });
     if (currentLevelIndex > 0) {

@@ -16,8 +16,9 @@ const galaxyBackground = (() => {
     { sky: "#010104", neb: [[20, 0, 40], [10, 0, 30], [30, 5, 50]], star: [180, 180, 220], gas: [[30, 0, 60], [20, 0, 50], [40, 10, 70]] },
     // L5 — Ember (amber/orange)
     { sky: "#060200", neb: [[140, 60, 0], [180, 90, 10], [120, 40, 0]], star: [255, 210, 140], gas: [[200, 100, 0], [240, 140, 20], [160, 70, 0]] },
-    // L6 — Jungle (deep green)
-    { sky: "#010804", neb: [[0, 80, 30], [10, 100, 40], [0, 60, 20]], star: [180, 255, 200], gas: [[0, 140, 60], [20, 180, 80], [0, 100, 40]] },
+    // L6 — Jungle (deep green) — 2026-10-26 (Paul: L6 read as an empty black screen): sky + clouds
+    // lifted ~1.7x so the green actually shows.
+    { sky: "#031409", neb: [[0, 140, 55], [20, 170, 70], [0, 105, 40]], star: [190, 255, 210], gas: [[0, 210, 95], [40, 235, 120], [0, 160, 70]] },
     // L7 — Storm (electric blue)
     { sky: "#020318", neb: [[20, 60, 220], [40, 100, 255], [10, 40, 180]], star: [220, 240, 255], gas: [[60, 120, 255], [100, 160, 255], [40, 80, 220]] },
     // L8 — Deep Freeze (ice blue) — 2026-06-24: rethemed from "Blood (crimson)" to match
@@ -738,7 +739,8 @@ const galaxyBackground = (() => {
     _planetLevel = levelNum; // 2026-06-09: keep planet color in sync with the level
     // 2026-06-15: clamp to the full THEMES range (was 9) so levels 11-15 get their own themes.
     const idx = Math.min(THEMES.length - 1, Math.max(0, levelNum - 1));
-    if (idx === themeIdx && blend >= 1) return;
+    // already there, or already dissolving toward it (scorecard dismiss starts the blend early)
+    if (idx === themeIdx && (blend >= 1 || dissolve)) return;
     themeIdx = idx;
     if (dissolve) {
       // 2026-06-22 (notes #6): crossfade — keep the currently displayed theme as the blend source and

@@ -218,7 +218,7 @@ const adTheater = (() => {
     root.innerHTML = `
       <div class="adTheaterStars" aria-hidden="true"></div>
       <div class="adTheaterStage">
-        <div class="adTheaterMarquee"><span class="adTheaterBrand">POLY ORACLE</span><span class="adTheaterTitle">AD THEATER</span></div>
+        <div class="adTheaterMarquee"><img class="adTheaterIcon" src="assets/ui/poly_oracle_icon.png" alt=""><span class="adTheaterBrand">POLY ORACLE</span><span class="adTheaterTitle">AD THEATER</span></div>
         <div class="adTheaterScreen">
           <div class="adTheaterFor"></div>
           <div class="adTheaterStatus">Now showing…</div>
@@ -514,7 +514,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-26 19:20";
+const BUILD_TS = "2026-10-26 19:28";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -1325,6 +1325,19 @@ function setCheatSwitchedOff(id, off) {
   if (off) all[id] = true;
   else delete all[id];
   writeCheatJson(STORAGE_CHEATS_OFF, all);
+  syncRunCheat(id, !off && !!getArmedCheats()[id]);
+}
+
+// 2026-10-26 (Paul: "unlimited plasma cheat did not work until a new game was started"): flipping a
+// cheat on/off (or earning one) also updates the run in progress, so a resumed game picks it up.
+// "lives" stays start-of-game only (it's a one-time +2 when a run begins).
+function syncRunCheat(id, on) {
+  if (id === "levelselect" || id === "lives") return;
+  if (!!activeRunCheats[id] === on) return;
+  activeRunCheats = { ...activeRunCheats };
+  if (on) activeRunCheats[id] = true;
+  else delete activeRunCheats[id];
+  writeCheatJson(STORAGE_RUN_CHEATS, activeRunCheats);
 }
 
 // A new run turns on every switched-on cheat still inside its 24h window. A cheat that expires mid-run
@@ -9812,6 +9825,24 @@ function initGalaxyCanvas() {
       if (p.hidden) { rules.push(`${s}{display:none !important}`); continue; }
       const isComm = key === "comm";
       const decl = cockpitPlaceCss(isComm ? { ...p, w: 0, h: 0 } : p, { box: !isComm, fixed: isComm });
+      if (p.skin === "belt") {
+        // 2026-10-26 (concept G): no box — a big haloed icon over segmented ammo pips (setHudPips).
+        const c = p.stroke || "#7be2ff";
+        decl.push("background:none", "border:0", "box-shadow:none", "padding:0", "display:flex", "flex-direction:column",
+          "align-items:center", "justify-content:flex-start", "gap:10px", "overflow:visible", `--c:${c}`, `--pip:${p.pip || 7}px`);
+        rules.push(`${s}{${decl.join(";")}}`);
+        const icon = p.icon || 46;
+        rules.push(`${s} .hudBtnIcon{width:${icon}px;height:${icon}px;object-fit:contain;border-radius:50%;background:radial-gradient(circle, ${cockpitRgba(c, 0.4)}, transparent 68%);filter:drop-shadow(0 0 7px ${cockpitRgba(c, 0.9)})}`);
+        rules.push(`${s} .hudBtnCount{display:none}`);
+        rules.push(`${s}.hud-word .hudBtnCount{display:block;position:static;font:900 12px/1 ui-monospace, Menlo, monospace;color:${c};text-shadow:0 0 8px ${c}}`);
+        // lit pips over dim pips: each pip is --pip wide with a 3px gap
+        rules.push(`${s}::after{content:"";display:block;height:11px;width:calc(var(--max, 3) * (var(--pip) + 3px) - 3px);transform:skewX(-14deg);`
+          + `background:repeating-linear-gradient(90deg, ${c} 0 var(--pip), transparent var(--pip) calc(var(--pip) + 3px)) 0 0 / calc(var(--n, 0) * (var(--pip) + 3px)) 100% no-repeat,`
+          + `repeating-linear-gradient(90deg, rgba(255,255,255,0.14) 0 var(--pip), transparent var(--pip) calc(var(--pip) + 3px));filter:drop-shadow(0 0 4px ${cockpitRgba(c, 0.8)})}`);
+        rules.push(`${s}.hud-word::after{display:none}`);
+        rules.push(`${s}:disabled .hudBtnIcon{opacity:0.45;filter:grayscale(0.7)}`);
+        continue;
+      }
       if (p.skin === "text" || p.skin === "custom") {
         decl.push(...cockpitTypeCss(p));
         if (p.skin === "custom") decl.push(...cockpitSkinCss(p), "padding:0");
@@ -9833,6 +9864,21 @@ function initGalaxyCanvas() {
       rules.push(`${s}{${decl.join(";")}}`);
       const fill = `linear-gradient(180deg, ${cockpitRgba(p.fill, p.alpha ?? 1)}, ${cockpitRgba(p.fill2 || p.fill, p.alpha ?? 1)})`;
       const sw = Number(p.strokeW) || 0;
+      if (p.shape === "canopy") {
+        // 2026-10-26 (concept G): cockpit glass — curved bottom rim with a glow line + two struts.
+        const curve = Number(p.curve) || 34;
+        const rim = cockpitRgba(p.stroke, p.strokeAlpha ?? 1);
+        rules.push(`${s}>i{border-radius:0 0 50% 50% / 0 0 ${curve}px ${curve}px;border:0;border-bottom:${sw || 2}px solid ${rim};background:${fill};box-shadow:0 4px 14px -4px ${cockpitRgba(p.stroke, 0.7)}, inset 0 -6px 12px -8px ${rim}}`);
+        rules.push(`${s}>i::before,${s}>i::after{content:"";position:absolute;top:0;bottom:${Math.round(curve * 0.55)}px;width:2px;background:linear-gradient(180deg, transparent, ${cockpitRgba(p.stroke, 0.4)});inset:auto}`);
+        rules.push(`${s}>i::before{left:29%;top:0;height:calc(100% - ${Math.round(curve * 0.4)}px);transform:skewX(8deg)}`);
+        rules.push(`${s}>i::after{right:29%;top:0;height:calc(100% - ${Math.round(curve * 0.4)}px);transform:skewX(-8deg)}`);
+        continue;
+      }
+      if (p.shape === "rail") {
+        // a glowing hairline the belt weapons sit on
+        rules.push(`${s}>i{border-radius:2px;background:linear-gradient(90deg, transparent, ${cockpitRgba(p.stroke, p.strokeAlpha ?? 0.85)}, transparent);box-shadow:0 0 12px ${cockpitRgba(p.stroke, 0.7)}}`);
+        continue;
+      }
       if (p.shape === "chamfer" || p.shape === "trapezoid") {
         // stroke = the outer clipped shape; fill = the same shape inset by the stroke width
         rules.push(`${s}>i{clip-path:${cockpitShapePath(p)};background:${sw ? cockpitRgba(p.stroke, p.strokeAlpha ?? 1) : "transparent"}}`);
@@ -9851,6 +9897,7 @@ function initGalaxyCanvas() {
       document.head.appendChild(cockpitStyleEl);
     }
     cockpitStyleEl.textContent = buildCockpitCss(layout);
+    document.body.classList.toggle("cockpit-belt", layout.style === "belt");
     if (!cockpitLayer) return;
     for (const old of cockpitLayer.querySelectorAll(".cockpitPanel")) old.remove();
     for (const p of layout.panels || []) {
@@ -13237,6 +13284,16 @@ function initGalaxyCanvas() {
   }
   window.addEventListener("polyLeaderboardThresholdsReady", renderScore);
 
+  // 2026-10-26: the cockpit "belt" HUD (Lab concept G) shows ammo as segmented pips instead of ×N.
+  // CSS draws them from --n / --max; a non-numeric state (∞ cheat, freeze ON / ❚❚) shows the word.
+  function setHudPips(btn, n, max, word = false) {
+    const key = `${n}|${max}|${word ? 1 : 0}`;
+    if (!btn || btn._pips === key) return;
+    btn._pips = key;
+    btn.style.setProperty("--n", String(Math.max(0, Math.min(n, max))));
+    btn.style.setProperty("--max", String(max));
+    btn.classList.toggle("hud-word", word);
+  }
   function updateHudBombInventory() {
     if (!hudBombBtn) return;
     // 2026-06-09: always visible — grayed-out empty slot at 0, full + count when stocked.
@@ -13246,6 +13303,7 @@ function initGalaxyCanvas() {
     if (hudBombCount) hudBombCount.textContent = activeRunCheats.bombs ? "\xD7\u221E" : `\xD7${playerBombInventory}`;
     hudBombBtn.disabled = !hasBombs;
     hudBombBtn.classList.toggle("has-bombs", hasBombs);
+    setHudPips(hudBombBtn, playerBombInventory, MAX_BOMB_INVENTORY, !!activeRunCheats.bombs);
     // pulse for attention only when bombs are available and not currently aiming
     hudBombBtn.classList.toggle("bomb-attention", hasBombs && !bombAimMode);
   }
@@ -13270,6 +13328,7 @@ function initGalaxyCanvas() {
     }
     // Keep enabled while there's banked time to pause/resume, even with empty inventory.
     hudFreezeBtn.disabled = !hasFreezes && _freezeBankMs <= 0;
+    setHudPips(hudFreezeBtn, playerFreezeInventory, MAX_FREEZE_INVENTORY, _freezeActive || pausedWithBank);
     hudFreezeBtn.classList.toggle("has-freezes", hasFreezes);
     hudFreezeBtn.classList.toggle("freeze-paused", pausedWithBank);
     // 2026-06-22: truly-out state (no charges, not running, nothing banked) gets a distinct
@@ -13295,6 +13354,7 @@ function initGalaxyCanvas() {
     }
     // can't fire with no stock, while reloading, or while a missile is already in flight
     const disabled = !has || reloading || !!activeMissile;
+    setHudPips(hudMissileBtn, count, MAX_MISSILE_INVENTORY, !!activeRunCheats.missiles);
     if (hudMissileBtn.disabled !== disabled) hudMissileBtn.disabled = disabled;
     hudMissileBtn.classList.toggle("has-missiles", has && !reloading);
     hudMissileBtn.classList.toggle("reloading", reloading);

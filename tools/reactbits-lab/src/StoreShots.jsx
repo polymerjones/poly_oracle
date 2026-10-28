@@ -5,7 +5,8 @@
 // is byte-for-byte what EXPORT writes to store-assets/appstore/<profile>/01.png, 02.png, …
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const PROFILES = { iphone69: { label: "iPhone 6.9\"", w: 1320, h: 2868 }, ipad13: { label: "iPad 13\"", w: 2064, h: 2752 } };
+const PROFILES = { iphone69: { label: "iPhone 6.9\"", w: 1320, h: 2868 }, ipad13: { label: "iPad 13\"", w: 2064, h: 2752 },
+  play_phone: { label: "Play phone", w: 1080, h: 1920 }, play_tab7: { label: "Play 7\"", w: 1224, h: 2176 }, play_tab10: { label: "Play 10\"", w: 1620, h: 2880 } };
 const MAX_SLOTS = 10;
 const DEFAULT_STYLE = {
   layout: "frame", captionPos: "top", font: "DIN Alternate", titleSize: 0.062, subtitleSize: 0.032, uppercase: true,
@@ -144,7 +145,7 @@ function ShotCanvas({ url, slot, st, W, H, className, onClick }) {
 
 export default function StoreShots({ modeSwitch }) {
   const [profile, setProfile] = useState("iphone69");
-  const [raw, setRaw] = useState({ iphone69: [], ipad13: [] });
+  const [raw, setRaw] = useState(Object.fromEntries(Object.keys(PROFILES).map((k) => [k, []])));
   const [config, setConfig] = useState(null);
   const [sel, setSel] = useState(0);
   const [status, setStatus] = useState("Loading…");
@@ -155,7 +156,7 @@ export default function StoreShots({ modeSwitch }) {
     const r = await fetch("/__storeshots/list").then((x) => x.json());
     setRaw(r.raw);
     if (!loaded.current) {
-      const cfg = r.config || { style: DEFAULT_STYLE, profiles: { iphone69: { slots: [] }, ipad13: { slots: [] } } };
+      const cfg = r.config || { style: DEFAULT_STYLE, profiles: Object.fromEntries(Object.keys(PROFILES).map((k) => [k, { slots: [] }])) };
       cfg.style = { ...DEFAULT_STYLE, ...cfg.style };
       setConfig(cfg);
       loaded.current = true;

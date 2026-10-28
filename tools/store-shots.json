@@ -67,7 +67,185 @@
       ]
     },
     "ipad13": {
-      "slots": []
+      "slots": [
+        {
+          "file": "01_oracle.png",
+          "title": "Ask the Oracle",
+          "subtitle": "Every answer bends reality"
+        },
+        {
+          "file": "02_hub.png",
+          "title": "Stroids in the Polyverse",
+          "subtitle": "A cosmic arcade shooter"
+        },
+        {
+          "file": "03_action.png",
+          "title": "Shatter the swarm",
+          "subtitle": "15 levels of rising chaos"
+        },
+        {
+          "file": "07_quad.png",
+          "title": "Quad shot",
+          "subtitle": "Four lasers, zero mercy"
+        },
+        {
+          "file": "06_missile.png",
+          "title": "Homing missiles",
+          "subtitle": "Lock on. Let go."
+        },
+        {
+          "file": "09_slot.png",
+          "title": "Spin Polyslots",
+          "subtitle": "Win power-ups between levels"
+        },
+        {
+          "file": "11_training.png",
+          "title": "Train with the Specialist",
+          "subtitle": "Master every weapon"
+        },
+        {
+          "file": "10_chest.png",
+          "title": "Crack reward boxes",
+          "subtitle": "Loot for every victory"
+        },
+        {
+          "file": "08_pulse.png",
+          "title": "Arm the Pulse Cannon",
+          "subtitle": "One shot, total clear"
+        }
+      ]
+    },
+    "play_phone": {
+      "slots": [
+        {
+          "file": "01_oracle.png",
+          "title": "Ask the Oracle",
+          "subtitle": "Every answer bends reality"
+        },
+        {
+          "file": "02_hub.png",
+          "title": "Stroids in the Polyverse",
+          "subtitle": "A cosmic arcade shooter"
+        },
+        {
+          "file": "03_action.png",
+          "title": "Shatter the swarm",
+          "subtitle": "15 levels of rising chaos"
+        },
+        {
+          "file": "07_quad.png",
+          "title": "Quad shot",
+          "subtitle": "Four lasers, zero mercy"
+        },
+        {
+          "file": "06_missile.png",
+          "title": "Homing missiles",
+          "subtitle": "Lock on. Let go."
+        },
+        {
+          "file": "09_slot.png",
+          "title": "Spin Polyslots",
+          "subtitle": "Win power-ups between levels"
+        },
+        {
+          "file": "11_training.png",
+          "title": "Train with the Specialist",
+          "subtitle": "Master every weapon"
+        },
+        {
+          "file": "10_chest.png",
+          "title": "Crack reward boxes",
+          "subtitle": "Loot for every victory"
+        }
+      ]
+    },
+    "play_tab7": {
+      "slots": [
+        {
+          "file": "01_oracle.png",
+          "title": "Ask the Oracle",
+          "subtitle": "Every answer bends reality"
+        },
+        {
+          "file": "02_hub.png",
+          "title": "Stroids in the Polyverse",
+          "subtitle": "A cosmic arcade shooter"
+        },
+        {
+          "file": "03_action.png",
+          "title": "Shatter the swarm",
+          "subtitle": "15 levels of rising chaos"
+        },
+        {
+          "file": "07_quad.png",
+          "title": "Quad shot",
+          "subtitle": "Four lasers, zero mercy"
+        },
+        {
+          "file": "06_missile.png",
+          "title": "Homing missiles",
+          "subtitle": "Lock on. Let go."
+        },
+        {
+          "file": "09_slot.png",
+          "title": "Spin Polyslots",
+          "subtitle": "Win power-ups between levels"
+        },
+        {
+          "file": "11_training.png",
+          "title": "Train with the Specialist",
+          "subtitle": "Master every weapon"
+        },
+        {
+          "file": "10_chest.png",
+          "title": "Crack reward boxes",
+          "subtitle": "Loot for every victory"
+        }
+      ]
+    },
+    "play_tab10": {
+      "slots": [
+        {
+          "file": "01_oracle.png",
+          "title": "Ask the Oracle",
+          "subtitle": "Every answer bends reality"
+        },
+        {
+          "file": "02_hub.png",
+          "title": "Stroids in the Polyverse",
+          "subtitle": "A cosmic arcade shooter"
+        },
+        {
+          "file": "03_action.png",
+          "title": "Shatter the swarm",
+          "subtitle": "15 levels of rising chaos"
+        },
+        {
+          "file": "07_quad.png",
+          "title": "Quad shot",
+          "subtitle": "Four lasers, zero mercy"
+        },
+        {
+          "file": "06_missile.png",
+          "title": "Homing missiles",
+          "subtitle": "Lock on. Let go."
+        },
+        {
+          "file": "09_slot.png",
+          "title": "Spin Polyslots",
+          "subtitle": "Win power-ups between levels"
+        },
+        {
+          "file": "11_training.png",
+          "title": "Train with the Specialist",
+          "subtitle": "Master every weapon"
+        },
+        {
+          "file": "10_chest.png",
+          "title": "Crack reward boxes",
+          "subtitle": "Loot for every victory"
+        }
+      ]
     }
   }
 }

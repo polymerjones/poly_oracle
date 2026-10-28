@@ -102,7 +102,7 @@ function cockpitDesigner() {
       // Store Shots (2026-10-27): raw captures in store-assets/raw/<profile>/, picks + captions in
       // tools/store-shots.json, finished PNGs (rendered in the browser) → store-assets/appstore/<profile>/NN.png
       const SHOTS_CFG = path.join(REPO, "tools/store-shots.json");
-      const SHOT_PROFILES = new Set(["iphone69", "ipad13"]);
+      const SHOT_PROFILES = new Set(["iphone69", "ipad13", "play_phone", "play_tab7", "play_tab10"]);
       const readBody = (req) => new Promise((resolve, reject) => {
         const chunks = [];
         req.on("data", (c) => chunks.push(c));

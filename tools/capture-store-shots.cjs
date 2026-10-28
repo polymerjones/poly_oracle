@@ -3,7 +3,8 @@
 // in store-assets/raw/<profile>/<scene>.png; the Lab's "Store Shots" tab picks, orders and captions them.
 //
 //   node tools/capture-store-shots.cjs <profile> [scene,...] [--base http://localhost:5180/game/]
-//   profiles: iphone69 (1320×2868) · ipad13 (2064×2752)
+//   profiles: iphone69 (1320×2868) · ipad13 (2064×2752) · Google Play (9:16): play_phone (1080×1920) ·
+//             play_tab7 (1224×2176) · play_tab10 (1620×2880)
 //
 // Needs Playwright (PLAYWRIGHT_PATH, default: the Codex runtime copy) + Google Chrome, and a server for
 // the game: the Lab's dev server (/game/) or `python3 -m http.server` in www/.
@@ -19,6 +20,9 @@ const OUT = path.join(__dirname, "..", "store-assets", "raw", PROF || "");
 const PROFILES = {
   iphone69: { vp: { width: 440, height: 956 }, dpr: 3, safe: [62, 34], ua: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148" },
   ipad13: { vp: { width: 1032, height: 1376 }, dpr: 2, safe: [24, 20], ua: "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148" },
+  play_phone: { vp: { width: 360, height: 640 }, dpr: 3, safe: [24, 0], ua: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36" },
+  play_tab7: { vp: { width: 612, height: 1088 }, dpr: 2, safe: [24, 0], ua: "Mozilla/5.0 (Linux; Android 14; SM-X210) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36" },
+  play_tab10: { vp: { width: 810, height: 1440 }, dpr: 2, safe: [24, 0], ua: "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36" },
 };
 const prof = PROFILES[PROF];
 if (!prof) { console.error(`unknown profile "${PROF}" (${Object.keys(PROFILES).join(", ")})`); process.exit(1); }

@@ -527,7 +527,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-28 09:23";
+const BUILD_TS = "2026-10-28 09:30";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2378,10 +2378,9 @@ const saveAudioSettings = () => {
 // drag could leave you hearing a lower step at 100%): the sample is decoded once (warmMixerAudition,
 // as Settings opens) and played as a buffer at exactly the dialled level; each shot cuts the last.
 let _auditionSrc = null;
-const mixerAuditionKey = () => `mixer_audition:${sfxTrial("sfxLaser", "advfire")}`;
+const mixerAuditionKey = () => sfxTrial("sfxLaser", "advfire");
 function warmMixerAudition() {
-  const url = GAME_SFX[sfxTrial("sfxLaser", "advfire")];
-  if (url && !audioEngine.buffers.has(mixerAuditionKey())) audioEngine.loadSound(mixerAuditionKey(), url).catch?.(() => {});
+  audioEngine.warmSound(mixerAuditionKey());
 }
 function playMixerPreviewSound() {
   const ctx = audioEngine.ctx;
@@ -2394,14 +2393,13 @@ function playMixerPreviewSound() {
   const src = ctx.createBufferSource();
   const gain = ctx.createGain();
   src.buffer = buf;
-  // iOS game SFX play element → gain(level × dial) → destination; elsewhere buffer → sfxBus (dial) →
-  // masterGain — mirror each so the audition matches in-game loudness.
-  if (isIOSNative || !audioEngine.sfxBus) {
-    gain.gain.value = userSfxGain();
-    gain.connect(ctx.destination);
-  } else {
+  // same route as in-game buffer SFX: buffer → sfxBus (the dial) → masterGain
+  if (audioEngine.sfxBus) {
     gain.gain.value = 1;
     gain.connect(audioEngine.sfxBus);
+  } else {
+    gain.gain.value = userSfxGain();
+    gain.connect(ctx.destination);
   }
   src.connect(gain);
   src.onended = () => { gain.disconnect(); if (_auditionSrc === src) _auditionSrc = null; };
@@ -2521,14 +2519,13 @@ function openStroidsSettings() {
   syncStroidsSettings();
   _settingsEl.classList.add("show");
   measureMixerTravel();
-  // iOS: do the one-time audio wiring now (as the panel opens), not on the first fader touch —
-  // routing the playing music + creating the preview element mid-drag was the "laggy right away".
+  // Do the one-time audio work as the panel opens, not on the first fader touch: decode the
+  // audition sample, and (iOS) route the playing music — mid-drag that was the "laggy right away".
   warmMixerAudition();
   if (isIOSNative) {
     _iosRouteAlways = true;
     const m = audioEngine.currentMusicHtml?.node;
     if (m && iosRouteElement(m)) m.volume = m.volume; // re-apply its level through the new gain
-    audioEngine.warmHtmlAudio(sfxTrial("sfxLaser", "advfire"));
   }
 }
 // Fader travel in px (slot height − cap height) → the cap moves by transform, never by layout.
@@ -4651,11 +4648,12 @@ const userLevelGain = (v) => Math.pow(Math.max(0, Math.min(100, Number(v) || 0))
 const userMusicGain = () => userLevelGain(audioSettings.music);
 const userSfxGain = () => userLevelGain(audioSettings.sfx);
 const _mediaVolume = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "volume");
-// 2026-10-28: iOS WebKit ignores <audio>.volume, and the iOS app plays game music + SFX as <audio>
-// (no Web Audio buffers) — so the dials did nothing there. Monkey Trubble's fix: play the element
-// through a Web Audio gain. Only once a dial is below 100% (100% keeps the plain-element path), only
-// while the ctx runs, once per element (createMediaElementSource can never re-bind it). A rebuilt ctx
-// leaves routed elements silent for good — the SFX pool drops them, rebuildContext replaces the music.
+// 2026-10-28: iOS WebKit ignores <audio>.volume, and the iOS app plays music (and un-decoded SFX) as
+// <audio> — so the dials did nothing there. MUSIC: the element plays through a Web Audio gain, once a
+// dial is below 100% or the mixer was opened, only while the ctx runs, once per element
+// (createMediaElementSource can never re-bind it); rebuildContext swaps in a fresh element. SFX are NOT
+// routed (routed elements start late + pop on rapid restarts, e.g. orb taps) — below 100% they decode
+// to buffers on first use and follow the dial through sfxBus (audioEngine.play / warmSound).
 function iosRouteElement(node) {
   if (!isIOSNative || !node) return null;
   if (node._iosRoute) return node._iosRoute.ctx === audioEngine.ctx ? node._iosRoute : null;
@@ -4873,6 +4871,13 @@ const audioEngine = {
     });
     console.info("[audio] ctx rebuilt in gesture");
   },
+  _warming: new Set(),
+  warmSound(name) {
+    const url = GAME_SFX?.[name];
+    if (!url || this.buffers.has(name) || this._warming.has(name)) return;
+    this._warming.add(name);
+    this.loadSound(name, url).finally(() => this._warming.delete(name));
+  },
   async loadSound(name, url) {
     if (this.buffers.has(name)) return this.buffers.get(name);
     const ctx = this.ensureContext();
@@ -4983,23 +4988,6 @@ const audioEngine = {
     if (index >= 0) voices.splice(index, 1);
     if (!voices.length) this.voices.delete(name);
   },
-  // Pre-create (and on iOS pre-route) one pooled element for `name`, so its first play() doesn't
-  // pay element creation + load + createMediaElementSource mid-gesture.
-  warmHtmlAudio(name) {
-    const src = GAME_SFX?.[name];
-    if (!src) return;
-    const pool = (this.htmlAudioPool.get(src) || []).filter((n) => !iosRouteDead(n));
-    let node = pool[0];
-    if (!node) {
-      node = new Audio(src);
-      node.preload = "auto";
-      node.playsInline = true;
-      try { node.load(); } catch { /* ignore */ }
-      pool.push(node);
-      this.htmlAudioPool.set(src, pool);
-    }
-    iosRouteElement(node);
-  },
   playHtmlAudio(name, { volume = 1, rate = 1, loop = false, preservePitch = false } = {}) {
     const src = GAME_SFX?.[name];
     if (!src || userSfxGain() <= 0) return { stop() {}, ended: Promise.resolve() };
@@ -5044,7 +5032,10 @@ const audioEngine = {
       node.mozPreservesPitch = true;
       node.webkitPreservesPitch = true;
     }
-    setElementLevel(node, volume, userSfxGain()); // × player SFX volume (Settings; iOS via Web Audio)
+    // × player SFX volume. Never routed through Web Audio: on iOS a routed element starts late and
+    // pops on rapid restarts (orb taps) — iOS SFX follow the dial via buffers instead (see play()).
+    if (node.muted) node.muted = false;
+    node.volume = clamp(volume * userSfxGain(), 0, 1);
     try {
       node.currentTime = 0;
     } catch {
@@ -5078,6 +5069,9 @@ const audioEngine = {
     }
     const buffer = this.buffers.get(name);
     if (!buffer) {
+      // iOS ignores <audio>.volume: below 100% SFX, decode this sound now (once, in the background)
+      // so its next plays take the buffer path, where sfxBus applies the dial.
+      if (isIOSNative && userSfxGain() < 1) this.warmSound(name);
       return this.playHtmlAudio(name, { volume, rate, loop: false });
     }
     const isExplosionLike = name === "explosion_big"

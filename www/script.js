@@ -527,7 +527,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-28 09:16";
+const BUILD_TS = "2026-10-28 09:23";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2374,8 +2374,39 @@ const saveAudioSettings = () => {
 };
 // SFX preview: the main weapon's plasma shot (the laser tap sound, incl. any Lab pick), so the
 // dialled level is judged on the sound you hear most in a level.
+// Own path, not the pooled game <audio> elements (on iOS those start late, stack, and a throttled
+// drag could leave you hearing a lower step at 100%): the sample is decoded once (warmMixerAudition,
+// as Settings opens) and played as a buffer at exactly the dialled level; each shot cuts the last.
+let _auditionSrc = null;
+const mixerAuditionKey = () => `mixer_audition:${sfxTrial("sfxLaser", "advfire")}`;
+function warmMixerAudition() {
+  const url = GAME_SFX[sfxTrial("sfxLaser", "advfire")];
+  if (url && !audioEngine.buffers.has(mixerAuditionKey())) audioEngine.loadSound(mixerAuditionKey(), url).catch?.(() => {});
+}
 function playMixerPreviewSound() {
-  window.playGameSfx?.(sfxTrial("sfxLaser", "advfire"), 1.0, { important: true, detune: (Math.random() - 0.5) * 100 });
+  const ctx = audioEngine.ctx;
+  const buf = audioEngine.buffers.get(mixerAuditionKey());
+  if (!ctx || ctx.state !== "running" || !buf) {
+    window.playGameSfx?.(sfxTrial("sfxLaser", "advfire"), 1.0, { important: true });
+    return;
+  }
+  try { _auditionSrc?.stop(); } catch { /* already ended */ }
+  const src = ctx.createBufferSource();
+  const gain = ctx.createGain();
+  src.buffer = buf;
+  // iOS game SFX play element → gain(level × dial) → destination; elsewhere buffer → sfxBus (dial) →
+  // masterGain — mirror each so the audition matches in-game loudness.
+  if (isIOSNative || !audioEngine.sfxBus) {
+    gain.gain.value = userSfxGain();
+    gain.connect(ctx.destination);
+  } else {
+    gain.gain.value = 1;
+    gain.connect(audioEngine.sfxBus);
+  }
+  src.connect(gain);
+  src.onended = () => { gain.disconnect(); if (_auditionSrc === src) _auditionSrc = null; };
+  src.start();
+  _auditionSrc = src;
 }
 // Live while dragging (audio + visuals); the saved setting is written on release (commit).
 function setStroidsVolume(key, value, { preview = false, commit = true } = {}) {
@@ -2388,6 +2419,7 @@ function setStroidsVolume(key, value, { preview = false, commit = true } = {}) {
     syncStroidsSettings();
     if (Math.floor(prev / 10) !== Math.floor(v / 10)) {
       triggerHapticImpact(hapticImpactStyle.Light);
+      // during a drag: one shot per 10% line (throttled); the release always plays the final level
       const now = performance.now();
       if (preview && key === "sfx" && v > 0 && now - _settingsSfxPreviewAt > 200) {
         _settingsSfxPreviewAt = now;
@@ -2449,6 +2481,7 @@ function openStroidsSettings() {
       stripEl.addEventListener("pointerdown", (e) => {
         if (e.target.closest(".mixMute")) return;
         e.preventDefault();
+        if (audioEngine.ctx?.state !== "running") audioEngine.unlock(); // in-gesture, for the audition
         dragId = e.pointerId;
         try { stripEl.setPointerCapture(e.pointerId); } catch { /* ignore */ }
         stripEl.classList.add("grab");
@@ -2466,6 +2499,7 @@ function openStroidsSettings() {
         dragId = null;
         stripEl.classList.remove("grab");
         saveAudioSettings();
+        if (key === "sfx" && audioSettings.sfx > 0) playMixerPreviewSound(); // always hear where you landed
       };
       stripEl.addEventListener("pointerup", release);
       stripEl.addEventListener("pointercancel", release);
@@ -2489,6 +2523,7 @@ function openStroidsSettings() {
   measureMixerTravel();
   // iOS: do the one-time audio wiring now (as the panel opens), not on the first fader touch —
   // routing the playing music + creating the preview element mid-drag was the "laggy right away".
+  warmMixerAudition();
   if (isIOSNative) {
     _iosRouteAlways = true;
     const m = audioEngine.currentMusicHtml?.node;

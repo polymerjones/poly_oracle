@@ -3688,7 +3688,7 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
 }
 .settingsTitle { margin: 0; text-align: center; font-size: 1.15rem; letter-spacing: 0.2em; }
 /* 2026-10-28: "Polyverse mixer" — two vertical faders on a console plate, stereo LED ladders either
-   side of each fader slot (green → yellow → red, top lit pair flickers like a live meter). The whole
+   side of each fader slot (theme blue → teal → purple, top lit pair flickers like a live meter). The whole
    strip is the touch target (see openStroidsSettings). */
 .mixDeck {
   position: relative;
@@ -3758,11 +3758,10 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
   min-height: 8px;
   border-radius: 3px;
   opacity: 0.16;
-  transition: opacity 0.08s linear, box-shadow 0.08s linear;
 }
-.mixLed.green { background: #39ff7a; --glow: rgba(57, 255, 122, 0.85); }
-.mixLed.yellow { background: #ffd23a; --glow: rgba(255, 210, 58, 0.85); }
-.mixLed.red { background: #ff3b5c; --glow: rgba(255, 59, 92, 0.9); }
+.mixLed.low { background: #4f9dff; --glow: rgba(79, 157, 255, 0.9); }
+.mixLed.mid { background: #3ff0dc; --glow: rgba(63, 240, 220, 0.9); }
+.mixLed.high { background: #b97cff; --glow: rgba(185, 124, 255, 0.95); }
 .mixLed.on { opacity: 1; box-shadow: 0 0 6px var(--glow), 0 0 1px #fff inset; }
 .mixLed.on.peak { animation: mixPeak 0.42s steps(2, jump-none) infinite alternate; will-change: opacity; }
 .mixLeds + .mixSlot + .mixLeds .mixLed.on.peak { animation-duration: 0.37s; animation-delay: -0.15s; }

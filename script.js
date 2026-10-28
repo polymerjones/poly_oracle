@@ -527,7 +527,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-28 09:13";
+const BUILD_TS = "2026-10-28 09:16";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2364,10 +2364,10 @@ function playLevelWarpTrial(opts = {}) {
 let _settingsEl = null;
 let _settingsSfxPreviewAt = 0;
 // 2026-10-28: the dials became a "Polyverse mixer" — two tall vertical faders with stereo LED
-// ladders (green → yellow → red). Range inputs were too fiddly to grab on a phone: the whole strip
+// ladders (theme blue → teal → purple). Range inputs were too fiddly to grab on a phone: the whole strip
 // is the touch target now (tap to jump, drag anywhere), with a haptic tick every 10% and big MUTEs.
 const MIX_LEDS = 12;
-const mixLedColor = (i) => (i >= 10 ? "red" : i >= 7 ? "yellow" : "green");
+const mixLedColor = (i) => (i >= 10 ? "high" : i >= 7 ? "mid" : "low"); // blue → teal → purple
 const _mixLastLevel = { music: 75, sfx: 75 };
 const saveAudioSettings = () => {
   try { localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify(audioSettings)); } catch { /* session only */ }
@@ -2389,7 +2389,7 @@ function setStroidsVolume(key, value, { preview = false, commit = true } = {}) {
     if (Math.floor(prev / 10) !== Math.floor(v / 10)) {
       triggerHapticImpact(hapticImpactStyle.Light);
       const now = performance.now();
-      if (preview && key === "sfx" && v > 0 && now - _settingsSfxPreviewAt > 120) {
+      if (preview && key === "sfx" && v > 0 && now - _settingsSfxPreviewAt > 200) {
         _settingsSfxPreviewAt = now;
         playMixerPreviewSound();
       }
@@ -2487,6 +2487,14 @@ function openStroidsSettings() {
   syncStroidsSettings();
   _settingsEl.classList.add("show");
   measureMixerTravel();
+  // iOS: do the one-time audio wiring now (as the panel opens), not on the first fader touch —
+  // routing the playing music + creating the preview element mid-drag was the "laggy right away".
+  if (isIOSNative) {
+    _iosRouteAlways = true;
+    const m = audioEngine.currentMusicHtml?.node;
+    if (m && iosRouteElement(m)) m.volume = m.volume; // re-apply its level through the new gain
+    audioEngine.warmHtmlAudio(sfxTrial("sfxLaser", "advfire"));
+  }
 }
 // Fader travel in px (slot height − cap height) → the cap moves by transform, never by layout.
 function measureMixerTravel() {
@@ -4629,18 +4637,21 @@ function iosRouteElement(node) {
   }
 }
 const iosRouteDead = (node) => !!node?._iosRoute && node._iosRoute.ctx !== audioEngine.ctx;
+// Once the player has opened the mixer, route at EVERY level (100% too): plain <audio> and the Web
+// Audio path play at different loudness on iOS, so mixing them made the top of the fader quieter.
+let _iosRouteAlways = false;
 // Play an element at `level` × the player's dial (0 = muted, which iOS does honour).
+// Element writes (muted/volume) cross into WebKit's media process on iOS — only write on change,
+// so a fader drag costs a cheap gain update per frame, not two media IPCs.
 function setElementLevel(node, level, userGain) {
   const g = Math.max(0, userGain);
-  node.muted = g <= 0;
-  const route = g < 1 ? iosRouteElement(node) : (iosRouteDead(node) ? null : node._iosRoute);
+  const mute = g <= 0;
+  if (node._lvlMuted !== mute) { node._lvlMuted = mute; node.muted = mute; }
+  const route = g < 1 || _iosRouteAlways ? iosRouteElement(node) : (iosRouteDead(node) ? null : node._iosRoute);
   const v = Math.max(0, Math.min(1, level * g));
-  if (route) {
-    _mediaVolume.set.call(node, 1);
-    route.gain.gain.value = v;
-  } else {
-    _mediaVolume.set.call(node, v);
-  }
+  const elVol = route ? 1 : v;
+  if (node._lvlVol !== elVol) { node._lvlVol = elVol; _mediaVolume.set.call(node, elVol); }
+  if (route && route.gain.gain.value !== v) route.gain.gain.value = v;
 }
 // HTML music node: code keeps writing its own levels (ducks/fades); the element plays them × MUSIC.
 function scaleMusicElementVolume(node) {
@@ -4936,6 +4947,23 @@ const audioEngine = {
     const index = voices.findIndex((voice) => voice.source === source);
     if (index >= 0) voices.splice(index, 1);
     if (!voices.length) this.voices.delete(name);
+  },
+  // Pre-create (and on iOS pre-route) one pooled element for `name`, so its first play() doesn't
+  // pay element creation + load + createMediaElementSource mid-gesture.
+  warmHtmlAudio(name) {
+    const src = GAME_SFX?.[name];
+    if (!src) return;
+    const pool = (this.htmlAudioPool.get(src) || []).filter((n) => !iosRouteDead(n));
+    let node = pool[0];
+    if (!node) {
+      node = new Audio(src);
+      node.preload = "auto";
+      node.playsInline = true;
+      try { node.load(); } catch { /* ignore */ }
+      pool.push(node);
+      this.htmlAudioPool.set(src, pool);
+    }
+    iosRouteElement(node);
   },
   playHtmlAudio(name, { volume = 1, rate = 1, loop = false, preservePitch = false } = {}) {
     const src = GAME_SFX?.[name];

@@ -527,7 +527,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-28 09:10";
+const BUILD_TS = "2026-10-28 09:13";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2372,27 +2372,10 @@ const _mixLastLevel = { music: 75, sfx: 75 };
 const saveAudioSettings = () => {
   try { localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify(audioSettings)); } catch { /* session only */ }
 };
-// SFX preview: a soft sine "test tone" through the SFX bus (so it plays at the dialled level),
-// pitched up the fader — the menu_hit sample sounded staticky. Falls back to the hub tick
-// sample when Web Audio isn't running (iOS before the first unlock).
-function playMixerPreviewTone(v) {
-  const ctx = audioEngine.ctx;
-  if (!ctx || ctx.state !== "running" || !audioEngine.sfxBus) {
-    window.playGameSfx?.("blip", 0.12, { important: true, rate: 1.55 });
-    return;
-  }
-  const t = ctx.currentTime;
-  const osc = ctx.createOscillator();
-  const env = ctx.createGain();
-  osc.type = "sine";
-  osc.frequency.setValueAtTime(440 * Math.pow(2, v / 100), t); // A4 → A5 up the fader
-  env.gain.setValueAtTime(0.0001, t);
-  env.gain.exponentialRampToValueAtTime(0.22, t + 0.012);
-  env.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
-  osc.connect(env).connect(audioEngine.sfxBus);
-  osc.start(t);
-  osc.stop(t + 0.24);
-  osc.onended = () => env.disconnect();
+// SFX preview: the main weapon's plasma shot (the laser tap sound, incl. any Lab pick), so the
+// dialled level is judged on the sound you hear most in a level.
+function playMixerPreviewSound() {
+  window.playGameSfx?.(sfxTrial("sfxLaser", "advfire"), 1.0, { important: true, detune: (Math.random() - 0.5) * 100 });
 }
 // Live while dragging (audio + visuals); the saved setting is written on release (commit).
 function setStroidsVolume(key, value, { preview = false, commit = true } = {}) {
@@ -2408,7 +2391,7 @@ function setStroidsVolume(key, value, { preview = false, commit = true } = {}) {
       const now = performance.now();
       if (preview && key === "sfx" && v > 0 && now - _settingsSfxPreviewAt > 120) {
         _settingsSfxPreviewAt = now;
-        playMixerPreviewTone(v);
+        playMixerPreviewSound();
       }
     }
   }

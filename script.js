@@ -527,7 +527,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-28 09:01";
+const BUILD_TS = "2026-10-28 09:07";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2363,38 +2363,98 @@ function playLevelWarpTrial(opts = {}) {
 // ── Settings (2026-10-25): MUSIC + SFX volume dials, like Monkey Trubble's ───────────────────
 let _settingsEl = null;
 let _settingsSfxPreviewAt = 0;
+// 2026-10-28: the dials became a "Polyverse mixer" — two tall vertical faders with stereo LED
+// ladders (green → yellow → red). Range inputs were too fiddly to grab on a phone: the whole strip
+// is the touch target now (tap to jump, drag anywhere), with a haptic tick every 10% and big MUTEs.
+const MIX_LEDS = 12;
+const mixLedColor = (i) => (i >= 10 ? "red" : i >= 7 ? "yellow" : "green");
+const _mixLastLevel = { music: 75, sfx: 75 };
+function setStroidsVolume(key, value, { preview = false } = {}) {
+  const v = Math.max(0, Math.min(100, Math.round(value / 5) * 5));
+  const prev = audioSettings[key];
+  if (prev === v) return;
+  audioSettings[key] = v;
+  if (v > 0) _mixLastLevel[key] = v;
+  try { localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify(audioSettings)); } catch { /* session only */ }
+  audioEngine.applyUserVolumes();
+  syncStroidsSettings();
+  if (Math.floor(prev / 10) !== Math.floor(v / 10)) triggerHapticImpact(hapticImpactStyle.Light);
+  // SFX: a short sample so the new level is audible (throttled while dragging)
+  const now = performance.now();
+  if (preview && key === "sfx" && v > 0 && now - _settingsSfxPreviewAt > 180) {
+    _settingsSfxPreviewAt = now;
+    window.playGameSfx?.("menu_hit", 0.8, { important: true });
+  }
+}
 function openStroidsSettings() {
   if (!_settingsEl) {
     _settingsEl = document.createElement("div");
     _settingsEl.className = "settingsOverlay";
     _settingsEl.setAttribute("role", "dialog");
     _settingsEl.setAttribute("aria-label", "Settings");
-    const row = (key, label) => `
-      <label class="settingsRow"><span class="settingsLabel">${label}</span>
-        <input type="range" class="settingsVol" data-key="${key}" min="0" max="100" step="5" aria-label="${label} volume">
-        <b class="settingsVal" data-val="${key}"></b></label>`;
+    const leds = Array.from({ length: MIX_LEDS }, (_, i) => `<i class="mixLed ${mixLedColor(i)}"></i>`).join("");
+    const strip = (key, label, icon) => `
+      <div class="mixStrip" data-key="${key}">
+        <div class="mixHead"><span class="mixIcon" aria-hidden="true">${icon}</span>${label}</div>
+        <b class="mixLcd" data-val="${key}"></b>
+        <div class="mixFader" role="slider" tabindex="0" aria-label="${label} volume" aria-valuemin="0" aria-valuemax="100">
+          <div class="mixLeds">${leds}</div>
+          <div class="mixSlot"><div class="mixCap"></div></div>
+          <div class="mixLeds">${leds}</div>
+        </div>
+        <button type="button" class="mixMute">MUTE</button>
+      </div>`;
     _settingsEl.innerHTML = `
       <div class="settingsCard">
         <h2 class="settingsTitle">SETTINGS</h2>
-        <div class="settingsSection">VOLUME</div>
-        ${row("music", "MUSIC")}
-        ${row("sfx", "SFX")}
+        <div class="mixDeck">
+          <div class="mixBrand">POLYVERSE MIXER</div>
+          <div class="mixStrips">${strip("music", "MUSIC", "\u266A")}${strip("sfx", "SFX", "\u2726")}</div>
+        </div>
         <button class="modeBtn settingsDone" type="button">Done</button>
       </div>`;
     document.body.appendChild(_settingsEl);
-    _settingsEl.addEventListener("input", (e) => {
-      const el = e.target.closest(".settingsVol");
-      if (!el) return;
-      audioSettings[el.dataset.key] = Number(el.value);
-      try { localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify(audioSettings)); } catch { /* session only */ }
-      audioEngine.applyUserVolumes();
-      syncStroidsSettings();
-      // SFX: a short sample so the new level is audible (throttled while dragging)
-      const now = performance.now();
-      if (el.dataset.key === "sfx" && now - _settingsSfxPreviewAt > 180) {
-        _settingsSfxPreviewAt = now;
-        window.playGameSfx?.("menu_hit", 0.8, { important: true });
-      }
+    _settingsEl.querySelectorAll(".mixStrip").forEach((stripEl) => {
+      const key = stripEl.dataset.key;
+      const fader = stripEl.querySelector(".mixFader");
+      const slot = stripEl.querySelector(".mixSlot");
+      const cap = stripEl.querySelector(".mixCap");
+      let dragId = null;
+      const valueAt = (e) => {
+        const r = slot.getBoundingClientRect();
+        const capH = cap.offsetHeight;
+        return (1 - (e.clientY - r.top - capH / 2) / Math.max(1, r.height - capH)) * 100;
+      };
+      // the whole strip is the touch target, not just the fader column
+      stripEl.addEventListener("pointerdown", (e) => {
+        if (e.target.closest(".mixMute")) return;
+        e.preventDefault();
+        dragId = e.pointerId;
+        try { stripEl.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+        stripEl.classList.add("grab");
+        setStroidsVolume(key, valueAt(e), { preview: true });
+      });
+      stripEl.addEventListener("pointermove", (e) => {
+        if (e.pointerId === dragId) setStroidsVolume(key, valueAt(e), { preview: true });
+      });
+      const release = (e) => {
+        if (e.pointerId !== dragId) return;
+        dragId = null;
+        stripEl.classList.remove("grab");
+      };
+      stripEl.addEventListener("pointerup", release);
+      stripEl.addEventListener("pointercancel", release);
+      fader.addEventListener("keydown", (e) => {
+        const step = { ArrowUp: 5, ArrowRight: 5, ArrowDown: -5, ArrowLeft: -5 }[e.key];
+        if (!step) return;
+        e.preventDefault();
+        setStroidsVolume(key, audioSettings[key] + step, { preview: true });
+      });
+      stripEl.querySelector(".mixMute").addEventListener("click", () => {
+        if (audioSettings[key] > 0) _mixLastLevel[key] = audioSettings[key];
+        setStroidsVolume(key, audioSettings[key] > 0 ? 0 : (_mixLastLevel[key] || 75), { preview: true });
+        triggerHapticImpact(hapticImpactStyle.Medium);
+      });
     });
     _settingsEl.querySelector(".settingsDone").addEventListener("click", () => _settingsEl.classList.remove("show"));
     _settingsEl.addEventListener("click", (e) => { if (e.target === _settingsEl) _settingsEl.classList.remove("show"); });
@@ -2404,12 +2464,21 @@ function openStroidsSettings() {
 }
 function syncStroidsSettings() {
   if (!_settingsEl) return;
-  _settingsEl.querySelectorAll(".settingsVol").forEach((el) => {
-    const v = audioSettings[el.dataset.key];
-    el.value = String(v);
-    el.style.setProperty("--fill", `${v}%`);
+  _settingsEl.querySelectorAll(".mixStrip").forEach((stripEl) => {
+    const v = audioSettings[stripEl.dataset.key];
+    const lit = Math.round((v / 100) * MIX_LEDS);
+    stripEl.style.setProperty("--v", String(v / 100));
+    stripEl.classList.toggle("muted", v <= 0);
+    stripEl.querySelector(".mixFader").setAttribute("aria-valuenow", String(v));
+    stripEl.querySelector(".mixLcd").textContent = v > 0 ? String(v).padStart(3, "0") : "OFF";
+    stripEl.querySelector(".mixMute").textContent = v > 0 ? "MUTE" : "MUTED";
+    stripEl.querySelectorAll(".mixLeds").forEach((col) => {
+      [...col.children].forEach((led, i) => {
+        led.classList.toggle("on", i < lit);
+        led.classList.toggle("peak", i < lit && i >= lit - 2);
+      });
+    });
   });
-  _settingsEl.querySelectorAll(".settingsVal").forEach((el) => { el.textContent = String(audioSettings[el.dataset.val]); });
 }
 
 let _fxLab = null;

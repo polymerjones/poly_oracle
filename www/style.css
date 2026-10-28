@@ -3687,42 +3687,140 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
   color: #d7e5ff;
 }
 .settingsTitle { margin: 0; text-align: center; font-size: 1.15rem; letter-spacing: 0.2em; }
-.settingsSection { font-size: 0.72rem; letter-spacing: 0.18em; color: rgba(183, 201, 255, 0.7); }
-.settingsRow {
-  display: grid;
-  grid-template-columns: 56px 1fr 34px;
-  align-items: center;
-  gap: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  font-size: 0.85rem;
+/* 2026-10-28: "Polyverse mixer" — two vertical faders on a console plate, stereo LED ladders either
+   side of each fader slot (green → yellow → red, top lit pair flickers like a live meter). The whole
+   strip is the touch target (see openStroidsSettings). */
+.mixDeck {
+  position: relative;
+  padding: 14px 12px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(123, 226, 255, 0.28);
+  background:
+    radial-gradient(120% 60% at 50% 0%, rgba(123, 226, 255, 0.10), transparent 70%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 2px, transparent 2px 4px),
+    linear-gradient(180deg, #121c33, #070c19);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -10px 24px rgba(0, 0, 0, 0.5), 0 0 22px rgba(123, 226, 255, 0.08);
 }
-.settingsVal { text-align: right; font-variant-numeric: tabular-nums; color: #7be2ff; }
-.settingsVol {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 8px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(123, 226, 255, 0.95) 0 var(--fill, 100%), rgba(255, 255, 255, 0.14) var(--fill, 100%) 100%);
+.mixBrand {
+  text-align: center;
+  font: 800 0.62rem ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.34em;
+  color: rgba(246, 167, 255, 0.75);
+  text-shadow: 0 0 8px rgba(246, 167, 255, 0.45);
+  margin-bottom: 10px;
+}
+.mixStrips { display: flex; justify-content: center; gap: 14px; }
+.mixStrip {
+  flex: 1 1 0;
+  max-width: 150px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 6px 10px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.25));
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: ns-resize;
+}
+.mixHead { display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 0.8rem; letter-spacing: 0.18em; color: #d7e5ff; }
+.mixIcon { color: #7be2ff; text-shadow: 0 0 8px rgba(123, 226, 255, 0.8); }
+.mixLcd {
+  min-width: 58px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  text-align: center;
+  font: 700 0.95rem ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.12em;
+  color: #7be2ff;
+  background: #02060e;
+  border: 1px solid rgba(123, 226, 255, 0.3);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.8), 0 0 10px rgba(123, 226, 255, 0.12);
+  text-shadow: 0 0 6px rgba(123, 226, 255, 0.9);
+}
+.mixStrip.muted .mixLcd { color: #ff5d7a; border-color: rgba(255, 93, 122, 0.4); text-shadow: 0 0 6px rgba(255, 93, 122, 0.9); }
+.mixFader {
+  display: grid;
+  grid-template-columns: 12px 56px 12px;
+  gap: 8px;
+  height: clamp(190px, 34vh, 260px);
   outline: none;
 }
-.settingsVol::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #7be2ff, #f6a7ff);
-  border: 2px solid #0a1734;
-  box-shadow: 0 0 10px rgba(123, 226, 255, 0.6);
+.mixFader:focus-visible { box-shadow: 0 0 0 2px rgba(123, 226, 255, 0.6); border-radius: 8px; }
+.mixLeds { display: flex; flex-direction: column-reverse; justify-content: space-between; padding: 4px 0; }
+.mixLed {
+  display: block;
+  height: calc((100% - 11 * 4px) / 12);
+  min-height: 8px;
+  border-radius: 3px;
+  opacity: 0.16;
+  transition: opacity 0.08s linear, box-shadow 0.08s linear;
 }
-.settingsVol::-moz-range-thumb {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #7be2ff, #f6a7ff);
-  border: 2px solid #0a1734;
+.mixLed.green { background: #39ff7a; --glow: rgba(57, 255, 122, 0.85); }
+.mixLed.yellow { background: #ffd23a; --glow: rgba(255, 210, 58, 0.85); }
+.mixLed.red { background: #ff3b5c; --glow: rgba(255, 59, 92, 0.9); }
+.mixLed.on { opacity: 1; box-shadow: 0 0 6px var(--glow), 0 0 1px #fff inset; }
+.mixLed.on.peak { animation: mixPeak 0.42s steps(2, jump-none) infinite alternate; }
+.mixLeds + .mixSlot + .mixLeds .mixLed.on.peak { animation-duration: 0.37s; animation-delay: -0.15s; }
+@keyframes mixPeak { from { opacity: 1; } to { opacity: 0.45; } }
+.mixSlot {
+  position: relative;
+  border-radius: 10px;
+  background:
+    linear-gradient(90deg, transparent calc(50% - 3px), #01040a calc(50% - 3px) calc(50% + 3px), transparent calc(50% + 3px)),
+    repeating-linear-gradient(180deg, transparent 0 calc(10% - 1px), rgba(123, 226, 255, 0.22) calc(10% - 1px) 10%),
+    rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.7);
+}
+.mixSlot::after {
+  content: "";
+  position: absolute;
+  left: calc(50% - 2px);
+  width: 4px;
+  bottom: 4px;
+  height: calc((100% - 8px) * var(--v, 1));
+  border-radius: 2px;
+  background: linear-gradient(0deg, #7be2ff, #f6a7ff);
+  box-shadow: 0 0 10px rgba(123, 226, 255, 0.8);
+}
+.mixCap {
+  position: absolute;
+  z-index: 1;
+  left: 0;
+  right: 0;
+  height: 40px;
+  bottom: calc((100% - 40px) * var(--v, 1));
+  border-radius: 9px;
+  background:
+    linear-gradient(180deg, transparent 47%, #7be2ff 47% 53%, transparent 53%),
+    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0 2px, transparent 2px 6px),
+    linear-gradient(180deg, #3a4560, #151b2c 55%, #0b0f1b);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.6), 0 0 14px rgba(123, 226, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.mixStrip.grab .mixCap { transform: scale(1.06); box-shadow: 0 8px 16px rgba(0, 0, 0, 0.6), 0 0 22px rgba(123, 226, 255, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+.mixStrip.muted .mixSlot::after { opacity: 0; }
+.mixMute {
+  width: 100%;
+  min-height: 40px;
+  border-radius: 10px;
+  font: 800 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.2em;
+  color: #ffb3c1;
+  background: linear-gradient(180deg, #2a1420, #170a12);
+  border: 1px solid rgba(255, 93, 122, 0.35);
+  cursor: pointer;
+}
+.mixStrip.muted .mixMute {
+  color: #fff;
+  background: linear-gradient(180deg, #ff3b5c, #a3122f);
+  border-color: #ff8fa3;
+  box-shadow: 0 0 14px rgba(255, 59, 92, 0.7);
 }
 .settingsDone { margin-top: 4px; }
 

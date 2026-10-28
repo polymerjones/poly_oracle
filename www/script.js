@@ -527,7 +527,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-27 16:49";
+const BUILD_TS = "2026-10-28 09:01";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -4501,6 +4501,40 @@ const userLevelGain = (v) => Math.pow(Math.max(0, Math.min(100, Number(v) || 0))
 const userMusicGain = () => userLevelGain(audioSettings.music);
 const userSfxGain = () => userLevelGain(audioSettings.sfx);
 const _mediaVolume = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "volume");
+// 2026-10-28: iOS WebKit ignores <audio>.volume, and the iOS app plays game music + SFX as <audio>
+// (no Web Audio buffers) — so the dials did nothing there. Monkey Trubble's fix: play the element
+// through a Web Audio gain. Only once a dial is below 100% (100% keeps the plain-element path), only
+// while the ctx runs, once per element (createMediaElementSource can never re-bind it). A rebuilt ctx
+// leaves routed elements silent for good — the SFX pool drops them, rebuildContext replaces the music.
+function iosRouteElement(node) {
+  if (!isIOSNative || !node) return null;
+  if (node._iosRoute) return node._iosRoute.ctx === audioEngine.ctx ? node._iosRoute : null;
+  const ctx = audioEngine.ctx;
+  if (!ctx || ctx.state !== "running" || !audioEngine.unlocked) return null;
+  try {
+    const gain = ctx.createGain();
+    ctx.createMediaElementSource(node).connect(gain);
+    gain.connect(ctx.destination);
+    node._iosRoute = { ctx, gain };
+    return node._iosRoute;
+  } catch {
+    return null;
+  }
+}
+const iosRouteDead = (node) => !!node?._iosRoute && node._iosRoute.ctx !== audioEngine.ctx;
+// Play an element at `level` × the player's dial (0 = muted, which iOS does honour).
+function setElementLevel(node, level, userGain) {
+  const g = Math.max(0, userGain);
+  node.muted = g <= 0;
+  const route = g < 1 ? iosRouteElement(node) : (iosRouteDead(node) ? null : node._iosRoute);
+  const v = Math.max(0, Math.min(1, level * g));
+  if (route) {
+    _mediaVolume.set.call(node, 1);
+    route.gain.gain.value = v;
+  } else {
+    _mediaVolume.set.call(node, v);
+  }
+}
 // HTML music node: code keeps writing its own levels (ducks/fades); the element plays them × MUSIC.
 function scaleMusicElementVolume(node) {
   if (!node || node._userScaled || !_mediaVolume) return;
@@ -4509,7 +4543,7 @@ function scaleMusicElementVolume(node) {
   Object.defineProperty(node, "volume", {
     configurable: true,
     get() { return raw; },
-    set(v) { raw = v; _mediaVolume.set.call(node, Math.max(0, Math.min(1, v * userMusicGain()))); },
+    set(v) { raw = v; setElementLevel(node, v, userMusicGain()); },
   });
   node.volume = raw;
 }
@@ -4601,6 +4635,7 @@ const audioEngine = {
     if (ctx !== this.ctx) return; // rebuilt meanwhile
     this.unlocked = ctx.state === "running";
     if (this.unlocked) this._everRan = true;
+    if (this.unlocked) this.applyUserVolumes(); // iOS: music started before the ctx ran can route now
   },
   resume() {
     return this.unlock();
@@ -4655,6 +4690,24 @@ const audioEngine = {
     this._needsRebuild = false;
     const ctx = this.ensureContext();
     try { old?.close(); } catch { /* ignore */ }
+    // iOS: a music element routed through the old ctx (dial < 100%) is silent forever — swap in a
+    // fresh one at the same spot; it routes into the new ctx once that runs (unlock → applyUserVolumes).
+    this._iosMusicSpare = null;
+    const m = this.currentMusicHtml;
+    if (m?.node?._iosRoute) {
+      const prev = m.node;
+      const node = new Audio(m.url);
+      node.preload = "auto";
+      node.loop = prev.loop;
+      node.playsInline = true;
+      scaleMusicElementVolume(node);
+      node.volume = prev.volume;
+      try { node.currentTime = prev.currentTime || 0; } catch { /* not ready */ }
+      const wasPlaying = !prev.paused;
+      try { prev.pause(); } catch { /* ignore */ }
+      if (wasPlaying) node.play().catch(() => {});
+      m.node = node;
+    }
     for (const cb of this._rebuildListeners) { try { cb(ctx); } catch { /* ignore */ } }
     // Not one-shot: if the fresh ctx still won't run (iOS session not back yet), re-arm so the NEXT
     // gesture rebuilds again instead of leaving Web Audio dead until a reboot.
@@ -4662,6 +4715,7 @@ const audioEngine = {
       if (ctx !== this.ctx) return;
       this.unlocked = ctx.state === "running";
       if (this.unlocked) this._everRan = true;
+      if (this.unlocked) this.applyUserVolumes();
       else if (isIOSNative) this._needsRebuild = true;
     });
     console.info("[audio] ctx rebuilt in gesture");
@@ -4778,8 +4832,9 @@ const audioEngine = {
   },
   playHtmlAudio(name, { volume = 1, rate = 1, loop = false, preservePitch = false } = {}) {
     const src = GAME_SFX?.[name];
-    if (!src) return { stop() {}, ended: Promise.resolve() };
-    const pool = this.htmlAudioPool.get(src) || [];
+    if (!src || userSfxGain() <= 0) return { stop() {}, ended: Promise.resolve() };
+    // iOS: elements routed through a since-rebuilt ctx can never play again — drop them.
+    const pool = (this.htmlAudioPool.get(src) || []).filter((n) => !iosRouteDead(n));
     const poolLimit = loop ? 2 : (preservePitch ? 2 : 4);
     let node = null;
     for (let i = 0; i < pool.length; i += 1) {
@@ -4819,7 +4874,7 @@ const audioEngine = {
       node.mozPreservesPitch = true;
       node.webkitPreservesPitch = true;
     }
-    node.volume = clamp(volume * userSfxGain(), 0, 1); // × player SFX volume (Settings)
+    setElementLevel(node, volume, userSfxGain()); // × player SFX volume (Settings; iOS via Web Audio)
     try {
       node.currentTime = 0;
     } catch {
@@ -5023,7 +5078,12 @@ const audioEngine = {
       if (prev && prev.node) {
         prev.node.pause();
       }
-      const node = new Audio(url);
+      // iOS: reuse a music element already routed through Web Audio (dial < 100%) instead of
+      // binding a new one per track — those source nodes are never freed (see acquireVoElement).
+      const spare = [prev?.node, this._iosMusicSpare].find((n) => n?._iosRoute && !iosRouteDead(n));
+      this._iosMusicSpare = null;
+      const node = spare || new Audio(url);
+      if (spare) node.src = url;
       node.preload = "auto";
       node.loop = true;
       node.playsInline = true;
@@ -5100,6 +5160,7 @@ const audioEngine = {
     _musicResumeUrl = "";
     if (this.currentMusicHtml?.node) {
       this.currentMusicHtml.node.pause();
+      if (this.currentMusicHtml.node._iosRoute) this._iosMusicSpare = this.currentMusicHtml.node;
       this.currentMusicHtml = null;
     }
     if (!this.currentMusic) return;

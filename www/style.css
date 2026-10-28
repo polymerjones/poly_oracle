@@ -3764,7 +3764,7 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
 .mixLed.yellow { background: #ffd23a; --glow: rgba(255, 210, 58, 0.85); }
 .mixLed.red { background: #ff3b5c; --glow: rgba(255, 59, 92, 0.9); }
 .mixLed.on { opacity: 1; box-shadow: 0 0 6px var(--glow), 0 0 1px #fff inset; }
-.mixLed.on.peak { animation: mixPeak 0.42s steps(2, jump-none) infinite alternate; }
+.mixLed.on.peak { animation: mixPeak 0.42s steps(2, jump-none) infinite alternate; will-change: opacity; }
 .mixLeds + .mixSlot + .mixLeds .mixLed.on.peak { animation-duration: 0.37s; animation-delay: -0.15s; }
 @keyframes mixPeak { from { opacity: 1; } to { opacity: 0.45; } }
 .mixSlot {
@@ -3782,7 +3782,10 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
   left: calc(50% - 2px);
   width: 4px;
   bottom: 4px;
-  height: calc((100% - 8px) * var(--v, 1));
+  height: calc(100% - 8px);
+  transform: scaleY(var(--v, 1));
+  transform-origin: bottom;
+  will-change: transform;
   border-radius: 2px;
   background: linear-gradient(0deg, #7be2ff, #f6a7ff);
   box-shadow: 0 0 10px rgba(123, 226, 255, 0.8);
@@ -3793,7 +3796,10 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
   left: 0;
   right: 0;
   height: 40px;
-  bottom: calc((100% - 40px) * var(--v, 1));
+  bottom: 0;
+  /* --travel (px) is measured in JS — the cap moves by transform only (no layout per frame) */
+  transform: translate3d(0, calc(var(--travel, 150px) * -1 * var(--v, 1)), 0);
+  will-change: transform;
   border-radius: 9px;
   background:
     linear-gradient(180deg, transparent 47%, #7be2ff 47% 53%, transparent 53%),
@@ -3801,26 +3807,28 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
     linear-gradient(180deg, #3a4560, #151b2c 55%, #0b0f1b);
   border: 1px solid rgba(255, 255, 255, 0.28);
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.6), 0 0 14px rgba(123, 226, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  transition: box-shadow 0.12s ease;
 }
-.mixStrip.grab .mixCap { transform: scale(1.06); box-shadow: 0 8px 16px rgba(0, 0, 0, 0.6), 0 0 22px rgba(123, 226, 255, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+.mixStrip.grab .mixCap { transform: translate3d(0, calc(var(--travel, 150px) * -1 * var(--v, 1)), 0) scale(1.06); box-shadow: 0 8px 16px rgba(0, 0, 0, 0.6), 0 0 22px rgba(123, 226, 255, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.35); }
 .mixStrip.muted .mixSlot::after { opacity: 0; }
+/* MUTE wears the hub CONTINUE button's gradient; MUTED = the same button pressed in + glowing */
 .mixMute {
   width: 100%;
   min-height: 40px;
   border-radius: 10px;
-  font: 800 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 900 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: 0.2em;
-  color: #ffb3c1;
-  background: linear-gradient(180deg, #2a1420, #170a12);
-  border: 1px solid rgba(255, 93, 122, 0.35);
+  color: #0a1734;
+  background: linear-gradient(120deg, #6fdcff 0%, #a98bff 52%, #f6a7ff 100%);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 6px 14px rgba(120, 140, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.5);
   cursor: pointer;
+  transition: transform 110ms ease;
 }
+.mixMute:active { transform: scale(0.97); }
 .mixStrip.muted .mixMute {
-  color: #fff;
-  background: linear-gradient(180deg, #ff3b5c, #a3122f);
-  border-color: #ff8fa3;
-  box-shadow: 0 0 14px rgba(255, 59, 92, 0.7);
+  box-shadow: 0 0 18px rgba(246, 167, 255, 0.75), inset 0 3px 8px rgba(40, 20, 110, 0.55);
+  filter: saturate(1.25) brightness(0.92);
 }
 .settingsDone { margin-top: 4px; }
 

@@ -527,7 +527,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-28 09:07";
+const BUILD_TS = "2026-10-28 09:10";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2369,22 +2369,50 @@ let _settingsSfxPreviewAt = 0;
 const MIX_LEDS = 12;
 const mixLedColor = (i) => (i >= 10 ? "red" : i >= 7 ? "yellow" : "green");
 const _mixLastLevel = { music: 75, sfx: 75 };
-function setStroidsVolume(key, value, { preview = false } = {}) {
-  const v = Math.max(0, Math.min(100, Math.round(value / 5) * 5));
-  const prev = audioSettings[key];
-  if (prev === v) return;
-  audioSettings[key] = v;
-  if (v > 0) _mixLastLevel[key] = v;
+const saveAudioSettings = () => {
   try { localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify(audioSettings)); } catch { /* session only */ }
-  audioEngine.applyUserVolumes();
-  syncStroidsSettings();
-  if (Math.floor(prev / 10) !== Math.floor(v / 10)) triggerHapticImpact(hapticImpactStyle.Light);
-  // SFX: a short sample so the new level is audible (throttled while dragging)
-  const now = performance.now();
-  if (preview && key === "sfx" && v > 0 && now - _settingsSfxPreviewAt > 180) {
-    _settingsSfxPreviewAt = now;
-    window.playGameSfx?.("menu_hit", 0.8, { important: true });
+};
+// SFX preview: a soft sine "test tone" through the SFX bus (so it plays at the dialled level),
+// pitched up the fader — the menu_hit sample sounded staticky. Falls back to the hub tick
+// sample when Web Audio isn't running (iOS before the first unlock).
+function playMixerPreviewTone(v) {
+  const ctx = audioEngine.ctx;
+  if (!ctx || ctx.state !== "running" || !audioEngine.sfxBus) {
+    window.playGameSfx?.("blip", 0.12, { important: true, rate: 1.55 });
+    return;
   }
+  const t = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const env = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(440 * Math.pow(2, v / 100), t); // A4 → A5 up the fader
+  env.gain.setValueAtTime(0.0001, t);
+  env.gain.exponentialRampToValueAtTime(0.22, t + 0.012);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+  osc.connect(env).connect(audioEngine.sfxBus);
+  osc.start(t);
+  osc.stop(t + 0.24);
+  osc.onended = () => env.disconnect();
+}
+// Live while dragging (audio + visuals); the saved setting is written on release (commit).
+function setStroidsVolume(key, value, { preview = false, commit = true } = {}) {
+  const v = Math.max(0, Math.min(100, Math.round(value)));
+  const prev = audioSettings[key];
+  if (prev !== v) {
+    audioSettings[key] = v;
+    if (v > 0) _mixLastLevel[key] = v;
+    audioEngine.applyUserVolumes();
+    syncStroidsSettings();
+    if (Math.floor(prev / 10) !== Math.floor(v / 10)) {
+      triggerHapticImpact(hapticImpactStyle.Light);
+      const now = performance.now();
+      if (preview && key === "sfx" && v > 0 && now - _settingsSfxPreviewAt > 120) {
+        _settingsSfxPreviewAt = now;
+        playMixerPreviewTone(v);
+      }
+    }
+  }
+  if (commit) saveAudioSettings();
 }
 function openStroidsSettings() {
   if (!_settingsEl) {
@@ -2420,10 +2448,19 @@ function openStroidsSettings() {
       const slot = stripEl.querySelector(".mixSlot");
       const cap = stripEl.querySelector(".mixCap");
       let dragId = null;
-      const valueAt = (e) => {
-        const r = slot.getBoundingClientRect();
+      let slotRect = null;
+      let pendingY = null;
+      let raf = 0;
+      // slot rect measured once per drag; pointermoves coalesce to one update per frame
+      const valueAt = (y) => {
         const capH = cap.offsetHeight;
-        return (1 - (e.clientY - r.top - capH / 2) / Math.max(1, r.height - capH)) * 100;
+        return (1 - (y - slotRect.top - capH / 2) / Math.max(1, slotRect.height - capH)) * 100;
+      };
+      const flush = () => {
+        raf = 0;
+        if (pendingY == null || !slotRect) return;
+        setStroidsVolume(key, valueAt(pendingY), { preview: true, commit: false });
+        pendingY = null;
       };
       // the whole strip is the touch target, not just the fader column
       stripEl.addEventListener("pointerdown", (e) => {
@@ -2432,15 +2469,20 @@ function openStroidsSettings() {
         dragId = e.pointerId;
         try { stripEl.setPointerCapture(e.pointerId); } catch { /* ignore */ }
         stripEl.classList.add("grab");
-        setStroidsVolume(key, valueAt(e), { preview: true });
+        slotRect = slot.getBoundingClientRect();
+        setStroidsVolume(key, valueAt(e.clientY), { preview: true, commit: false });
       });
       stripEl.addEventListener("pointermove", (e) => {
-        if (e.pointerId === dragId) setStroidsVolume(key, valueAt(e), { preview: true });
+        if (e.pointerId !== dragId) return;
+        pendingY = e.clientY;
+        if (!raf) raf = requestAnimationFrame(flush);
       });
       const release = (e) => {
         if (e.pointerId !== dragId) return;
+        if (raf) { cancelAnimationFrame(raf); flush(); }
         dragId = null;
         stripEl.classList.remove("grab");
+        saveAudioSettings();
       };
       stripEl.addEventListener("pointerup", release);
       stripEl.addEventListener("pointercancel", release);
@@ -2461,16 +2503,29 @@ function openStroidsSettings() {
   }
   syncStroidsSettings();
   _settingsEl.classList.add("show");
+  measureMixerTravel();
 }
+// Fader travel in px (slot height − cap height) → the cap moves by transform, never by layout.
+function measureMixerTravel() {
+  _settingsEl?.querySelectorAll(".mixStrip").forEach((stripEl) => {
+    const slot = stripEl.querySelector(".mixSlot");
+    const cap = stripEl.querySelector(".mixCap");
+    stripEl.style.setProperty("--travel", `${Math.max(0, slot.clientHeight - cap.offsetHeight)}px`);
+  });
+}
+window.addEventListener("resize", () => { if (_settingsEl?.classList.contains("show")) measureMixerTravel(); });
 function syncStroidsSettings() {
   if (!_settingsEl) return;
   _settingsEl.querySelectorAll(".mixStrip").forEach((stripEl) => {
     const v = audioSettings[stripEl.dataset.key];
     const lit = Math.round((v / 100) * MIX_LEDS);
     stripEl.style.setProperty("--v", String(v / 100));
+    stripEl.querySelector(".mixLcd").textContent = v > 0 ? String(v).padStart(3, "0") : "OFF";
+    const ledState = v <= 0 ? -1 : lit; // LEDs + mute state only change when this does
+    if (stripEl._ledState === ledState) return;
+    stripEl._ledState = ledState;
     stripEl.classList.toggle("muted", v <= 0);
     stripEl.querySelector(".mixFader").setAttribute("aria-valuenow", String(v));
-    stripEl.querySelector(".mixLcd").textContent = v > 0 ? String(v).padStart(3, "0") : "OFF";
     stripEl.querySelector(".mixMute").textContent = v > 0 ? "MUTE" : "MUTED";
     stripEl.querySelectorAll(".mixLeds").forEach((col) => {
       [...col.children].forEach((led, i) => {

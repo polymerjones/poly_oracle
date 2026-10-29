@@ -28,6 +28,13 @@ so the submitted Play build is untouched), new `ios/App/App/SceneDelegate.swift`
 `UIApplicationSceneManifest` in Info.plist, `configurationForConnecting` in AppDelegate. Built against iOS 27.1 SDK
 (`BUILD SUCCEEDED`), launched + background/foreground round-trip on the iOS 26.5 simulator. Device app-switch matrix still to do.
 
+**Crash reproduced and fix proven (iOS 27.1 simulator, iPhone Duo):** pre-migration eb9338d built on the 27.1 SDK
+→ `launch failed`, SIGTRAP ~55 ms after launch. c2c818a → launches and renders the Oracle screen.
+
+**New resizability finding (Duo cover screen):** the status-bar clock / camera pill sits top-RIGHT and overlaps the
+STROIDS card (asymmetric safe area, the skill's `safe-area-task`). Check our CSS `env(safe-area-inset-*)` use for
+left/right insets, not just top/bottom.
+
 Original fix plan:
 1. Bump all `@capacitor/*` to 8.6.x; `npx cap sync ios` from root.
 2. Add the `UIApplicationSceneManifest` (single scene, `SceneDelegate`, Main storyboard) and a `SceneDelegate` that forwards to `SceneDelegateProxy.shared` (open URL / user activity).

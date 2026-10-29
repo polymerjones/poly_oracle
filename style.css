@@ -3830,6 +3830,18 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
   filter: saturate(1.25) brightness(0.92);
 }
 .settingsDone { margin-top: 4px; }
+.settingsPrivacy {
+  justify-self: center;
+  padding: 6px 14px;
+  border: 1px solid rgba(123, 226, 255, 0.28);
+  border-radius: 999px;
+  background: transparent;
+  color: #9fc4ff;
+  font: inherit;
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+}
+.settingsPrivacy[hidden] { display: none; }
 
 /* ── 2026-10-25: Oracle page → the game. A clear "STROIDS IN THE POLYVERSE" tile under the Oracle
    card (playtesters missed the small asteroid icon). Idle motion is transform/opacity only. ── */

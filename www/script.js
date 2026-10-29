@@ -309,6 +309,7 @@ const adService = (() => {
   let hooks = { onOpen: null, onClose: null };
   let inPod = false;
   let audioHeld = false;
+  let consentInfo = null; // last UMP answer — drives the Settings "Privacy Settings" row
   const subscribers = new Set();
 
   function platform() {
@@ -352,6 +353,7 @@ const adService = (() => {
       try {
         let info = await plugin.requestConsentInfo();
         if (info?.status === "REQUIRED" && info?.isConsentFormAvailable) info = await plugin.showConsentForm();
+        consentInfo = info;
         if (info && info.canRequestAds === false) { failedAt = performance.now(); setState("failed"); return false; }
       } catch { /* consent lookup failed — let the SDK decide per request */ }
       plugin.addListener("onRewardedVideoAdReward", () => { if (current) current.rewarded = true; });
@@ -454,6 +456,15 @@ const adService = (() => {
     preload,
     show,
     showPod,
+    // Google's EU consent policy: users who were asked must be able to change their choice later.
+    privacyOptionsRequired: () => consentInfo?.privacyOptionsRequirementStatus === "REQUIRED",
+    async showPrivacyOptions() {
+      if (!(await init())) return;
+      try {
+        await plugin.showPrivacyOptionsForm();
+        consentInfo = await plugin.requestConsentInfo();
+      } catch { /* form unavailable — nothing to change */ }
+    },
     setHooks(next) { hooks = { ...hooks, ...next }; },
     subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); },
   };
@@ -527,7 +538,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-28 09:30";
+const BUILD_TS = "2026-10-29 09:48";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -2452,6 +2463,7 @@ function openStroidsSettings() {
           <div class="mixBrand">POLYVERSE MIXER</div>
           <div class="mixStrips">${strip("music", "MUSIC", "\u266A")}${strip("sfx", "SFX", "\u2726")}</div>
         </div>
+        <button class="settingsPrivacy" type="button" hidden>Privacy Settings</button>
         <button class="modeBtn settingsDone" type="button">Done</button>
       </div>`;
     document.body.appendChild(_settingsEl);
@@ -2513,10 +2525,15 @@ function openStroidsSettings() {
         triggerHapticImpact(hapticImpactStyle.Medium);
       });
     });
+    _settingsEl.querySelector(".settingsPrivacy").addEventListener("click", () => {
+      _settingsEl.classList.remove("show");
+      void adService.showPrivacyOptions();
+    });
     _settingsEl.querySelector(".settingsDone").addEventListener("click", () => _settingsEl.classList.remove("show"));
     _settingsEl.addEventListener("click", (e) => { if (e.target === _settingsEl) _settingsEl.classList.remove("show"); });
   }
   syncStroidsSettings();
+  _settingsEl.querySelector(".settingsPrivacy").hidden = !adService.privacyOptionsRequired();
   _settingsEl.classList.add("show");
   measureMixerTravel();
   // Do the one-time audio work as the panel opens, not on the first fader touch: decode the

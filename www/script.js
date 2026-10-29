@@ -538,7 +538,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-29 16:18";
+const BUILD_TS = "2026-10-29 16:34";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -4739,6 +4739,12 @@ const audioEngine = {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return null;
     this.ctx = new AudioCtx();
+    // 2026-10-29: iOS can suspend/interrupt the ctx while the app just sits idle (no visibility or
+    // focus event fires) — drop `unlocked` so the next gesture verifies/rebuilds and VO plays dry.
+    const ctx = this.ctx;
+    ctx.onstatechange = () => {
+      if (ctx === this.ctx && ctx.state !== "running" && this._everRan) this.unlocked = false;
+    };
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 0.75;
     this.masterGain.connect(this.ctx.destination);
@@ -4815,6 +4821,20 @@ const audioEngine = {
   // ctx can only start inside a gesture on iOS (why the retired teardown() lost audio at level start).
   _everRan: false,
   _needsRebuild: false,
+  // Cheap frozen-clock probe: a "running" ctx whose currentTime hasn't moved across >400ms of wall
+  // time is a zombie (silent). Sampled on gestures and before each VO line.
+  _probeCtxT: -1,
+  _probePerfT: 0,
+  clockLooksFrozen() {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== "running" || !this._everRan) return false;
+    const now = performance.now();
+    const t = ctx.currentTime;
+    const frozen = this._probeCtxT >= 0 && now - this._probePerfT > 400 && t <= this._probeCtxT;
+    this._probeCtxT = t;
+    this._probePerfT = now;
+    return frozen;
+  },
   async verifyAlive() {
     const ctx = this.ctx;
     if (!ctx || !this._everRan) return true;
@@ -5528,6 +5548,21 @@ function acquireVoElement(channel) {
     el.preload = "auto";
     el.playsInline = true;
     _voChannels.set(channel, el);
+  } else if (_commRadioWired.has(el)) {
+    // 2026-10-29 (playtest: idle on the Oracle page → game VO silent): a wired element is audible
+    // ONLY through the ctx. If the ctx is suspended/interrupted/frozen, swap in a fresh unwired
+    // element so this line plays dry through plain HTML audio (like iOS music) instead of silence.
+    const ctx = audioEngine.ctx;
+    const frozen = audioEngine.clockLooksFrozen();
+    if (!ctx || ctx.state !== "running" || !audioEngine.unlocked || frozen) {
+      if (frozen) audioEngine.unlocked = false; // next gesture runs verifyAlive → rebuild
+      try { el.pause(); } catch { /* ignore */ }
+      el = new Audio();
+      el.preload = "auto";
+      el.playsInline = true;
+      _voChannels.set(channel, el);
+      return el; // dry for this line; a later line wires it once the ctx is healthy again
+    }
   }
   // Wire the radio-filter graph once the ctx is running (idempotent; no-op once wired or pre-unlock).
   applyCommRadioEffect(el);
@@ -5552,7 +5587,7 @@ function applyCommRadioEffect(audioNode) {
   try {
     const ctx = audioEngine.ensureContext?.();
     if (!ctx || !audioEngine.masterGain) return () => {};
-    if (ctx.state !== "running") return () => {}; // not unlocked yet — play dry, wire on a later line
+    if (ctx.state !== "running" || !audioEngine.unlocked) return () => {}; // not unlocked/healthy — play dry, wire on a later line
     const source = ctx.createMediaElementSource(audioNode);
     const highpass = ctx.createBiquadFilter();
     const lowpass = ctx.createBiquadFilter();
@@ -5850,12 +5885,19 @@ function addListeners() {
   // while audio is unhealthy — one-shot recovery used to leave the rub silent until a reboot.
   // touchend/click are included: some WebKit builds only honour those as an audio-unlock gesture.
   let lastGestureVerifyAt = 0;
+  let lastGestureAt = performance.now();
   const resumeAudioOnGesture = () => {
     if (isIOSNative && !audioEngine.ctx) return;
     if (audioEngine._needsRebuild) audioEngine.rebuildContext(); // must stay synchronous in the gesture
     else if (audioEngine.ctx?.state !== "running") audioEngine.resume();
-    const unhealthy = audioEngine._verifyOnGesture || (audioEngine._everRan && !audioEngine.unlocked);
     const now = performance.now();
+    // 2026-10-29: idling with the screen on fires no visibility/focus event, yet iOS can kill the
+    // ctx meanwhile — re-verify on the first tap after a long idle, or if the clock looks frozen.
+    const idleLong = now - lastGestureAt > 20000;
+    lastGestureAt = now;
+    const frozen = audioEngine.clockLooksFrozen();
+    const unhealthy = idleLong || frozen || audioEngine._verifyOnGesture
+      || (audioEngine._everRan && !audioEngine.unlocked);
     if (unhealthy && now - lastGestureVerifyAt > 500) {
       lastGestureVerifyAt = now;
       audioEngine._verifyOnGesture = false;

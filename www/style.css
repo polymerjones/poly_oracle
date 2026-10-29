@@ -17,6 +17,9 @@ input, textarea {
 :root {
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
+  /* 2026-10-29: viewport width minus side safe areas. iPhone Duo cover screen reports its clock/camera pill
+     as an 84pt RIGHT inset; plain vw widths ran under it. Equals 100vw wherever side insets are 0. */
+  --svw: calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   --bg-0: #060915;
   --bg-1: #0b1230;
   --bg-2: #172a5b;
@@ -219,8 +222,8 @@ body.reveal-screen-shake #oracleView {
 }
 
 .stage {
-  width: 92vw;
-  max-width: min(92vw, 520px);
+  width: calc(var(--svw) * 0.92);
+  max-width: min(calc(var(--svw) * 0.92), 520px);
   margin: 0 auto;
   padding: 26px;
   border-radius: 30px;
@@ -1048,7 +1051,7 @@ body.verbose-details .answer-verbose {
 }
 
 .vault-card {
-  width: min(780px, 95vw);
+  width: min(780px, calc(var(--svw) * 0.95));
   max-height: 86vh;
   overflow: auto;
   border: 1px solid var(--line);
@@ -1470,8 +1473,8 @@ select:focus-visible {
   }
 
   .stage {
-    width: 92vw;
-    max-width: min(92vw, 520px);
+    width: calc(var(--svw) * 0.92);
+    max-width: min(calc(var(--svw) * 0.92), 520px);
     padding: 18px;
     border-radius: 28px;
     background: rgba(16, 22, 36, 0.82);
@@ -3848,8 +3851,8 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
 #oracleView { align-content: center; gap: 14px; }
 .play-stroids-tile {
   position: relative;
-  width: 92vw;
-  max-width: min(92vw, 520px);
+  width: calc(var(--svw) * 0.92);
+  max-width: min(calc(var(--svw) * 0.92), 520px);
   display: flex;
   align-items: center;
   gap: 12px;

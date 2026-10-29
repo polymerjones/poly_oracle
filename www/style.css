@@ -4279,6 +4279,14 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
   .galaxyModeSelect.hub-root { gap: 10px; --hub-rest: 531px; }
   .galaxyModeSelect.hub-root.hub-dev { --hub-rest: 594px; }
 }
+/* 2026-10-29: short windows (unfolded iPhone Duo: 669 tall with 82/34 insets) — the logo is already at its
+   72px floor, so the card ring gives up height too (218 → ~174) or the no-scroll root clips. The aspect
+   test keeps the iPhone SE (667 tall but narrow, already fits) on the full-size ring. */
+@media (max-height: 700px) and (min-aspect-ratio: 2/3) {
+  .hub-root .polyRing { zoom: 0.8; }
+  .galaxyModeSelect.hub-root { --hub-rest: 487px; }
+  .galaxyModeSelect.hub-root.hub-dev { --hub-rest: 550px; }
+}
 
 .polyHero { box-shadow: 0 10px 26px rgba(120, 140, 255, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.55), inset 0 -4px 8px rgba(40, 20, 110, 0.35); }
 @media (prefers-reduced-motion: reduce) { .menuOracleBadge { animation: none; } }
@@ -4300,7 +4308,12 @@ body.fx-star-buttons .modeBtn:not(:disabled):not(.devModeBtn):not(.polyTile)::af
 .pst-title { font-size: clamp(0.82rem, 3.4vw, 1rem); }
 .pst-play { padding: 6px 14px; font-size: 0.78rem; }
 .play-stroids-tile.first-run .pst-hint { bottom: 4px; }
-.orb-shell .orb, .oracle-orb-fx { --oracle-orb-size: clamp(190px, 58vw, 340px); }
+.orb-shell .orb, .oracle-orb-fx {
+  /* 2026-10-29: also capped by usable height (minus ~385px of tile/title/question/input/button), so the
+     Oracle card fits short windows like the unfolded iPhone Duo (469×669, 82/34 insets → 529px).
+     On every current iPhone the 58vw term is smaller, so this changes nothing there. */
+  --oracle-orb-size: clamp(140px, min(58vw, calc(100dvh - max(24px, env(safe-area-inset-top, 0px)) - 24px - env(safe-area-inset-bottom, 0px) - 385px)), 340px);
+}
 .orb-shell .orb { width: var(--oracle-orb-size); }
 .oracle-orb-fx { width: calc(var(--oracle-orb-size) * 1.4); }
 

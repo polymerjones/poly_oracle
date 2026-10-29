@@ -538,7 +538,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-29 09:48";
+const BUILD_TS = "2026-10-29 16:18";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -10454,6 +10454,11 @@ function initGalaxyCanvas() {
         document.getElementById("rewardBoxOverlay")?.remove();
         showRewardBox(-1, () => {}, { previewItems: rollRewardBox().items });
       },
+      // 2026-10-29: end-level scorecard on its own (bomb continue + auto-continue ring), no level needed.
+      scorecard(onDismiss = () => {}) {
+        showLevelScoreReport({ levelNum: 3, levelTimeMs: 74000, timeBonus: 250, accuracy: 82, accuracyBonus: 120,
+          comboBonus: 300, ufosKilled: 2, scoreBefore: 4200, scoreAfter: 4870, onDismiss });
+      },
     };
     window.parent?.postMessage({ type: "rewardLab:ready" }, "*");
   }
@@ -12585,7 +12590,7 @@ function initGalaxyCanvas() {
       @keyframes rbxFlash{0%{opacity:var(--peak,1)}100%{opacity:0}}
       .rbx-hint.rbx-hint-pop{animation:rbxHintPop 260ms cubic-bezier(.2,1.6,.4,1);}
       @keyframes rbxHintPop{0%{transform:scale(1)}40%{transform:scale(1.18)}100%{transform:scale(1)}}
-      .rbx-hint{font-size:.8rem;letter-spacing:.2em;color:#00FFD1;}
+      .rbx-hint{font-size:.8rem;letter-spacing:.2em;color:#00FFD1;padding:12px 24px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
       .rbx-items{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;min-height:0;}
       .rbx-item{display:grid;justify-items:center;gap:4px;font-size:.72rem;letter-spacing:.06em;color:#dff;animation:lsrRowIn 260ms ease both;}
       .rbx-item img{width:44px;height:44px;object-fit:contain;}
@@ -12730,6 +12735,8 @@ function initGalaxyCanvas() {
       }, 720);
     });
 
+    // 2026-10-29 (playtest, 9-year-old): kids tap the "KEEP TAPPING!" words, not the chest — count those too.
+    hint.addEventListener("click", () => box.click());
     box.addEventListener("click", () => {
       if (!arrived || taps >= REWARD_BOX_TAPS_TO_OPEN) return;
       taps += 1;
@@ -18856,8 +18863,21 @@ function initGalaxyCanvas() {
       .lsr-val{color:#fff;font-weight:700;}
       .lsr-total .lsr-lbl{color:#b7c9ff;}
       .lsr-total .lsr-val{color:#00FFD1;font-size:1.4rem;}
-      .lsr-hint{text-align:center;margin-top:14px;font-size:1rem;letter-spacing:.2em;color:rgba(183,201,255,.4);opacity:0;transform:translateX(-16px);}
-      .lsr-hint.in{animation:lsrRowIn 250ms ease forwards,lsrBlink 1.2s 250ms ease-in-out infinite;}
+      .lsr-hint{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:16px;opacity:0;transform:translateX(-16px);}
+      .lsr-hint.in{animation:lsrRowIn 250ms ease forwards;}
+      .lsr-hint-txt{font-size:.95rem;letter-spacing:.2em;color:#ffcf6e;font-weight:700;}
+      .lsr-hint.in .lsr-hint-txt{animation:lsrBlink 1.2s 250ms ease-in-out infinite;}
+      .lsr-bomb{position:relative;width:84px;height:84px;padding:0;border:0;border-radius:50%;background:radial-gradient(circle,rgba(255,150,40,.22),transparent 70%);cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+      .lsr-bomb img{position:absolute;inset:12px;width:60px;height:60px;pointer-events:none;animation:lsrBombBob 900ms ease-in-out infinite alternate;}
+      .lsr-ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);pointer-events:none;}
+      .lsr-ring circle{fill:none;stroke:#ff9a2e;stroke-width:6;stroke-linecap:round;stroke-dasharray:289;stroke-dashoffset:0;filter:drop-shadow(0 0 4px #ff9a2e);}
+      .lsr-bomb.counting .lsr-ring circle{animation:lsrRingDrain var(--lsr-auto,6000ms) linear forwards;}
+      .lsr-bomb.paused .lsr-ring circle{animation-play-state:paused;}
+      .lsr-bomb.boom img{animation:lsrBombBoom 260ms ease-out forwards;}
+      .lsr-bomb.boom .lsr-ring{opacity:0;}
+      @keyframes lsrBombBob{from{transform:scale(1) rotate(-6deg)}to{transform:scale(1.1) rotate(6deg)}}
+      @keyframes lsrRingDrain{to{stroke-dashoffset:289}}
+      @keyframes lsrBombBoom{to{transform:scale(2.2);opacity:0}}
       .score-tick-flash{text-shadow:0 0 12px #00ffcc,0 0 24px #00ffcc;transition:text-shadow 80ms ease;}
       .score-final-flash{text-shadow:0 0 30px #ffffff,0 0 60px #00ffcc;transition:text-shadow 300ms ease;}
       .hudBombBtn.hudBombBtn--aiming{box-shadow:0 0 12px #00ffcc,0 0 24px #00ffcc;border-color:#00ffcc;animation:pulse-aim 0.3s ease-in-out infinite alternate;}
@@ -18893,7 +18913,10 @@ function initGalaxyCanvas() {
       <div class="lsr-row"><span class="lsr-lbl">TIME BONUS</span><span class="lsr-val">${tbStr}</span></div>
       <div class="lsr-div">─────────────────</div>
       <div class="lsr-row lsr-total"><span class="lsr-lbl">TOTAL</span><span class="lsr-val" id="lsrTotalVal">${scoreBefore}</span></div>
-      <div class="lsr-hint">TAP TO CONTINUE</div>
+      <div class="lsr-hint">
+        <button class="lsr-bomb" type="button" aria-label="Continue"><svg class="lsr-ring" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="46"/></svg><img src="powerups/powerup_bomb.png" alt=""></button>
+        <div class="lsr-hint-txt">TAP THE BOMB!</div>
+      </div>
     `;
     overlay.appendChild(panel);
     (galaxyView || document.body).appendChild(overlay);
@@ -18960,9 +18983,7 @@ function initGalaxyCanvas() {
       if (countupRaf) { cancelAnimationFrame(countupRaf); countupRaf = 0; }
       stopWriteLoop();
       revealEls.forEach((el) => el.classList.add("in"));
-      const hint = panel.querySelector(".lsr-hint");
-      hint?.classList.add("in");
-      hintVisible = true;
+      showContinueHint();
       const totalEl = panel.querySelector("#lsrTotalVal");
       if (totalEl) {
         totalEl.textContent = scoreAfter;
@@ -18981,6 +19002,8 @@ function initGalaxyCanvas() {
       if (dismissed) return;
       dismissed = true;
       if (_scorecardFinishNow === completeScorecardReveal) _scorecardFinishNow = null;
+      clearTimeout(autoTimer);
+      document.removeEventListener("visibilitychange", onAutoVisibility);
       scorecardIdleAt = 0;
       lvlTrace(`[lvltrans] scorecard dismiss elapsed=${(performance.now() - shownAt).toFixed(1)}ms`);
       // FIX 2026-06-09: restore music to its pre-scorecard level as gameplay resumes
@@ -19018,12 +19041,55 @@ function initGalaxyCanvas() {
       }
       // 2026-06-26: stray firing taps were skipping the scorecard. Only skip via either
       // (a) a deliberate double-tap once it's been up ≥1s, or (b) a single tap once TAP TO CONTINUE shows.
-      if (hintVisible || (isDoubleTap && tapNow - shownAt >= 1000)) dismiss();
+      if (hintVisible || (isDoubleTap && tapNow - shownAt >= 1000)) detonateAndContinue();
     }, { passive: false });
 
-    // 2026-10-25 (GAME-04): the scorecard no longer auto-advances (it used to dismiss itself after
-    // 7s, +8s grace while the level-complete VO played). An idle player now stays here until they
-    // tap — the TAP TO CONTINUE / double-tap paths above are the only ways forward.
+    // 2026-10-29 (playtest: a 9-year-old sat on the scorecard and drifted off): auto-continue is back.
+    // Once the hint shows, a ring drains around the bomb for SCORECARD_AUTO_CONTINUE_MS, then the bomb
+    // goes off by itself. Any tap detonates it early. The countdown only runs while the app is visible —
+    // backgrounded, it pauses (the scorecard must never advance behind the player's back).
+    const SCORECARD_AUTO_CONTINUE_MS = 6000;
+    const bombBtn = panel.querySelector(".lsr-bomb");
+    bombBtn?.style.setProperty("--lsr-auto", `${SCORECARD_AUTO_CONTINUE_MS}ms`);
+    let autoTimer = 0;
+    let autoRemaining = SCORECARD_AUTO_CONTINUE_MS;
+    let autoStartedAt = 0;
+    function runAutoTimer() {
+      autoStartedAt = performance.now();
+      autoTimer = setTimeout(() => detonateAndContinue(), autoRemaining);
+      bombBtn?.classList.remove("paused");
+    }
+    function onAutoVisibility() {
+      if (dismissed) return;
+      if (document.hidden) {
+        clearTimeout(autoTimer);
+        autoRemaining = Math.max(400, autoRemaining - (performance.now() - autoStartedAt));
+        bombBtn?.classList.add("paused");
+      } else {
+        runAutoTimer();
+      }
+    }
+    function showContinueHint() {
+      if (dismissed || hintVisible) return;
+      panel.querySelector(".lsr-hint")?.classList.add("in");
+      hintVisible = true;
+      bombBtn?.classList.add("counting");
+      document.addEventListener("visibilitychange", onAutoVisibility);
+      if (document.hidden) bombBtn?.classList.add("paused");
+      else runAutoTimer();
+    }
+    function detonateAndContinue() {
+      if (dismissed) return;
+      if (bombBtn) {
+        const r = bombBtn.getBoundingClientRect();
+        bombBtn.classList.add("boom");
+        window.polyFx?.playTealBurst?.({ x: r.left + r.width / 2, y: r.top + r.height / 2, power: 1, durationMs: 650 });
+      }
+      cssFlash("#ff9a2e", 0.32, 220);
+      playGameSfx("explosion_big", 0.8);
+      triggerHapticImpact(hapticImpactStyle.Heavy);
+      dismiss();
+    }
 
     // Row-by-row tally reveal: dividers + rows appear one at a time, 200ms apart
     const revealEls = Array.from(panel.querySelectorAll(".lsr-div, .lsr-row"));
@@ -19038,7 +19104,7 @@ function initGalaxyCanvas() {
           stopWriteLoop();
           // Hint appears concurrently while countup is still running
           tallyTimers.push(setTimeout(() => {
-            if (!dismissed) { panel.querySelector(".lsr-hint")?.classList.add("in"); hintVisible = true; }
+            showContinueHint();
           }, 400));
           // Score countup from scoreBefore → scoreAfter over ~1500ms
           const totalEl = panel.querySelector("#lsrTotalVal");

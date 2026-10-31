@@ -5814,6 +5814,45 @@ const leaderboardThresholds = {
   thirdScore: null,
 };
 
+// 2026-10-31: ?stroids (Polymer Jones games hub, paulfishermedia.com/games) skips the Oracle home and
+// continues the player's STROIDS run (or starts a new one). Web only (native builds never load with a
+// query string). Called once, as the last init() step. The start is deferred one task: init() runs mid-module, and openGalaxyView()
+// reads top-level lets declared further down (e.g. orbRubbing), which would throw a TDZ ReferenceError.
+function maybeStartStroidsFromLink() {
+  if (isCapacitorNative) return;
+  let params;
+  try { params = new URLSearchParams(location.search); } catch { return; }
+  if (!params.has("stroids")) return;
+  setTimeout(() => {
+    try {
+      if (!galaxyCanvasController?.playFromHub) return; // game failed to init → stay on the Oracle home
+      openGalaxyView(); // same entry as the STROIDS tile / header asteroid
+      // openGalaxyView() queues showModeSelect in a rAF; this one runs after it. playFromHub() is the hub's
+      // one-tap PLAY/CONTINUE: resumes a saved run (keeps progress), else starts a new game. Let the menu
+      // theme showModeSelect just requested settle first (bounded): the resume path starts the level
+      // synchronously, and a still-loading menu track would land last and replace the level music.
+      const waitUntil = performance.now() + 3000;
+      const go = () => {
+        if (audioEngine._pendingMusicKey && performance.now() < waitUntil) { setTimeout(go, 50); return; }
+        galaxyCanvasController.playFromHub();
+      };
+      requestAnimationFrame(go);
+    } catch (error) {
+      console.warn("[stroids-link] start failed", error);
+      return;
+    }
+    // No user gesture yet, so autoplay blocks the level music's HTML <audio> fallback and nothing
+    // retries it. The global gesture handlers resume the Web Audio ctx (SFX/VO); start the music here.
+    const events = ["pointerdown", "touchend", "click", "keydown"];
+    const onFirstGesture = () => {
+      events.forEach((ev) => document.removeEventListener(ev, onFirstGesture, true));
+      const node = audioEngine.currentMusicHtml?.node;
+      if (node?.paused) node.play().catch(() => {});
+    };
+    events.forEach((ev) => document.addEventListener(ev, onFirstGesture, true));
+  }, 0);
+}
+
 init();
 
 function init() {
@@ -5848,6 +5887,7 @@ function init() {
   runStartupStep("initTitleSparkles", initTitleSparkles);
   runStartupStep("initOrbTapPool", initOrbTapPool);
   runStartupStep("setGalaxyTool", () => setGalaxyTool(state.galaxyTool));
+  runStartupStep("stroidsLink", maybeStartStroidsFromLink);
 }
 
 function addListeners() {

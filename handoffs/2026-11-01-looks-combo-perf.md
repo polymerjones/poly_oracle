@@ -171,3 +171,13 @@ This plan is written to work as a **handoff doc**. Paul may `/clear` first, so a
   - Combo awards during bomb chains: no visible stall.
   - Each look on, check FPS.
   - First-time combo voice plays without a hitch.
+
+## C3–C8 session (build 2026-11-01 11:52, UNCOMMITTED, installed on iPhone)
+- 4.1.1 (6) archive opened in Organizer for Paul to Distribute → TestFlight (CLI upload still fails).
+- C3: `getTintedFxSheet` — (sheet, tint) baked once into a whole-sheet canvas (cap 16); `drawFxSheetFrame` tinted path = 1 drawImage.
+- C4: already shipped in 81e1d50 (shrapnel = pooled ADD sprites).
+- C5: `.galaxy-view.mode-arcade { will-change: transform }` + translate3d shake; ghost-check rects cached 250ms (`_hudRect`, resize bumps `_hudRectGen`).
+- C6: `cssStatic` resizes only on viewport change; overlapping calls restart the one live loop (`_staticRun`).
+- C7: `explodeMissile` queues caught landmine/placed bombs on `pendingExplosions` (any phase, as before) → MINE_CHAIN_PER_FRAME cap.
+- C8: reused `_seen*` Sets in pixiRenderer syncs; `_pixiTint` reset in releaseParticle/releaseRing; dropped warp ring → releaseRing; ufoFx draw patch uses `arguments` (no rest array).
+- Headless L12 (6 mines + missile + 3 bombs): no errors; desktop 60fps both before/after (not discriminating). NEXT: Paul device check perf chip L12/L15 (missile into mine cluster, bomb chains), watch tinted burst colours, HUD ghosting, shake feel. Then commit.

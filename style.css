@@ -1618,6 +1618,13 @@ select:focus-visible {
   grid-template-rows: auto 1fr auto;
 }
 
+/* 2026-11-01 PERF (C5): cssShake writes transform on #galaxyView. Without a standing layer each
+   80ms shake promoted/demoted it (layer-tree rebuild per bomb kill). Arcade play keeps it promoted.
+   galaxy-view is fixed inset:0, so fixed descendants resolve to the same box as the viewport. */
+.galaxy-view.mode-arcade {
+  will-change: transform;
+}
+
 .bgStack {
   position: absolute;
   inset: 0;
@@ -2663,6 +2670,12 @@ select:focus-visible {
 }
 .hudQuadBadge.active {
   display: flex;
+}
+/* 2026-11-01: Unlimited Quad switched off by the player — badge stays tappable to turn it back on. */
+.hudQuadBadge.active.off {
+  opacity: 0.55;
+  filter: grayscale(0.7);
+  box-shadow: none;
 }
 .hudQuadIcon {
   width: 22px;

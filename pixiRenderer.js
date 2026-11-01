@@ -429,9 +429,14 @@ const pixiRenderer = (() => {
     }
   }
 
+  const _seenAsteroids = new Set();
+  const _seenParticles = new Set();
+  const _seenWarpRings = new Set();
+  const _seenLightningRings = new Set();
   function syncAsteroids(asteroids) {
     if (!asteroidContainer) return;
-    const seen = new Set();
+    const seen = _seenAsteroids; // reused (C8: no per-frame Set allocation)
+    seen.clear();
 
     for (let i = 0; i < asteroids.length; i += 1) {
       const a = asteroids[i];
@@ -557,7 +562,8 @@ const pixiRenderer = (() => {
 
   function syncParticles(particles) {
     if (!particleContainer) return;
-    const seen = new Set();
+    const seen = _seenParticles; // reused (C8: no per-frame Set allocation)
+    seen.clear();
 
     for (let i = 0; i < particles.length; i += 1) {
       const p = particles[i];
@@ -605,7 +611,8 @@ const pixiRenderer = (() => {
       return;
     }
     warpRingContainer.visible = true;
-    const seen = new Set();
+    const seen = _seenWarpRings; // reused (C8: no per-frame Set allocation)
+    seen.clear();
 
     for (let i = 0; i < warpRings.length; i += 1) {
       const ring = warpRings[i];
@@ -679,7 +686,8 @@ const pixiRenderer = (() => {
       return;
     }
     lightningRingContainer.visible = true;
-    const seen = new Set();
+    const seen = _seenLightningRings; // reused (C8: no per-frame Set allocation)
+    seen.clear();
 
     for (let i = 0; i < lightningRings.length; i += 1) {
       const ring = lightningRings[i];

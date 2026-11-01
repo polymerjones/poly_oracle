@@ -566,7 +566,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-11-01 14:05";
+const BUILD_TS = "2026-11-01 12:05";
 // 2026-11-01: audio diagnostics → native console (MainViewController "polyLog" → NSLog), readable from
 // the Mac with `devicectl device process launch --console` — no Web Inspector or on-screen copy needed.
 function nativeLog(msg) {
@@ -629,7 +629,7 @@ function cssShake(intensity = 1) {
   if (!_shakeEl || _shakeTimer) return;
   const x = (Math.random() - 0.5) * 8 * intensity;
   const y = (Math.random() - 0.5) * 8 * intensity;
-  _shakeEl.style.transform = `translate(${x}px,${y}px)`;
+  _shakeEl.style.transform = `translate3d(${x}px,${y}px,0)`;
   _shakeTimer = setTimeout(() => {
     _shakeEl.style.transform = "";
     _shakeTimer = null;
@@ -808,23 +808,40 @@ function spawnScorecardFireball(x, y) {
   setTimeout(done, 900);
 }
 
+// 2026-11-01 PERF (C6): the canvas was re-sized (= backing store reallocated + cleared) on EVERY call,
+// and overlapping calls each ran their own rAF loop drawing over each other. Now: resize only when
+// the viewport changed, and a call during a running glitch just restarts the one live loop's clock.
+let _staticRun = null; // { startTime, duration } of the live glitch, or null
 function cssStatic(duration = 500) {
   if (!_staticCtx || !_staticCanvas) return;
-  _staticCanvas.width = window.innerWidth;
-  _staticCanvas.height = window.innerHeight;
+  if (_staticRun) {
+    const t = performance.now();
+    const remaining = _staticRun.duration - (t - _staticRun.startTime);
+    _staticRun.startTime = t;
+    _staticRun.duration = Math.max(duration, remaining);
+    return;
+  }
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  if (_staticCanvas.width !== vw || _staticCanvas.height !== vh) {
+    _staticCanvas.width = vw;
+    _staticCanvas.height = vh;
+  }
   const W = _staticCanvas.width;
   const H = _staticCanvas.height;
-  let elapsed = 0;
-  const startTime = performance.now();
+  const run = { startTime: performance.now(), duration };
+  _staticRun = run;
 
   function drawGlitchFrame() {
     const now = performance.now();
-    elapsed = now - startTime;
-    if (elapsed > duration) {
+    const elapsed = now - run.startTime;
+    if (elapsed > run.duration) {
       _staticCanvas.style.opacity = "0";
       _staticCtx.clearRect(0, 0, W, H);
+      _staticRun = null;
       return;
     }
+    const duration = run.duration;
 
     const progress = elapsed / duration;
     const alpha = progress < 0.4
@@ -1614,8 +1631,13 @@ function consumeArmedCheatsForRun() {
   activeRunCheats = Object.fromEntries(Object.keys(active).filter((id) => !off[id]).map((id) => [id, true]));
   if (devInfiniteWeaponsOn()) for (const id of DEV_INF_WEAPON_IDS) activeRunCheats[id] = true;
   writeCheatJson(STORAGE_RUN_CHEATS, activeRunCheats);
+  cheatQuadPaused = false; // every run starts with Unlimited Quad on
   return activeRunCheats;
 }
+
+// 2026-11-01 (Paul: "cannot turn off quad shot when it's infinite"): tapping the quad badge toggles
+// Unlimited Quad off/on for the rest of the run. While off the badge stays up, dimmed, reading OFF.
+let cheatQuadPaused = false;
 
 // 2026-11-01 (Paul): Dev Mode "Infinite Weapons" switch, on by default — unlimited missiles, bombs,
 // quad and plasma for testing. Rides the cheat flags, so a run with it on never posts a score.
@@ -1827,15 +1849,14 @@ function wireCheatCodesMenu() {
 // What's new for players in this build (opened from SPC's mug beside the byline). Bump `version`
 // and rewrite `lines` for every release; the mug breathes + shows NEW until the notes are read.
 const RELEASE_NOTES = {
-  version: "4.1",
+  version: "4.1.1",
   lines: [
-    "NEW: POLYSLOTS lives on your HUD — tap it any time mid-level to spin. The game pauses, and your tokens carry through the whole run.",
-    "NEW: Photon bolts fire from your cockpit, and a light-tunnel warp launches every level.",
-    "NEW: Settings — set Music and SFX volume.",
-    "Carry up to 9 bombs, and big chain blasts stay smooth.",
-    "Pulse Cannon kills now dissolve in plasma instead of vanishing.",
-    "Cheat-code ads now play back to back in the Ad Theater — no more popping back into the game between ads.",
-    "Fixes: snappier menus, buzzer-beater clears now count, and Unlimited Missiles stays unlimited.",
+    "NEW: Looks — see the Polyverse five new ways: Polynoir, Polysketch, Polygrid, Virtual Poly and Polyvector. Unlock them in Cheat Codes and keep them forever.",
+    "NEW: Big, bold combo banners that slam in without slowing the action.",
+    "Bombs and missiles hit harder: new blasts, flying debris, and chain explosions that stay smooth.",
+    "Tap the bomb on the scorecard to jump into the next level.",
+    "Cheat Codes are sorted into Unlocks, Power-Ups and Looks. Tap the Unlimited Quad badge to switch it off and back on.",
+    "Fixes: sound after a Continue ad, snappier menu cards, and smoother first launch.",
   ],
 };
 const NOTES_SEEN_KEY = "poly_oracle_notes_seen";
@@ -9625,7 +9646,7 @@ function wirePolyRing() {
     const g = polyRing.drag;
     if (!g) return;
     const dx = e.clientX - g.x;
-    if (!g.moved && Math.abs(dx) > 6) {
+    if (!g.moved && Math.abs(dx) > 12) { // 2026-11-01: 6→12px — thumb taps wobble; 6px turned them into drags
       g.moved = true;
       try { ring.setPointerCapture(g.id); } catch { /* already released */ }
     }
@@ -9656,8 +9677,11 @@ function wirePolyRing() {
     if (!card || !ring.contains(card)) return;
     const i = +card.dataset.ringIndex;
     if (card._menuNavReplay) return; // the menu's delayed nav replay of an already-armed tap
-    const settled = !polyRing.raf || Math.abs(polyRing.target - polyRing.angle) < 1;
-    if (polyRing.swallowClick || overlayOpen() || i !== polyRing.front || polyRing.armed !== i || !settled) {
+    // 2026-11-01 (Paul: "selected + centered, I tap it and it just makes the bomb sound"): tap 2 used to
+    // also require the ring to be fully at rest (< 1° from target). The spring's last-degree creep made a
+    // visibly centered card count as "moving", so tap 2 re-armed (replaying the select SFX) instead of
+    // opening. Now an armed card that's at the front opens, settled or not.
+    if (polyRing.swallowClick || overlayOpen() || i !== polyRing.front || polyRing.armed !== i) {
       e.stopImmediatePropagation();
       e.preventDefault();
       if (!polyRing.swallowClick && !overlayOpen()) {
@@ -10639,7 +10663,9 @@ function initGalaxyCanvas() {
   if (ufoFxCtx) {
     for (const m of ["fill", "stroke", "fillRect", "strokeRect", "drawImage", "fillText", "strokeText", "putImageData"]) {
       const orig = ufoFxCtx[m];
-      ufoFxCtx[m] = function (...args) { _ufoFxDrew = true; return orig.apply(this, args); };
+      // C8: f.apply(this, arguments) is a JIT fast path (no array); ...rest allocated one per draw call.
+      // eslint-disable-next-line prefer-rest-params
+      ufoFxCtx[m] = function () { _ufoFxDrew = true; return orig.apply(this, arguments); };
     }
   }
   ufoFxCanvas.setAttribute("aria-hidden", "true");
@@ -14419,8 +14445,38 @@ function initGalaxyCanvas() {
   let explosiveElectricBursts = [];
   let powerupPickupBursts = [];
   let pulseFireBursts = []; // 2026-07-02: teal electric-ring bursts stamped at each Pulse Cannon shot
-  const fxTintCanvas = document.createElement("canvas");
-  const fxTintCtx = fxTintCanvas.getContext("2d", { alpha: true });
+  // 2026-11-01 PERF (C3): tinted bursts used to round-trip every frame through one scratch canvas
+  // (clear + drawImage + source-atop fill + drawImage). Now each (sheet, tint) pair is baked ONCE into
+  // a whole-sheet canvas and every later frame is a single drawImage. Tints come from small fixed
+  // palettes (explosionTintForSprite / powerupPickupTint / laser teal), so the cache stays tiny; the
+  // cap is just a safety net.
+  const fxTintSheetCache = new Map();
+  const FX_TINT_SHEET_CACHE_MAX = 16;
+  function getTintedFxSheet(sheet, tint) {
+    const img = sheet.img;
+    if (!img || !img.naturalWidth) return null;
+    const key = `${img.src}|${tint}`;
+    let baked = fxTintSheetCache.get(key);
+    if (baked) return baked;
+    baked = document.createElement("canvas");
+    baked.width = img.naturalWidth;
+    baked.height = img.naturalHeight;
+    const bctx = baked.getContext("2d", { alpha: true });
+    if (!bctx) return null;
+    bctx.drawImage(img, 0, 0);
+    bctx.globalCompositeOperation = "source-atop";
+    bctx.fillStyle = tint;
+    bctx.fillRect(0, 0, baked.width, baked.height);
+    bctx.globalCompositeOperation = "source-over";
+    if (fxTintSheetCache.size >= FX_TINT_SHEET_CACHE_MAX) {
+      const oldest = fxTintSheetCache.keys().next().value;
+      const old = fxTintSheetCache.get(oldest);
+      if (old) { old.width = 0; old.height = 0; }
+      fxTintSheetCache.delete(oldest);
+    }
+    fxTintSheetCache.set(key, baked);
+    return baked;
+  }
   let comboBlastSeq = 0;
   const comboBombBlastAwarded = new Set();
   const comboState = {
@@ -14659,11 +14715,14 @@ function initGalaxyCanvas() {
   function updateHudQuadBadge() {
     if (!hudQuadBadge) return;
     const remaining = quadShotUntil - performance.now();
-    const active = remaining > 0;
+    const pausedCheat = !!activeRunCheats.quad && cheatQuadPaused && engineMode === "arcade" && arcadeActive && !stuntActive;
+    const active = remaining > 0 || pausedCheat;
     hudQuadBadge.classList.toggle("active", active);
+    hudQuadBadge.classList.toggle("off", pausedCheat && remaining <= 0);
     setAttrIfChanged(hudQuadBadge, "aria-hidden", active ? "false" : "true");
     if (active && hudQuadTime) {
-      const label = activeRunCheats.quad && remaining > CHEAT_QUAD_SPAN_MS / 2 ? "\u221E" : `${Math.ceil(remaining / 1000)}s`;
+      const label = remaining <= 0 ? "OFF"
+        : cheatQuadLive() && remaining > CHEAT_QUAD_SPAN_MS / 2 ? "\u221E" : `${Math.ceil(remaining / 1000)}s`;
       if (hudQuadTime.textContent !== label) hudQuadTime.textContent = label;
     }
   }
@@ -14694,7 +14753,9 @@ function initGalaxyCanvas() {
   // 2026-10-25 (ADS-01): Unlimited Quad Shot keeps quadShotUntil far in the future (the same trick
   // the Training quad lesson uses). A Pulse pickup takes over immediately instead of queueing
   // behind a quad that never ends; updateTimedWeaponQueue() re-arms the quad when it finishes.
+  function cheatQuadLive() { return !!activeRunCheats.quad && !cheatQuadPaused; }
   function startCheatQuad(now = performance.now()) {
+    if (cheatQuadPaused) return;
     quadShotUntil = now + CHEAT_QUAD_SPAN_MS;
     updateHudQuadBadge();
   }
@@ -14754,7 +14815,7 @@ function initGalaxyCanvas() {
       }
       return "extended";
     }
-    if (type === "pulse" && active === "quadshot" && activeRunCheats.quad) {
+    if (type === "pulse" && active === "quadshot" && cheatQuadLive()) {
       quadShotUntil = 0;
       updateHudQuadBadge();
       startTimedWeapon("pulse", durationMs, now, false);
@@ -14772,7 +14833,7 @@ function initGalaxyCanvas() {
   function updateTimedWeaponQueue(now = performance.now()) {
     if (now >= pulseCannonUntil && pulseWasActive) onPulseEnd();
     promotePendingTimedWeapon(now);
-    if (activeRunCheats.quad && engineMode === "arcade" && arcadeActive && !stuntActive && !activeTimedWeapon(now)) {
+    if (cheatQuadLive() && engineMode === "arcade" && arcadeActive && !stuntActive && !activeTimedWeapon(now)) {
       startCheatQuad(now);
     }
   }
@@ -15036,20 +15097,9 @@ function initGalaxyCanvas() {
     const sy = Math.floor(frame / sheet.columns) * (sheet.frameHeight + sheet.padding);
     drawCtx.translate(x, y);
     drawCtx.rotate(rot);
-    if (tint && fxTintCtx) {
-      if (fxTintCanvas.width !== sheet.frameWidth || fxTintCanvas.height !== sheet.frameHeight) {
-        fxTintCanvas.width = sheet.frameWidth;
-        fxTintCanvas.height = sheet.frameHeight;
-      }
-      fxTintCtx.clearRect(0, 0, sheet.frameWidth, sheet.frameHeight);
-      fxTintCtx.globalCompositeOperation = "source-over";
-      fxTintCtx.globalAlpha = 1;
-      fxTintCtx.drawImage(sheet.img, sx, sy, sheet.frameWidth, sheet.frameHeight, 0, 0, sheet.frameWidth, sheet.frameHeight);
-      fxTintCtx.globalCompositeOperation = "source-atop";
-      fxTintCtx.fillStyle = tint;
-      fxTintCtx.fillRect(0, 0, sheet.frameWidth, sheet.frameHeight);
-      fxTintCtx.globalCompositeOperation = "source-over";
-      drawCtx.drawImage(fxTintCanvas, -size / 2, -sizeY / 2, size, sizeY);
+    const tinted = tint ? getTintedFxSheet(sheet, tint) : null;
+    if (tinted) {
+      drawCtx.drawImage(tinted, sx, sy, sheet.frameWidth, sheet.frameHeight, -size / 2, -sizeY / 2, size, sizeY);
     } else {
       drawCtx.drawImage(
         sheet.img,
@@ -16061,6 +16111,7 @@ function initGalaxyCanvas() {
   function releaseParticle(p) {
     p.flicker = false;
     p.drag = 0;
+    p._pixiTint = null; // C8: pooled particles get a new color — drop the cached PIXI tint
     sim.particlePool.push(p);
   }
 
@@ -16069,6 +16120,7 @@ function initGalaxyCanvas() {
   }
 
   function releaseRing(ring) {
+    ring._pixiTint = null; // C8: pooled rings get a new color — drop the cached PIXI tint
     sim.ringPool.push(ring);
   }
 
@@ -16542,7 +16594,7 @@ function initGalaxyCanvas() {
 
   function addWarpRing(x, y, color = "rgba(112,255,178,1)") {
     if (isIOSNative && sim.warpRings.length >= 3) {
-      sim.warpRings.shift();
+      releaseRing(sim.warpRings.shift()); // C8: back to the pool (was dropped → GC churn)
     }
     const ring = getRing();
     ring.x = x;
@@ -23147,6 +23199,20 @@ function initGalaxyCanvas() {
     }
     return false;
   }
+  // 2026-11-01 PERF (C5): the ghost check runs at 15Hz but read 3–6 element rects each tick (forced
+  // style/layout flushes, often right after a cssShake/cssFlash style write). HUD boxes barely move,
+  // so each rect is cached for 250ms (and dropped on resize) — the stroid overlap test stays 15Hz.
+  const _hudRectCache = new WeakMap();
+  const HUD_RECT_TTL_MS = 250;
+  let _hudRectGen = 0; // bumped on resize → every cached rect is stale
+  function _hudRect(el, now) {
+    const hit = _hudRectCache.get(el);
+    if (hit && hit.gen === _hudRectGen && now - hit.at < HUD_RECT_TTL_MS) return hit.r;
+    const r = el.getBoundingClientRect();
+    _hudRectCache.set(el, { r, at: now, gen: _hudRectGen });
+    return r;
+  }
+  window.addEventListener("resize", () => { _hudRectGen += 1; });
   function updateStroidBehindHud(now) {
     if (now < _stroidBehindHudNext) return;
     _stroidBehindHudNext = now + 66; // ~15Hz
@@ -23154,8 +23220,8 @@ function initGalaxyCanvas() {
     const hud = _commHudEl;
     if (!hud) return;
     if (!_commTickerEl) _commTickerEl = document.getElementById("commanderTicker");
-    const commRect = hud.getBoundingClientRect();
-    const canvasRect = galaxyPlayCanvas?.getBoundingClientRect();
+    const commRect = _hudRect(hud, now);
+    const canvasRect = galaxyPlayCanvas ? _hudRect(galaxyPlayCanvas, now) : null;
     // display:none / collapsed / off-canvas → treat as not obstructing (getBoundingClientRect is ~0).
     const visible = canvasRect && commRect.width > 20 && commRect.height > 20
       && commRect.bottom > canvasRect.top && commRect.top < canvasRect.bottom
@@ -23171,7 +23237,7 @@ function initGalaxyCanvas() {
       // Also ghost when a stroid hides behind the comms TEXT BOX, even if nothing's under the mug.
       if (!behind && _commTickerEl) {
         const op = parseFloat(getComputedStyle(_commTickerEl).opacity || "0");
-        const tRect = _commTickerEl.getBoundingClientRect();
+        const tRect = _hudRect(_commTickerEl, now);
         if (op > 0.05 && tRect.width > 20 && tRect.height > 20
           && tRect.bottom > canvasRect.top && tRect.top < canvasRect.bottom) {
           behind = anyStroidInRect(
@@ -23189,8 +23255,8 @@ function initGalaxyCanvas() {
     // fixed element with its own opacity, so we toggle a .stroid-ghost class (see CSS). Only live
     // during Training (both elements are null/hidden otherwise → no-op).
     if (canvasRect) {
-      _updateElBehindStroid(_taskInstrEl, canvasRect);
-      _updateElBehindStroid(_demoOverlayEl, canvasRect);
+      _updateElBehindStroid(_taskInstrEl, canvasRect, now);
+      _updateElBehindStroid(_demoOverlayEl, canvasRect, now);
       // 2026-07-03: extend the see-through to the TOP arcade-HUD content — the score/level/timer
       // block and the weapon-button group — so a Stroid drifting behind them fades them too. The
       // pulse-step green Stroids passed under the top HUD, which had NO ghost effect. Targets the
@@ -23198,16 +23264,16 @@ function initGalaxyCanvas() {
       // hidden HUD (rect ~0) just clears the class.
       if (!_hudCenterEl) _hudCenterEl = document.querySelector("#arcadeHud .hudCenter");
       if (!_hudInvEl) _hudInvEl = document.querySelector("#arcadeHud .hudInventoryGroup");
-      _ghostHudRegion(_hudCenterEl, canvasRect);
-      _ghostHudRegion(_hudInvEl, canvasRect);
+      _ghostHudRegion(_hudCenterEl, canvasRect, now);
+      _ghostHudRegion(_hudInvEl, canvasRect, now);
     }
   }
   let _hudCenterEl = null;
   let _hudInvEl = null;
   // Rect-based ghost toggle (doesn't assume an inline display style, unlike _updateElBehindStroid).
-  function _ghostHudRegion(el, canvasRect) {
+  function _ghostHudRegion(el, canvasRect, now) {
     if (!el) return;
-    const r = el.getBoundingClientRect();
+    const r = _hudRect(el, now);
     let behind = false;
     if (r.width > 12 && r.height > 12 && r.bottom > canvasRect.top && r.top < canvasRect.bottom) {
       behind = anyStroidInRect(
@@ -23217,12 +23283,12 @@ function initGalaxyCanvas() {
     el.classList.toggle("stroid-ghost", behind);
   }
   // Toggle .stroid-ghost on a fixed overlay element when a non-ambient Stroid overlaps its rect.
-  function _updateElBehindStroid(el, canvasRect) {
+  function _updateElBehindStroid(el, canvasRect, now) {
     if (!el || el.style.display === "none" || !el.style.display) {
       if (el && el.classList.contains("stroid-ghost")) el.classList.remove("stroid-ghost");
       return;
     }
-    const r = el.getBoundingClientRect();
+    const r = _hudRect(el, now);
     let behind = false;
     if (r.width > 20 && r.height > 20 && r.bottom > canvasRect.top && r.top < canvasRect.bottom) {
       behind = anyStroidInRect(
@@ -25663,18 +25729,24 @@ function initGalaxyCanvas() {
       if (dist <= blastRadius) hitUfo();
       else applyMissileKnockback(ufo, dx, dy, dist, blastRadius);
     }
-    // level landmine — detonate if caught in the blast (static, so no knockback)
-    if (landmine) {
-      const dist = Math.hypot(landmine.x - tx, landmine.y - ty);
-      if (dist <= blastRadius) explodeLandmine({ halfRadius: true });
+    // level landmine + placed bombs caught in the blast — 2026-11-01 PERF (C7): QUEUED on
+    // pendingExplosions (same as chainDetonateMines) instead of detonated inline, so a missile into a
+    // mine cluster cascades at MINE_CHAIN_PER_FRAME instead of stacking every mine blast onto the
+    // missile's own frame. Unlike chainDetonateMines this catches mines in ANY phase (the missile
+    // always set off unarmed mines too). Each mine is pulled from its container now, so it can't
+    // double-fire; processPendingExplosions detonates it (halfRadius) next frame.
+    if (landmine && Math.hypot(landmine.x - tx, landmine.y - ty) <= blastRadius) {
+      const m = landmine;
+      landmine = null;
+      stopDangerLoop();
+      pendingExplosions.push({ mine: m, source: "landmine" });
     }
-    // placed bombs — iterate backwards (explodePlacedBomb splices, and a chain detonation can
-    // splice further entries this same pass, so a slot may already be gone — guard against it).
     for (let i = placedBombs.length - 1; i >= 0; i -= 1) {
       const b = placedBombs[i];
-      if (!b) continue; // 2026-06-16: removed by a chain reaction earlier in this loop
-      const dist = Math.hypot(b.x - tx, b.y - ty);
-      if (dist <= blastRadius) explodePlacedBomb(b, { halfRadius: true });
+      if (b && Math.hypot(b.x - tx, b.y - ty) <= blastRadius) {
+        placedBombs.splice(i, 1);
+        pendingExplosions.push({ mine: b, source: "placed" });
+      }
     }
   }
 
@@ -26458,7 +26530,19 @@ function initGalaxyCanvas() {
     // in endless Practice, but never during the training lesson (stuntActive drives the quad phase).
     cancelQuad() {
       if (stuntActive) return;
-      if (activeRunCheats.quad && engineMode === "arcade") return; // Unlimited Quad Shot can't be cancelled
+      if (activeRunCheats.quad && engineMode === "arcade") {
+        // Unlimited Quad: the badge is an on/off toggle (see cheatQuadPaused).
+        if (!cheatQuadPaused) {
+          cheatQuadPaused = true;
+          cancelQuadShot();
+        } else {
+          cheatQuadPaused = false;
+          if (!activeTimedWeapon()) startCheatQuad();
+        }
+        playGameSfx("menu_hit", 0.5);
+        updateHudQuadBadge();
+        return;
+      }
       if (engineMode !== "arcade" && engineMode !== "practice") return;
       cancelQuadShot();
     },

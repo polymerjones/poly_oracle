@@ -566,7 +566,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-11-01 12:05";
+const BUILD_TS = "2026-11-01 12:10";
 // 2026-11-01: audio diagnostics → native console (MainViewController "polyLog" → NSLog), readable from
 // the Mac with `devicectl device process launch --console` — no Web Inspector or on-screen copy needed.
 function nativeLog(msg) {
@@ -3600,6 +3600,7 @@ const commBoxController = (() => {
   // this split, every CMDR gameplay line (UFO/plasma/landmine/level-complete) flapped the SPC mug.
   let _spcLevelHost = false;           // level default is SPC (mug follows the line speaker on top)
   let _spcLevelPortraitSrc = null;     // the SPC override src to restore after a CMDR line
+  let _curLineSpc = false;             // 2026-11-01: speaker of the line currently in triggerVO (true = SPC)
   let _spcRestFrame = "smile_wide";    // idle frame returned to after a line / blink
   let _spcLastFrameHint = null;        // frameHint of the most recently started line (for spcSpeakEnd)
   let _spcSpeaking = false;
@@ -3816,6 +3817,16 @@ const commBoxController = (() => {
     );
 
   function setPortraitOverride(src, callsign = "SPC") {
+    // 2026-11-01 (Paul, L13 start: CMDR's "I believe in you, cadet" played with the SPC mug): a CMDR
+    // line still talking when an SPC-host level starts (e.g. the retry's low-lives line, queued just
+    // before startLevel) had its mug swapped to SPC mid-line. Make SPC the level HOST now but leave
+    // the CMDR mug up; her first own line (triggerVO → restoreSpcHost) brings her mug in.
+    if (_voPlaying && !_curLineSpc) {
+      _spcLevelHost = true;
+      _spcLevelPortraitSrc = src || SPC_PLACEHOLDER;
+      _spcRestFrame = "smile_wide";
+      return;
+    }
     portraitOverride = src || SPC_PLACEHOLDER;
     _spcMode = true;
     _spcLevelHost = true;                  // 2026-06-24: this level's default host is SPC
@@ -3875,6 +3886,9 @@ const commBoxController = (() => {
     }
     const cs = callsignEl();
     if (cs) cs.textContent = "CMDR";
+    // 2026-11-01: actually draw the CMDR mug now — a bare audioSrc line (no frame/event) left the
+    // SPC image on the <img> until a mouth-flap frame happened to replace it.
+    setFrame("idle");
   }
   function restoreSpcHost() {
     portraitOverride = _spcLevelPortraitSrc || SPC_PLACEHOLDER;
@@ -4374,6 +4388,7 @@ const commBoxController = (() => {
     // 2026-06-24: mug follows the line's speaker, not the level. On SPC-host levels (13/14) a CMDR
     // gameplay line (_spc false) shows the CMDR mug for its duration; SPC's own lines (_spc true) keep
     // her mug. Restored to the SPC host when the line ends (endTalking).
+    _curLineSpc = !!_spc;
     if (_spcLevelHost) {
       // 2026-07-03: make the mug authoritative on THIS line's channel, not on prior _spcMode state.
       // A carried-over line left the SPC mug up while a CMDR clip played on L13; forcing showCmdrForLine

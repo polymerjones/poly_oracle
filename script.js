@@ -566,7 +566,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-11-01 12:10";
+const BUILD_TS = "2026-11-01 12:35";
 // 2026-11-01: audio diagnostics → native console (MainViewController "polyLog" → NSLog), readable from
 // the Mac with `devicectl device process launch --console` — no Web Inspector or on-screen copy needed.
 function nativeLog(msg) {
@@ -1856,6 +1856,7 @@ const RELEASE_NOTES = {
     "Bombs and missiles hit harder: new blasts, flying debris, and chain explosions that stay smooth.",
     "Tap the bomb on the scorecard to jump into the next level.",
     "Cheat Codes are sorted into Unlocks, Power-Ups and Looks. Tap the Unlimited Quad badge to switch it off and back on.",
+    "A shinier Polyverse Scoreboard.",
     "Fixes: sound after a Continue ad, snappier menu cards, and smoother first launch.",
   ],
 };
@@ -9941,7 +9942,26 @@ function ensureLeaderboardStyles() {
     .leaderboardRow{display:grid;grid-template-columns:3ch 1fr 7ch;gap:12px;align-items:center;padding:9px 12px;border:1px solid rgba(0,255,209,.18);background:rgba(0,255,209,.045);border-radius:10px;color:rgba(225,255,250,.88);transform:translateY(-16px);opacity:0;animation:scoreRowIn 360ms ease forwards;animation-delay:calc(var(--row-index,0)*65ms)}
     .leaderboardRow.highlight{color:#fff;border-color:rgba(220,255,250,.95);background:rgba(0,255,209,.16);box-shadow:0 0 22px rgba(0,255,209,.42);animation:scoreRowIn 360ms ease forwards,scorePulse 1.2s ease-in-out infinite}
     .leaderboardRank{color:#00FFD1}.leaderboardInitials{font-weight:800;letter-spacing:.18em}.leaderboardScore{text-align:right;color:#fff}
-    .leaderboardActions{position:relative;z-index:1;display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
+    .leaderboardActions{position:relative;z-index:1;display:flex;justify-content:center;align-items:center;gap:22px;flex-wrap:wrap}
+    /* 2026-11-01 (Paul): scoreboard polish — the arcade buttons' shine, kept cheap: every motion below is a
+       transform on a pseudo-element (compositor-only), the rest is static gradients. */
+    .leaderboardPanel::before{content:"";position:absolute;inset:-40% -60%;z-index:0;pointer-events:none;background:linear-gradient(105deg,transparent 42%,rgba(160,255,240,.10) 50%,transparent 58%);transform:translateX(-60%);animation:fxHoloSweep 5.5s ease-in-out infinite}
+    .leaderboardTitle{background:linear-gradient(180deg,#ffffff 0%,#dffff8 45%,#7ff5dc 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 10px rgba(0,255,209,.55))}
+    .leaderboardRow{background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,0) 55%),rgba(0,255,209,.045);box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+    .leaderboardRow:nth-child(1) .leaderboardRank{color:#ffd76a;text-shadow:0 0 8px rgba(255,215,106,.6)}
+    .leaderboardRow:nth-child(2) .leaderboardRank{color:#e4ecf5;text-shadow:0 0 8px rgba(228,236,245,.5)}
+    .leaderboardRow:nth-child(3) .leaderboardRank{color:#f0a868;text-shadow:0 0 8px rgba(240,168,104,.5)}
+    /* BACK/DONE: the teal primary — arcade-button gloss + star-border orbit (one rotating pseudo). */
+    .leaderboardBtn--primary{min-width:150px;min-height:48px;overflow:hidden;isolation:isolate;border:0;color:#04201b;font-weight:800;background:transparent;box-shadow:0 0 18px rgba(0,255,209,.45);transition:transform 90ms ease}
+    .leaderboardBtn--primary::before{content:"";position:absolute;left:50%;top:50%;width:260%;aspect-ratio:1;z-index:-2;background:conic-gradient(from 0deg,transparent 0 78%,rgba(255,255,255,.95) 88%,transparent 96%);transform:translate(-50%,-50%) rotate(0deg);animation:fxStarOrbit 3s linear infinite}
+    .leaderboardBtn--primary::after{content:"";position:absolute;inset:2px;z-index:-1;border-radius:inherit;background:linear-gradient(180deg,rgba(255,255,255,.55) 0%,rgba(255,255,255,0) 48%),linear-gradient(125deg,#6ffff0,#00d9b4)}
+    .leaderboardBtn--primary:hover{background:transparent}
+    .leaderboardBtn--primary:active{transform:scale(.95)}
+    /* Game Center / Retry: deliberately quiet + compact so it isn't hit by accident. */
+    .leaderboardBtn--secondary{padding:7px 12px;font-size:.72rem;letter-spacing:.14em;color:rgba(210,255,248,.7);background:transparent;border-color:rgba(0,255,209,.32);box-shadow:none}
+    @keyframes fxHoloSweep{0%,55%{transform:translateX(-60%)}85%,100%{transform:translateX(60%)}}
+    @keyframes fxStarOrbit{to{transform:translate(-50%,-50%) rotate(360deg)}}
+    @media (prefers-reduced-motion: reduce){.leaderboardPanel::before,.leaderboardBtn--primary::before{animation:none}}
     .leaderboardStatus{position:relative;z-index:1;text-align:center;color:rgba(220,255,248,.8);min-height:1.2em}
     @keyframes scoreRowIn{to{transform:translateY(0);opacity:1}}
     @keyframes scorePulse{0%,100%{text-shadow:0 0 8px rgba(0,255,209,.45)}50%{text-shadow:0 0 18px rgba(255,255,255,.95)}}
@@ -10071,8 +10091,8 @@ async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubm
     const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
       ${renderLeaderboardRows(rows, highlightId)}
       <div class="leaderboardActions">
-        ${gameCenter.available() ? `<button id="leaderboardGameCenter" class="leaderboardBtn" type="button">Game Center</button>` : ""}
-        <button id="leaderboardClose" class="leaderboardBtn" type="button">${closeText}</button>
+        <button id="leaderboardClose" class="leaderboardBtn leaderboardBtn--primary" type="button">${closeText}</button>
+        ${gameCenter.available() ? `<button id="leaderboardGameCenter" class="leaderboardBtn leaderboardBtn--secondary" type="button">Game Center</button>` : ""}
       </div>
     `);
     overlay.querySelector("#leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
@@ -10084,8 +10104,8 @@ async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubm
     const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
       <p class="leaderboardSub">Scores unavailable offline. Connect to the internet to view the Polyverse Scoreboard.</p>
       <div class="leaderboardActions">
-        <button id="leaderboardRetry" class="leaderboardBtn" type="button">Retry</button>
-        <button id="leaderboardClose" class="leaderboardBtn" type="button">${closeText}</button>
+        <button id="leaderboardClose" class="leaderboardBtn leaderboardBtn--primary" type="button">${closeText}</button>
+        <button id="leaderboardRetry" class="leaderboardBtn leaderboardBtn--secondary" type="button">Retry</button>
       </div>
     `, error.message || "Offline");
     overlay.querySelector("#leaderboardRetry")?.addEventListener("click", () => showLeaderboard({ highlightId, afterSubmit }));
@@ -13695,7 +13715,8 @@ function initGalaxyCanvas() {
       target: () => tipElTarget(plasmaChargeChip), snap: () => ({ m: plasmaCage.mode }), done: (s) => plasmaCage.mode !== s.m },
     // Skipped by cadets who finished Training (they learned the toss there).
     { id: "toss2", anyLevel: true, gesture: "flick", line: "STROID TOSS! PRESS & HOLD IT, THEN FLICK TO TOSS IT",
-      when: () => tipsLearned().has("fire") && !trainingDone() && bigStroidsDominate() && !!tipBigStroid(),
+      when: () => tipsLearned().has("fire") && !trainingDone() && tossGrabAllowed() && bigStroidsDominate() && !!tipBigStroid(),
+      stillValid: () => tossGrabAllowed(), // e.g. a Pulse Cannon picked up mid-tip → step aside, retry later
       target: lockedBigStroid,
       snap: () => ({}), done: () => !!stroidToss.asteroid || sim.asteroids.some((a) => a.tossed) },
     { id: "netPlaced", anyLevel: true, line: "TAP THE NET (OR DETONATE) TO FIRE IT",
@@ -13801,6 +13822,15 @@ function initGalaxyCanvas() {
       const { tip, at, snap } = _tipShown;
       let doneNow = false;
       try { doneNow = tip.done(snap); } catch { doneNow = true; }
+      // 2026-11-01: a tip whose action just became impossible steps aside unlearned and may return.
+      let invalid = false;
+      try { invalid = !!tip.stillValid && !tip.stillValid(); } catch { invalid = true; }
+      if (invalid && !doneNow) {
+        tipsShownThisSession.delete(tip.id);
+        hideTip();
+        _tipReadyAt = now + TIP_GAP_MS;
+        return;
+      }
       if (tipsPaused() || doneNow || now - at > TIP_MS) {
         if (doneNow) learnTip(tip.id); // learned only by doing it
         hideTip();
@@ -17394,6 +17424,11 @@ function initGalaxyCanvas() {
     stroidToss.samples.length = 0;
   }
 
+  // 2026-11-01: the one rule for "can a press grab a stroid/mine right now" — shared by the pointerdown
+  // grab gate and the toss tip (which showed while the armed Pulse Cannon made grabbing impossible).
+  function tossGrabAllowed() {
+    return engineMode === "arcade" && arcadeActive && !missileAimMode && !bombAimMode && !pulseCannonActive();
+  }
   function startStroidToss(index, point, pointerId, now) {
     if (tutorialBlockPlasmaToss) return false; // tutorial laser step only teaches the laser
     const asteroid = sim.asteroids[index];
@@ -25955,7 +25990,7 @@ function initGalaxyCanvas() {
     // fire" bug). Suppress the grab entirely in either aim mode so the tap reaches handleArcadeTap.
     // 2026-10-25: the armed Pulse Cannon also suppresses grabs — a press on a big stroid was starting
     // a toss-grab, so nothing fired until release (the "hold it over a rock" playtest complaint).
-    if (engineMode === "arcade" && arcadeActive && !missileAimMode && !bombAimMode && !pulseCannonActive()) {
+    if (tossGrabAllowed()) {
       // 2026-06-11: mines take grab priority over stroids at an overlapping point (rarer,
       // more deliberate). A plain tap that never becomes a hold/flick falls back to the tap
       // path below (arm/detonate for mines, split for stroids) via launchStroidToss → cancel.

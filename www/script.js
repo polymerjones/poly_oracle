@@ -538,7 +538,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-10-29 16:34";
+const BUILD_TS = "2026-11-01 10:05";
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -585,6 +585,119 @@ if (!_staticCanvas) {
   document.body.appendChild(_staticCanvas);
 }
 const _staticCtx = _staticCanvas ? _staticCanvas.getContext("2d") : null;
+
+// 2026-11-01: WIREFRAME / B&W / VIRTUAL-BOY MOCKUPS (Paul picks one before it becomes a permanent
+// 3-ad cheat). Dev Mode "Look:" button cycles them live (persisted in poly_oracle_wire_mock), or ?wire=X.
+//   A = everything black & white (whole screen: HUD, speaker mugs, plasma switch, menus).
+//   B = A + stroids redrawn as glowing white edge outlines (pixiRenderer wireTextureFor).
+//   C = B + the space backdrop swapped for a dark scrolling perspective grid ("Tron").
+//   R = Virtual Boy red: A tinted red-on-black (normal art).
+//   V = Virtual Boy wireframe: C in red.
+// The grey/red is two full-screen pointer-events:none overlays (backdrop-filter grayscale, then a
+// red multiply layer) above EVERYTHING, so no DOM/canvas layer escapes it. Mockup only — the shipped
+// version needs an iPhone FPS check (full-screen backdrop-filter every frame).
+const WIRE_LOOKS = ["", "A", "B", "C", "R", "V"];
+const WIRE_LOOK_LABEL = { "": "Normal", A: "B&W", B: "B&W Outlines", C: "Tron Grid", R: "Virtual Boy", V: "VB Wireframe" };
+const STORAGE_WIRE_MOCK = "poly_oracle_wire_mock";
+function applyWireLook(mode) {
+  mode = String(mode || "").toUpperCase();
+  if (!WIRE_LOOKS.includes(mode)) mode = "";
+  window.POLY_WIRE_MODE = mode === "V" ? "C" : mode === "R" ? "A" : mode; // texture/grid behaviour
+  if (!document.getElementById("wireMockStyles")) {
+    const st = document.createElement("style");
+    st.id = "wireMockStyles";
+    st.textContent = `
+      #wireGrayFx{position:fixed;inset:0;z-index:2147483646;pointer-events:none;display:none;
+        -webkit-backdrop-filter:grayscale(1) contrast(1.35) brightness(1.05);backdrop-filter:grayscale(1) contrast(1.35) brightness(1.05);}
+      #wireRedFx{position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:none;background:#ff1e1e;mix-blend-mode:multiply;}
+      body[data-wire] #wireGrayFx{display:block;}
+      body[data-wire="R"] #wireRedFx, body[data-wire="V"] #wireRedFx{display:block;}
+      body[data-wire="C"] #galaxyBgCanvas, body[data-wire="C"] #bgStack,
+      body[data-wire="V"] #galaxyBgCanvas, body[data-wire="V"] #bgStack{opacity:0 !important;}
+      .wireGrid{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden;background:
+        radial-gradient(ellipse at 50% 38%,rgba(255,255,255,.10),transparent 60%),#000;}
+      .wireGrid::before{content:"";position:absolute;left:-60%;right:-60%;top:42%;height:120%;
+        background-image:linear-gradient(rgba(255,255,255,.55) 1.5px,transparent 1.5px),
+          linear-gradient(90deg,rgba(255,255,255,.55) 1.5px,transparent 1.5px);
+        background-size:56px 56px;transform:perspective(320px) rotateX(64deg);transform-origin:50% 0;
+        animation:wireGridRun 1.6s linear infinite;
+        -webkit-mask-image:linear-gradient(to bottom,transparent,#000 22%);mask-image:linear-gradient(to bottom,transparent,#000 22%);}
+      .wireGrid::after{content:"";position:absolute;left:0;right:0;top:41.6%;height:2px;background:#fff;box-shadow:0 0 18px 4px rgba(255,255,255,.6);}
+      @keyframes wireGridRun{to{background-position:0 56px,0 0}}
+    `;
+    document.head.appendChild(st);
+    for (const id of ["wireGrayFx", "wireRedFx"]) {
+      const d = document.createElement("div");
+      d.id = id;
+      d.setAttribute("aria-hidden", "true");
+      document.body.appendChild(d);
+    }
+  }
+  if (mode) document.body.dataset.wire = mode;
+  else delete document.body.dataset.wire;
+  const gv = document.getElementById("galaxyView");
+  let grid = gv?.querySelector(".wireGrid");
+  const wantGrid = mode === "C" || mode === "V";
+  if (wantGrid && !grid && gv) { grid = document.createElement("div"); grid.className = "wireGrid"; gv.insertBefore(grid, gv.firstChild); }
+  if (!wantGrid && grid) grid.remove();
+  const btn = document.getElementById("btnWireLook");
+  if (btn) btn.textContent = `Look: ${WIRE_LOOK_LABEL[mode]}`;
+  return mode;
+}
+// 2026-11-01: Paul picked "VB Wireframe" (mode V) as the shipped look — a PERMANENT cheat (3 ads,
+// never expires), toggled from the Cheat Codes menu or the Arcade menu button under Level Select.
+// Purely visual: it never enters activeRunCheats, so scores still submit. String keys on purpose —
+// this runs before the cheat-code consts further down are initialised (TDZ).
+function vboyCheatOwned() { try { return localStorage.getItem("poly_oracle_cheat_vboy") === "1"; } catch { return false; } }
+function vboyCheatOn() { try { return localStorage.getItem("poly_oracle_vboy_on") !== "0"; } catch { return true; } }
+function setVboyCheatOn(on) {
+  try { localStorage.setItem("poly_oracle_vboy_on", on ? "1" : "0"); } catch { /* ignore */ }
+  try { localStorage.removeItem(STORAGE_WIRE_MOCK); } catch { /* ignore */ } // the cheat owns the look now
+  applyWireLook(on && vboyCheatOwned() ? "V" : "");
+  syncVboyMenuButton();
+}
+function syncVboyMenuButton() {
+  const b = document.getElementById("btnArcadeVboy");
+  if (!b) return;
+  const owned = vboyCheatOwned();
+  b.hidden = !owned;
+  b.style.display = owned ? "" : "none";
+  b.textContent = `Virtual Boy: ${vboyCheatOn() ? "On" : "Off"}`;
+}
+function cycleWireLook() {
+  const cur = document.body.dataset.wire || "";
+  const next = WIRE_LOOKS[(WIRE_LOOKS.indexOf(cur) + 1) % WIRE_LOOKS.length];
+  try { localStorage.setItem(STORAGE_WIRE_MOCK, next); } catch { /* ignore */ }
+  applyWireLook(next);
+}
+(function initWireMock() {
+  let mode = (location.search.match(/[?&]wire=([ABCRV])\b/i) || [])[1] || "";
+  if (!mode) { try { mode = localStorage.getItem(STORAGE_WIRE_MOCK) || ""; } catch { /* ignore */ } }
+  if (!mode && vboyCheatOwned() && vboyCheatOn()) mode = "V"; // the earned Virtual Boy cheat
+  applyWireLook(mode);
+  syncVboyMenuButton();
+  document.getElementById("btnWireLook")?.addEventListener("click", cycleWireLook);
+})();
+
+// 2026-11-01: scorecard bomb fireball — one radial-gradient div that swells from the bomb past the
+// screen edges and fades (transform/opacity only → compositor). Sits just under the fx.js canvases.
+function spawnScorecardFireball(x, y) {
+  const d = document.createElement("div");
+  const size = Math.hypot(window.innerWidth, window.innerHeight) * 1.25;
+  d.style.cssText = `position:fixed;left:${x - size / 2}px;top:${y - size / 2}px;width:${size}px;height:${size}px;`
+    + "border-radius:50%;pointer-events:none;z-index:20990;mix-blend-mode:screen;will-change:transform,opacity;"
+    + "background:radial-gradient(circle,rgba(255,255,255,1) 0%,rgba(255,240,190,.95) 10%,rgba(255,170,60,.85) 22%,"
+    + "rgba(255,80,20,.55) 36%,rgba(120,20,60,.25) 52%,rgba(0,0,0,0) 66%);";
+  document.body.appendChild(d);
+  const anim = d.animate?.([
+    { transform: "scale(.04)", opacity: 1 },
+    { transform: "scale(.55)", opacity: 1, offset: 0.35 },
+    { transform: "scale(1)", opacity: 0 },
+  ], { duration: 760, easing: "cubic-bezier(.15,.8,.3,1)" });
+  const done = () => d.remove();
+  if (anim) anim.onfinish = done;
+  setTimeout(done, 900);
+}
 
 function cssStatic(duration = 500) {
   if (!_staticCtx || !_staticCanvas) return;
@@ -884,7 +997,9 @@ const PRACTICE_ENABLED = false;
 // it's drawn; the short hold still blocks an accidental flick from firing. History: 1000 → 800 on
 // 2026-06-12 (1000ms remains the "hard mode" candidate for a future difficulty setting).
 const PLASMA_CAGE_CHARGE_MS = 150;
-const PLASMA_CAGE_COOLDOWN_MS = 5000;
+// 2026-11-01 (playtest: "fun over challenge"): net reload halved 5000 → 2500ms. Training keeps its
+// /2 (now 1250), Manual mode still ×2 (now 5000).
+const PLASMA_CAGE_COOLDOWN_MS = 2500;
 const PLASMA_HUD_COLOR = "#00FFE6";
 const PLASMA_HUD_RADIUS = 14;
 const PLASMA_HUD_PULSE_MS = 2000;
@@ -1326,6 +1441,7 @@ function getArmedCheats() {
 }
 
 function isCheatOwned(id) {
+  if (id === "vboy") return vboyCheatOwned();
   return id === "levelselect" ? hasCheatLevelSelect() : !!getArmedCheats()[id];
 }
 
@@ -1343,6 +1459,9 @@ function recordCheatAd(id) {
   writeCheatJson(STORAGE_CHEAT_PROGRESS, all);
   if (id === "levelselect") {
     setCheatLevelSelect();
+  } else if (id === "vboy") {
+    try { localStorage.setItem("poly_oracle_cheat_vboy", "1"); } catch { /* ignore */ }
+    setVboyCheatOn(true); // switch it on the moment it's earned
   } else {
     writeCheatJson(STORAGE_CHEATS_ARMED, { ...getArmedCheats(), [id]: Date.now() + CHEAT_ACTIVE_MS });
     setCheatSwitchedOff(id, false);
@@ -1408,6 +1527,7 @@ function setDevModeOn(on) {
   if (btnFxLab) btnFxLab.style.display = devModeOn && btnDevMode?.style.display !== "none" ? "" : "none";
   if (btnCockpitHud) btnCockpitHud.style.display = btnFxLab?.style.display ?? "none";
   if (btnStroidDepth) btnStroidDepth.style.display = btnFxLab?.style.display ?? "none";
+  { const wl = document.getElementById("btnWireLook"); if (wl) wl.style.display = btnFxLab?.style.display ?? "none"; }
   if (btnResetTips) btnResetTips.style.display = btnFxLab?.style.display ?? "none";
   applyTrials(); // Dev Mode on → lab picks go live; off → back to the shipped defaults
 }
@@ -1434,7 +1554,7 @@ function renderCheatCodesPanel() {
     const p = progress[cheat.id];
     let status;
     if (owned) {
-      status = cheat.id === "levelselect"
+      status = cheat.id === "levelselect" || cheat.id === "vboy"
         ? "Unlocked"
         : `Active · ${formatTimeLeft(getArmedCheats()[cheat.id] - Date.now())} left`;
     }
@@ -1451,7 +1571,21 @@ function renderCheatCodesPanel() {
     row.querySelector(".cheatDesc").textContent = cheat.desc;
     row.querySelector(".cheatStatus").textContent = status;
     const btn = row.querySelector(".cheatWatchBtn");
-    if (owned && cheat.id !== "levelselect") {
+    if (owned && cheat.id === "vboy") {
+      // Permanent look: an On/Off switch forever (no 24h window).
+      const on = vboyCheatOn();
+      btn.textContent = on ? "ON" : "OFF";
+      btn.classList.add("cheatToggle");
+      btn.classList.toggle("on", on);
+      btn.setAttribute("role", "switch");
+      btn.setAttribute("aria-checked", String(on));
+      row.querySelector(".cheatStatus").textContent = on ? "Unlocked · On" : "Unlocked · Off";
+      btn.addEventListener("click", () => {
+        setVboyCheatOn(!on);
+        hapticTap();
+        renderCheatCodesPanel();
+      });
+    } else if (owned && cheat.id !== "levelselect") {
       // Earned: the row becomes an On/Off switch for the rest of its 24h window.
       const on = !getCheatsSwitchedOff()[cheat.id];
       btn.textContent = on ? "ON" : "OFF";
@@ -1491,7 +1625,7 @@ function renderCheatCodesPanel() {
           onAdRewarded: () => {
             if (!recordCheatAd(cheat.id)) return;
             triggerHapticNotification(hapticNotificationType.Success);
-            if (cheat.id === "levelselect") galaxyCanvasController?.syncArcadeMenuButtons?.();
+            if (cheat.id === "levelselect" || cheat.id === "vboy") galaxyCanvasController?.syncArcadeMenuButtons?.();
           },
         });
         renderCheatCodesPanel();
@@ -2657,6 +2791,7 @@ const CHEAT_EXTRA_LIVES = 2;
 const CHEAT_QUAD_SPAN_MS = 60 * 60 * 1000; // "unlimited" Quad Shot = an hour-long timer, re-armed
 const CHEAT_CATALOG = [
   { id: "levelselect", name: "Unlock Level Select", desc: "Start from any level. Permanent." },
+  { id: "vboy", name: "Virtual Boy Mode", desc: "Retro red wireframe graphics. Just for looks — scores still count. Permanent." },
   { id: "missiles", name: "Unlimited Missiles", desc: "Homing missiles never run out (reload still applies). 24 hours." },
   { id: "bombs", name: "Unlimited Bombs", desc: "Bombs never run out (up to 9 on the field). 24 hours." },
   { id: "quad", name: "Unlimited Quad Shot", desc: "Quad Shot on every level. 24 hours." },
@@ -4652,6 +4787,32 @@ function mountRetryFuzzy() {
 let _soundLoadChain = Promise.resolve();
 let _musicWasPlaying = false;
 let _musicCurrentTime = 0;
+// 2026-11-01 (playtest: alarm/snooze left the game silent until an app switch): an iOS alarm, call
+// banner or Siri makes the app INACTIVE without hiding the page, so no visibilitychange ever saved the
+// music state and nothing re-played the <audio> that iOS paused. Every music element now carries a
+// 'pause' watcher: a pause we didn't ask for marks the music interrupted, and the next foreground /
+// tap re-plays it. Our own pauses (track switch, stopMusic, ad) set node._polyIntentPause first.
+let _musicInterrupted = false;
+function pauseMusicNodeIntent(node) {
+  if (!node) return;
+  node._polyIntentPause = true;
+  try { node.pause(); } catch { /* ignore */ }
+}
+function watchMusicInterruption(node) {
+  if (!node || node._polyPauseWatched) return;
+  node._polyPauseWatched = true;
+  node.addEventListener("pause", () => {
+    if (node._polyIntentPause || node.ended) return;
+    if (audioEngine.currentMusicHtml?.node !== node) return;
+    _musicInterrupted = true;
+    _musicWasPlaying = true;
+    _musicCurrentTime = node.currentTime || _musicCurrentTime;
+  });
+  node.addEventListener("play", () => {
+    node._polyIntentPause = false;
+    if (audioEngine.currentMusicHtml?.node === node) _musicInterrupted = false;
+  });
+}
 let _musicResumeKey = "";
 let _musicResumeUrl = "";
 
@@ -4891,10 +5052,12 @@ const audioEngine = {
       scaleMusicElementVolume(node);
       node.volume = prev.volume;
       try { node.currentTime = prev.currentTime || 0; } catch { /* not ready */ }
-      const wasPlaying = !prev.paused;
-      try { prev.pause(); } catch { /* ignore */ }
-      if (wasPlaying) node.play().catch(() => {});
+      // 2026-11-01: an interrupted (iOS-paused) track counts as playing so the rebuild brings it back.
+      const wasPlaying = !prev.paused || _musicInterrupted;
+      pauseMusicNodeIntent(prev);
+      watchMusicInterruption(node);
       m.node = node;
+      if (wasPlaying) node.play().catch(() => {});
     }
     for (const cb of this._rebuildListeners) { try { cb(ctx); } catch { /* ignore */ } }
     // Not one-shot: if the fresh ctx still won't run (iOS session not back yet), re-arm so the NEXT
@@ -4949,10 +5112,10 @@ const audioEngine = {
       return null;
     }
   },
-  loadMany(mapNameToUrl) {
+  loadMany(mapNameToUrl, onProgress = null) {
     const soundMap = mapNameToUrl || {};
     const missingKeys = Object.keys(soundMap).filter((key) => !this.buffers.has(key));
-    if (!missingKeys.length) return Promise.resolve();
+    if (!missingKeys.length) { onProgress?.(1, 1); return Promise.resolve(); }
     const priorityKeys = [
       "orb_tap",
       "orb_rub2",
@@ -4978,6 +5141,7 @@ const audioEngine = {
         } catch {
           // Skip individual failed sounds and continue loading the rest.
         }
+        try { onProgress?.(i + 1, orderedKeys.length); } catch { /* ignore */ }
       }
     };
     _soundLoadChain = _soundLoadChain.then(run, run);
@@ -5001,6 +5165,17 @@ const audioEngine = {
     }
     if (!voices.length) { this.voices.delete(name); return true; }
     if (voices.length < maxVoices) return true;
+    // 2026-11-01 (playtest: menu sounds died after Beat Game → scoreboard): with the ctx clock frozen
+    // (keyboard / Game Center / sign-in sheet over the WebView) onended never fires AND the purge
+    // above can't age anything out, so menu taps piled up to the cap and were dropped forever. At the
+    // cap on a frozen clock: drop the stale bookkeeping and health-check (verifyAlive arms a rebuild
+    // that the next tap performs synchronously in the capture-phase gesture handler).
+    if (this.clockLooksFrozen()) {
+      this.voices.delete(name);
+      this._verifyOnGesture = true;
+      setTimeout(() => this.verifyAlive(), 0);
+      return true;
+    }
     if (mode === "steal_oldest") {
       const dropCount = voices.length - maxVoices + 1;
       for (let i = 0; i < dropCount; i += 1) {
@@ -5277,7 +5452,7 @@ const audioEngine = {
       const prev = this.currentMusicHtml;
       if (prev && prev.key === key) return;
       if (prev && prev.node) {
-        prev.node.pause();
+        pauseMusicNodeIntent(prev.node);
       }
       // iOS: reuse a music element already routed through Web Audio (dial < 100%) instead of
       // binding a new one per track — those source nodes are never freed (see acquireVoElement).
@@ -5290,12 +5465,14 @@ const audioEngine = {
       node.playsInline = true;
       scaleMusicElementVolume(node);
       node.volume = state.whisper ? 0.43 : Math.min(1, MUSIC_MAX_GAIN * volume);
+      watchMusicInterruption(node);
+      node._polyIntentPause = false;
       node.play().catch(() => {});
       this.currentMusicHtml = { key, url, node, baseVolume: volume };
       return;
     }
     if (this.currentMusicHtml?.node) {
-      this.currentMusicHtml.node.pause();
+      pauseMusicNodeIntent(this.currentMusicHtml.node);
       this.currentMusicHtml = null;
     }
     const source = this.ctx.createBufferSource();
@@ -5359,8 +5536,9 @@ const audioEngine = {
     _musicCurrentTime = 0;
     _musicResumeKey = "";
     _musicResumeUrl = "";
+    _musicInterrupted = false;
     if (this.currentMusicHtml?.node) {
-      this.currentMusicHtml.node.pause();
+      pauseMusicNodeIntent(this.currentMusicHtml.node);
       if (this.currentMusicHtml.node._iosRoute) this._iosMusicSpare = this.currentMusicHtml.node;
       this.currentMusicHtml = null;
     }
@@ -5704,6 +5882,9 @@ function setArcadeWarmupVisible(visible, text = "LOADING") {
           transform-origin:center;
           animation:arcadeWarmupPulseScale 1.15s ease-in-out infinite;
         }
+        .arcadeWarmupBar{width:min(220px,60vw);height:6px;border-radius:4px;background:rgba(0,255,209,.12);border:1px solid rgba(0,255,209,.28);overflow:hidden;box-shadow:0 0 12px rgba(0,255,209,.18)}
+        .arcadeWarmupBar i{display:block;height:100%;width:100%;transform-origin:left center;transform:scaleX(0);background:linear-gradient(90deg,#00b89a,#00FFD1);box-shadow:0 0 10px #00FFD1;transition:transform .18s linear}
+        .arcadeWarmupPct{font-style:normal;font-size:.72rem;letter-spacing:.2em;color:rgba(210,255,248,.7);margin-top:-6px}
         @media (prefers-reduced-motion: reduce){
           .arcadeWarmupInner b{animation:none}
         }
@@ -5712,7 +5893,10 @@ function setArcadeWarmupVisible(visible, text = "LOADING") {
     }
     arcadeWarmupOverlay = document.createElement("div");
     arcadeWarmupOverlay.id = "arcadeWarmup";
-    arcadeWarmupOverlay.innerHTML = '<div class="arcadeWarmupInner"><span></span><b></b></div>';
+    // 2026-11-01 (playtest: "sat on warming up longer than comfortable"): a horizontal % meter under
+    // the label so a long warmup reads as progress, not a hang.
+    arcadeWarmupOverlay.innerHTML = '<div class="arcadeWarmupInner"><span></span><b></b>'
+      + '<div class="arcadeWarmupBar"><i></i></div><em class="arcadeWarmupPct">0%</em></div>';
     Object.assign(arcadeWarmupOverlay.style, {
       position: "fixed",
       inset: "0",
@@ -5748,7 +5932,21 @@ function setArcadeWarmupVisible(visible, text = "LOADING") {
   }
   const label = arcadeWarmupOverlay.querySelector("b");
   if (label) label.textContent = text;
+  if (visible) setArcadeWarmupProgress(0, true);
   arcadeWarmupOverlay.style.display = visible ? "flex" : "none";
+}
+
+// Monotonic 0..1 → the warmup bar + % label (never moves backwards).
+let _arcadeWarmupFrac = 0;
+function setArcadeWarmupProgress(frac, reset = false) {
+  if (!arcadeWarmupOverlay) return;
+  const f = clamp(Number(frac) || 0, 0, 1);
+  if (!reset && f <= _arcadeWarmupFrac) return;
+  _arcadeWarmupFrac = f;
+  const fill = arcadeWarmupOverlay.querySelector(".arcadeWarmupBar i");
+  const pct = arcadeWarmupOverlay.querySelector(".arcadeWarmupPct");
+  if (fill) fill.style.transform = `scaleX(${f.toFixed(3)})`;
+  if (pct) pct.textContent = `${Math.round(f * 100)}%`;
 }
 
 async function warmImageSet(images) {
@@ -5770,15 +5968,25 @@ async function warmArcadeAssets(levelNum = 1) {
   const minHold = delay(420);
   arcadeWarmupPromise = (async () => {
     try {
+      // 2026-11-01: progress weights — SFX 0→70%, music →85%, sprites →100%.
       await afterNextPaint();
       await audioEngine.unlock?.();
-      await audioEngine.loadMany?.(gameplayPreloadSfxMap());
+      setArcadeWarmupProgress(0.04);
+      // SFX used to have NO overall cap (≈105 sounds one at a time, 5s XHR timeout each) — the likely
+      // cause of the long "WARMING UP". Cap the wait; anything unfinished keeps loading in the
+      // background chain and plays via the HTML fallback until its buffer lands.
+      await Promise.race([
+        audioEngine.loadMany?.(gameplayPreloadSfxMap(), (done, total) => setArcadeWarmupProgress(0.04 + 0.66 * (done / Math.max(1, total)))),
+        delay(5000),
+      ]);
+      setArcadeWarmupProgress(0.7);
       const bgKey = bgKeyForLevel(levelNum);
       preloadGalaxyBackgroundKey(bgKey);
       await Promise.race([
         audioEngine.loadMusicBuffer?.(getMusicForLevel(levelNum)) || Promise.resolve(),
         delay(1800),
       ]);
+      setArcadeWarmupProgress(0.85);
       // 2026-06-30: pre-decode + GPU-prime ALL gameplay sprites (asteroids incl. generated tint
       // skins, powerups, combo-FX sheets, AND the slot symbols) so first combo / first pickup /
       // first tinted-rock level / first slot reveal no longer hitch. This supersedes the old
@@ -5787,6 +5995,7 @@ async function warmArcadeAssets(levelNum = 1) {
       if (typeof warmGameplaySprites === "function") {
         await Promise.race([warmGameplaySprites(), delay(1800)]);
       }
+      setArcadeWarmupProgress(1);
       await minHold;
     } finally {
       setArcadeWarmupVisible(false);
@@ -5930,6 +6139,8 @@ function addListeners() {
     if (isIOSNative && !audioEngine.ctx) return;
     if (audioEngine._needsRebuild) audioEngine.rebuildContext(); // must stay synchronous in the gesture
     else if (audioEngine.ctx?.state !== "running") audioEngine.resume();
+    // 2026-11-01: music iOS paused under an alarm/call banner comes back on the first tap.
+    if (_musicInterrupted && !document.hidden) resumeBackgroundMusic();
     const now = performance.now();
     // 2026-10-29: idling with the screen on fires no visibility/focus event, yet iOS can kill the
     // ctx meanwhile — re-verify on the first tap after a long idle, or if the clock looks frozen.
@@ -5979,6 +6190,12 @@ function addListeners() {
   // focus also fires after interruptions that never hide the page (Control Center, Siri, call
   // banner) — verify there too, or a frozen-clock ctx goes unnoticed.
   window.addEventListener("focus", () => onAudioForeground(true));
+  // 2026-11-01: native AppDelegate fires this when an AVAudioSession interruption (alarm, call,
+  // Siri) ends — re-play the music iOS paused, retrying while the session settles.
+  window.addEventListener("polyAudioInterruptionEnded", () => {
+    onAudioForeground(true);
+    setTimeout(() => { audioEngine.resume(); resumeBackgroundMusic(); }, 500);
+  });
 
   questionInput.addEventListener("input", () => {
     setIntentState();
@@ -6246,6 +6463,8 @@ function addListeners() {
   if (btnArcadeResume) {
     btnArcadeResume.addEventListener("click", () => galaxyCanvasController?.startArcadeResume?.());
   }
+  // 2026-11-01: Virtual Boy toggle (only shown once the cheat is earned).
+  document.getElementById("btnArcadeVboy")?.addEventListener("click", () => setVboyCheatOn(!vboyCheatOn()));
   if (btnArcadeLevelSelect) {
     btnArcadeLevelSelect.addEventListener("click", () => galaxyCanvasController?.openArcadeLevelSelect?.());
   }
@@ -8980,7 +9199,7 @@ function drawWrappedText(ctx, text, centerX, startY, maxWidth, lineHeight) {
 // tab): tick = a card passes the front while turning, select = tap 1 on a card, open = a forward
 // menu tap (tap 2 on a card, and every other forward .modeBtn).
 const HUB_SFX_DEFAULT = {
-  tick: [{ key: "menu_hit", vol: 0.14 }], select: [{ key: "menu_hit", vol: 0.3 }], open: [{ key: "menu_hit", vol: 0.9 }],
+  tick: [{ key: "menu_hit", vol: 0.14 }], select: [{ key: "menu_hit", vol: 0.3 }], open: [{ key: "menu_hit", vol: 0.2 }],
 };
 function playHubSfx(moment) {
   const cfg = window.POLY_HUB_SFX || HUB_SFX_DEFAULT;
@@ -9375,6 +9594,9 @@ function ensureLeaderboardStyles() {
     .initialsInput::placeholder{color:rgba(0,255,209,.4)}
     .leaderboardBtn{position:relative;z-index:1;border:1px solid rgba(0,255,209,.7);border-radius:999px;background:rgba(0,255,209,.1);color:#eafffb;padding:10px 18px;text-transform:uppercase;letter-spacing:.12em;box-shadow:0 0 16px rgba(0,255,209,.18);cursor:pointer}
     .leaderboardBtn:hover{background:rgba(0,255,209,.2)}
+    /* 2026-11-01 (playtest: Skip too easy to hit by accident): a small dim link in the panel's top-right
+       corner, far from Submit + the keyboard. */
+    .initialsSkip{position:absolute;z-index:2;top:3px;right:8px;padding:4px 6px;line-height:1;border:0;background:none;color:rgba(210,255,248,.42);font:600 .72rem ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;cursor:pointer}
     .leaderboardRows{position:relative;z-index:1;display:grid;gap:8px;margin:18px 0}
     .leaderboardRow{display:grid;grid-template-columns:3ch 1fr 7ch;gap:12px;align-items:center;padding:9px 12px;border:1px solid rgba(0,255,209,.18);background:rgba(0,255,209,.045);border-radius:10px;color:rgba(225,255,250,.88);transform:translateY(-16px);opacity:0;animation:scoreRowIn 360ms ease forwards;animation-delay:calc(var(--row-index,0)*65ms)}
     .leaderboardRow.highlight{color:#fff;border-color:rgba(220,255,250,.95);background:rgba(0,255,209,.16);box-shadow:0 0 22px rgba(0,255,209,.42);animation:scoreRowIn 360ms ease forwards,scorePulse 1.2s ease-in-out infinite}
@@ -9418,6 +9640,10 @@ function setLeaderboardOverlayVisible(visible) {
 
 function closeLeaderboardOverlay() {
   setLeaderboardOverlayVisible(false);
+  // 2026-11-01: the initials keyboard / Game Center sheet can leave the ctx clock frozen — health-check
+  // on the way back to the menu so the next menu tap rebuilds audio instead of staying silent.
+  audioEngine._verifyOnGesture = true;
+  setTimeout(() => audioEngine.verifyAlive(), 250);
   galaxyCanvasController?.showModeSelect?.({ preserveArcade: false });
 }
 
@@ -9510,7 +9736,10 @@ async function showLeaderboard({ highlightId = leaderboardHighlightId, afterSubm
       </div>
     `);
     overlay.querySelector("#leaderboardClose")?.addEventListener("click", closeLeaderboardOverlay);
-    overlay.querySelector("#leaderboardGameCenter")?.addEventListener("click", () => { void gameCenter.show(); });
+    overlay.querySelector("#leaderboardGameCenter")?.addEventListener("click", () => {
+      // 2026-11-01: the native Game Center sheet can freeze the ctx clock — re-check once it closes.
+      gameCenter.show().finally(() => { audioEngine._verifyOnGesture = true; setTimeout(() => audioEngine.verifyAlive(), 300); });
+    });
   } catch (error) {
     const overlay = renderLeaderboardShell("POLYVERSE SCOREBOARD", `
       <p class="leaderboardSub">Scores unavailable offline. Connect to the internet to view the Polyverse Scoreboard.</p>
@@ -9561,8 +9790,8 @@ function showInitialsEntry(score, runMsg = "") {
       <p class="leaderboardSub">Score ${safeScore}. Enter initials.${runMsg ? ` ${runMsg}` : ""}</p>
       <input id="leaderboardInitials" class="initialsInput" maxlength="3" minlength="3" placeholder="AAA" inputmode="latin" autocomplete="off" aria-label="Three initials" />
       <button class="leaderboardBtn" type="submit">Submit Score</button>
-      <button id="leaderboardSkip" class="leaderboardBtn" type="button">Skip</button>
     </form>
+    <button id="leaderboardSkip" class="initialsSkip" type="button" aria-label="Skip score entry">skip ›</button>
   `);
   const input = overlay.querySelector("#leaderboardInitials");
   const form = overlay.querySelector("#initialsForm");
@@ -10956,7 +11185,6 @@ function initGalaxyCanvas() {
   let _spcContinuousStartAt = 0;       // when SPC's current uninterrupted talking run began (0 = silent)
   let _spcLinesCompletedThisPhase = 0; // full VO lines finished in the active phase
   let _lastTutInteractionAt = 0;       // last gameplay interaction (play-area press / skip tap)
-  let _spcGrabSmallAt = 0;             // 2026-06-17: rate-limit (8s) the "can't grab small stroids" SPC line
   let _skipHintShown = false;          // is the hint currently faded-in?
   let _skipHintHideTimer = null;       // pending 500ms fade-out when SPC goes quiet
   let tutorialBlockPlasmaToss = false; // Phase 2: only the laser is taught — block net/toss
@@ -11269,10 +11497,11 @@ function initGalaxyCanvas() {
   const SLOT_SPIN_TIME_MS = isIOSNative ? 1900 : 2600;
   const SLOT_REEL_STAGGER_MS = isIOSNative ? 260 : 380;
   const SLOT_STOP_MIN_TRAVEL = 6, SLOT_STOP_DUR = 1.0;
-  const SLOT_LEVER_COMMIT = 0.18, SLOT_LEVER_STIFF = 120, SLOT_LEVER_DAMP = 9;
+  // 2026-11-01 (kid playtest): commit 0.18 → 0.12, fire 0.5 → 0.35 — a shorter tug spins.
+  const SLOT_LEVER_COMMIT = 0.12, SLOT_LEVER_STIFF = 120, SLOT_LEVER_DAMP = 9;
   // 2026-10-25: the spin fires the moment the finger drags the knob past this travel (like a real
   // lever reaching its stop) instead of waiting for pointerup — that wait was the pre-spin hesitation.
-  const SLOT_LEVER_FIRE = 0.5;
+  const SLOT_LEVER_FIRE = 0.35;
   const SLOT_BOUNCE_IMPULSE = 0.16, SLOT_BOUNCE_K = 200, SLOT_BOUNCE_DAMP = 16;
   const SLOT_DPR = isIOSNative ? 1 : Math.min(window.devicePixelRatio || 1, 2);
   // Slot mode now keeps level music running underneath, ducked by slotDuckLevelMusic().
@@ -11460,7 +11689,15 @@ function initGalaxyCanvas() {
   function slotLeverEnabled() {
     return slotTokens > 0 && slotState === SLOT_STATE.READY && performance.now() >= slotInputLockedUntil;
   }
+  function hideSlotLeverTip(learned = false) {
+    if (learned) setSlotFlag(SLOT_LEVER_TIP_KEY);
+    slotEls.leverTip?.remove();
+    slotEls.leverTip = null;
+    slotEls.leverGhost?.remove();
+    slotEls.leverGhost = null;
+  }
   function slotCommitLever() {
+    hideSlotLeverTip(true);
     slotLever.mode = "autoPull";
     slotLever.springTarget = 1;
     slotDoPull();
@@ -12085,21 +12322,51 @@ function initGalaxyCanvas() {
   }
 
   let _slotStylesInjected = false;
+  // Spiral-galaxy arms as an SVG data URI: 5 logarithmic arms (violet) + 5 thin offset arms (cyan),
+  // thicker/brighter toward the core, fading out at the rim.
+  function slotSpiralSvgUrl() {
+    const arms = 5;
+    let paths = "";
+    const arm = (offset, color, w, op) => {
+      for (let k = 0; k < arms; k += 1) {
+        const pts = [];
+        for (let t = 0; t <= 1; t += 0.012) {
+          const r = 4 + t * 96;
+          const th = offset + (k * 2 * Math.PI) / arms + Math.log(r / 4) * 1.55;
+          pts.push(`${(Math.cos(th) * r).toFixed(1)},${(Math.sin(th) * r).toFixed(1)}`);
+        }
+        paths += `<polyline points="${pts.join(" ")}" fill="none" stroke="${color}" stroke-width="${w}" stroke-linecap="round" opacity="${op}"/>`;
+      }
+    };
+    arm(0, "url(#ga)", 2.6, 0.75);
+    arm(0.33, "url(#gb)", 0.9, 0.6);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-100 -100 200 200">`
+      + `<defs><radialGradient id="ga" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="100"><stop offset="0" stop-color="#e7c8ff"/><stop offset=".45" stop-color="#a45bff"/><stop offset="1" stop-color="#5a1fb0" stop-opacity="0"/></radialGradient>`
+      + `<radialGradient id="gb" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="100"><stop offset="0" stop-color="#ffffff"/><stop offset=".5" stop-color="#5ccdff"/><stop offset="1" stop-color="#5ccdff" stop-opacity="0"/></radialGradient>`
+      + `<radialGradient id="gc" cx="0" cy="0" r="1" gradientUnits="objectBoundingBox"></radialGradient></defs>`
+      + `<circle r="9" fill="#d9b8ff" opacity=".35"/>${paths}</svg>`;
+    return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+  }
   function ensureSlotStyles() {
     if (_slotStylesInjected) return;
     _slotStylesInjected = true;
+    const spiralUrl = slotSpiralSvgUrl();
     const s = document.createElement("style");
     s.id = "polyslotsStyles";
     s.textContent = `
       #polyslots{position:fixed;inset:0;z-index:9500;display:flex;align-items:flex-start;justify-content:center;pointer-events:auto;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;background:
         radial-gradient(ellipse at 50% 40%,rgba(116,56,210,.38),rgba(28,16,82,.46) 36%,rgba(3,5,20,.94) 72%),
         linear-gradient(145deg,rgba(21,5,54,.97),rgba(3,8,28,.98) 52%,rgba(42,7,74,.96));}
-      #polyslots::before{content:"";position:absolute;inset:-18%;z-index:0;pointer-events:none;background:
-        radial-gradient(circle at 18% 22%,rgba(182,104,255,.34),transparent 18%),
-        radial-gradient(circle at 78% 26%,rgba(92,205,255,.18),transparent 15%),
-        radial-gradient(circle at 42% 72%,rgba(246,105,255,.20),transparent 22%),
-        repeating-radial-gradient(circle at 50% 50%,rgba(255,255,255,.13) 0 1px,transparent 1px 13px);
-        opacity:.72;will-change:transform;animation:psGalaxyDrift 60s linear infinite;}
+      /* 2026-11-01 (Paul: "we just see a box spinning instead of actual spirals"): the rotating layer was
+         a tall rectangle of concentric rings — rings look static when spun and its corners swept into
+         view. Now a SQUARE layer (150vmax, centred, always covers the screen at any angle) carrying real
+         spiral arms (generated SVG), so the slow turn reads as a swirl. Still transform-only. */
+      #polyslots::before{content:"";position:absolute;left:50%;top:42%;width:150vmax;height:150vmax;margin:-75vmax 0 0 -75vmax;z-index:0;pointer-events:none;border-radius:50%;background:
+        radial-gradient(circle at 30% 32%,rgba(182,104,255,.30),transparent 16%),
+        radial-gradient(circle at 70% 36%,rgba(92,205,255,.16),transparent 13%),
+        radial-gradient(circle at 46% 68%,rgba(246,105,255,.18),transparent 18%),
+        ${spiralUrl} center/100% 100% no-repeat;
+        opacity:.8;will-change:transform;animation:psGalaxyDrift 40s linear infinite;}
       #polyslots::after{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:
         radial-gradient(circle at 22% 34%,rgba(255,255,255,.74) 0 1px,transparent 1.5px),
         radial-gradient(circle at 64% 18%,rgba(202,224,255,.84) 0 1px,transparent 1.5px),
@@ -12179,7 +12446,29 @@ function initGalaxyCanvas() {
       .ps-lever{position:absolute;right:var(--leverR);top:var(--leverT);width:var(--leverW);height:var(--leverH);display:flex;flex-direction:column;align-items:center;z-index:7;touch-action:none;}
       .ps-track{position:relative;width:9px;flex:1;margin:4px 0;border-radius:6px;background:linear-gradient(180deg,#0b1422,#060c16);border:1px solid rgba(0,255,209,.18);box-shadow:inset 0 0 8px rgba(0,0,0,.8);}
       .ps-knob{position:absolute;left:50%;top:0;width:30px;height:30px;margin-left:-15px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ff6b6b,#b00020 70%);border:2px solid rgba(255,255,255,.35);box-shadow:0 0 16px rgba(255,40,60,.55),inset 0 -4px 8px rgba(0,0,0,.4);cursor:grab;touch-action:none;z-index:5;}
-      .ps-knob::before{content:"";position:absolute;inset:-28px;border-radius:50%;}
+      .ps-knob::before{content:"";position:absolute;inset:-44px;border-radius:50%;}
+      /* 2026-11-01 (kid playtest: lever too hard to grab): invisible pad widens the lever column's
+         hit area (a pseudo-element hit-tests as .ps-lever) — mostly leftward over the reels and down
+         past the stop. The visual lever is unchanged. */
+      .ps-lever::after{content:"";position:absolute;top:-10%;bottom:-18%;left:-55%;right:-12%;}
+      .ps-levertip{position:absolute;right:100%;top:-6%;margin-right:4px;display:flex;align-items:center;gap:4px;pointer-events:none;z-index:9;color:#fff;font-weight:900;font-size:clamp(13px,3.8vw,18px);letter-spacing:.12em;text-shadow:0 0 10px #ff3b55,0 0 22px rgba(255,59,85,.8);animation:psLeverSwipe 1.6s infinite;}
+      /* 2026-11-01 (Paul: arrow hard to see → point it at the knob; give the tip a pull-swipe ease + whiz) */
+      .ps-levertip b{padding:4px 9px;border-radius:9px;background:rgba(40,0,10,.85);border:1.5px solid #ff5a6e;box-shadow:0 0 14px rgba(255,59,85,.7);}
+      .ps-levertip span{font-size:1.7em;line-height:1;color:#ff6b7d;filter:drop-shadow(0 0 6px #ff3b55);animation:psLeverPoke .4s ease-in-out infinite alternate;}
+      .ps-levertip::before{content:"";position:absolute;right:28px;bottom:60%;width:5px;height:0;border-radius:3px;background:linear-gradient(to top,rgba(255,90,110,.9),rgba(255,90,110,0));opacity:0;animation:psLeverWhiz 1.6s infinite;}
+      .ps-leverghost{position:absolute;left:50%;top:0;width:30px;height:30px;margin-left:-15px;border-radius:50%;pointer-events:none;z-index:2;border:2px solid rgba(255,120,135,.9);background:rgba(255,40,60,.25);box-shadow:0 0 16px rgba(255,40,60,.8);animation:psGhostPull 1.6s infinite;}
+      @keyframes psLeverSwipe{
+        0%,22%{top:-6%;opacity:1;animation-timing-function:cubic-bezier(.55,0,.9,.35);}
+        58%{top:58%;opacity:1;animation-timing-function:ease-out;}
+        72%{top:62%;opacity:0;}
+        100%{top:-6%;opacity:0;}}
+      @keyframes psGhostPull{
+        0%,22%{top:0;opacity:0;animation-timing-function:cubic-bezier(.55,0,.9,.35);}
+        26%{opacity:.9;}
+        58%{top:calc(100% - 30px);opacity:.9;}
+        72%,100%{top:calc(100% - 30px);opacity:0;}}
+      @keyframes psLeverWhiz{0%,30%{height:0;opacity:0}46%{height:46px;opacity:1}58%{height:14px;opacity:.6}66%,100%{height:0;opacity:0}}
+      @keyframes psLeverPoke{to{transform:translateX(5px)}}
       .ps-knob:active{cursor:grabbing;}
       .ps-lever.disabled .ps-knob{filter:grayscale(.7) brightness(.55);cursor:not-allowed;}
       .ps-hint{position:absolute;left:0;right:0;top:var(--hintT);text-align:center;font-size:clamp(12px,3.4vw,16px);letter-spacing:.16em;color:rgba(0,255,209,.72);z-index:8;}
@@ -12273,6 +12562,20 @@ function initGalaxyCanvas() {
     slotEls.lever = overlay.querySelector("#psLever");
     slotEls.track = overlay.querySelector("#psTrack");
     slotEls.knob = overlay.querySelector("#psKnob");
+    // 2026-11-01: first-time lever tip — bouncing "PULL" bubble + arrow beside the knob until the
+    // first pull (shown only when there's a token to spend).
+    if (!slotFlag(SLOT_LEVER_TIP_KEY) && slotTokens > 0 && slotEls.lever) {
+      const tip = document.createElement("div");
+      tip.className = "ps-levertip";
+      tip.innerHTML = '<b>PULL</b><span>\u279C</span>';
+      slotEls.lever.appendChild(tip);
+      // ghost knob demonstrating the pull on the track itself
+      const ghost = document.createElement("div");
+      ghost.className = "ps-leverghost";
+      slotEls.track?.appendChild(ghost);
+      slotEls.leverTip = tip;
+      slotEls.leverGhost = ghost;
+    }
     slotEls.reelCanvas = [0, 1, 2].map((i) => overlay.querySelector("#psReelC" + i));
     slotEls.invSlots = {
       quad: overlay.querySelector('.ps-slot[data-k="quad"]'),
@@ -12324,6 +12627,8 @@ function initGalaxyCanvas() {
   // call from here on). Safe against double-entry: ignored while a slot is already live.
   function enterSlot({ onExit, midLevel = false } = {}) {
     if (isSlotActive()) return;
+    setSlotFlag(SLOT_EVER_USED_KEY);
+    if (midLevel) setSlotFlag(SLOT_HUD_USED_KEY);
     slotState = SLOT_STATE.ENTERING;
     updatePlasmaModeBtn(); // 2026-10-26: the NET switch hung around over the slot (level loop is paused)
     slotOnExit = typeof onExit === "function" ? onExit : null;
@@ -12398,9 +12703,10 @@ function initGalaxyCanvas() {
       // Measure the track once per grab — pointermove then does no layout reads.
       slotLever.trackTop = slotEls.track.getBoundingClientRect().top;
       const knobTop = slotLever.trackTop + slotLever.value * slotLeverTravel;
-      slotLever.grabOffset = e.target === slotEls.knob
-        ? e.clientY - knobTop
-        : (slotEls.knob?.offsetHeight || 30) / 2;
+      // 2026-11-01 (kid playtest): grabbing anywhere in the (now wider) lever area keeps the knob
+      // where it is and drags it relative to the finger — it used to snap the knob under the finger,
+      // so a touch low in the column could spin on the slightest wiggle.
+      slotLever.grabOffset = e.clientY - knobTop;
       slotLever.springTarget = Math.max(0, Math.min(1, (e.clientY - slotLever.grabOffset - slotLever.trackTop) / slotLeverTravel));
       e.preventDefault();
     };
@@ -12996,6 +13302,10 @@ function initGalaxyCanvas() {
     { id: "fire", line: "TAP A STROID TO BLAST IT",
       when: () => !!tipStroid(), target: lockedStroid,
       snap: () => ({ n: sim.asteroids.length }), done: (s) => _tipCanvasTapped || sim.asteroids.length < s.n },
+    // 2026-11-01: the level after the slot auto-opened — show where it lives (any level).
+    { id: "slotHud", anyLevel: true, line: "YOUR SLOT MACHINE! TAP IT ANYTIME TO SPIN TOKENS",
+      when: () => slotFlag(SLOT_HUD_TIP_DUE_KEY) && !slotFlag(SLOT_HUD_USED_KEY) && !!tipElTarget(hudSlotBtn),
+      target: () => tipElTarget(hudSlotBtn), snap: () => ({}), done: () => isSlotActive() },
     { id: "powerup", line: "TAP THE POWER-UP TO GRAB IT",
       when: () => powerups.length > 0, target: (s) => powerups.includes(s.p) && tipCanvasPoint(s.p.x, s.p.y, 34),
       snap: () => ({ p: powerups[0] }), done: (s) => !powerups.includes(s.p) },
@@ -13178,7 +13488,7 @@ function initGalaxyCanvas() {
       commBoxController.stopVO();
       const node = audioEngine.currentMusicHtml?.node;
       _adPausedMusic = node && !node.paused ? node : null;
-      _adPausedMusic?.pause();
+      pauseMusicNodeIntent(_adPausedMusic);
       _adSuspendedCtx = !!audioEngine.ctx && audioEngine.ctx.state !== "closed";
       if (_adSuspendedCtx) audioEngine.ctx.suspend().catch(() => {});
     },
@@ -13206,8 +13516,25 @@ function initGalaxyCanvas() {
   // 2026-10-25 (GAME-02 / ADS): between-level order is scorecard → reward box (even levels) →
   // next level. The slot no longer auto-opens here — players open it any time from the HUD
   // (#hudSlotBtn → openSlotMidLevel) and tokens bank for the whole run.
+  // 2026-11-01 (playtest): players who never find the slot get it opened FOR them once they're
+  // sitting on 3+ tokens (after the chest, if one is due), and the next level points at the HUD
+  // slot button so they know where it lives. Plus a first-time "PULL" tip on the lever.
+  const SLOT_EVER_USED_KEY = "poly_slot_ever_used";
+  const SLOT_HUD_TIP_DUE_KEY = "poly_slot_hud_tip_due";
+  const SLOT_HUD_USED_KEY = "poly_slot_hud_used";
+  const SLOT_LEVER_TIP_KEY = "poly_slot_lever_tip_seen";
+  const slotFlag = (k) => { try { return localStorage.getItem(k) === "1"; } catch { return false; } };
+  const setSlotFlag = (k) => { try { localStorage.setItem(k, "1"); } catch { /* ignore */ } };
+  function slotAutoOnboardDue() {
+    return engineMode === "arcade" && !stuntActive && !practiceEndless && slotTokens > 2 && !slotFlag(SLOT_EVER_USED_KEY);
+  }
+
   function handoffAfterScorecard(continueToNextLevel, clearedLevel = 0) {
-    const toSlot = () => openSlotOrContinue(continueToNextLevel);
+    const toSlot = () => {
+      // after the chest too: warp straight away unless the slot is about to open (it owns the screen)
+      if (clearedLevel > 0 && !slotAutoOnboardDue() && !(SLOT_OPEN_AFTER_EVERY_LEVEL && shouldOpenSlot())) preStartLevelWarp(clearedLevel + 1);
+      openSlotOrContinue(continueToNextLevel);
+    };
     if (rewardBoxDue(clearedLevel)) {
       showRewardBox(clearedLevel, toSlot);
       return;
@@ -13341,7 +13668,9 @@ function initGalaxyCanvas() {
   }
 
   function openSlotOrContinue(continueToNextLevel) {
-    if (SLOT_OPEN_AFTER_EVERY_LEVEL && shouldOpenSlot()) {
+    const autoOnboard = slotAutoOnboardDue();
+    if (autoOnboard) setSlotFlag(SLOT_HUD_TIP_DUE_KEY);
+    if (autoOnboard || (SLOT_OPEN_AFTER_EVERY_LEVEL && shouldOpenSlot())) {
       // The slot owns startLevel(); after it runs, apply any reward that must land on the new level (quad).
       enterSlot({ onExit: () => {
         engineMode = "arcade";
@@ -15051,6 +15380,7 @@ function initGalaxyCanvas() {
     if (btnFxLab) btnFxLab.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
     if (btnCockpitHud) btnCockpitHud.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
     if (btnStroidDepth) btnStroidDepth.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
+    { const wl = document.getElementById("btnWireLook"); if (wl) wl.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none"; }
     if (btnResetTips) btnResetTips.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
     if (btnCheatCodes) btnCheatCodes.style.display = showRoot ? "" : "none";
     if (btnSettings) btnSettings.style.display = showRoot ? "" : "none";
@@ -15135,6 +15465,7 @@ function initGalaxyCanvas() {
       // debug-unlocked. Keep it locked only when there's genuinely no access.
       btnArcadeLevelSelect.classList.toggle("locked", !levelSelectUnlocked);
     }
+    syncVboyMenuButton();
   }
 
   function syncDebugLevelPanel() {
@@ -15309,6 +15640,7 @@ function initGalaxyCanvas() {
 
   function releaseParticle(p) {
     p.flicker = false;
+    p.drag = 0;
     sim.particlePool.push(p);
   }
 
@@ -15401,6 +15733,23 @@ function initGalaxyCanvas() {
       preloadGalaxyBackgroundKey(nextKey);
     }
     return shown; // resolves when the level's bg is on screen (see setGalaxyBackgroundKey)
+  }
+
+  // 2026-11-01 (Paul: "dead animation between levels before the transition overlay appears"): the
+  // level-warp tunnel used to start inside startLevel(), i.e. 420ms after the scorecard lifted plus
+  // the level's setup work — a beat of bare, frozen field. On a straight scorecard → next level hand-off
+  // the tunnel now starts the instant the scorecard is dismissed; startLevel() adopts it and releases
+  // its hold once the new level's background is on screen (same holdUntil contract as before).
+  let _preWarp = null;
+  function preStartLevelWarp(levelNum) {
+    if (_preWarp) return;
+    let release;
+    const hold = new Promise((r) => { release = r; });
+    _preWarp = { release };
+    const color = (LEVEL_THEMES[levelNum] ?? LEVEL_THEMES[1]).primary;
+    playLevelWarpTrial({ color, holdUntil: hold });
+    // safety: never hold forever if startLevel doesn't run (quit to menu mid-transition)
+    setTimeout(() => { if (_preWarp?.release === release) { _preWarp = null; release(); } }, 5000);
   }
 
   function applyLevelTheme(levelNum) {
@@ -15791,7 +16140,7 @@ function initGalaxyCanvas() {
   // with a faint trailing echo and (off the perf-critical native path) a 1px chromatic R/B split —
   // cheap fake distortion drawn on the 2D overlay, reads as a heatwave pop at the impact point
   // without ever touching the framebuffer. Pooled through the shared ring pool; capped per frame.
-  function addShockwave(x, y) {
+  function addShockwave(x, y, scale = 1) {
     if (prefersReducedMotion || state.minimal) return;
     const cap = isIOSNative ? 6 : 12;
     if (sim.shockwaves.length >= cap) releaseRing(sim.shockwaves.shift());
@@ -15801,7 +16150,7 @@ function initGalaxyCanvas() {
     s.life = 0;
     s.ttl = isIOSNative ? 240 : 300;
     s.baseR = 6;
-    s.maxR = isIOSNative ? 50 : 64;
+    s.maxR = (isIOSNative ? 50 : 64) * scale;
     s.alpha = 0.5;
     sim.shockwaves.push(s);
   }
@@ -16132,7 +16481,43 @@ function initGalaxyCanvas() {
     renderLives();
   }
 
+  // 2026-11-01: real rock SHARDS cut from the stroid's own texture (PIXI, own pool capped at 48,
+  // outside the particle cap) — the rock visibly busts apart instead of small ones seeming to blink
+  // out. Kills landing within SHARD_AREA_MS of each other (bomb, missile, net, shrapnel chains) are an
+  // AREA kill: each rock gets a cheap 3-chunk burst and the whole blast is capped, so a bomb that
+  // wipes 10 rocks still shows debris everywhere without flooding the pool. Ice shards while frozen.
+  const SHARD_AREA_MS = 120, SHARD_AREA_CAP = 30;
+  let _shardBurstAt = 0, _shardBurstCount = 0;
+  function spawnKillShards(x, y, kind, spriteKey, lite) {
+    if (!(engineMode === "arcade" || engineMode === "practice") || !window.pixiRenderer?.spawnStroidShards) return;
+    const now = performance.now();
+    const area = now - _shardBurstAt < SHARD_AREA_MS;
+    if (!area) _shardBurstCount = 0;
+    _shardBurstAt = now;
+    if (area && _shardBurstCount >= SHARD_AREA_CAP) return;
+    const small = kind === 1, medium = kind === 2;
+    const full = small ? (isIOSNative ? 5 : 6) : medium ? 6 : 8;
+    let count = area ? 3 : full;
+    if (lite) count = Math.ceil(count / 2);
+    _shardBurstCount += count;
+    window.pixiRenderer.spawnStroidShards(x, y, {
+      // 2026-11-01 (Paul: "frozen stroids should produce ice debris"): while frozen the shards are cut
+      // from the ice-crystal debris art instead of the rock's own texture.
+      texKey: _freezeActive ? "debris_ice" : (spriteKey || "roid01"),
+      count,
+      minSize: small ? 6 : medium ? 8 : 10,
+      maxSize: small ? 11 : medium ? 14 : 19,
+      minSpeed: small ? 300 : 220,
+      maxSpeed: small ? 620 : 520,
+      drag: small ? 4.4 : 3.4,
+      ttl: area ? 640 : (small ? 720 : 900),
+      tint: null,
+    });
+  }
+
   function spawnExplosion(x, y, count = 14, fire = false, blastScale = 1, ttlScale = 1, asteroidKind = 3, spriteKey = "roid01") {
+    // Shards first: they have their own pool, so a full particle pool (area kills) must not skip them.
+    if (!fire) spawnKillShards(x, y, asteroidKind, spriteKey, prefersReducedMotion || (isIOSNative && !!sim._frameBudgetExceeded));
     if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
     const underFramePressure = isIOSNative && !!sim._frameBudgetExceeded;
     const isLarge = asteroidKind >= 2;
@@ -16151,14 +16536,15 @@ function initGalaxyCanvas() {
       if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
       if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) return;
       const angle = Math.random() * Math.PI * 2;
-      const speed = isSmallAsteroid ? 160 + Math.random() * 240 : 40 + Math.random() * 80;
+      const speed = isSmallAsteroid ? 260 + Math.random() * 300 : 120 + Math.random() * 160;
       const p = getParticle();
       p.x = x;
       p.y = y;
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
+      p.drag = isSmallAsteroid ? 3.4 : 2.2;
       p.life = 0;
-      p.ttl = (isSmallAsteroid ? 280 + Math.random() * 180 : 600 + Math.random() * 200) * (isMediumAsteroid ? 1.2 : 1);
+      p.ttl = (isSmallAsteroid ? 480 + Math.random() * 260 : 650 + Math.random() * 220) * (isMediumAsteroid ? 1.2 : 1);
       p.size = (isSmallAsteroid ? 1.6 + Math.random() * 1.7 : 2.5 + Math.random() * 2) * (isMediumAsteroid ? 1.3 : 1);
       p.alpha = isSmallAsteroid ? 0.72 + Math.random() * 0.2 : 0.8 + Math.random() * 0.2;
       if (isSmallAsteroid) {
@@ -16203,7 +16589,8 @@ function initGalaxyCanvas() {
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
       p.life = 0;
-      p.ttl = isSmallAsteroid ? 95 + Math.random() * 70 : 120 + Math.random() * 80;
+      p.ttl = isSmallAsteroid ? 140 + Math.random() * 90 : 120 + Math.random() * 80;
+      p.drag = isSmallAsteroid ? 5 : 0;
       p.size = isSmallAsteroid ? 0.9 + Math.random() * 1.1 : 1.0 + Math.random();
       p.alpha = 0.9;
       if (isSmallAsteroid) {
@@ -16218,18 +16605,24 @@ function initGalaxyCanvas() {
     if (isSmallAsteroid) spawnSmallStroidBurst(x, y);
     if (isMediumAsteroid) spawnMediumStroidBurst(x, y, spriteKey);
     if (isBigAsteroid) spawnBigStroidBurst(x, y, blastScale, spriteKey);
+    if (!fire && (isSmallAsteroid || isMediumAsteroid)) addShockwave(x, y, isSmallAsteroid ? 0.62 : 0.85);
     for (let i = 0; i < emitCount; i += 1) {
       if (isIOSNative && sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
       if (sim.particles.length >= MAX_EXPLOSION_PARTICLES) break;
       const angle = Math.random() * Math.PI * 2;
-      const speed = isSmallAsteroid ? 190 + Math.random() * 260 : 30 + Math.random() * 110;
+      // 2026-11-01 (playtest: "feel the force of a stroid blown into star dust"): launch faster and
+      // brake with drag — a hard outward punch that settles into a hanging dust cloud.
+      const speed = fire
+        ? 30 + Math.random() * 110
+        : (isSmallAsteroid ? 260 + Math.random() * 320 : 80 + Math.random() * 200);
       const p = getParticle();
       p.x = x;
       p.y = y;
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
+      p.drag = fire ? 0 : (isSmallAsteroid ? 3.6 : 2.0);
       p.life = 0;
-      p.ttl = (isSmallAsteroid ? 260 + Math.random() * 190 : 320 + Math.random() * 180) * ttlScale * (isMediumAsteroid ? 1.2 : 1);
+      p.ttl = (isSmallAsteroid ? 420 + Math.random() * 280 : 360 + Math.random() * 200) * ttlScale * (isMediumAsteroid ? 1.2 : 1);
       p.size = (isSmallAsteroid ? 1.1 + Math.random() * 2.0 : 1.7 + Math.random() * 2.4) * blastScale * (isMediumAsteroid ? 1.3 : 1);
       p.alpha = isSmallAsteroid ? 0.58 + Math.random() * 0.32 : 0.45 + Math.random() * 0.4;
       if (fire) {
@@ -16519,7 +16912,8 @@ function initGalaxyCanvas() {
     const asteroid = sim.asteroids[index];
     // 2026-06-11: an in-flight (flaming) tossed stroid can't be grabbed again — re-grabbing
     // pinned it in place (grab zeroes velocity), which is what stalled upward tosses.
-    if (!asteroid || asteroid.kind < 2 || asteroid.tossed) return false;
+    // 2026-11-01 (playtest): every stroid size is tossable now (was big/medium only, kind >= 2).
+    if (!asteroid || asteroid.tossed) return false;
     resetStroidToss();
     stroidToss.active = true;
     stroidToss.asteroidIndex = index;
@@ -16750,7 +17144,11 @@ function initGalaxyCanvas() {
     const dx = stroidToss.dragX - ref.x;
     const dy = stroidToss.dragY - ref.y;
     const len = Math.hypot(dx, dy);
-    if (len < 10) return slowTossFallback(); // insufficient flick — slow cold toss in the drift direction
+    // 2026-11-01: small stroids are tossable now and take most of the laser taps — a quick (never
+    // grabbed) touch on one needs a clear ~22px swipe to count as a flick, so a jittery tap still
+    // fires the laser (slowTossFallback returns false when not grabbed → handleArcadeTap).
+    const minFlick = (!isMine && entity.kind === 1 && !stroidToss.grabbed) ? 22 : 10;
+    if (len < minFlick) return slowTossFallback(); // insufficient flick — slow cold toss in the drift direction
     const nx = dx / len;
     const ny = dy / len;
     // bombs are heavy: launch at 0.45x a stroid's speed so they lob rather than zoom
@@ -19003,8 +19401,8 @@ function initGalaxyCanvas() {
     overlay.appendChild(panel);
     (galaxyView || document.body).appendChild(overlay);
     attachBreakOrb(overlay); // Orb glow behind the scorecard (between levels)
-    // One-shot spark swirl as the card lands, so the break opens on motion while the Orb warms up.
-    window.polyFx?.playTealBurst?.({ x: window.innerWidth / 2, y: window.innerHeight * 0.42, power: 0.6, durationMs: 700 });
+    // 2026-11-01 (Paul: "weird explosion on the end screen like an orphaned confetti burst"): the
+    // one-shot teal spark swirl as the card landed is retired — the bomb barrage is the only burst now.
     lvlTrace(`[lvltrans] scorecard overlay appeared level=${levelNum}`);
 
     // FIX 2026-06-09: make sure a UFO doesn't linger behind the scorecard
@@ -19160,17 +19558,37 @@ function initGalaxyCanvas() {
       if (document.hidden) bombBtn?.classList.add("paused");
       else runAutoTimer();
     }
+    // 2026-11-01 (playtest: "one burst of nuke confetti — make it more dramatic"): a staged blast —
+    // white-hot fireball swelling past the screen edges, a ring of chained secondary bursts, double
+    // flash + shake + static + the huge haptic + layered booms — and the scorecard holds ~450ms so
+    // the blast is seen before it lifts. All DOM/CSS + fx.js canvases (works over the scorecard).
+    let detonating = false;
     function detonateAndContinue() {
-      if (dismissed) return;
-      if (bombBtn) {
-        const r = bombBtn.getBoundingClientRect();
-        bombBtn.classList.add("boom");
-        window.polyFx?.playTealBurst?.({ x: r.left + r.width / 2, y: r.top + r.height / 2, power: 1, durationMs: 650 });
-      }
-      cssFlash("#ff9a2e", 0.32, 220);
-      playGameSfx("explosion_big", 0.8);
-      triggerHapticImpact(hapticImpactStyle.Heavy);
-      dismiss();
+      if (dismissed || detonating) return;
+      detonating = true;
+      clearTimeout(autoTimer);
+      const r = bombBtn?.getBoundingClientRect();
+      const bx = r ? r.left + r.width / 2 : window.innerWidth / 2;
+      const by = r ? r.top + r.height / 2 : window.innerHeight * 0.6;
+      bombBtn?.classList.add("boom");
+      spawnScorecardFireball(bx, by);
+      const fx = window.polyFx;
+      fx?.playTealBurst?.({ x: bx, y: by, power: 1, durationMs: 800 });
+      cssFlash("#ffffff", 0.6, 160);
+      cssShake(1.8);
+      triggerHugeHaptic();
+      playGameSfx("bigbang", 1.3, { important: true });
+      playGameSfx("explosion_big", 1.0, { important: true });
+      // chained secondaries around the blast point
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const secondaries = [[-0.26, -0.16], [0.24, -0.22], [0.02, -0.34]];
+      secondaries.forEach(([dx, dy], i) => setTimeout(() => {
+        fx?.playTealBurst?.({ x: clamp(bx + dx * vw, 20, vw - 20), y: clamp(by + dy * vh, 20, vh - 20), power: 0.7, durationMs: 650 });
+        cssShake(1.2 - i * 0.2);
+        if (i === 0) { cssFlash("#ff9a2e", 0.42, 220); playGameSfx("explosion_med", 0.9, { important: true }); }
+        if (i === 2) { cssStatic(260); playAsteroidExplosionBoom?.(3, 0.9, 0.85); }
+      }, 90 + i * 85));
+      setTimeout(dismiss, 450);
     }
 
     // Row-by-row tally reveal: dividers + rows appear one at a time, 200ms apart
@@ -19334,6 +19752,8 @@ function initGalaxyCanvas() {
         scoreAfter,
         onDismiss: () => {
           setSavedArcadeLevel(nextLevel);
+          // straight to the next level (no chest / slot in between) → warp starts now, not after setup
+          if (!rewardBoxDue(cfg.level) && !slotAutoOnboardDue()) preStartLevelWarp(nextLevel);
           // 2026-06-12: the "LEVEL X" slam-in fires ONCE, from startLevel() once the next level
           // is fully loaded — not here on dismiss (that double-slammed: once pre-load, once post).
           setTimeout(() => {
@@ -19711,7 +20131,13 @@ function initGalaxyCanvas() {
     // 2026-10-25: FX Lab trials — level-start warp effect + level-start sound (both off by default).
     // 2026-10-26: the warp holds until the level's bg video is on screen (covers the bare starfield)
     // and then fades out into the level.
-    playLevelWarpTrial({ color: _levelPrimaryColor, holdUntil: bgShown }); // tunnel takes the level's theme colour
+    if (_preWarp) {
+      const { release } = _preWarp; // already running since the scorecard lifted — hand it the bg gate
+      _preWarp = null;
+      Promise.resolve(bgShown).then(release, release);
+    } else {
+      playLevelWarpTrial({ color: _levelPrimaryColor, holdUntil: bgShown }); // tunnel takes the level's theme colour
+    }
     {
       const startSfx = trial("sfxLevelStart");
       if (startSfx && startSfx !== "none") playGameSfx(startSfx, 0.9, { important: true });
@@ -22912,6 +23338,13 @@ function initGalaxyCanvas() {
     for (let i = sim.particles.length - 1; i >= 0; i -= 1) {
       const p = sim.particles[i];
       p.life += dt;
+      // 2026-11-01: optional exponential drag (per second) — kill debris punches out hard, then
+      // brakes and hangs as drifting dust instead of sliding off at constant speed.
+      if (p.drag) {
+        const f = Math.exp(-p.drag * (dt / 1000));
+        p.vx *= f;
+        p.vy *= f;
+      }
       p.x += p.vx * (dt / 1000);
       p.y += p.vy * (dt / 1000);
       if (p.life >= p.ttl) {
@@ -24949,15 +25382,10 @@ function initGalaxyCanvas() {
       } else {
         const hitIndex = findHitAsteroidIndex(point.x, point.y);
         const hitAsteroid = hitIndex >= 0 ? sim.asteroids[hitIndex] : null;
-        if (hitAsteroid && hitAsteroid.kind >= 2 && startStroidToss(hitIndex, point, event.pointerId, now)) {
+        // 2026-11-01 (playtest): all stroid sizes are grabbable — the old "Smaller Stroids cannot be
+        // grabbed" coaching branch is retired.
+        if (hitAsteroid && startStroidToss(hitIndex, point, event.pointerId, now)) {
           mode = "stroidToss";
-        } else if (tutorialSmallGrabHintEnabled && hitAsteroid && hitAsteroid.kind === 1) {
-          // Coach this only during the stroid-toss lesson. Everywhere else, small-stroid taps
-          // fall through silently to the laser path so Training/Practice stay non-chatty.
-          if (now - _spcGrabSmallAt > 8000) {
-            _spcGrabSmallAt = now;
-            spcVO("grab_small", "Smaller **Stroids** cannot be grabbed, Cadet.", "idle_smirk");
-          }
         }
       }
     }
@@ -25269,6 +25697,9 @@ function initGalaxyCanvas() {
   function onGameHide() {
     if (_gameHidden) return;
     _gameHidden = true;
+    // 2026-11-01: an alarm / call banner goes inactive WITHOUT visibilitychange — save the music
+    // state here too, or resumeBackgroundMusic() bails on return and the game stays silent.
+    saveBackgroundMusicState();
     // 2026-06-09: clear any in-progress plasma net (a mid-drag gesture left a stuck cage on return).
     if (plasmaCage.active) releasePlasmaCage(performance.now());
     setPlasmaOverlayVisible(false);
@@ -25315,7 +25746,14 @@ function initGalaxyCanvas() {
     const htmlNode = audioEngine.currentMusicHtml?.node;
     if (htmlNode && _bgMusicHtmlVolBeforePause != null) htmlNode.volume = _bgMusicHtmlVolBeforePause;
     _bgMusicHtmlVolBeforePause = null;
+    // 2026-11-01: same retry ladder as an ad close — iOS hands the audio session back a beat after
+    // an alarm/snooze, so the first play() can be refused. Then health-check the ctx.
+    audioEngine.resume();
     resumeBackgroundMusic();
+    setTimeout(() => { if (!_gameHidden) { audioEngine.resume(); resumeBackgroundMusic(); } }, 400);
+    setTimeout(() => { if (!_gameHidden) { audioEngine.resume(); resumeBackgroundMusic(); } }, 1200);
+    audioEngine._verifyOnGesture = true;
+    setTimeout(() => audioEngine.verifyAlive(), 1400);
     if (galaxyView.hidden) return;
     setPlasmaOverlayVisible(false); // safety: never return with a stuck cage overlay
     if (isSlotActive()) slotResumeFromBackground();

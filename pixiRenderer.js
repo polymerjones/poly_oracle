@@ -18,6 +18,14 @@ const pixiRenderer = (() => {
   let bombContainer = null;
   let landmineContainer = null;
   let debrisContainer = null;
+  // 2026-11-01 (playtest: small stroids "just disappear"): stroid kill SHARDS — real rock chunks cut
+  // from the dying stroid's own texture, blasted out hard then braked by drag so they hang as dust.
+  let shardContainer = null;
+  const shardPool = [];
+  const activeShards = [];
+  const shardTexCache = new Map(); // `${texKey}:${q}` → sub-texture (a quadrant-ish chunk)
+  const SHARD_MAX = 48;
+  let _shardLastT = 0;
   let shrapnelContainer = null;
   let flashContainer = null;
   // 2026-10-25: the level-timer perimeter used its own full-screen 2D canvas (z2) that was cleared
@@ -102,6 +110,62 @@ const pixiRenderer = (() => {
       img.onerror = () => resolve(null);
       img.src = baseSrc;
     });
+  }
+
+  // 2026-11-01: WIREFRAME MOCKUP (Paul's "Tron" B/W cheat — dev-only ?wire=B|C for now). A stroid's
+  // texture → Sobel edges (luminance + silhouette) drawn as white lines with a soft glow, transparent
+  // elsewhere. Built once per texture key, lazily on first use.
+  const wireTexCache = new Map();
+  function wireTextureFor(texKey, tex) {
+    if (wireTexCache.has(texKey)) return wireTexCache.get(texKey);
+    wireTexCache.set(texKey, null); // in-flight / failed → fall back to the normal texture
+    try {
+      const src = tex?.baseTexture?.resource?.source;
+      if (!src) return null;
+      const w = src.naturalWidth || src.width;
+      const h = src.naturalHeight || src.height;
+      if (!w || !h) return null;
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      const c = cv.getContext('2d');
+      c.drawImage(src, 0, 0);
+      const img = c.getImageData(0, 0, w, h);
+      const px = img.data;
+      const lum = new Float32Array(w * h);
+      for (let i = 0, j = 0; i < px.length; i += 4, j += 1) {
+        const a = px[i + 3] / 255;
+        // silhouette dominates; surface detail only contributes its strongest facet edges
+        lum[j] = a * 1.0 + ((0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]) / 255) * a * 0.32;
+      }
+      const out = c.createImageData(w, h);
+      const o = out.data;
+      for (let y = 1; y < h - 1; y += 1) {
+        for (let x = 1; x < w - 1; x += 1) {
+          const k = y * w + x;
+          const gx = -lum[k - w - 1] - 2 * lum[k - 1] - lum[k + w - 1] + lum[k - w + 1] + 2 * lum[k + 1] + lum[k + w + 1];
+          const gy = -lum[k - w - 1] - 2 * lum[k - w] - lum[k - w + 1] + lum[k + w - 1] + 2 * lum[k + w] + lum[k + w + 1];
+          const e = Math.min(1, Math.hypot(gx, gy) * 1.1);
+          const a = e > 0.42 ? Math.min(1, e * 1.3) : 0;
+          const q = k * 4;
+          o[q] = 255; o[q + 1] = 255; o[q + 2] = 255; o[q + 3] = a * 255;
+        }
+      }
+      const lines = document.createElement('canvas');
+      lines.width = w; lines.height = h;
+      lines.getContext('2d').putImageData(out, 0, 0);
+      c.clearRect(0, 0, w, h);
+      c.filter = `blur(${Math.max(2, Math.round(w / 48))}px)`;
+      c.globalAlpha = 0.9;
+      c.drawImage(lines, 0, 0); // glow
+      c.filter = 'none';
+      c.globalAlpha = 1;
+      c.drawImage(lines, 0, 0); // crisp lines on top
+      const t = PIXI.Texture.from(cv);
+      wireTexCache.set(texKey, t);
+      return t;
+    } catch {
+      return null;
+    }
   }
 
   let flashFilter = null;
@@ -275,6 +339,7 @@ const pixiRenderer = (() => {
         tint: true,
       });
       shrapnelContainer = new PIXI.Container();
+      shardContainer = new PIXI.Container();
       flashContainer = new PIXI.Container();
 
       app.stage.addChild(starContainer);
@@ -282,6 +347,7 @@ const pixiRenderer = (() => {
       app.stage.addChild(lightningRingContainer);
       app.stage.addChild(asteroidContainer);
       app.stage.addChild(ufoContainer);
+      app.stage.addChild(shardContainer);
       app.stage.addChild(particleContainer);
       app.stage.addChild(plasmaContainer);
       app.stage.addChild(bombContainer);
@@ -381,7 +447,9 @@ const pixiRenderer = (() => {
       }
 
       const texKey = a.spriteKey || 'roid01';
-      const tex = textures[texKey] || textures.roid01 || PIXI.Texture.WHITE;
+      let tex = textures[texKey] || textures.roid01 || PIXI.Texture.WHITE;
+      const wm = window.POLY_WIRE_MODE;
+      if (wm === 'B' || wm === 'C') tex = wireTextureFor(texKey, tex) || tex;
       if (sprite.texture !== tex) sprite.texture = tex;
 
       sprite.x = a.x;
@@ -1226,6 +1294,93 @@ const pixiRenderer = (() => {
     }
   }
 
+  function shardTexture(texKey, q) {
+    const base = textures[texKey] || textures.roid01;
+    if (!base || base === PIXI.Texture.WHITE || !base.baseTexture) return null;
+    const ck = `${texKey}:${q}`;
+    let t = shardTexCache.get(ck);
+    if (t) return t;
+    // Cut one of 6 jagged-ish chunks from the inner part of the rock (avoids the transparent rim).
+    const fr = base.frame;
+    const cw = fr.width * 0.34;
+    const ch = fr.height * 0.34;
+    const cols = [0.16, 0.5, 0.33];
+    const rows = [0.2, 0.46];
+    const cx = fr.x + fr.width * cols[q % 3];
+    const cy = fr.y + fr.height * rows[(q / 3) | 0];
+    t = new PIXI.Texture(base.baseTexture, new PIXI.Rectangle(cx, cy, cw, ch));
+    shardTexCache.set(ck, t);
+    return t;
+  }
+
+  // opts: { texKey, count, minSize, maxSize, minSpeed, maxSpeed, ttl, drag }
+  function spawnStroidShards(x, y, opts = {}) {
+    if (!shardContainer) return;
+    const count = Math.min(opts.count || 5, SHARD_MAX - activeShards.length);
+    const now = performance.now();
+    for (let i = 0; i < count; i += 1) {
+      const q = (Math.random() * 6) | 0;
+      const tex = shardTexture(opts.texKey || 'roid01', q);
+      const sprite = shardPool.pop() || new PIXI.Sprite();
+      sprite.texture = tex || PIXI.Texture.WHITE;
+      sprite.tint = opts.tint != null ? opts.tint : (tex ? 0xffffff : 0x9aa4b0); // ice-blue while frozen
+      sprite.anchor.set(0.5);
+      const size = (opts.minSize || 6) + Math.random() * ((opts.maxSize || 11) - (opts.minSize || 6));
+      sprite.width = size * (0.8 + Math.random() * 0.5);
+      sprite.height = size * (0.7 + Math.random() * 0.5);
+      // spread angles evenly with jitter so the burst reads as an outward blast, not a clump
+      const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 1.1;
+      const speed = (opts.minSpeed || 260) + Math.random() * ((opts.maxSpeed || 520) - (opts.minSpeed || 260));
+      sprite.x = x;
+      sprite.y = y;
+      sprite.rotation = Math.random() * Math.PI * 2;
+      sprite.alpha = 1;
+      sprite.visible = true;
+      shardContainer.addChild(sprite);
+      activeShards.push({
+        sprite,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        spin: (Math.random() - 0.5) * 22,
+        drag: opts.drag || 4.2,
+        start: now,
+        ttl: (opts.ttl || 780) * (0.8 + Math.random() * 0.4),
+        sx: sprite.scale.x,
+        sy: sprite.scale.y,
+      });
+    }
+  }
+
+  function updateShards(now) {
+    if (!shardContainer) return;
+    const dt = _shardLastT ? Math.min(0.05, Math.max(0, (now - _shardLastT) / 1000)) : 0.016;
+    _shardLastT = now;
+    for (let i = activeShards.length - 1; i >= 0; i -= 1) {
+      const d = activeShards[i];
+      const t = (now - d.start) / d.ttl;
+      if (t >= 1) {
+        d.sprite.visible = false;
+        shardContainer.removeChild(d.sprite);
+        shardPool.push(d.sprite);
+        activeShards[i] = activeShards[activeShards.length - 1];
+        activeShards.pop();
+        continue;
+      }
+      const f = Math.exp(-d.drag * dt);
+      d.vx *= f;
+      d.vy *= f;
+      d.spin *= Math.exp(-1.6 * dt);
+      d.sprite.x += d.vx * dt;
+      d.sprite.y += d.vy * dt;
+      d.sprite.rotation += d.spin * dt;
+      // full opacity while flying, then fade + crumble (shrink) over the last 45%
+      const k = t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45;
+      d.sprite.alpha = k;
+      const sc = 0.55 + 0.45 * k;
+      d.sprite.scale.set(d.sx * sc, d.sy * sc);
+    }
+  }
+
   function updateBombEffects(now) {
     if (!bombGraphics) return;
     bombGraphics.clear();
@@ -1720,6 +1875,7 @@ const pixiRenderer = (() => {
     drawStars(sim.stars, now, prefersReducedMotion, frameBudgetExceeded);
     syncAsteroids(sim.asteroids);
     syncUFO(ufoState);
+    updateShards(now);
     syncParticles(sim.particles);
     syncWarpRings(sim.warpRings, frameBudgetExceeded);
     syncLightningRings(sim.lightningRings || [], frameBudgetExceeded);
@@ -1757,6 +1913,12 @@ const pixiRenderer = (() => {
     bombContainer = null;
     landmineContainer = null;
     debrisContainer = null;
+    shardContainer = null;
+    activeShards.length = 0;
+    shardPool.length = 0;
+    for (const t of shardTexCache.values()) { try { t.destroy(false); } catch { /* ignore */ } }
+    shardTexCache.clear();
+    _shardLastT = 0;
     shrapnelContainer = null;
     flashContainer = null;
     timerGraphics = null;
@@ -1805,7 +1967,7 @@ const pixiRenderer = (() => {
     _plasmaBorderFlash = 0;
   }
 
-  return { init, draw, resize, destroy, setTimerPerimeter, syncOverlays, triggerBombDetonation, triggerShockwave, triggerPlasmaRectFlash };
+  return { init, draw, resize, destroy, setTimerPerimeter, syncOverlays, triggerBombDetonation, triggerShockwave, triggerPlasmaRectFlash, spawnStroidShards };
 })();
 
 window.pixiRenderer = pixiRenderer;

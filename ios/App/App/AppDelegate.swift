@@ -40,7 +40,27 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     @objc private func handleAudioInterruption(_ note: Notification) {
         guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
-        if type == .ended { reactivateAudioSession() }
+        if type == .ended {
+            reactivateAudioSession()
+            notifyWebAudioInterruptionEnded()
+        }
+    }
+
+    // 2026-11-01 (playtest: alarm + snooze left the game with no music): an alarm/call banner only
+    // makes the app inactive — the page never hides, so JS has no visibilitychange to recover on.
+    // Tell the web side the session is back so it re-plays the music iOS paused.
+    private func notifyWebAudioInterruptionEnded() {
+        DispatchQueue.main.async {
+            let js = "window.dispatchEvent(new Event('polyAudioInterruptionEnded'))"
+            for scene in UIApplication.shared.connectedScenes {
+                guard let windowScene = scene as? UIWindowScene else { continue }
+                for win in windowScene.windows {
+                    if let vc = win.rootViewController as? CAPBridgeViewController {
+                        vc.bridge?.webView?.evaluateJavaScript(js, completionHandler: nil)
+                    }
+                }
+            }
+        }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

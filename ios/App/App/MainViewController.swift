@@ -23,6 +23,13 @@ class MainViewController: CAPBridgeViewController {
     /// typing into inputs, so script.js re-enables it for the duration of input focus.
     override open func webViewConfiguration(for instanceConfiguration: InstanceConfiguration) -> WKWebViewConfiguration {
         let config = super.webViewConfiguration(for: instanceConfiguration)
+        // 2026-11-01 (Paul): cheat codes are free on TestFlight. TestFlight (and Xcode) installs carry a
+        // sandbox receipt; App Store installs carry "receipt" — so promoting this same build to the
+        // store turns free cheats off with no code change. Injected before the page's scripts run.
+        if Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt" {
+            config.userContentController.addUserScript(WKUserScript(
+                source: "window.__polyTestFlight=true;", injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
         if #available(iOS 14.5, *) {
             config.preferences.isTextInteractionEnabled = false
         }

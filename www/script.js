@@ -566,7 +566,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-11-01 11:14";
+const BUILD_TS = "2026-11-01 14:05";
 // 2026-11-01: audio diagnostics → native console (MainViewController "polyLog" → NSLog), readable from
 // the Mac with `devicectl device process launch --console` — no Web Inspector or on-screen copy needed.
 function nativeLog(msg) {
@@ -662,6 +662,7 @@ function applyWireLook(mode) {
   mode = String(mode || "").toUpperCase();
   if (!WIRE_LOOKS.includes(mode)) mode = "";
   window.POLY_WIRE_MODE = mode === "V" ? "C" : mode === "R" ? "A" : mode; // texture/grid behaviour
+  window.POLY_LOOK = mode; // the real look (perf chip buckets by it)
   if (!document.getElementById("wireMockStyles")) {
     const st = document.createElement("style");
     st.id = "wireMockStyles";
@@ -1611,8 +1612,27 @@ function consumeArmedCheatsForRun() {
   const active = getArmedCheats();
   const off = getCheatsSwitchedOff();
   activeRunCheats = Object.fromEntries(Object.keys(active).filter((id) => !off[id]).map((id) => [id, true]));
+  if (devInfiniteWeaponsOn()) for (const id of DEV_INF_WEAPON_IDS) activeRunCheats[id] = true;
   writeCheatJson(STORAGE_RUN_CHEATS, activeRunCheats);
   return activeRunCheats;
+}
+
+// 2026-11-01 (Paul): Dev Mode "Infinite Weapons" switch, on by default — unlimited missiles, bombs,
+// quad and plasma for testing. Rides the cheat flags, so a run with it on never posts a score.
+const STORAGE_DEV_INF_WEAPONS = "poly_oracle_dev_inf_weapons";
+const DEV_INF_WEAPON_IDS = ["missiles", "bombs", "quad", "plasma"];
+function devInfiniteWeaponsOn() {
+  if (!devModeOn) return false;
+  try { return localStorage.getItem(STORAGE_DEV_INF_WEAPONS) !== "0"; } catch { return true; }
+}
+// Re-apply to the run in progress: dev switch OR the player's own earned+switched-on cheat.
+function applyDevInfiniteWeapons() {
+  const armed = getArmedCheats();
+  const off = getCheatsSwitchedOff();
+  const dev = devInfiniteWeaponsOn();
+  for (const id of DEV_INF_WEAPON_IDS) syncRunCheat(id, dev || (!!armed[id] && !off[id]));
+  const b = document.getElementById("btnDevInfWeapons");
+  if (b) b.textContent = `Infinite Weapons: ${dev ? "On" : "Off"}`;
 }
 
 function runHasGameplayCheats() {
@@ -1641,7 +1661,10 @@ function setDevModeOn(on) {
   { const wl = document.getElementById("btnWireLook"); if (wl) wl.style.display = btnFxLab?.style.display ?? "none"; }
   if (btnResetTips) btnResetTips.style.display = btnFxLab?.style.display ?? "none";
   { const fr = document.getElementById("btnFactoryReset"); if (fr) fr.style.display = btnFxLab?.style.display ?? "none"; }
+  { const iw = document.getElementById("btnDevInfWeapons"); if (iw) iw.style.display = btnFxLab?.style.display ?? "none"; }
+  try { applyDevInfiniteWeapons(); } catch { /* boot / TDZ */ }
   applyTrials(); // Dev Mode on → lab picks go live; off → back to the shipped defaults
+  try { galaxyCanvasController?.syncArcadeMenuButtons?.(); } catch { /* boot / TDZ */ }
 }
 
 function formatTimeLeft(msLeft) {
@@ -1750,6 +1773,17 @@ function renderCheatCodesPanel() {
     } else if (!native) {
       btn.textContent = "Available in the app";
       btn.disabled = true;
+    } else if (window.__polyTestFlight === true) {
+      // 2026-11-01: TestFlight builds unlock cheats for free (native sets the flag only for sandbox
+      // receipts — App Store installs never see it). Same grant path as finishing the ads.
+      btn.textContent = "Unlock free (beta)";
+      btn.addEventListener("click", () => {
+        for (let i = 0; i < CHEAT_ADS_REQUIRED; i += 1) if (recordCheatAd(cheat.id)) break;
+        celebrateCheatUnlock();
+        triggerHapticNotification(hapticNotificationType.Success);
+        if (cheat.section !== "powerups") galaxyCanvasController?.syncArcadeMenuButtons?.();
+        renderCheatCodesPanel();
+      });
     } else {
       // One tap plays the whole ad pod (the remaining ads back to back). A skipped ad or a
       // failed load stops the pod; finished ads still count toward the 24h progress.
@@ -1903,6 +1937,10 @@ function wireDevModeEntry() {
   // settings, seen-flags) back to a first-install state and reload. Keeps only the dev-device flags.
   // Two taps (no confirm() dialog — those can wedge the WKWebView). Native caches (WKWebView HTTP
   // cache, compiled shaders) can't be cleared from JS; delete the app to test those.
+  document.getElementById("btnDevInfWeapons")?.addEventListener("click", () => {
+    try { localStorage.setItem(STORAGE_DEV_INF_WEAPONS, devInfiniteWeaponsOn() ? "0" : "1"); } catch { /* ignore */ }
+    applyDevInfiniteWeapons();
+  });
   const btnFactoryReset = document.getElementById("btnFactoryReset");
   let factoryArmedAt = 0;
   btnFactoryReset?.addEventListener("click", () => {
@@ -1913,7 +1951,7 @@ function wireDevModeEntry() {
       setTimeout(() => { if (performance.now() - factoryArmedAt >= 3000) btnFactoryReset.textContent = "Factory Reset"; }, 3100);
       return;
     }
-    const KEEP = ["poly_oracle_show_build", "poly_oracle_test_ads"];
+    const KEEP = ["poly_oracle_show_build", "poly_oracle_test_ads", STORAGE_DEV_INF_WEAPONS];
     try {
       const kept = KEEP.map((k) => [k, localStorage.getItem(k)]).filter(([, v]) => v != null);
       localStorage.clear();
@@ -2018,7 +2056,8 @@ function recordChaosShift() {
 // Single source of truth for the Level Select gate: forever unlocked once the player beats the
 // game (either historical flag) or earns the orb cheat. DEBUG_FORCE_LEVEL_SELECT still overrides.
 function isLevelSelectUnlocked() {
-  return DEBUG_FORCE_LEVEL_SELECT || hasArcadeWon() || hasBeatenGame() || hasCheatLevelSelect();
+  // 2026-11-01: Dev Mode always has Level Select (Paul) — players still need one of the real unlocks.
+  return DEBUG_FORCE_LEVEL_SELECT || devModeOn || hasArcadeWon() || hasBeatenGame() || hasCheatLevelSelect();
 }
 
 const revealModes = [
@@ -2589,6 +2628,7 @@ const TRIALS_KEY = "poly_oracle_trials";
 const TRIAL_DEFAULTS = {
   // 2026-10-25: Paul's FX Lab picks baked in (bolt / tunnel / glitch / holo / star / level_up / reveal_flash).
   laser: "bolt", warp: "tunnel", titles: "glitch", cards: "holo", buttons: "star", cheatFx: "confetti", logoIdle: "shimmer",
+  comboStyle: "mixed", // 2026-11-01: placeholder until Paul picks (he liked chrome + comic)
   sfxLaser: "advfire", sfxPulse: "default", sfxBomb: "default", sfxKill: "default", sfxCheat: "level_up", sfxLevelStart: "reveal_flash",
 };
 // [key, section, label, [[value, chip label], ...], optional preview]
@@ -2599,6 +2639,7 @@ const TRIAL_ROWS = [
   ["cards", "look", "MENU CARDS", [["plain", "PLAIN"], ["holo", "HOLO FOIL"]]],
   ["buttons", "look", "MENU BUTTONS", [["plain", "PLAIN"], ["star", "STAR BORDER"]]],
   ["logoIdle", "look", "STROIDS LOGO IDLE (menu framerate A/B)", [["shimmer", "LIVING SHIMMER"], ["static", "STATIC (CHEAPEST)"]]],
+  ["comboStyle", "look", "COMBO TEXT (earn a combo to see it)", [["classic", "OLD"], ["chrome", "ARCADE CHROME"], ["comic", "COMIC PUNCH"], ["neon", "NEON TUBE"], ["mixed", "CHROME + COMIC FOR BIG"]]],
   ["cheatFx", "look", "CHEAT UNLOCK FX", [["off", "OFF"], ["confetti", "NUCLEAR HOLO CONFETTI"]], "confetti"],
   ["sfxLaser", "sound", "LASER FIRE", [["advfire", "ADVFIRE LIGHT"], ["lab_advfire_full", "ADVFIRE FULL"], ["lab_zap2", "ZAP 2"], ["lab_zap5", "ZAP 5"], ["lab_zap6", "ZAP 6"], ["lab_maybeshot", "SHOT"]]],
   ["sfxPulse", "sound", "PULSE CANNON SHOT", [["default", "FIRE 1/2"], ["lab_zap5", "ZAP 5"], ["smallblast", "SMALL BLAST"], ["lab_zap6", "ZAP 6"]]],
@@ -5014,9 +5055,13 @@ function iosRouteElement(node) {
   if (!ctx || ctx.state !== "running" || !audioEngine.unlocked) return null;
   try {
     const gain = ctx.createGain();
+    // 2026-11-01 (Paul: "muffled speaker crack" as the theme starts): routing an element that's
+    // already playing (first tap unlocks the ctx → applyUserVolumes) hands its output from the native
+    // player to Web Audio mid-waveform. Start that hand-off silent and let setElementLevel glide it up.
+    gain.gain.value = 0;
     ctx.createMediaElementSource(node).connect(gain);
     gain.connect(ctx.destination);
-    node._iosRoute = { ctx, gain };
+    node._iosRoute = { ctx, gain, fresh: true };
     return node._iosRoute;
   } catch {
     return null;
@@ -5037,7 +5082,19 @@ function setElementLevel(node, level, userGain) {
   const v = Math.max(0, Math.min(1, level * g));
   const elVol = route ? 1 : v;
   if (node._lvlVol !== elVol) { node._lvlVol = elVol; _mediaVolume.set.call(node, elVol); }
-  if (route && route.gain.gain.value !== v) route.gain.gain.value = v;
+  if (route && route._target !== v) {
+    // Glide, never jump: raw .value steps (per-frame fades/ducks) click on iOS. A fresh route fades
+    // in over ~60ms; later changes track within ~15ms, which is inaudible but still feels instant.
+    route._target = v;
+    const p = route.gain.gain;
+    const t = route.ctx.currentTime;
+    try {
+      p.cancelScheduledValues(t);
+      p.setValueAtTime(p.value, t);
+      p.setTargetAtTime(v, t, route.fresh ? 0.02 : 0.005);
+    } catch { p.value = v; }
+    route.fresh = false;
+  }
 }
 // HTML music node: code keeps writing its own levels (ducks/fades); the element plays them × MUSIC.
 function scaleMusicElementVolume(node) {
@@ -10602,6 +10659,15 @@ function initGalaxyCanvas() {
   comboBannerCanvas.style.zIndex = "9500";
   comboBannerCanvas.style.inset = "auto";
   (document.getElementById("commanderHUD")?.parentNode || document.body).appendChild(comboBannerCanvas);
+  // 2026-11-01 (Part B): baked combo banners. Each banner is drawn ONCE (comboBanner.js) into its own
+  // small canvas inside this host and animated with the Web Animations API (transform + opacity only,
+  // so the compositor runs it — zero per-frame JS, no full-screen clear/upload). The host mirrors the
+  // play canvas geometry like comboBannerCanvas does. Style = trial("comboStyle"); "classic" keeps the
+  // old per-frame canvas path for A/B.
+  const comboBannerHost = document.createElement("div");
+  comboBannerHost.setAttribute("aria-hidden", "true");
+  comboBannerHost.style.cssText = "position:fixed;pointer-events:none;z-index:9500;overflow:visible;contain:layout;";
+  comboBannerCanvas.after(comboBannerHost);
 
   // 2026-07-03: Plasma net Manual/Auto toggle + Manual-mode DETONATE button. Same top-most layer trick
   // as the combo banner (sibling of #commanderHUD, z-index 9500) so it stays visible AND tappable even
@@ -10985,6 +11051,12 @@ function initGalaxyCanvas() {
         startArcadeAtLevel(level);
       },
       isActive: () => cockpitApplied,
+      // 2026-11-01: fire a combo banner (headless banner screenshots / perf).
+      combo(i = 0, style) {
+        const [label, points, colors] = COMBO_PREBAKE[i % COMBO_PREBAKE.length];
+        if (style) trials.comboStyle = style;
+        awardCombo({ key: "lab", label, points, colors, x: sim.width / 2, y: sim.height * 0.36 });
+      },
       playfield: () => ({ ...playfield }),
       // 2026-10-27: store-screenshot staging (tools: headless capture) — grant/spawn powerups, drop a
       // bomb, read rock positions. Lab-only (?cockpitLab=1), never reachable in a normal session.
@@ -12889,6 +12961,7 @@ function initGalaxyCanvas() {
     // A combo banner mid-animation froze on its body-level canvas (z 9500) over the cabinet — the
     // paused level loop is what clears it. Same wipe showModeSelect does.
     comboBanners.length = 0;
+    clearBakedComboBanners();
     if (comboBannerCtx) { comboBannerCtx.clearRect(0, 0, sim.width, sim.height); _comboBannerDirty = false; }
     slotOverlay = buildSlotOverlay();
     slotOverlay.classList.add("cabinet-loading");
@@ -14773,6 +14846,7 @@ function initGalaxyCanvas() {
     comboState.pyroAwarded2 = false;
     comboState.pyroAwarded3 = false;
     comboBanners.length = 0;
+    clearBakedComboBanners();
     comboFxParticles.length = 0;
     smallStroidBursts.length = 0;
     mediumStroidBursts.length = 0;
@@ -14992,6 +15066,76 @@ function initGalaxyCanvas() {
     drawCtx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
   }
 
+  // ── Baked combo banners (2026-11-01, Part B) ──
+  // "mixed" = Arcade Chrome for normal combos, Comic Punch for the big ones (>= 1500 pts).
+  function comboStyleFor(points) {
+    const v = trial("comboStyle");
+    if (v === "mixed") return points >= 1500 ? "comic" : "chrome";
+    return v;
+  }
+  const _bakedComboCache = new Map(); // `${style}|${label}|${points}|${w}` → baked
+  function getBakedCombo(style, label, points, colors) {
+    const maxW = Math.max(220, Math.min(sim.width - 28, 460));
+    const dpr = Math.min(3, window.devicePixelRatio || 2);
+    const k = `${style}|${label}|${points}|${Math.round(maxW)}|${dpr}`;
+    let b = _bakedComboCache.get(k);
+    if (!b) {
+      b = window.PolyComboBanner.bake({ label, points, colors, style, maxW, dpr });
+      if (_bakedComboCache.size > 24) _bakedComboCache.clear();
+      _bakedComboCache.set(k, b);
+    }
+    return b;
+  }
+  // Pre-bake every combo in idle time so the award frame only clones a bitmap.
+  const COMBO_PREBAKE = [
+    ["MARKSMAN COMBO", 500, ["80,220,255", "255,255,255"]], ["NET-UFO-NET COMBO!", 1500, ["0,255,209", "255,85,255"]],
+    ["XTRA PYRO COMBO", 2000, ["255,70,20", "255,220,80"]], ["PYRO COMBO", 1000, ["255,120,30", "255,236,120"]],
+    ["FREEZE BERSERK COMBO", 1000, ["150,225,255", "255,255,255"]], ["BIG BOMB COMBO", 500, ["255,215,0", "255,90,90"]],
+  ];
+  function prebakeComboBanners() {
+    if (!window.PolyComboBanner || trial("comboStyle") === "classic") return;
+    window.PolyComboBanner.loadFonts().then(() => {
+      const idle = window.requestIdleCallback || ((f) => setTimeout(f, 200));
+      COMBO_PREBAKE.forEach(([label, pts, colors], i) => setTimeout(() => idle(() => {
+        try { getBakedCombo(comboStyleFor(pts), label, pts, colors); } catch { /* ignore */ }
+      }), 400 + i * 120));
+    });
+  }
+  function clearBakedComboBanners() {
+    while (comboBannerHost.firstChild) comboBannerHost.firstChild.remove();
+  }
+  // Returns true when the baked path took the banner (else caller falls back to the classic canvas).
+  function showBakedComboBanner(style, label, points, colors, cx, cy) {
+    if (!window.PolyComboBanner || style === "classic") return false;
+    let baked;
+    try { baked = getBakedCombo(style, label, points, colors); } catch { return false; }
+    const el = document.createElement("canvas");
+    el.width = baked.canvas.width;
+    el.height = baked.canvas.height;
+    el.getContext("2d").drawImage(baked.canvas, 0, 0);
+    const x = clamp(cx, baked.width / 2 + 6, Math.max(baked.width / 2 + 6, sim.width - baked.width / 2 - 6));
+    el.style.cssText = `position:absolute;left:${x - baked.width / 2}px;top:${cy - baked.height / 2}px;`
+      + `width:${baked.width}px;height:${baked.height}px;will-change:transform,opacity;`;
+    while (comboBannerHost.childElementCount >= COMBO_MAX_BANNERS) comboBannerHost.firstChild.remove();
+    comboBannerHost.appendChild(el);
+    const frames = [];
+    const N = prefersReducedMotion ? 2 : 28;
+    for (let i = 0; i <= N; i += 1) {
+      const t = i / N;
+      const p = window.PolyComboBanner.pose(style, t);
+      const sc = prefersReducedMotion ? 1 : p.scale;
+      frames.push({
+        offset: t,
+        opacity: p.alpha,
+        transform: `translateY(${p.dy.toFixed(1)}px) rotate(${p.rot.toFixed(3)}rad) scale(${sc.toFixed(3)})`,
+      });
+    }
+    const anim = el.animate(frames, { duration: COMBO_BANNER_TTL_MS, easing: "linear", fill: "forwards" });
+    anim.onfinish = () => el.remove();
+    setTimeout(() => el.remove(), COMBO_BANNER_TTL_MS + 400); // belt + braces if onfinish never fires
+    return true;
+  }
+
   function playComboSfx(key) {
     const sfxKey = `combo_${key}`;
     if (!GAME_SFX[sfxKey]) return;
@@ -15003,7 +15147,10 @@ function initGalaxyCanvas() {
     // already "very loud," is left as-is.
     if (isIPadClass) { v1 = Math.min(1, v1 * 1.7); v2 = Math.min(1, v2 * 1.7); }
     playGameSfx(sfxKey, v1, { rate: 1.45, preservePitch: true, important: true });
-    setTimeout(() => playGameSfx(sfxKey, v2, { rate: 1.55, preservePitch: true, important: true }), 70);
+    // 2026-11-01 (Part B): the 70ms echo layer is gone with the baked banners — it spun up a second
+    // pitch-preserved <audio> element on the award frame (perf chip: 130ms combo hitches on L12).
+    // "classic" combo text keeps it for the A/B.
+    if (trial("comboStyle") === "classic") setTimeout(() => playGameSfx(sfxKey, v2, { rate: 1.55, preservePitch: true, important: true }), 70);
   }
 
   function awardCombo({ key, label, points, x, y, colors = ["0,255,209", "186,110,255"] }) {
@@ -15041,7 +15188,7 @@ function initGalaxyCanvas() {
     addArcadeScore(points);
     comboBonusThisLevel += points;
     comboCountThisLevel += 1;
-    comboBanners.push({
+    if (!showBakedComboBanner(comboStyleFor(points), label, points, colors, cx, cy)) comboBanners.push({
       key,
       label,
       points,
@@ -15653,6 +15800,7 @@ function initGalaxyCanvas() {
     { const wl = document.getElementById("btnWireLook"); if (wl) wl.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none"; }
     if (btnResetTips) btnResetTips.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
     { const fr = document.getElementById("btnFactoryReset"); if (fr) fr.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none"; }
+    { const iw = document.getElementById("btnDevInfWeapons"); if (iw) iw.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none"; }
     if (btnCheatCodes) btnCheatCodes.style.display = showRoot ? "" : "none";
     if (btnSettings) btnSettings.style.display = showRoot ? "" : "none";
     if (cheatCodesPanel) {
@@ -18481,6 +18629,10 @@ function initGalaxyCanvas() {
       comboBannerCanvas.height = galaxyPlayCanvas.height;
       comboBannerCtx.setTransform(sim.dpr, 0, 0, sim.dpr, 0, 0);
     }
+    comboBannerHost.style.left = galaxyPlayCanvas.style.left;
+    comboBannerHost.style.top = galaxyPlayCanvas.style.top;
+    comboBannerHost.style.width = galaxyPlayCanvas.style.width;
+    comboBannerHost.style.height = galaxyPlayCanvas.style.height;
   }
 
   function setPlasmaOverlayVisible(visible) {
@@ -20364,6 +20516,7 @@ function initGalaxyCanvas() {
     fdBegin(ARCADE_LEVELS[clamp(idx, 0, ARCADE_LEVELS.length - 1)]?.level || 0);
     lvlTrace(`[lvltrans] startLevel entry requestedIndex=${idx}`);
     bootTrace(`startLevel ${idx + 1}`);
+    try { prebakeComboBanners(); } catch { /* never block a level start */ }
     stuntActive = false; // a real arcade level is never a stunt session
     practiceEndless = false; // ...nor an endless practice session (Stunt Practice re-sets this after)
     commBoxController.setLevelEndLock(false); // 2026-06-21 (Item 1b): next level live — end the level-end VO lock
@@ -22411,7 +22564,7 @@ function initGalaxyCanvas() {
           const d = t - this.last;
           const name = tutorialPhase >= 0 ? (TUTORIAL_PHASES[tutorialPhase]?.id || `p${tutorialPhase}`)
             : practiceEndless ? "practice"
-              : engineMode === "arcade" ? `L${ARCADE_LEVELS[currentLevelIndex]?.level ?? "?"}` : "other";
+              : engineMode === "arcade" ? `L${ARCADE_LEVELS[currentLevelIndex]?.level ?? "?"}${window.POLY_LOOK ? ` ${WIRE_LOOK_LABEL[window.POLY_LOOK].replace(/^Poly|^Virtual Poly$/, (m) => (m === "Poly" ? "" : "vpoly")).toLowerCase()}` : ""}` : "other";
           this.cur = name;
           const ev = this.evName && performance.now() < this.evUntil + d ? this.evName : "";
           const add = (b) => { b.n += 1; b.sum += d; if (d > 33.4) b.o33 += 1; if (d > 50) b.o50 += 1; if (d > b.max) b.max = d; };
@@ -22443,7 +22596,7 @@ function initGalaxyCanvas() {
       const row = (name) => {
         const b = this.buckets.get(name);
         const fps = b.sum ? (1000 * b.n / b.sum).toFixed(0) : "-";
-        return `${name.padEnd(9).slice(0, 9)} ${String(fps).padStart(3)}fps >33:${String(b.o33).padStart(3)} >50:${String(b.o50).padStart(3)} max:${Math.round(b.max)}`;
+        return `${name.padEnd(11).slice(0, 11)} ${String(fps).padStart(3)}fps >33:${String(b.o33).padStart(3)} >50:${String(b.o50).padStart(3)} max:${Math.round(b.max)}`;
       };
       if (this.el.dataset.full) {
         this.el.textContent = [`PERF  ${((performance.now() - this.t0) / 1000).toFixed(0)}s  (tap to hide)`,
@@ -22783,6 +22936,7 @@ function initGalaxyCanvas() {
     // The combo banner layer lives on a body-level canvas (above the HUD); wipe any lingering
     // banner so it can't float over the mode-select menu when we leave mid-combo.
     comboBanners.length = 0;
+    clearBakedComboBanners();
     if (comboBannerCtx) { comboBannerCtx.clearRect(0, 0, sim.width, sim.height); _comboBannerDirty = false; }
     retryPending = false;
     stopWarningState();

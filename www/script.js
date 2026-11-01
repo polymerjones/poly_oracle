@@ -566,7 +566,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-11-01 10:59";
+const BUILD_TS = "2026-11-01 11:14";
 // 2026-11-01: audio diagnostics → native console (MainViewController "polyLog" → NSLog), readable from
 // the Mac with `devicectl device process launch --console` — no Web Inspector or on-screen copy needed.
 function nativeLog(msg) {
@@ -645,18 +645,18 @@ if (!_staticCanvas) {
 }
 const _staticCtx = _staticCanvas ? _staticCanvas.getContext("2d") : null;
 
-// 2026-11-01: WIREFRAME / B&W / VIRTUAL-BOY MOCKUPS (Paul picks one before it becomes a permanent
-// 3-ad cheat). Dev Mode "Look:" button cycles them live (persisted in poly_oracle_wire_mock), or ?wire=X.
+// 2026-11-01: LOOKS (Polynoir / Polysketch / Polygrid / Virtual Poly / Polyvector — each a permanent
+// 3-ad cheat, see LOOK_CATALOG). Dev Mode "Look:" button cycles them live (persisted in poly_oracle_wire_mock), or ?wire=X.
 //   A = everything black & white (whole screen: HUD, speaker mugs, plasma switch, menus).
 //   B = A + stroids redrawn as glowing white edge outlines (pixiRenderer wireTextureFor).
 //   C = B + the space backdrop swapped for a dark scrolling perspective grid ("Tron").
-//   R = Virtual Boy red: A tinted red-on-black (normal art).
-//   V = Virtual Boy wireframe: C in red.
+//   R = Virtual Poly: A tinted red-on-black (normal art).
+//   V = Polyvector: C in red.
 // The grey/red is two full-screen pointer-events:none overlays (backdrop-filter grayscale, then a
 // red multiply layer) above EVERYTHING, so no DOM/canvas layer escapes it. Mockup only — the shipped
 // version needs an iPhone FPS check (full-screen backdrop-filter every frame).
 const WIRE_LOOKS = ["", "A", "B", "C", "R", "V"];
-const WIRE_LOOK_LABEL = { "": "Normal", A: "B&W", B: "B&W Outlines", C: "Tron Grid", R: "Virtual Boy", V: "VB Wireframe" };
+const WIRE_LOOK_LABEL = { "": "Classic", A: "Polynoir", B: "Polysketch", C: "Polygrid", R: "Virtual Poly", V: "Polyvector" };
 const STORAGE_WIRE_MOCK = "poly_oracle_wire_mock";
 function applyWireLook(mode) {
   mode = String(mode || "").toUpperCase();
@@ -703,38 +703,87 @@ function applyWireLook(mode) {
   if (btn) btn.textContent = `Look: ${WIRE_LOOK_LABEL[mode]}`;
   return mode;
 }
-// 2026-11-01: Paul picked "VB Wireframe" (mode V) as the shipped look — a PERMANENT cheat (3 ads,
-// never expires), toggled from the Cheat Codes menu or the Arcade menu button under Level Select.
-// Purely visual: it never enters activeRunCheats, so scores still submit. String keys on purpose —
-// this runs before the cheat-code consts further down are initialised (TDZ).
-function vboyCheatOwned() { try { return localStorage.getItem("poly_oracle_cheat_vboy") === "1"; } catch { return false; } }
-function vboyCheatOn() { try { return localStorage.getItem("poly_oracle_vboy_on") !== "0"; } catch { return true; } }
-function setVboyCheatOn(on) {
-  try { localStorage.setItem("poly_oracle_vboy_on", on ? "1" : "0"); } catch { /* ignore */ }
-  try { localStorage.removeItem(STORAGE_WIRE_MOCK); } catch { /* ignore */ } // the cheat owns the look now
-  applyWireLook(on && vboyCheatOwned() ? "V" : "");
-  syncVboyMenuButton();
+// 2026-11-01: LOOKS — each look is its own PERMANENT cheat (3 ads, never expires), named for the
+// Polyverse. Owned looks: poly_oracle_look_<mode> = "1". The ONE active look: poly_oracle_look_active
+// (a mode, "" = Classic). Purely visual: looks never enter activeRunCheats, so scores still submit.
+// String keys + top-level functions on purpose — this runs before the cheat consts further down are
+// initialised (TDZ, memory: init-tdz-gotcha). Dev Mode "Look:" cycles every look without owning it
+// (poly_oracle_look_dev marks that so a reload keeps the preview).
+const LOOK_CATALOG = [
+  { id: "look_A", mode: "A", name: "Polynoir", desc: "Black & white, film-noir space." },
+  { id: "look_B", mode: "B", name: "Polysketch", desc: "Black & white with glowing outlined Stroids." },
+  { id: "look_C", mode: "C", name: "Polygrid", desc: "Outlined Stroids over a scrolling neon grid." },
+  { id: "look_R", mode: "R", name: "Virtual Poly", desc: "Retro red on black." },
+  { id: "look_V", mode: "V", name: "Polyvector", desc: "Red wireframe vectors over the grid." },
+];
+const LOOK_ACTIVE_KEY = "poly_oracle_look_active";
+const LOOK_DEV_KEY = "poly_oracle_look_dev";
+function lookModeOfCheat(id) {
+  const l = LOOK_CATALOG.find((x) => x.id === id);
+  return l ? l.mode : null;
 }
-function syncVboyMenuButton() {
-  const b = document.getElementById("btnArcadeVboy");
+function lookOwned(mode) {
+  try { return localStorage.getItem(`poly_oracle_look_${mode}`) === "1"; } catch { return false; }
+}
+function grantLook(mode) {
+  try { localStorage.setItem(`poly_oracle_look_${mode}`, "1"); } catch { /* ignore */ }
+}
+function ownedLooks() { return LOOK_CATALOG.filter((l) => lookOwned(l.mode)); }
+function activeLook() {
+  let m = "";
+  try { m = localStorage.getItem(LOOK_ACTIVE_KEY) || ""; } catch { /* ignore */ }
+  if (!WIRE_LOOKS.includes(m)) return "";
+  let dev = false;
+  try { dev = localStorage.getItem(LOOK_DEV_KEY) === "1"; } catch { /* ignore */ }
+  return m && (lookOwned(m) || dev) ? m : "";
+}
+function setActiveLook(mode, { dev = false } = {}) {
+  mode = WIRE_LOOKS.includes(mode) ? mode : "";
+  try {
+    localStorage.setItem(LOOK_ACTIVE_KEY, mode);
+    if (dev) localStorage.setItem(LOOK_DEV_KEY, "1");
+    else localStorage.removeItem(LOOK_DEV_KEY);
+  } catch { /* ignore */ }
+  applyWireLook(mode);
+  syncLookMenuButton();
+}
+// Arcade menu button (under Level Select): cycles Classic → each owned look. Hidden until one is owned.
+function syncLookMenuButton() {
+  const b = document.getElementById("btnArcadeLook");
   if (!b) return;
-  const owned = vboyCheatOwned();
+  const owned = ownedLooks().length > 0;
   b.hidden = !owned;
   b.style.display = owned ? "" : "none";
-  b.textContent = `Virtual Boy: ${vboyCheatOn() ? "On" : "Off"}`;
+  b.textContent = `Look: ${WIRE_LOOK_LABEL[activeLook()]}`;
 }
-function cycleWireLook() {
+function cycleOwnedLook() {
+  const modes = ["", ...ownedLooks().map((l) => l.mode)];
+  const cur = activeLook();
+  setActiveLook(modes[(modes.indexOf(cur) + 1) % modes.length]);
+}
+function cycleWireLook() { // Dev Mode: every look, owned or not
   const cur = document.body.dataset.wire || "";
-  const next = WIRE_LOOKS[(WIRE_LOOKS.indexOf(cur) + 1) % WIRE_LOOKS.length];
-  try { localStorage.setItem(STORAGE_WIRE_MOCK, next); } catch { /* ignore */ }
-  applyWireLook(next);
+  setActiveLook(WIRE_LOOKS[(WIRE_LOOKS.indexOf(cur) + 1) % WIRE_LOOKS.length], { dev: true });
 }
-(function initWireMock() {
-  let mode = (location.search.match(/[?&]wire=([ABCRV])\b/i) || [])[1] || "";
-  if (!mode) { try { mode = localStorage.getItem(STORAGE_WIRE_MOCK) || ""; } catch { /* ignore */ } }
-  if (!mode && vboyCheatOwned() && vboyCheatOn()) mode = "V"; // the earned Virtual Boy cheat
-  applyWireLook(mode);
-  syncVboyMenuButton();
+(function initLooks() {
+  // Migration: the one-day red-wireframe cheat (legacy "vboy" keys) → Polyvector; the Dev mockup key → dev preview.
+  try {
+    if (localStorage.getItem("poly_oracle_cheat_vboy") === "1") {
+      grantLook("V");
+      if (localStorage.getItem(LOOK_ACTIVE_KEY) == null && localStorage.getItem("poly_oracle_vboy_on") !== "0") {
+        localStorage.setItem(LOOK_ACTIVE_KEY, "V");
+      }
+    }
+    const mock = localStorage.getItem(STORAGE_WIRE_MOCK);
+    if (mock != null && localStorage.getItem(LOOK_ACTIVE_KEY) == null) {
+      localStorage.setItem(LOOK_ACTIVE_KEY, mock);
+      if (mock) localStorage.setItem(LOOK_DEV_KEY, "1");
+    }
+    ["poly_oracle_cheat_vboy", "poly_oracle_vboy_on", STORAGE_WIRE_MOCK].forEach((k) => localStorage.removeItem(k));
+  } catch { /* ignore */ }
+  const q = (location.search.match(/[?&]wire=([ABCRV])\b/i) || [])[1];
+  applyWireLook(q ? q.toUpperCase() : activeLook());
+  syncLookMenuButton();
   document.getElementById("btnWireLook")?.addEventListener("click", cycleWireLook);
 })();
 
@@ -998,6 +1047,8 @@ const CORE_PRELOAD_SFX_KEYS = [
   "orb_tap",
   "orb_rub2",
   "menu_hit",
+  "blip", // 2026-11-01: hub carousel tick + select layers (sfxPicks POLY_HUB_SFX) — decoded at boot so
+  "smallblast", // menu taps never fall back to full-volume HTML audio on iOS (see play preferBuffer)
   "menu_back",
   "bling",
   "explosion_med",
@@ -1500,7 +1551,8 @@ function getArmedCheats() {
 }
 
 function isCheatOwned(id) {
-  if (id === "vboy") return vboyCheatOwned();
+  const look = lookModeOfCheat(id);
+  if (look) return lookOwned(look);
   return id === "levelselect" ? hasCheatLevelSelect() : !!getArmedCheats()[id];
 }
 
@@ -1518,9 +1570,9 @@ function recordCheatAd(id) {
   writeCheatJson(STORAGE_CHEAT_PROGRESS, all);
   if (id === "levelselect") {
     setCheatLevelSelect();
-  } else if (id === "vboy") {
-    try { localStorage.setItem("poly_oracle_cheat_vboy", "1"); } catch { /* ignore */ }
-    setVboyCheatOn(true); // switch it on the moment it's earned
+  } else if (lookModeOfCheat(id)) {
+    grantLook(lookModeOfCheat(id));
+    setActiveLook(lookModeOfCheat(id)); // wear it the moment it's earned
   } else {
     writeCheatJson(STORAGE_CHEATS_ARMED, { ...getArmedCheats(), [id]: Date.now() + CHEAT_ACTIVE_MS });
     setCheatSwitchedOff(id, false);
@@ -1607,14 +1659,46 @@ function renderCheatCodesPanel() {
   const ready = adService.isReady();
   const progress = getCheatProgress();
   cheatCodesList.innerHTML = "";
-  for (const cheat of CHEAT_CATALOG) {
+  // 2026-11-01: grouped under section headers (Unlocks / Power-Ups · 24 hours / Looks · permanent).
+  const ordered = [];
+  for (const sec of CHEAT_SECTIONS) {
+    ordered.push({ header: sec });
+    if (sec.id === "looks" && ownedLooks().length) ordered.push({ classic: true });
+    for (const c of CHEAT_CATALOG) if (c.section === sec.id) ordered.push(c);
+  }
+  const wearing = activeLook();
+  for (const cheat of ordered) {
+    if (cheat.header) {
+      const h = document.createElement("div");
+      h.className = "cheatSection";
+      h.innerHTML = '<span class="cheatSectionTitle"></span><span class="cheatSectionNote"></span>';
+      h.querySelector(".cheatSectionTitle").textContent = cheat.header.title;
+      h.querySelector(".cheatSectionNote").textContent = cheat.header.note;
+      cheatCodesList.appendChild(h);
+      continue;
+    }
+    if (cheat.classic) {
+      // "Classic" = no look: lets players take a look off without owning anything.
+      const row = document.createElement("div");
+      row.className = "cheatRow cheatRowLook";
+      row.innerHTML = `
+        <div class="cheatInfo"><div class="cheatName">Classic</div><div class="cheatDesc">The original full-colour Poly Oracle.</div></div>
+        <button class="cheatWatchBtn cheatToggle" type="button"></button>`;
+      const b = row.querySelector("button");
+      b.textContent = wearing ? "USE" : "IN USE";
+      b.classList.toggle("on", !wearing);
+      b.disabled = !wearing;
+      b.addEventListener("click", () => { setActiveLook(""); hapticTap(); renderCheatCodesPanel(); });
+      cheatCodesList.appendChild(row);
+      continue;
+    }
     const row = document.createElement("div");
     row.className = "cheatRow";
     const owned = isCheatOwned(cheat.id);
     const p = progress[cheat.id];
     let status;
     if (owned) {
-      status = cheat.id === "levelselect" || cheat.id === "vboy"
+      status = cheat.section !== "powerups"
         ? "Unlocked"
         : `Active · ${formatTimeLeft(getArmedCheats()[cheat.id] - Date.now())} left`;
     }
@@ -1631,17 +1715,18 @@ function renderCheatCodesPanel() {
     row.querySelector(".cheatDesc").textContent = cheat.desc;
     row.querySelector(".cheatStatus").textContent = status;
     const btn = row.querySelector(".cheatWatchBtn");
-    if (owned && cheat.id === "vboy") {
-      // Permanent look: an On/Off switch forever (no 24h window).
-      const on = vboyCheatOn();
-      btn.textContent = on ? "ON" : "OFF";
+    if (owned && cheat.section === "looks") {
+      // Permanent look: one look is worn at a time — USE switches to it, IN USE marks the current one.
+      const mode = lookModeOfCheat(cheat.id);
+      const inUse = wearing === mode;
+      row.classList.add("cheatRowLook");
+      btn.textContent = inUse ? "IN USE" : "USE";
       btn.classList.add("cheatToggle");
-      btn.classList.toggle("on", on);
-      btn.setAttribute("role", "switch");
-      btn.setAttribute("aria-checked", String(on));
-      row.querySelector(".cheatStatus").textContent = on ? "Unlocked · On" : "Unlocked · Off";
+      btn.classList.toggle("on", inUse);
+      btn.disabled = inUse;
+      row.querySelector(".cheatStatus").textContent = inUse ? "Unlocked · in use" : "Unlocked";
       btn.addEventListener("click", () => {
-        setVboyCheatOn(!on);
+        setActiveLook(mode);
         hapticTap();
         renderCheatCodesPanel();
       });
@@ -1685,7 +1770,7 @@ function renderCheatCodesPanel() {
           onAdRewarded: () => {
             if (!recordCheatAd(cheat.id)) return;
             triggerHapticNotification(hapticNotificationType.Success);
-            if (cheat.id === "levelselect" || cheat.id === "vboy") galaxyCanvasController?.syncArcadeMenuButtons?.();
+            if (cheat.section !== "powerups") galaxyCanvasController?.syncArcadeMenuButtons?.();
           },
         });
         renderCheatCodesPanel();
@@ -2874,14 +2959,20 @@ const CHEAT_ACTIVE_MS = 24 * 60 * 60 * 1000; // an earned gameplay cheat stays o
 const CHEAT_EXTRA_LIVES = 2;
 const CHEAT_QUAD_SPAN_MS = 60 * 60 * 1000; // "unlimited" Quad Shot = an hour-long timer, re-armed
 const CHEAT_CATALOG = [
-  { id: "levelselect", name: "Unlock Level Select", desc: "Start from any level. Permanent." },
-  { id: "vboy", name: "Virtual Boy Mode", desc: "Retro red wireframe graphics. Just for looks — scores still count. Permanent." },
-  { id: "missiles", name: "Unlimited Missiles", desc: "Homing missiles never run out (reload still applies). 24 hours." },
-  { id: "bombs", name: "Unlimited Bombs", desc: "Bombs never run out (up to 9 on the field). 24 hours." },
-  { id: "quad", name: "Unlimited Quad Shot", desc: "Quad Shot on every level. 24 hours." },
-  { id: "loadout", name: "Stocked Loadout", desc: "Every level starts with 9 bombs and 3 freezes. 24 hours." },
-  { id: "plasma", name: "Instant Plasma", desc: "The plasma net recharges instantly — fire net after net. 24 hours." },
-  { id: "lives", name: "Extra Lives", desc: `+${CHEAT_EXTRA_LIVES} lives at the start of every game. 24 hours.` },
+  { id: "levelselect", section: "unlocks", name: "Unlock Level Select", desc: "Start from any level." },
+  { id: "missiles", section: "powerups", name: "Unlimited Missiles", desc: "Homing missiles never run out (reload still applies)." },
+  { id: "bombs", section: "powerups", name: "Unlimited Bombs", desc: "Bombs never run out (up to 9 on the field)." },
+  { id: "quad", section: "powerups", name: "Unlimited Quad Shot", desc: "Quad Shot on every level." },
+  { id: "loadout", section: "powerups", name: "Stocked Loadout", desc: "Every level starts with 9 bombs and 3 freezes." },
+  { id: "plasma", section: "powerups", name: "Instant Plasma", desc: "The plasma net recharges instantly — fire net after net." },
+  { id: "lives", section: "powerups", name: "Extra Lives", desc: `+${CHEAT_EXTRA_LIVES} lives at the start of every game.` },
+  // 2026-11-01: the Looks — purely visual, scores still count, permanent.
+  ...LOOK_CATALOG.map((l) => ({ id: l.id, section: "looks", name: l.name, desc: l.desc })),
+];
+const CHEAT_SECTIONS = [
+  { id: "unlocks", title: "Unlocks", note: "Permanent" },
+  { id: "powerups", title: "Power-Ups", note: "24 hours" },
+  { id: "looks", title: "Looks", note: "Permanent · scores still count" },
 ];
 let activeRunCheats = readCheatJson(STORAGE_RUN_CHEATS);
 const hudQuadTime = document.getElementById("hudQuadTime");
@@ -5377,9 +5468,19 @@ const audioEngine = {
       ended,
     };
   },
-  play(name, { volume = 1, rate = 1, detune = 0 } = {}) {
+  // preferBuffer (2026-11-01, menu taps): iOS ignores <audio>.volume, so the HTML fallback played menu
+  // chirps at FULL volume until the ctx unlocked — "loud the first time, then really quiet". With it,
+  // a decoded sound always takes the buffer path (a not-yet-running ctx plays it the moment the tap's
+  // resume lands), and on iOS a not-yet-decoded one is skipped rather than blasted.
+  play(name, { volume = 1, rate = 1, detune = 0, preferBuffer = false } = {}) {
     const ctx = this.ensureContext();
-    if (!ctx || !this.unlocked) {
+    const bufferOk = preferBuffer && ctx && ctx.state !== "closed" && !this._clockDead && this.buffers.has(name);
+    if (preferBuffer && isIOSNative && !bufferOk && !(ctx && this.unlocked && this.buffers.has(name))) {
+      this.warmSound(name);
+      return { source: null, ended: Promise.resolve() };
+    }
+    if (bufferOk && ctx.state !== "running") { try { ctx.resume().catch(() => {}); } catch { /* ignore */ } }
+    if (!ctx || (!this.unlocked && !bufferOk)) {
       return this.playHtmlAudio(name, { volume, rate, loop: false });
     }
     const buffer = this.buffers.get(name);
@@ -6604,8 +6705,8 @@ function addListeners() {
   if (btnArcadeResume) {
     btnArcadeResume.addEventListener("click", () => galaxyCanvasController?.startArcadeResume?.());
   }
-  // 2026-11-01: Virtual Boy toggle (only shown once the cheat is earned).
-  document.getElementById("btnArcadeVboy")?.addEventListener("click", () => setVboyCheatOn(!vboyCheatOn()));
+  // 2026-11-01: Look cycler (only shown once a look is owned).
+  document.getElementById("btnArcadeLook")?.addEventListener("click", cycleOwnedLook);
   if (btnArcadeLevelSelect) {
     btnArcadeLevelSelect.addEventListener("click", () => galaxyCanvasController?.openArcadeLevelSelect?.());
   }
@@ -9349,7 +9450,7 @@ function playHubSfx(moment) {
   const layers = Array.isArray(cfg[moment]) ? cfg[moment] : HUB_SFX_DEFAULT[moment] || [];
   for (const l of layers) {
     if (!l?.key || !GAME_SFX[l.key]) continue;
-    audioEngine.play(l.key, { volume: Number(l.vol) || 0, rate: l.rate == null ? 1 : Number(l.rate) });
+    audioEngine.play(l.key, { volume: Number(l.vol) || 0, rate: l.rate == null ? 1 : Number(l.rate), preferBuffer: true });
   }
 }
 function wirePolyRing() {
@@ -15635,7 +15736,7 @@ function initGalaxyCanvas() {
       // debug-unlocked. Keep it locked only when there's genuinely no access.
       btnArcadeLevelSelect.classList.toggle("locked", !levelSelectUnlocked);
     }
-    syncVboyMenuButton();
+    syncLookMenuButton();
   }
 
   function syncDebugLevelPanel() {
@@ -15862,7 +15963,7 @@ function initGalaxyCanvas() {
     // 2026-06-15: second-act per-level tints (Part 3). Level 10 stays untinted (hotroid sprite).
     if (level === 11) return "rgba(160,160,160,0.25)"; // void grey
     if (level === 12) return "rgba(0,255,200,0.22)";   // cyberpunk cyan
-    if (level === 13) return "rgba(220,0,0,0.30)";     // virtual boy red
+    if (level === 13) return "rgba(220,0,0,0.30)";     // retro red
     if (level === 14) return "rgba(0,180,60,0.22)";    // forest green
     if (level === 15) return "rgba(255,140,0,0.30)";   // inferno orange
     return null;
@@ -18123,6 +18224,9 @@ function initGalaxyCanvas() {
   }
 
   function updatePlasmaRechargeSound(now) {
+    // 2026-11-01 (playtest): a run paused into the menu keeps arcadeActive (for Resume) — the recharge
+    // cock + CMDR "plasma recharged" box fired over the menu. Wait until play resumes.
+    if (engineMode === "menu") return;
     if (plasmaCage.active) return;
     if (plasmaCage.cooldownUntil <= 0) return;
     if (now < plasmaCage.cooldownUntil) return;
@@ -18146,6 +18250,7 @@ function initGalaxyCanvas() {
         // FIX 2026-06-09: bail if the cage is mid-gesture or was re-depleted by a new
         // plasma net blast after this callback was scheduled — avoids a false "recharged" VO.
         if (plasmaCage.active || performance.now() < plasmaCage.cooldownUntil) return;
+        if (engineMode === "menu") return; // left for the menu in the 400ms gap
         const ticker = document.getElementById("commanderTicker");
         const isActive = ticker?.classList.contains("ticker-visible");
         if (isActive) {
@@ -18154,7 +18259,7 @@ function initGalaxyCanvas() {
         }
         // 2026-10-26 (L4 playtest): the line can wait in the VO queue behind other comms; if a new
         // net fires meanwhile it announced "recharged" mid-cooldown. Re-check at play time.
-        const stillCharged = () => arcadeActive && !plasmaCage.active && performance.now() >= plasmaCage.cooldownUntil;
+        const stillCharged = () => arcadeActive && engineMode !== "menu" && !plasmaCage.active && performance.now() >= plasmaCage.cooldownUntil;
         // SPC levels: her own "Plasma recharged — make a plasma net!" line. (2026-06-24)
         if (queueSpcBonusVO("SPC_plasma_recharged_make_a_plasma_net.mp3", { playGuard: stillCharged })) return;
         commBoxController.queueVO({

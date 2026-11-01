@@ -3419,6 +3419,12 @@ body.dev-mode .hudDevWin { display: inline-block; }
 .cheatHeader #btnCheatsBack { background: #00ffd1; border-color: #00ffd1; color: #04121c; font-weight: 800; box-shadow: 0 0 16px rgba(0, 255, 209, 0.45); }
 .cheatHeader #btnCheatsBack:active { background: #5fffe3; }
 .cheatCodesList { display: grid; gap: 8px; max-height: min(44vh, 400px); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+/* 2026-11-01: Cheat Codes section headers (Unlocks / Power-Ups / Looks) */
+.cheatSection { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 10px 2px 0; padding: 0 2px 4px; border-bottom: 1px solid rgba(0, 255, 209, 0.28); }
+.cheatSection:first-child { margin-top: 0; }
+.cheatSectionTitle { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: #00ffd1; text-shadow: 0 0 10px rgba(0, 255, 209, 0.45); }
+.cheatSectionNote { font-size: 0.66rem; letter-spacing: 0.08em; color: rgba(183, 201, 255, 0.6); text-align: right; }
+.cheatWatchBtn.cheatToggle:disabled.on { opacity: 1; }
 .cheatRow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, 0.04); text-align: left; }
 .cheatInfo { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .cheatName { font-weight: 700; font-size: 0.92rem; color: #e6eeff; }

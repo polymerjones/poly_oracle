@@ -499,12 +499,40 @@ function getCapacitorHaptics() {
   return capacitorHaptics || globalThis.Capacitor?.Plugins?.Haptics || null;
 }
 
-function triggerHapticImpact(style) {
+function _sendHapticImpact(style) {
   try {
     getCapacitorHaptics()?.impact?.({ style })?.catch?.(() => {});
   } catch {
     // Haptics are optional outside a native Capacitor runtime.
   }
+}
+// 2026-11-01 PERF: every impact is a native bridge round-trip, and a bomb used to fire 10–20 of them
+// in one frame (1–2 per stroid kill). At most one impact per HAPTIC_MIN_GAP_MS: requests inside the
+// window coalesce into ONE trailing impact at the strongest style asked for (you can't feel more).
+const HAPTIC_MIN_GAP_MS = 60;
+let _hapticLastAt = -1e9;
+let _hapticPending = null;
+let _hapticTimer = 0;
+function _hapticRank(style) {
+  return style === hapticImpactStyle.Heavy ? 3 : style === hapticImpactStyle.Medium ? 2 : 1;
+}
+function triggerHapticImpact(style) {
+  const now = performance.now();
+  if (now - _hapticLastAt >= HAPTIC_MIN_GAP_MS && !_hapticTimer) {
+    _hapticLastAt = now;
+    _sendHapticImpact(style);
+    return;
+  }
+  if (!_hapticPending || _hapticRank(style) > _hapticRank(_hapticPending)) _hapticPending = style;
+  if (_hapticTimer) return;
+  _hapticTimer = setTimeout(() => {
+    _hapticTimer = 0;
+    const st = _hapticPending;
+    _hapticPending = null;
+    if (!st) return;
+    _hapticLastAt = performance.now();
+    _sendHapticImpact(st);
+  }, Math.max(0, HAPTIC_MIN_GAP_MS - (now - _hapticLastAt)));
 }
 
 function triggerGameplayHapticImpact(style) {
@@ -538,7 +566,30 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-11-01 10:05";
+const BUILD_TS = "2026-11-01 10:59";
+// 2026-11-01: audio diagnostics → native console (MainViewController "polyLog" → NSLog), readable from
+// the Mac with `devicectl device process launch --console` — no Web Inspector or on-screen copy needed.
+function nativeLog(msg) {
+  try { window.webkit?.messageHandlers?.polyLog?.postMessage(String(msg)); } catch { /* not iOS native */ }
+}
+// 2026-11-01: first-launch hang hunt — a timeline of the cold-start path (ms since page load) plus
+// every frame gap >80ms in the first 3 minutes, tagged with the last step logged before it. Goes to
+// the native console only (nativeLog), so it costs players nothing visible.
+let _bootLast = "boot";
+function bootTrace(name) {
+  _bootLast = name;
+  if (performance.now() < 180000) nativeLog(`[boot] +${Math.round(performance.now())}ms ${name}`);
+}
+(function watchBootFrames() {
+  if (!window.webkit?.messageHandlers?.polyLog) return;
+  let last = 0;
+  const tick = (t) => {
+    if (last && t - last > 80) nativeLog(`[boot] +${Math.round(t)}ms GAP ${Math.round(t - last)}ms after "${_bootLast}"`);
+    last = t;
+    if (t < 180000) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+})();
 const debugTapsKey = "poly_oracle_debug_taps";
 const ufoFxPresetKey = "poly_oracle_ufo_fx_preset";
 const STORAGE_BEST_RUN = "poly-oracle-best-run";
@@ -548,8 +599,16 @@ const DISABLE_VIDEO_BG = true;
 const _flashDiv = document.getElementById("screenFlashDiv");
 let _flashTimer = null;
 
+let _flashLastAt = -1e9;
+let _flashLastOpacity = 0;
 function cssFlash(color = "#ffffff", opacity = 0.45, durationMs = 120) {
   if (!_flashDiv) return;
+  // 2026-11-01 PERF: a bomb's kills each asked for a flash in the same frame (a style write + timer
+  // each). Within 80ms only a STRONGER flash replaces the current one.
+  const now = performance.now();
+  if (now - _flashLastAt < 80 && opacity <= _flashLastOpacity) return;
+  _flashLastAt = now;
+  _flashLastOpacity = opacity;
   if (_flashTimer) clearTimeout(_flashTimer);
   _flashDiv.style.background = color;
   _flashDiv.style.transition = "none";
@@ -1529,6 +1588,7 @@ function setDevModeOn(on) {
   if (btnStroidDepth) btnStroidDepth.style.display = btnFxLab?.style.display ?? "none";
   { const wl = document.getElementById("btnWireLook"); if (wl) wl.style.display = btnFxLab?.style.display ?? "none"; }
   if (btnResetTips) btnResetTips.style.display = btnFxLab?.style.display ?? "none";
+  { const fr = document.getElementById("btnFactoryReset"); if (fr) fr.style.display = btnFxLab?.style.display ?? "none"; }
   applyTrials(); // Dev Mode on → lab picks go live; off → back to the shipped defaults
 }
 
@@ -1754,6 +1814,30 @@ function wirePolyverseBranding() {
 
 function wireDevModeEntry() {
   applyTrials(); // shipped TRIAL_DEFAULTS looks (Dev Mode is off at launch)
+  // 2026-11-01: Dev Mode Factory Reset — wipe every saved key (progress, unlocks, cheats, tips,
+  // settings, seen-flags) back to a first-install state and reload. Keeps only the dev-device flags.
+  // Two taps (no confirm() dialog — those can wedge the WKWebView). Native caches (WKWebView HTTP
+  // cache, compiled shaders) can't be cleared from JS; delete the app to test those.
+  const btnFactoryReset = document.getElementById("btnFactoryReset");
+  let factoryArmedAt = 0;
+  btnFactoryReset?.addEventListener("click", () => {
+    const now = performance.now();
+    if (now - factoryArmedAt > 3000) {
+      factoryArmedAt = now;
+      btnFactoryReset.textContent = "Tap again to WIPE";
+      setTimeout(() => { if (performance.now() - factoryArmedAt >= 3000) btnFactoryReset.textContent = "Factory Reset"; }, 3100);
+      return;
+    }
+    const KEEP = ["poly_oracle_show_build", "poly_oracle_test_ads"];
+    try {
+      const kept = KEEP.map((k) => [k, localStorage.getItem(k)]).filter(([, v]) => v != null);
+      localStorage.clear();
+      kept.forEach(([k, v]) => localStorage.setItem(k, v));
+      sessionStorage.clear();
+    } catch { /* storage blocked */ }
+    btnFactoryReset.textContent = "Wiped — restarting…";
+    setTimeout(() => location.reload(), 300);
+  });
   if (!menuLogoCanvas || !btnDevMode) return;
   let taps = [];
   menuLogoCanvas.addEventListener("pointerdown", () => {
@@ -4968,7 +5052,9 @@ const audioEngine = {
     if (!ctx) return;
     if (ctx.state !== "running") await this._resumeWithTimeout(ctx);
     if (ctx !== this.ctx) return; // rebuilt meanwhile
-    this.unlocked = ctx.state === "running";
+    // 2026-11-01: a ctx verifyAlive caught with a frozen clock stays "locked" even though it reports
+    // "running" — play() then uses the HTML <audio> path (which still works) instead of a dead graph.
+    this.unlocked = ctx.state === "running" && !this._clockDead;
     if (this.unlocked) this._everRan = true;
     if (this.unlocked) this.applyUserVolumes(); // iOS: music started before the ctx ran can route now
   },
@@ -4982,6 +5068,10 @@ const audioEngine = {
   // ctx can only start inside a gesture on iOS (why the retired teardown() lost audio at level start).
   _everRan: false,
   _needsRebuild: false,
+  _clockDead: false, // verifyAlive saw "running" with a frozen clock — SFX fall back to HTML audio
+  _rebuildCount: 0,
+  _lastRebuildAt: 0,
+  _rebuildAfterAd: false, // set by adService onClose (iOS): next gesture swaps in a fresh ctx
   // Cheap frozen-clock probe: a "running" ctx whose currentTime hasn't moved across >400ms of wall
   // time is a zombie (silent). Sampled on gestures and before each VO line.
   _probeCtxT: -1,
@@ -5010,9 +5100,12 @@ const audioEngine = {
     await new Promise((r) => setTimeout(r, 150));
     if (ctx !== this.ctx) return true; // rebuilt meanwhile
     const alive = ctx.state === "running" && ctx.currentTime > t0;
+    this._clockDead = !alive && ctx.state === "running";
+    if (alive) this._rebuildCount = 0;
     this.unlocked = alive;
     this._needsRebuild = !alive && isIOSNative;
     if (!alive) console.info(`[audio] ctx dead after foreground (state=${ctx.state}) — rebuild on next tap`);
+    nativeLog(`[audio] verifyAlive alive=${alive ? 1 : 0} state=${ctx.state}`);
     return alive;
   },
   // Call ONLY synchronously inside a user gesture. Decoded AudioBuffers aren't tied to a ctx, so
@@ -5062,11 +5155,21 @@ const audioEngine = {
     for (const cb of this._rebuildListeners) { try { cb(ctx); } catch { /* ignore */ } }
     // Not one-shot: if the fresh ctx still won't run (iOS session not back yet), re-arm so the NEXT
     // gesture rebuilds again instead of leaving Web Audio dead until a reboot.
-    this._resumeWithTimeout(ctx).then(() => {
+    // 2026-11-01: "running" isn't proof — after an ad, fresh contexts reported running with
+    // currentTime stuck at 0. Only unlock once the clock moves; until then SFX use HTML audio.
+    this._rebuildCount += 1;
+    this._lastRebuildAt = performance.now();
+    this._clockDead = false;
+    this._resumeWithTimeout(ctx).then(async () => {
       if (ctx !== this.ctx) return;
-      this.unlocked = ctx.state === "running";
-      if (this.unlocked) this._everRan = true;
-      if (this.unlocked) this.applyUserVolumes();
+      const t0 = ctx.currentTime;
+      await new Promise((r) => setTimeout(r, 200));
+      if (ctx !== this.ctx) return;
+      const alive = ctx.state === "running" && ctx.currentTime > t0;
+      this._clockDead = !alive && ctx.state === "running";
+      this.unlocked = alive;
+      nativeLog(`[audio] rebuild #${this._rebuildCount} alive=${alive ? 1 : 0} state=${ctx.state} t=${ctx.currentTime.toFixed(2)}`);
+      if (alive) { this._everRan = true; this._rebuildCount = 0; this.applyUserVolumes(); }
       else if (isIOSNative) this._needsRebuild = true;
     });
     console.info("[audio] ctx rebuilt in gesture");
@@ -5962,8 +6065,28 @@ async function warmImageSet(images) {
   }));
 }
 
+// 2026-11-01 (playtest: "first install, first level start has major hangs — almost a legit HANG"):
+// Game Center sign-in, AdMob start-up (+ consent lookup + first rewarded-ad download) and the Firebase
+// SDK (~400KB fetched + parsed for leaderboard ranks) all used to start between opening STROIDS and
+// the first seconds of level 1. None is needed mid-level, so they wait for the first natural break —
+// the end-of-level scorecard or game over (cheat menu / leaderboard taps still start their own
+// piece on demand) — staggered so they don't land in one lump.
+let _deferredServicesStarted = false;
+function startDeferredServices(reason) {
+  if (_deferredServicesStarted) return;
+  _deferredServicesStarted = true;
+  bootTrace(`deferred services (${reason})`);
+  void gameCenter.signIn().then((ok) => bootTrace(`game center signed in=${ok}`));
+  setTimeout(() => {
+    bootTrace("leaderboard prime start");
+    primeLeaderboardThresholds({ timeoutMs: 1600 }).then(() => bootTrace("leaderboard prime done")).catch(() => {});
+  }, 900);
+  setTimeout(() => { bootTrace("ad preload start"); void adService.preload(); }, 1800);
+}
+
 async function warmArcadeAssets(levelNum = 1) {
   if (arcadeWarmupPromise) return arcadeWarmupPromise;
+  bootTrace("warmup start");
   setArcadeWarmupVisible(true, "WARMING UP");
   const minHold = delay(420);
   arcadeWarmupPromise = (async () => {
@@ -5979,6 +6102,7 @@ async function warmArcadeAssets(levelNum = 1) {
         audioEngine.loadMany?.(gameplayPreloadSfxMap(), (done, total) => setArcadeWarmupProgress(0.04 + 0.66 * (done / Math.max(1, total)))),
         delay(5000),
       ]);
+      bootTrace("warmup sfx done");
       setArcadeWarmupProgress(0.7);
       const bgKey = bgKeyForLevel(levelNum);
       preloadGalaxyBackgroundKey(bgKey);
@@ -5986,6 +6110,7 @@ async function warmArcadeAssets(levelNum = 1) {
         audioEngine.loadMusicBuffer?.(getMusicForLevel(levelNum)) || Promise.resolve(),
         delay(1800),
       ]);
+      bootTrace("warmup music done");
       setArcadeWarmupProgress(0.85);
       // 2026-06-30: pre-decode + GPU-prime ALL gameplay sprites (asteroids incl. generated tint
       // skins, powerups, combo-FX sheets, AND the slot symbols) so first combo / first pickup /
@@ -5995,12 +6120,15 @@ async function warmArcadeAssets(levelNum = 1) {
       if (typeof warmGameplaySprites === "function") {
         await Promise.race([warmGameplaySprites(), delay(1800)]);
       }
+      bootTrace("warmup sprites done");
       setArcadeWarmupProgress(1);
       await minHold;
     } finally {
       setArcadeWarmupVisible(false);
       arcadeWarmupPromise = null;
-      setTimeout(() => primeLeaderboardThresholds({ timeoutMs: 1600 }).catch(() => {}), 250);
+      bootTrace("warmup end");
+      // 2026-11-01: leaderboard prime moved to startDeferredServices (was here: Firebase landed in level 1).
+      if (_deferredServicesStarted) setTimeout(() => primeLeaderboardThresholds({ timeoutMs: 1600 }).catch(() => {}), 250);
     }
   })();
   return arcadeWarmupPromise;
@@ -6137,7 +6265,20 @@ function addListeners() {
   let lastGestureAt = performance.now();
   const resumeAudioOnGesture = () => {
     if (isIOSNative && !audioEngine.ctx) return;
-    if (audioEngine._needsRebuild) audioEngine.rebuildContext(); // must stay synchronous in the gesture
+    if (audioEngine._rebuildAfterAd && !adService.isShowing()) {
+      audioEngine._rebuildAfterAd = false;
+      audioEngine.rebuildContext(); // see adService onClose — fresh ctx after every ad
+      nativeLog(`[adaudio] gesture rebuild after ad → ctx=${audioEngine.ctx?.state}`);
+      setTimeout(() => nativeLog(`[adaudio] post-rebuild ctx=${audioEngine.ctx?.state} t=${audioEngine.ctx?.currentTime.toFixed(2)} unl=${audioEngine.unlocked ? 1 : 0}`), 800);
+    } else if (audioEngine._needsRebuild) {
+      // 2026-11-01: a wedged ctx used to be rebuilt on EVERY tap (a new AudioContext each time —
+      // a frame hitch per tap, forever). After 3 tries, retry at most every 8s; SFX meanwhile play
+      // through HTML audio (_clockDead keeps the engine "locked").
+      const now0 = performance.now();
+      if (audioEngine._rebuildCount < 3 || now0 - audioEngine._lastRebuildAt > 8000) {
+        audioEngine.rebuildContext(); // must stay synchronous in the gesture
+      }
+    }
     else if (audioEngine.ctx?.state !== "running") audioEngine.resume();
     // 2026-11-01: music iOS paused under an alarm/call banner comes back on the first tap.
     if (_musicInterrupted && !document.hidden) resumeBackgroundMusic();
@@ -6915,7 +7056,9 @@ function openGalaxyView() {
   setNativeTextInteraction(false); // no magnifier loupe over the game
   cancelOrbRub();
   orbRealityLock.stop(); // leaving the Oracle screen ends the reality lock
-  void gameCenter.signIn(); // first Stroids open: Game Center "Welcome back" banner (or sign-in sheet once)
+  bootTrace("openGalaxyView");
+  // 2026-11-01: Game Center sign-in moved to the first scorecard (startDeferredServices) — signing in
+  // here landed GameKit's native work + "Welcome back" banner on the player's first level start.
   setSettingsOpen(false);
   vault.hidden = true;
   oracleView.hidden = true;
@@ -10747,6 +10890,7 @@ function initGalaxyCanvas() {
       give(type) { collectPowerup({ type, x: playfield.x + playfield.w / 2, y: playfield.y + playfield.h / 2 }); },
       spawn(type, x, y) { spawnPowerupAt(type, { x, y }); },
       bombAt(x, y) { placeBombFromInventory(x, y); },
+      detonateAt(x, y) { playerBombInventory = Math.max(playerBombInventory, 1); detonateInventoryBomb(x, y); },
       missileAt(x, y) { fireMissile(x, y); },
       rocks: () => sim.asteroids.filter((a) => a && !a.tossed).map((a) => ({ x: a.x, y: a.y, r: a.r })),
     };
@@ -13335,7 +13479,7 @@ function initGalaxyCanvas() {
         && !!tipElTarget(plasmaChargeChip),
       target: () => tipElTarget(plasmaChargeChip), snap: () => ({ m: plasmaCage.mode }), done: (s) => plasmaCage.mode !== s.m },
     // Skipped by cadets who finished Training (they learned the toss there).
-    { id: "toss2", anyLevel: true, gesture: "flick", line: "BIG STROID! PRESS & HOLD IT, THEN FLICK TO TOSS IT",
+    { id: "toss2", anyLevel: true, gesture: "flick", line: "STROID TOSS! PRESS & HOLD IT, THEN FLICK TO TOSS IT",
       when: () => tipsLearned().has("fire") && !trainingDone() && bigStroidsDominate() && !!tipBigStroid(),
       target: lockedBigStroid,
       snap: () => ({}), done: () => !!stroidToss.asteroid || sim.asteroids.some((a) => a.tossed) },
@@ -13483,8 +13627,24 @@ function initGalaxyCanvas() {
   // interrupted from the previous ad read 0 and "restored" the music to silence for good.
   let _adSuspendedCtx = false;
   let _adPausedMusic = null;
+  // 2026-11-01 (playtest L11: SFX gone after a Continue ad): the Google Mobile Ads SDK manages the
+  // iOS AVAudioSession around a full-screen ad and can leave it Ambient (silent switch mutes us) or
+  // inactive. Dismissing the ad's view controller fires no scene-activation, so ask native to
+  // re-assert .playback (MainViewController "audioSession" handler) before every resume attempt.
+  const reassertNativeAudioSession = () => {
+    try { window.webkit?.messageHandlers?.audioSession?.postMessage("reactivate"); } catch { /* not iOS native */ }
+  };
+  const audioSnapshot = (tag) => {
+    const c = audioEngine.ctx;
+    const ss = window.__polyAudioSession;
+    nativeLog(`[adaudio] ${tag} ctx=${c ? c.state : "none"} t=${c ? c.currentTime.toFixed(2) : "-"} unl=${audioEngine.unlocked ? 1 : 0}`
+      + ` rb=${audioEngine._needsRebuild ? 1 : 0} sess=${ss ? `${ss.category}/was:${ss.before}/ok:${ss.ok}` : "?"}`
+      + ` sfx=${userSfxGain().toFixed(2)} bus=${audioEngine.sfxBus ? audioEngine.sfxBus.gain.value.toFixed(2) : "-"} min=${state.minimal ? 1 : 0}`);
+  };
   adService.setHooks({
     onOpen() {
+      try { tutPerf.mark("ad-open"); } catch { /* TDZ-safe */ }
+      audioSnapshot("open");
       commBoxController.stopVO();
       const node = audioEngine.currentMusicHtml?.node;
       _adPausedMusic = node && !node.paused ? node : null;
@@ -13498,7 +13658,9 @@ function initGalaxyCanvas() {
       _adSuspendedCtx = false;
       _adPausedMusic = null;
       // The ad SDK hands the audio session back a beat after dismiss, so retry briefly.
+      try { tutPerf.mark("ad-close"); } catch { /* TDZ-safe */ }
       const restore = () => {
+        reassertNativeAudioSession();
         if (ctxToResume && audioEngine.ctx && audioEngine.ctx.state !== "running") {
           audioEngine.ctx.resume().catch(() => {});
         }
@@ -13510,6 +13672,12 @@ function initGalaxyCanvas() {
       // Same health check as an app switch: confirm the clock runs, else rebuild on the next tap.
       audioEngine._verifyOnGesture = true;
       setTimeout(() => audioEngine.verifyAlive(), 1400);
+      // 2026-11-01 (playtest: SFX still gone after a Continue ad even with the session re-asserted):
+      // don't trust a ctx that lived through an ad — the first tap after it swaps in a fresh one
+      // (rebuildContext must run inside a gesture; buffers survive, so it's cheap).
+      audioEngine._rebuildAfterAd = isIOSNative;
+      audioSnapshot("close");
+      for (const ms of [500, 1500, 3000, 6000, 10000]) setTimeout(() => audioSnapshot(`close+${ms}`), ms);
     },
   });
 
@@ -14740,6 +14908,7 @@ function initGalaxyCanvas() {
   function awardCombo({ key, label, points, x, y, colors = ["0,255,209", "186,110,255"] }) {
     if (engineMode !== "arcade" || !arcadeActive) return;
     if (stuntActive) return;
+    tutPerf.mark(`combo`);
     const now = performance.now();
     const marginX = Math.max(18, sim.width * 0.06);
     const marginY = Math.max(54, sim.height * 0.12);
@@ -15382,6 +15551,7 @@ function initGalaxyCanvas() {
     if (btnStroidDepth) btnStroidDepth.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
     { const wl = document.getElementById("btnWireLook"); if (wl) wl.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none"; }
     if (btnResetTips) btnResetTips.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none";
+    { const fr = document.getElementById("btnFactoryReset"); if (fr) fr.style.display = showRoot && devModeRevealed && devModeOn ? "" : "none"; }
     if (btnCheatCodes) btnCheatCodes.style.display = showRoot ? "" : "none";
     if (btnSettings) btnSettings.style.display = showRoot ? "" : "none";
     if (cheatCodesPanel) {
@@ -15623,6 +15793,7 @@ function initGalaxyCanvas() {
   }
 
   function releaseAsteroid(a) {
+    a._shrapnelDoomed = false; // a pooled stroid must never inherit a queued shrapnel kill
     a.shape = null;
     a.tossed = false;
     a.tossedAt = 0;
@@ -17628,6 +17799,7 @@ function initGalaxyCanvas() {
   function splitAsteroidByIndex(targetIndex, pulseImpact = null) {
     const a = removeAsteroidAt(targetIndex);
     if (!a) return;
+    if (_bootKills < 3) bootTrace(`kill ${++_bootKills} (split k${a.kind})`);
     if (engineMode === "arcade") shotsHit += 1;
 
     const wasKind = a.kind;
@@ -17736,9 +17908,12 @@ function initGalaxyCanvas() {
     });
   }
 
-  function vaporizeAsteroidByIndex(targetIndex, suppressBoom = false, suppressFreezeCombo = false, dissolve = false) {
+  // lite (2026-11-01 PERF): mass kills (bomb shrapnel) skip the per-kill screen shake/flash/haptic —
+  // the blast that caused them already did one screen-wide hit.
+  function vaporizeAsteroidByIndex(targetIndex, suppressBoom = false, suppressFreezeCombo = false, dissolve = false, lite = false) {
     const a = removeAsteroidAt(targetIndex);
     if (!a) return;
+    if (_bootKills < 3) bootTrace(`kill ${++_bootKills} (vaporize k${a.kind})`);
     // Ghosts only render through PIXI — the 2D fallback keeps the explosion.
     const ghost = dissolve && !!window.pixiRenderer?.syncOverlays;
     const levelNum = ARCADE_LEVELS[currentLevelIndex]?.level || 1;
@@ -17754,7 +17929,7 @@ function initGalaxyCanvas() {
       spawnExplosion(a.x, a.y, bigBlast ? 24 : 14, false, bigBlast ? 1.6 : 1.1, 1, a.kind, a.spriteKey);
       addFrozenShatterFx(a.x, a.y);
     }
-    triggerAsteroidSizeFeedback(a.kind);
+    if (!lite) triggerAsteroidSizeFeedback(a.kind);
     // 2026-06-09: plasma net suppresses per-asteroid booms so the single basicb_explo blast
     // isn't drowned out / dropped by the native frame-budget behind a wall of explosion sounds.
     if (!suppressBoom) {
@@ -18021,6 +18196,7 @@ function initGalaxyCanvas() {
   }
 
   function destroyAsteroidsInPlasmaCage(rect) {
+    markFxEvent("net");
     const toDestroy = [];
     const plasmaKillPositions = [];
     for (let i = 0; i < sim.asteroids.length; i += 1) {
@@ -18033,7 +18209,7 @@ function initGalaxyCanvas() {
     for (let i = toDestroy.length - 1; i >= 0; i -= 1) {
       // suppressBoom + no freeze combo credit; 2026-10-25: dissolve = plasma ghost + sparks (big nets
       // used to lose most of their kill FX to the iOS particle cap, so rocks just vanished)
-      vaporizeAsteroidByIndex(toDestroy[i], true, true, true);
+      vaporizeAsteroidByIndex(toDestroy[i], true, true, true, true); // lite: the net blast does the screen FX once
     }
     plasmaKillPositions.forEach((pos) => {
       for (let p = 0; p < 12; p += 1) {
@@ -18965,7 +19141,15 @@ function initGalaxyCanvas() {
   // one hit per cooldown window — visually indistinguishable (you can't resolve 5 flashes in 130ms).
   let _lastBombScreenFxAt = 0;
   const BOMB_SCREEN_FX_COOLDOWN_MS = 130;
+  // 2026-11-01 PERF: a big blast marks this frame and the next ~3 as tight, so optional FX
+  // (particles, glows, shards) self-throttle on the frame that would otherwise hitch.
+  function markFxEvent(name) {
+    sim._fxEventUntil = performance.now() + 60;
+    if (isIOSNative) sim._frameBudgetExceeded = true;
+    tutPerf.mark(name);
+  }
   function triggerBombScreenFx() {
+    markFxEvent("bomb");
     const now = performance.now();
     if (now - _lastBombScreenFxAt < BOMB_SCREEN_FX_COOLDOWN_MS) {
       // Coalesced blast: keep a single light boom so the hit still reads, but skip the heavy stack.
@@ -18995,7 +19179,9 @@ function initGalaxyCanvas() {
     window.pixiRenderer?.triggerBombDetonation?.(x, y, radius);
     addWarpRing(x, y, "rgba(255,90,90,1)");
     spawnExplosion(x, y, 80, true);
-    spawnExplosiveElectricBurst(x, y, radius, halfRadius ? 4 : 7);
+    // 2026-11-01 PERF: these 2D sprite-sheet bursts round-trip a tint canvas per burst per frame —
+    // fewer on iOS (the PIXI fireball/rings/embers carry the blast).
+    spawnExplosiveElectricBurst(x, y, radius, isIOSNative ? (halfRadius ? 2 : 3) : (halfRadius ? 4 : 7));
     triggerBombScreenFx();
     // chain: queue other armed mines caught in the blast (the just-exploded mine is already
     // removed from its container by the caller, so it can't re-trigger itself). chainDetonateMines
@@ -19030,8 +19216,27 @@ function initGalaxyCanvas() {
     window.pixiRenderer?.triggerBombDetonation?.(x, y, 1050);
     addWarpRing(x, y, "rgba(255,90,90,1)");
     spawnExplosion(x, y, 80, true);
-    spawnExplosiveElectricBurst(x, y, 700, 8);
+    spawnExplosiveElectricBurst(x, y, 700, isIOSNative ? 4 : 8);
     triggerBombScreenFx(); // 2026-06-24 PERF: throttled screen-wide FX (see triggerBombScreenFx)
+  }
+
+  const _shrapnelKillQueue = [];
+  const SHRAPNEL_KILLS_PER_FRAME = 3;
+  function drainShrapnelKills() {
+    let budget = SHRAPNEL_KILLS_PER_FRAME;
+    while (budget > 0 && _shrapnelKillQueue.length) {
+      const { a, blastId } = _shrapnelKillQueue.shift();
+      if (!a._shrapnelDoomed) continue; // released (and maybe re-pooled) since it was queued
+      a._shrapnelDoomed = false;
+      const idx = sim.asteroids.indexOf(a);
+      if (idx < 0) continue; // already gone (another weapon got it) — costs no budget
+      budget -= 1;
+      if (!comboBombBlastAwarded.has(blastId)) {
+        comboBombBlastAwarded.add(blastId);
+        recordComboEvent("bomb_destroyed_stroids", { x: a.x, y: a.y });
+      }
+      vaporizeAsteroidByIndex(idx, false, false, false, true);
+    }
   }
 
   function spawnBombShrapnel(x, y) {
@@ -19416,6 +19621,7 @@ function initGalaxyCanvas() {
     // startLevel() (or the slot) re-shows it.
     scorecardIdleAt = performance.now() + 250;
     window.galaxyBackground?.pause?.();
+    startDeferredServices("scorecard"); // first break of the session: GC + leaderboard + ads (staggered)
     void adService.preload(); // load during the break, never mid-gameplay
 
     // 2026-06-26: defocus the just-completed level's background (blur+grayscale, bg video paused)
@@ -20002,6 +20208,7 @@ function initGalaxyCanvas() {
   }
 
   function triggerGameOver() {
+    startDeferredServices("gameover");
     arcadeActive = false;
     retryPending = false;
     if (gameTimer.running) {
@@ -20051,9 +20258,13 @@ function initGalaxyCanvas() {
     const _lvlTransStartAt = performance.now();
     fdBegin(ARCADE_LEVELS[clamp(idx, 0, ARCADE_LEVELS.length - 1)]?.level || 0);
     lvlTrace(`[lvltrans] startLevel entry requestedIndex=${idx}`);
+    bootTrace(`startLevel ${idx + 1}`);
     stuntActive = false; // a real arcade level is never a stunt session
     practiceEndless = false; // ...nor an endless practice session (Stunt Practice re-sets this after)
     commBoxController.setLevelEndLock(false); // 2026-06-21 (Item 1b): next level live — end the level-end VO lock
+    // Dev Mode only — keeps recording across levels (bucketed per level). try: tutPerf is declared
+    // further down the module, so a boot-time startLevel would hit its TDZ (memory: init-tdz-gotcha).
+    try { if (!tutPerf.on) tutPerf.start(); } catch { /* not declared yet */ }
     commBoxController.setIntroVoLock(false); // 2026-07-05: a fresh level never inherits a stale intro hold
     setLevelBackgroundDefocus(false); // 2026-06-26: lift the scorecard bg blur as the next level's bg comes in
     const safeIdx = clamp(idx, 0, ARCADE_LEVELS.length - 1);
@@ -22058,6 +22269,15 @@ function initGalaxyCanvas() {
   const tutPerf = {
     on: false, raf: 0, last: 0, t0: 0, buckets: new Map(), order: [], hitches: [], errors: [],
     el: null, liveAt: 0, cur: "", audioT: 0, audioCtxT: 0, audioAdv: "?",
+    // 2026-11-01: arcade levels too (bucketed "L12"), plus event markers — frames in the 300ms after a
+    // bomb/missile/net/combo/ad land in their own "ev:<name>" bucket and hitches name the event.
+    evName: "", evUntil: 0, evLog: [], fullAt: 0,
+    mark(name) {
+      if (!this.on) return;
+      this.evName = name;
+      this.evUntil = performance.now() + 300;
+      if (this.evLog.length < 30) this.evLog.push(`${((performance.now() - this.t0) / 1000).toFixed(1)}s ${name}`);
+    },
     bucket(name) {
       let b = this.buckets.get(name);
       if (!b) { b = { n: 0, sum: 0, o33: 0, o50: 0, max: 0 }; this.buckets.set(name, b); this.order.push(name); }
@@ -22068,6 +22288,7 @@ function initGalaxyCanvas() {
       this.stop();
       this.on = true; this.last = 0; this.t0 = performance.now();
       this.buckets.clear(); this.order.length = 0; this.hitches.length = 0; this.errors.length = 0;
+      this.evName = ""; this.evUntil = 0; this.evLog.length = 0;
       if (!this.el) {
         this.el = document.createElement("div");
         this.el.id = "tutPerfChip";
@@ -22083,14 +22304,18 @@ function initGalaxyCanvas() {
         if (!this.on) return;
         if (this.last) {
           const d = t - this.last;
-          const name = tutorialPhase >= 0 ? (TUTORIAL_PHASES[tutorialPhase]?.id || `p${tutorialPhase}`) : (practiceEndless ? "practice" : "other");
+          const name = tutorialPhase >= 0 ? (TUTORIAL_PHASES[tutorialPhase]?.id || `p${tutorialPhase}`)
+            : practiceEndless ? "practice"
+              : engineMode === "arcade" ? `L${ARCADE_LEVELS[currentLevelIndex]?.level ?? "?"}` : "other";
           this.cur = name;
-          const b = this.bucket(name);
-          b.n += 1; b.sum += d; if (d > 33.4) b.o33 += 1; if (d > 50) b.o50 += 1; if (d > b.max) b.max = d;
-          if (d > 100 && this.hitches.length < 40) this.hitches.push(`${((t - this.t0) / 1000).toFixed(1)}s ${name} ${Math.round(d)}ms`);
+          const ev = this.evName && performance.now() < this.evUntil + d ? this.evName : "";
+          const add = (b) => { b.n += 1; b.sum += d; if (d > 33.4) b.o33 += 1; if (d > 50) b.o50 += 1; if (d > b.max) b.max = d; };
+          add(this.bucket(name));
+          if (ev) add(this.bucket(`ev:${ev}`));
+          if (d > 100 && this.hitches.length < 40) this.hitches.push(`${((t - this.t0) / 1000).toFixed(1)}s ${name}${ev ? ` [${ev}]` : ""} ${Math.round(d)}ms`);
         }
         this.last = t;
-        if (t - this.liveAt > 500) { this.liveAt = t; this.render(false); }
+        if (t - this.liveAt > 500) { this.liveAt = t; this.render(!!this.el.dataset.full && t - this.fullAt > 1000); }
         this.raf = requestAnimationFrame(tick);
       };
       this.raf = requestAnimationFrame(tick);
@@ -22102,18 +22327,23 @@ function initGalaxyCanvas() {
         this.audioAdv = this.audioT ? (ctx.currentTime > this.audioCtxT + 0.5 ? "adv" : "STUCK") : "?";
         this.audioT = now; this.audioCtxT = ctx.currentTime;
       }
-      return `audio ${ctx ? ctx.state : "none"} ${ctx ? ctx.sampleRate : "-"}Hz ${this.audioAdv} unl:${audioEngine.unlocked ? 1 : 0} buf:${audioEngine.buffers?.size ?? "-"}`;
+      // Native session (iOS): category/active as last re-asserted, and what it was just before.
+      const ss = window.__polyAudioSession;
+      const sess = ss ? ` sess:${ss.category}${ss.otherAudio ? "+oth" : ""} was:${ss.before}` : "";
+      return `audio ${ctx ? ctx.state : "none"} ${ctx ? ctx.sampleRate : "-"}Hz ${this.audioAdv} unl:${audioEngine.unlocked ? 1 : 0} rb:${audioEngine._needsRebuild ? 1 : 0} buf:${audioEngine.buffers?.size ?? "-"}${sess}`;
     },
     render(force) {
       if (!this.el || (!force && this.el.dataset.full)) return;
+      if (this.el.dataset.full) this.fullAt = performance.now();
       const row = (name) => {
         const b = this.buckets.get(name);
         const fps = b.sum ? (1000 * b.n / b.sum).toFixed(0) : "-";
         return `${name.padEnd(9).slice(0, 9)} ${String(fps).padStart(3)}fps >33:${String(b.o33).padStart(3)} >50:${String(b.o50).padStart(3)} max:${Math.round(b.max)}`;
       };
       if (this.el.dataset.full) {
-        this.el.textContent = [`TRAINING PERF  ${((performance.now() - this.t0) / 1000).toFixed(0)}s  (tap to hide)`,
+        this.el.textContent = [`PERF  ${((performance.now() - this.t0) / 1000).toFixed(0)}s  (tap to hide)`,
           ...this.order.map(row), this.audioLine(),
+          ...(this.evLog.length ? ["events:", this.evLog.slice(-12).join("  ")] : []),
           this.hitches.length ? "hitches >100ms:" : "no hitches >100ms", ...this.hitches,
           ...(this.errors.length ? ["ERRORS:", ...this.errors] : ["no errors"])].join("\n");
       } else {
@@ -22440,7 +22670,11 @@ function initGalaxyCanvas() {
 
   function showModeSelect({ preserveArcade = false, openArcadeMenu = false } = {}) {
     hideArcadeOverlay();
-    void adService.preload(); // 2026-10-25 (ADS): menus are a safe time to load the next rewarded ad
+    if (!preserveArcade) { try { tutPerf.stop(); } catch { /* TDZ at boot */ } }
+    bootTrace("showModeSelect");
+    // 2026-10-25 (ADS): menus are a safe time to load the next rewarded ad — but not before the
+    // session's first break (startDeferredServices): AdMob start-up used to land on level 1.
+    if (_deferredServicesStarted) void adService.preload();
     // The combo banner layer lives on a body-level canvas (above the HUD); wipe any lingering
     // banner so it can't float over the mode-select menu when we leave mid-combo.
     comboBanners.length = 0;
@@ -22740,7 +22974,9 @@ function initGalaxyCanvas() {
   }
 
   function update(dt, now) {
-    const _frameBudgetExceeded = isIOSNative && dt > 32;
+    // 2026-11-01 PERF: also "tight" for a few frames after a bomb/missile/net blast (markFxEvent) —
+    // the old flag only reacted the frame AFTER a slow one, i.e. after the hitch already happened.
+    const _frameBudgetExceeded = isIOSNative && (dt > 32 || now < sim._fxEventUntil);
     sim._frameBudgetExceeded = _frameBudgetExceeded;
     updateStroidBehindHud(now);
     updatePlasmaRechargeSound(now);
@@ -23159,6 +23395,7 @@ function initGalaxyCanvas() {
       // phase waiter (await !activeMissile) then hung forever. Practice mode missiles now step too.
       stepMissile(now);
       stepMissileSplitQueue();
+      drainShrapnelKills();
       for (let si = _bombShrapnel.length - 1; si >= 0; si -= 1) {
         const sh = _bombShrapnel[si];
         const age = now_s - sh.startedAt;
@@ -23173,33 +23410,29 @@ function initGalaxyCanvas() {
             // 2026-06-10: only damage asteroids that existed at the detonation moment —
             // shrapnel lingers ~2s and was destroying asteroids spawned after the blast.
             if ((a.spawnedAtMs || 0) > sh.startedAt) continue;
+            if (a._shrapnelDoomed) continue; // already queued for a shrapnel kill
             // 2026-06-10: track already-hit asteroids by object ref, not array index
             // (indices shift as asteroids are removed, so index tracking hit wrong ones).
             if (sh.hitSet && sh.hitSet.has(a)) continue;
             const dx = a.x - sh.x;
             const dy = a.y - sh.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
             const hitRadius = sh.isPulse
               ? a.r + sh.r * 3.5
               : a.r + sh.r * 1.8;
-            if (dist < hitRadius) {
+            if (dx * dx + dy * dy < hitRadius * hitRadius) {
               if (sh.isPulse) {
                 if (!sh.hitSet) sh.hitSet = new Set();
                 sh.hitSet.add(a);
               } else {
                 sh.hit = true;
               }
-              spawnExplosion(a.x, a.y, a.kind === 3 ? 16 : 10, false, 1.2, 1, a.kind, a.spriteKey);
-              cssShake(0.4);
-              playAsteroidExplosionBoom(a.kind, 0.7, 1.0);
-              const idx = sim.asteroids.indexOf(a);
-              if (idx >= 0) {
-                if (!comboBombBlastAwarded.has(sh.blastId)) {
-                  comboBombBlastAwarded.add(sh.blastId);
-                  recordComboEvent("bomb_destroyed_stroids", { x: a.x, y: a.y });
-                }
-                vaporizeAsteroidByIndex(idx);
-              }
+              // 2026-11-01 PERF: queue the kill instead of doing it inline. A bomb used to kill 10+
+              // stroids in ONE frame, each running its explosion TWICE (here and in vaporize) with
+              // 2 booms, 2 shakes, a flash and 1–2 native haptics. Now: one vaporize per kill, at
+              // most SHRAPNEL_KILLS_PER_FRAME per frame, with per-kill screen FX skipped (the bomb
+              // already shook/flashed/buzzed the screen).
+              a._shrapnelDoomed = true;
+              _shrapnelKillQueue.push({ a, blastId: sh.blastId });
               if (!sh.isPulse) break;
             }
           }
@@ -24528,7 +24761,10 @@ function initGalaxyCanvas() {
     practiceTapMarker = { x, y, t: performance.now() };
   }
 
+  let _bootTaps = 0;
+  let _bootKills = 0;
   function handleArcadeTap(x, y, now, isTouch = false) {
+    if (_bootTaps < 3) bootTrace(`tap ${++_bootTaps}`);
     // 2026-06-09: bomb deployment (two-tap aim) consumes the tap — no laser/fire.
     if (bombAimMode) {
       // 2026-06-10: deploy now PLACES an unarmed landmine at the tap point (tap it to arm,
@@ -25132,6 +25368,7 @@ function initGalaxyCanvas() {
 
   // PART 6: missile impact — destroy everything inside MISSILE_BLAST_RADIUS, fling the rest.
   function explodeMissile(tx, ty) {
+    markFxEvent("missile");
     const blastRadius = MISSILE_BLAST_RADIUS;
     // important: don't let the per-frame iOS sound budget drop the main blast report
     playGameSfx("missile_explo", 1.0, { important: true });

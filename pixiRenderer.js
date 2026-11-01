@@ -35,7 +35,6 @@ const pixiRenderer = (() => {
   let _timerKey = '';
   const _cssColorCache = new Map();
   let _ufoGeomKey = '';
-  const shrapnelGfxPool = [];
   let _reducedMotionMQ = null;
   // 2026-10-25: powerups + placed mines moved off the full-screen 2D FX overlay (which then had to
   // repaint every frame one was on screen — i.e. nearly always). Their glow/gradient art is baked
@@ -770,24 +769,21 @@ const pixiRenderer = (() => {
     const strokeColor = damaged ? 0xff7c7c : 0x9cffc2;
     const bodyColor = damaged ? 0xff6060 : 0x9aebff;
 
-    const BlurFilter = PIXI.filters?.BlurFilter || PIXI.BlurFilter;
-    if (glowG && BlurFilter) {
-      glowG.cacheAsBitmap = false; // re-bake below
-      glowG.beginFill(glowColor, 0.12);
-      glowG.drawCircle(0, 0, r * 2.15);
-      glowG.endFill();
-      if (!glowG.filters || glowG.filters.length === 0) {
-        glowG.filters = [new BlurFilter(10)];
-      }
-      // Blur once into a cached texture instead of a multi-pass filter render every frame.
-      glowG.cacheAsBitmap = true;
-    } else {
-      g.beginFill(glowColor, 0.08);
-      g.drawCircle(0, 0, r * 2.55);
-      g.endFill();
-      g.beginFill(glowColor, 0.14);
-      g.drawCircle(0, 0, r * 1.35);
-      g.endFill();
+    // 2026-11-01 (playtest: "HANG right before the UFO spawned in", L3): the glow was a BlurFilter
+    // baked via cacheAsBitmap — the first UFO compiled the blur shaders + rendered an offscreen
+    // texture mid-level. Now a soft glow from stacked translucent discs: plain geometry, built once
+    // per radius/damage state (syncUFO's _ufoGeomKey), no filter, no render texture.
+    const glowTarget = glowG || g;
+    if (glowG) {
+      glowG.cacheAsBitmap = false;
+      glowG.filters = null;
+    }
+    const GLOW_STEPS = 7;
+    for (let i = 0; i < GLOW_STEPS; i += 1) {
+      const k = 1 - i / GLOW_STEPS; // outer → inner
+      glowTarget.beginFill(glowColor, 0.035);
+      glowTarget.drawCircle(0, 0, r * (0.9 + 1.5 * k));
+      glowTarget.endFill();
     }
 
     g.lineStyle(1.4, strokeColor, damaged ? 0.55 : 0.58);
@@ -1381,6 +1377,11 @@ const pixiRenderer = (() => {
     }
   }
 
+  const BOMB_RINGS = [
+    { delay: 0, from: 0.2, to: 2.5, color: 0xff6600, alpha: 0.9 },
+    { delay: 90, from: 0.1, to: 2.0, color: 0xffaa00, alpha: 0.6 },
+    { delay: 200, from: 0, to: 3.2, color: 0x6a3cff, alpha: 0.35 },
+  ];
   function updateBombEffects(now) {
     if (!bombGraphics) return;
     bombGraphics.clear();
@@ -1412,8 +1413,7 @@ const pixiRenderer = (() => {
         core.tint = 0xffffff;
         core.blendMode = PIXI.BLEND_MODES.ADD;
         // leading shock edge
-        bombGraphics.lineStyle(3, 0xffdd88, 0.6 * fade);
-        bombGraphics.drawCircle(bomb.x, bomb.y, coreR * 1.4);
+        ringSprite(bombFxLayer, fx++, bomb.x, bomb.y, coreR * 1.4, 0xffdd88, 0.6 * fade);
         if (!bomb.flashTriggered) {
           bomb.flashTriggered = true;
           if (now - _lastBombFlashAt >= BOMB_FLASH_WINDOW_MS) {
@@ -1426,23 +1426,13 @@ const pixiRenderer = (() => {
           }
         }
       } else if (age < 1400) {
-        const rings = [
-          { delay: 0, from: 0.2, to: 2.5, color: 0xff6600, alpha: 0.8 },
-          { delay: 80, from: 0.1, to: 2.0, color: 0xffaa00, alpha: 0.6 },
-          { delay: 160, from: 0, to: 3.0, color: 0xffffff, alpha: 0.3 },
-          { delay: 240, from: 0, to: 3.5, color: 0x4400ff, alpha: 0.25 },
-        ];
-        const ringCount = bomb.lite ? 1 : rings.length;
+        const ringCount = bomb.lite ? 1 : BOMB_RINGS.length;
         for (let j = 0; j < ringCount; j += 1) {
-          const ring = rings[j];
+          const ring = BOMB_RINGS[j];
           const rt = Math.max(0, Math.min(1, (age - 420 - ring.delay) / (750 - ring.delay)));
           if (rt <= 0 || rt >= 1) continue;
           const rr = r * (ring.from + (ring.to - ring.from) * rt);
-          const alpha = ring.alpha * (1 - rt);
-          bombGraphics.lineStyle(j === 0 ? 6 : 4, ring.color, alpha);
-          bombGraphics.drawCircle(bomb.x, bomb.y, rr);
-          bombGraphics.lineStyle(1, ring.color, alpha * 0.45);
-          bombGraphics.drawCircle(bomb.x, bomb.y, rr + 10);
+          ringSprite(bombFxLayer, fx++, bomb.x, bomb.y, rr, ring.color, ring.alpha * (1 - rt));
         }
       }
 
@@ -1513,58 +1503,44 @@ const pixiRenderer = (() => {
     starsSeeded = false;
   }
 
+  // 2026-11-01 PERF (bomb redesign): shrapnel = ADD-blended sprites. Fire shrapnel is an ember streak
+  // stretched along its flight path (sparks, not the old flat circles); pulse shrapnel is a longer
+  // teal comet streak. Was 3 Graphics shapes per piece rebuilt every frame (36 pieces per bomb).
   function syncShrapnel(shrapnel, now) {
-    if (!shrapnelContainer) return;
-    // 2026-10-25: pooled — this used to destroy and re-create one Graphics per shrapnel every frame
-    // (GC + GPU buffer churn during the L12/L13 bomb/mine chains).
+    if (!shrapnelContainer || !overlayTex.ember) return;
     let used = 0;
     for (let i = 0; i < shrapnel.length; i += 1) {
       const sh = shrapnel[i];
-      const age = now - sh.startedAt;
-      const progress = age / sh.ttl;
+      const progress = (now - sh.startedAt) / sh.ttl;
       const alpha = progress < 0.1
         ? progress * 10
         : progress > 0.7
           ? (1 - progress) / 0.3
           : 1;
       if (alpha <= 0) continue;
-
-      let g = shrapnelGfxPool[used];
-      if (!g) {
-        g = new PIXI.Graphics();
-        shrapnelGfxPool.push(g);
-        shrapnelContainer.addChild(g);
-      }
-      used += 1;
-      g.clear();
-      g.visible = true;
-
       if (sh.isPulse) {
-        g.lineStyle(3, 0x00ffd1, alpha * 0.8);
-        g.drawCircle(sh.x, sh.y, sh.r + progress * 20);
-        g.lineStyle(1, 0xffffff, alpha * 0.5);
-        g.drawCircle(sh.x, sh.y, sh.r);
-        g.beginFill(0x00ffd1, alpha * 0.15);
-        g.drawCircle(sh.x, sh.y, sh.r);
-        g.endFill();
+        // teal plasma comet: long, soft, stretching as it flies (was a hollow circle)
+        const sp = layerSprite(shrapnelContainer, used++, overlayTex.emberWhite);
+        sp.position.set(sh.x, sh.y);
+        sp.width = sh.r * (3.2 + progress * 3);
+        sp.height = sh.r * 1.1;
+        sp.rotation = Math.atan2(sh.vy, sh.vx);
+        sp.alpha = alpha * 0.85;
+        sp.tint = 0x00ffd1;
+        sp.blendMode = PIXI.BLEND_MODES.ADD;
       } else {
         const size = sh.r * (1 - progress * 0.4);
-        g.beginFill(0xff6600, alpha * 0.9);
-        g.drawCircle(sh.x, sh.y, size);
-        g.endFill();
-        g.beginFill(0xffffff, alpha * 0.7);
-        g.drawCircle(sh.x, sh.y, size * 0.5);
-        g.endFill();
-        g.lineStyle(size * 2, 0xff4400, alpha * 0.25);
-        g.drawCircle(sh.x, sh.y, size);
+        const sp = layerSprite(shrapnelContainer, used++, overlayTex.ember);
+        sp.position.set(sh.x, sh.y);
+        sp.width = size * 5.2;  // streak along the velocity…
+        sp.height = size * 2.1; // …thin across it
+        sp.rotation = Math.atan2(sh.vy, sh.vx);
+        sp.alpha = alpha;
+        sp.tint = 0xffffff;
+        sp.blendMode = PIXI.BLEND_MODES.ADD;
       }
     }
-    for (let i = used; i < shrapnelGfxPool.length; i += 1) {
-      const g = shrapnelGfxPool[i];
-      if (!g.visible) break; // everything past the first hidden one is already hidden
-      g.clear();
-      g.visible = false;
-    }
+    hideLayerFrom(shrapnelContainer, used);
   }
 
   function bakeTexture(size, paint) {
@@ -1642,6 +1618,57 @@ const pixiRenderer = (() => {
         x.fill();
       });
     });
+    // 2026-11-01 PERF (bomb redesign): the blast rings and the flying shrapnel used to be PIXI.Graphics
+    // circles re-tessellated every frame (8 big ring strokes per bomb + 3 shapes × 36 shrapnel). Now
+    // they're tinted sprites of two baked textures — a frame costs a few quads instead of geometry.
+    // ringSoft: white ring of design radius RING_R with a soft halo; texture half-size = RING_PAD.
+    overlayTex.ringSoft = bakeTexture(Math.ceil(RING_PAD * 2 * K), (x, c) => {
+      const u = c / RING_PAD;
+      x.beginPath();
+      x.arc(c, c, RING_R * u, 0, Math.PI * 2);
+      x.strokeStyle = '#ffffff';
+      x.lineWidth = 5 * u;
+      x.shadowColor = '#ffffff';
+      x.shadowBlur = 12 * u;
+      x.stroke();
+      x.stroke();
+      x.shadowBlur = 0;
+      x.lineWidth = 2 * u;
+      x.stroke();
+    });
+    // ember: white-hot core → orange → red fringe → transparent (ADD-blended, never tinted).
+    overlayTex.ember = bakeTexture(64 * K, (x, c) => {
+      const g = x.createRadialGradient(c, c, 0, c, c, c);
+      g.addColorStop(0, 'rgba(255,255,255,1)');
+      g.addColorStop(0.22, 'rgba(255,236,170,1)');
+      g.addColorStop(0.45, 'rgba(255,128,20,0.85)');
+      g.addColorStop(0.75, 'rgba(255,50,0,0.3)');
+      g.addColorStop(1, 'rgba(255,30,0,0)');
+      x.fillStyle = g;
+      x.fillRect(0, 0, 2 * c, 2 * c);
+    });
+    // emberWhite: same falloff in white, for tinted streaks (the teal pulse shrapnel).
+    overlayTex.emberWhite = bakeTexture(64 * K, (x, c) => {
+      const g = x.createRadialGradient(c, c, 0, c, c, c);
+      g.addColorStop(0, 'rgba(255,255,255,1)');
+      g.addColorStop(0.35, 'rgba(255,255,255,0.75)');
+      g.addColorStop(0.7, 'rgba(255,255,255,0.22)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = g;
+      x.fillRect(0, 0, 2 * c, 2 * c);
+    });
+  }
+  const RING_R = 64;
+  const RING_PAD = 84;
+  // A ringSoft sprite whose ring sits at radius rr.
+  function ringSprite(layer, i, x, y, rr, tint, alpha) {
+    const sp = layerSprite(layer, i, overlayTex.ringSoft);
+    sp.position.set(x, y);
+    sp.width = sp.height = rr * (RING_PAD / RING_R) * 2;
+    sp.tint = tint;
+    sp.alpha = alpha;
+    sp.blendMode = PIXI.BLEND_MODES.ADD;
+    return sp;
   }
 
   function imgTexture(img) {
@@ -1933,7 +1960,6 @@ const pixiRenderer = (() => {
     }
     _timerKey = '';
     _ufoGeomKey = '';
-    shrapnelGfxPool.length = 0;
     starGraphics = null;
     ufoDisplay = null;
     ufoFallback = null;

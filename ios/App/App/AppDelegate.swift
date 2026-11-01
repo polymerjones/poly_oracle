@@ -1,6 +1,7 @@
 import UIKit
 import Capacitor
 import AVFoundation
+import GoogleMobileAds
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -18,6 +19,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         } catch {
             print("AppDelegate: failed to set AVAudioSession category: \(error)")
         }
+        // 2026-11-01 (playtest: SFX gone after a Continue ad): the Google Mobile Ads SDK manages the
+        // AVAudioSession around a full-screen ad by default; its deactivate/reactivate froze WKWebView's
+        // Web Audio clock for good (even fresh AudioContexts sat at currentTime 0). We own the session.
+        MobileAds.shared.audioVideoManager.isAudioSessionApplicationManaged = true
         // 2026-10-27: no shake-to-undo "Undo" alert over the game.
         application.applicationSupportsShakeToEdit = false
         // 2026-10-26: after another app / a call / Siri takes the session, iOS doesn't hand it back on
@@ -29,11 +34,40 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func reactivateAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        let before = session.category.rawValue.replacingOccurrences(of: "AVAudioSessionCategory", with: "")
+        var ok = true
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, options: .mixWithOthers)
-            try AVAudioSession.sharedInstance().setActive(true)
+            try session.setCategory(.playback, options: .mixWithOthers)
+            try session.setActive(true)
         } catch {
+            ok = false
             print("AppDelegate: failed to reactivate AVAudioSession: \(error)")
+        }
+        reportAudioSession(before: before, ok: ok)
+    }
+
+    // 2026-11-01: Dev perf chip readout — what the session was before we re-asserted it (the Google
+    // Mobile Ads SDK manages the session around a full-screen ad and may leave it Ambient/inactive).
+    private func reportAudioSession(before: String, ok: Bool) {
+        let session = AVAudioSession.sharedInstance()
+        let cat = session.category.rawValue.replacingOccurrences(of: "AVAudioSessionCategory", with: "")
+        let js = "window.__polyAudioSession={category:'\(cat)',before:'\(before)',ok:\(ok),"
+            + "otherAudio:\(session.isOtherAudioPlaying),at:Date.now()}"
+        FileHandle.standardError.write("[native] session reassert before=\(before) now=\(cat) ok=\(ok) other=\(session.isOtherAudioPlaying)\n".data(using: .utf8) ?? Data())
+        evaluateInWebViews(js)
+    }
+
+    private func evaluateInWebViews(_ js: String) {
+        DispatchQueue.main.async {
+            for scene in UIApplication.shared.connectedScenes {
+                guard let windowScene = scene as? UIWindowScene else { continue }
+                for win in windowScene.windows {
+                    if let vc = win.rootViewController as? CAPBridgeViewController {
+                        vc.bridge?.webView?.evaluateJavaScript(js, completionHandler: nil)
+                    }
+                }
+            }
         }
     }
 
@@ -50,17 +84,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     // makes the app inactive — the page never hides, so JS has no visibilitychange to recover on.
     // Tell the web side the session is back so it re-plays the music iOS paused.
     private func notifyWebAudioInterruptionEnded() {
-        DispatchQueue.main.async {
-            let js = "window.dispatchEvent(new Event('polyAudioInterruptionEnded'))"
-            for scene in UIApplication.shared.connectedScenes {
-                guard let windowScene = scene as? UIWindowScene else { continue }
-                for win in windowScene.windows {
-                    if let vc = win.rootViewController as? CAPBridgeViewController {
-                        vc.bridge?.webView?.evaluateJavaScript(js, completionHandler: nil)
-                    }
-                }
-            }
-        }
+        evaluateInWebViews("window.dispatchEvent(new Event('polyAudioInterruptionEnded'))")
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

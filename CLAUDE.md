@@ -69,7 +69,9 @@ Every item below must be resolved before App Store submission:
       SKAdNetwork list in Info.plist; dev devices (`poly_oracle_show_build`/`poly_oracle_test_ads` = "1")
       stay on test units. app-ads.txt live on polyoracle.app + paulfishermedia.com
 - [x] ASC leaderboard `polyverse_high_score` → ✅ created 2026-10-27 (attach to the 4.1 version's Game Center section once the build is processed)
-- [ ] Nice-to-have: orb "leave reality" lock (hold still 10s+3s) plays in background
+- [x] ~~Nice-to-have: orb "leave reality" lock plays in background~~ → ✅ DROPPED 2026-11-11: App Review
+      rejected 4.1.1 (9) under 2.5.4 for the `audio` UIBackgroundModes key (no real background audio);
+      key removed in 4.1.1 (10). Do NOT re-add background audio.
 - [x] Cockpit HUD → ✅ DECIDED 2026-10-27: graduates — default for everyone in 4.1 (Dev "off" = classic).
       iPad scales cockpit + menus (cockpitTabletScale / --ck); needs a real-iPad check
 - [ ] App Store screenshots: Lab → Store Shots tab (tools/capture-store-shots.cjs → store-assets/raw,

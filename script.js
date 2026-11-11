@@ -566,7 +566,7 @@ const verboseKey = "poly_oracle_verbose_details";
 const chaosEnabledKey = "poly_oracle_chaos_theme";
 const chaosPaletteKey = "poly_oracle_theme_palette";
 const galaxyToolKey = "poly_oracle_galaxy_tool";
-const BUILD_TS = "2026-11-01 12:35";
+const BUILD_TS = "2026-11-11 09:40";
 // 2026-11-01: audio diagnostics → native console (MainViewController "polyLog" → NSLog), readable from
 // the Mac with `devicectl device process launch --console` — no Web Inspector or on-screen copy needed.
 function nativeLog(msg) {

@@ -3,6 +3,7 @@
 Detailed per-session context for resuming work on Poly Oracle. Written by the `session-handoff`
 skill. Newest first — read the top entry to pick up where the last session left off.
 
+- [2026-11-11 — App Review 2.5.4 fix, iOS 4.1.1 (10) resubmitted](2026-11-11-asc-2-5-4-rejection-resubmit.md) — background-audio UIBackgroundModes removed (`b5cd210`), build 10 Waiting for Review (9:39 AM); export-compliance key for next build (`abb36fa`); Android 39 live since 11-03. Gotcha: ASC resubmit is gated behind the version page's **Update Review** button.
 - [2026-11-01 — Explosion perf C3–C8, playtest fixes, 4.1.1 submitted](2026-11-01-explosions-411-release.md) — iOS 4.1.1 (9) in App Review (12:46 PM) + Android 39 production; C3–C8 (60fps bombs/missile chains), hub 2nd-tap fix, Quad toggle, L13 portrait, toss-tip guard, scoreboard polish. Gotchas: master compressor silenced iOS SFX; Gradle needs JDK 21; jarsigner recipe.
 - [2026-11-01 — Audio audit (NEXT)](2026-11-01-audio-audit.md) — plan for a professional mix balance + the hub-chirp music crackle (predates 11-01); gain chain map + measured peaks.
 - [2026-11-01 — Looks cheats, combo banners, explosion perf (Parts A–D)](2026-11-01-looks-combo-perf.md) — Looks as 5 permanent cheats, baked combo banners, Continue-ad SFX fix, C1/C2/C9; status log through C3–C8.
